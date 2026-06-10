@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.eggs/
+dist/
+build/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Django
+*.log
+staticfiles/
+media/
+db.sqlite3
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Docker
+*.env.prod
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage / testing
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Credentials
+*.credentials.json
+apps/claude_export/
+
+# Docs / planning
+*.md
+docs/
+
+# Claude
+.claude/
+
+# Dev Dockerfile
+Dockerfile

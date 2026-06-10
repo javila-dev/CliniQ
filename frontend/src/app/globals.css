@@ -1,0 +1,59 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 224 15% 12%;
+    --card: 0 0% 100%;
+    --card-foreground: 224 15% 12%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 224 15% 12%;
+
+    /* Rosa cálido — clínica estética */
+    --primary: 334 72% 55%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 334 30% 95%;
+    --secondary-foreground: 334 40% 28%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 220 10% 46%;
+    --accent: 334 25% 94%;
+    --accent-foreground: 334 40% 28%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 334 72% 55%;
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}
+
+/* Scrollbar delgado para el nav del sidebar */
+.sidebar-nav {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--primary) / 0.18) transparent;
+}
+.sidebar-nav::-webkit-scrollbar {
+  width: 3px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background: hsl(var(--primary) / 0.20);
+  border-radius: 999px;
+}
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--primary) / 0.38);
+}

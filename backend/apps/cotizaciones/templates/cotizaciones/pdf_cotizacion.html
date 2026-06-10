@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      @page {
+        size: A4;
+        margin: 20mm 14mm 18mm 14mm;
+        @bottom-right {
+          content: "Pagina " counter(page) " de " counter(pages);
+          font-size: 10px;
+          color: #6b7280;
+        }
+      }
+
+      body {
+        font-family: Helvetica, Arial, sans-serif;
+        color: #1f2937;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .header {
+        background: #1f2937;
+        color: #ffffff;
+        padding: 18px 20px;
+        border-radius: 14px;
+        margin-bottom: 18px;
+      }
+
+      .header-table,
+      .info-table,
+      .items-table,
+      .totals-table,
+      .payment-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .logo-box {
+        width: 120px;
+        vertical-align: top;
+      }
+
+      .logo-box img {
+        max-width: 100px;
+        max-height: 70px;
+        object-fit: contain;
+        background: #ffffff;
+        border-radius: 10px;
+        padding: 8px;
+      }
+
+      .clinic-title {
+        font-size: 24px;
+        font-weight: bold;
+        margin: 0 0 6px 0;
+      }
+
+      .muted {
+        color: #6b7280;
+      }
+
+      .section {
+        margin-bottom: 16px;
+      }
+
+      .panel {
+        border: 1px solid #d1d5db;
+        border-radius: 12px;
+        padding: 14px 16px;
+      }
+
+      .section-title {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6b7280;
+        margin: 0 0 8px 0;
+      }
+
+      .document-row td {
+        vertical-align: top;
+        width: 50%;
+      }
+
+      .label {
+        font-weight: bold;
+        color: #111827;
+      }
+
+      .items-table thead th {
+        background: #e5e7eb;
+        color: #111827;
+        font-size: 10px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        padding: 10px 8px;
+        border-bottom: 1px solid #cbd5e1;
+      }
+
+      .items-table tbody td,
+      .payment-table td {
+        padding: 9px 8px;
+        border-bottom: 1px solid #e5e7eb;
+        vertical-align: top;
+      }
+
+      .items-table tbody tr:nth-child(even) {
+        background: #f9fafb;
+      }
+
+      .table-section-title {
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 6px 8px;
+        border-radius: 6px 6px 0 0;
+        margin-bottom: 0;
+      }
+      .table-title-tratamiento { background: #dbeafe; color: #1d4ed8; }
+      .table-title-servicio    { background: #dcfce7; color: #15803d; }
+
+      .tipo-badge {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        padding: 2px 6px;
+        border-radius: 4px;
+        margin-bottom: 3px;
+      }
+      .tipo-libre { background: #f3f4f6; color: #6b7280; }
+
+      .item-catalogo-ref {
+        font-size: 10px;
+        color: #6b7280;
+        margin-top: 2px;
+      }
+      .item-desc { font-size: 11px; }
+
+      .text-right {
+        text-align: right;
+      }
+
+      .totals-wrap {
+        margin-top: 12px;
+        margin-left: auto;
+        width: 300px;
+      }
+
+      .totals-table td {
+        padding: 6px 0;
+      }
+
+      .total-final td {
+        font-size: 18px;
+        font-weight: bold;
+        border-top: 2px solid #111827;
+        padding-top: 10px;
+      }
+
+      .notes-box {
+        min-height: 50px;
+        white-space: pre-wrap;
+      }
+
+      .footer {
+        margin-top: 20px;
+        font-size: 10px;
+        color: #6b7280;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <table class="header-table">
+        <tr>
+          <td class="logo-box">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" alt="Logo clinica">
+            {% endif %}
+          </td>
+          <td>
+            <p class="clinic-title">{{ clinica.nombre }}</p>
+            <div>NIT: {{ clinica.nit }}</div>
+            <div>Tel: {{ telefono_clinica }}</div>
+            {% if ciudad_clinica %}<div>Ciudad: {{ ciudad_clinica }}</div>{% endif %}
+            {% if direccion_clinica %}<div>Direccion: {{ direccion_clinica }}</div>{% endif %}
+          </td>
+          <td class="text-right">
+            <div class="section-title" style="color:#cbd5e1; margin-bottom: 4px;">Cotizacion</div>
+            <div><span class="label" style="color:#ffffff;">No.</span> {{ referencia }}</div>
+            <div><span class="label" style="color:#ffffff;">Fecha:</span> {{ fecha_emision }}</div>
+            <div><span class="label" style="color:#ffffff;">Valida hasta:</span> {{ fecha_vencimiento }}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <div class="section panel">
+      <table class="info-table document-row">
+        <tr>
+          <td>
+            <p class="section-title">Paciente</p>
+            <div><span class="label">Nombre:</span> {{ paciente.nombre_completo }}</div>
+            <div><span class="label">Documento:</span> {{ documento_paciente }}</div>
+            <div><span class="label">Telefono:</span> {{ telefono_paciente }}</div>
+          </td>
+          <td>
+            <p class="section-title">Profesional</p>
+            <div><span class="label">Nombre:</span> {{ profesional_nombre }}</div>
+            {% if sede %}
+            <div><span class="label">Sede:</span> {{ sede.nombre }}</div>
+            {% endif %}
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    {% if items_tratamientos %}
+    <div class="section">
+      <div class="table-section-title table-title-tratamiento">Tratamientos</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width:50%">Descripcion</th>
+            <th>Sesiones</th>
+            <th class="text-right">Valor unit.</th>
+            <th class="text-right">Desc.</th>
+            <th class="text-right">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items_tratamientos %}
+          <tr>
+            <td>
+              <div class="item-desc">{{ item.descripcion }}</div>
+              {% if item.catalogo_ref %}
+              <div class="item-catalogo-ref">Ref: {{ item.catalogo_ref }}</div>
+              {% endif %}
+            </td>
+            <td>{{ item.num_sesiones }}</td>
+            <td class="text-right">{{ item.valor_unitario }}</td>
+            <td class="text-right">{{ item.descuento_porcentaje }}</td>
+            <td class="text-right">{{ item.subtotal }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if items_servicios %}
+    <div class="section">
+      <div class="table-section-title table-title-servicio">Procedimientos y servicios</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width:46%">Descripcion</th>
+            <th>Sesiones</th>
+            <th class="text-right">Valor unit.</th>
+            <th class="text-right">Desc.</th>
+            <th class="text-right">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in items_servicios %}
+          <tr>
+            <td>
+              {% if item.tipo_label == "Libre" %}
+              <span class="tipo-badge tipo-libre">Libre</span>
+              {% endif %}
+              <div class="item-desc">{{ item.descripcion }}</div>
+              {% if item.catalogo_ref %}
+              <div class="item-catalogo-ref">Ref: {{ item.catalogo_ref }}</div>
+              {% endif %}
+            </td>
+            <td>{{ item.num_citas }}</td>
+            <td class="text-right">{{ item.valor_unitario }}</td>
+            <td class="text-right">{{ item.descuento_porcentaje }}</td>
+            <td class="text-right">{{ item.subtotal }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    <div class="section">
+      <div class="totals-wrap">
+        <table class="totals-table">
+          <tr>
+            <td class="muted">Subtotal</td>
+            <td class="text-right">{{ subtotal_bruto }}</td>
+          </tr>
+          <tr>
+            <td class="muted">Descuentos</td>
+            <td class="text-right">-{{ total_descuentos }}</td>
+          </tr>
+          <tr class="total-final">
+            <td>Total</td>
+            <td class="text-right">{{ total }}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <div class="section panel">
+      <p class="section-title">Formas de pago</p>
+      <table class="payment-table">
+        <tbody>
+          {% for forma in formas_pago %}
+          <tr>
+            <td><span class="label">{{ forma.tipo }}</span></td>
+            <td>{{ forma.descripcion }}</td>
+            <td class="text-right">{{ forma.valor }}</td>
+          </tr>
+          {% empty %}
+          <tr>
+            <td colspan="3" class="muted">No se registraron formas de pago.</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="section panel">
+      <p class="section-title">Notas</p>
+      <div class="notes-box">{{ notas|default:"Sin notas adicionales." }}</div>
+    </div>
+
+    <div class="footer">
+      Este documento tiene validez comercial por {{ validez_texto }} a partir de su emision.
+    </div>
+  </body>
+</html>

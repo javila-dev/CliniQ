@@ -1,0 +1,98 @@
+﻿version: "3.8"
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: cliniq_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-cliniq_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cliniq_password}
+      POSTGRES_DB: ${POSTGRES_DB:-cliniq_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - cliniq_net
+
+  redis:
+    image: redis:7-alpine
+    container_name: cliniq_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - cliniq_net
+
+  minio:
+    image: minio/minio:latest
+    container_name: cliniq_minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    networks:
+      - cliniq_net
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: cliniq_backend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./backend:/app
+      - ./docs:/app/docs
+      - ./agents/.codex:/root/.codex
+      - ./agents/.claude:/root/.claude
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./.env
+    depends_on:
+      - db
+      - redis
+      - minio
+    networks:
+      - cliniq_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: cliniq_frontend
+    restart: unless-stopped
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - ./docs:/app/docs
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+    depends_on:
+      - backend
+    networks:
+      - cliniq_net
+
+networks:
+  cliniq_net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:

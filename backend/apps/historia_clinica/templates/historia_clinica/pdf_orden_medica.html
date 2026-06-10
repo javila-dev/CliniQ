@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      @page {
+        size: A4;
+        margin-top: 135px;
+        margin-right: 14mm;
+        margin-bottom: 20mm;
+        margin-left: 14mm;
+        @top-left {
+          content: element(page-header);
+          width: 100%;
+        }
+        @bottom-right {
+          content: "Pagina " counter(page) " de " counter(pages);
+          font-size: 9px;
+          color: #6b7280;
+        }
+        @bottom-left {
+          content: "{{ paciente_nombre_completo }}  ·  {{ paciente_tipo_doc }} {{ paciente_numero_doc }}";
+          font-size: 9px;
+          color: #6b7280;
+        }
+      }
+
+      body {
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 11px;
+        color: #1f2937;
+        line-height: 1.45;
+      }
+
+      /* ── Repeating header ─────────────────────────── */
+      #page-header {
+        position: running(page-header);
+      }
+
+      .header {
+        background: #1f2937;
+        color: #ffffff;
+        padding: 14px 18px;
+        border-radius: 12px;
+        margin-bottom: 0;
+      }
+
+      .header-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .logo-box {
+        width: 80px;
+        vertical-align: middle;
+        padding-right: 12px;
+      }
+
+      .logo-box img {
+        max-width: 68px;
+        max-height: 60px;
+        object-fit: contain;
+        background: #ffffff;
+        border-radius: 8px;
+        padding: 6px;
+      }
+
+      .header-center {
+        vertical-align: middle;
+      }
+
+      .header-dx {
+        font-size: 15px;
+        font-weight: bold;
+        margin: 0 0 3px 0;
+        letter-spacing: 0.02em;
+      }
+
+      .header-clinic {
+        font-size: 11px;
+        margin: 0;
+        color: #d1d5db;
+      }
+
+      .header-address {
+        font-size: 10px;
+        color: #9ca3af;
+        margin: 2px 0 0 0;
+      }
+
+      .header-right {
+        text-align: right;
+        vertical-align: middle;
+        white-space: nowrap;
+      }
+
+      .header-label {
+        color: #9ca3af;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        margin: 0 0 2px 0;
+      }
+
+      .header-date {
+        font-size: 11px;
+        color: #f9fafb;
+        margin: 0;
+      }
+
+      /* ── Body sections ────────────────────────────── */
+      .section {
+        margin-bottom: 12px;
+      }
+
+      .panel {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 12px 14px;
+      }
+
+      .section-title {
+        font-size: 10px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: #6b7280;
+        margin: 0 0 8px 0;
+      }
+
+      .patient-table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 10.5px;
+      }
+
+      .patient-table td {
+        padding: 2px 6px 2px 0;
+        vertical-align: top;
+      }
+
+      .lbl {
+        font-weight: bold;
+        color: #111827;
+      }
+
+      .divider {
+        border: none;
+        border-top: 1px solid #e5e7eb;
+        margin: 10px 0;
+      }
+
+      .prescription-date {
+        font-size: 11px;
+        font-weight: bold;
+        margin: 0 0 10px 0;
+      }
+
+      .content-area {
+        white-space: pre-wrap;
+        font-size: 11px;
+        line-height: 1.7;
+        color: #111827;
+      }
+
+      /* ── Signature section ────────────────────────── */
+      .firma-panel {
+        border: 1px solid #d1d5db;
+        border-radius: 10px;
+        padding: 14px 16px;
+        margin-top: 28px;
+      }
+
+      .firma-img {
+        max-height: 80px;
+        max-width: 220px;
+        display: block;
+        margin-bottom: 0;
+      }
+
+      .firma-hr {
+        border: none;
+        border-top: 1.5px solid #374151;
+        width: 220px;
+        margin: 4px 0 6px 0;
+      }
+
+      .firma-name {
+        font-size: 11px;
+        font-weight: bold;
+        margin: 0;
+        color: #111827;
+      }
+
+      .firma-reg {
+        font-size: 10px;
+        color: #374151;
+        margin: 3px 0 0 0;
+      }
+
+      .text-muted {
+        color: #6b7280;
+      }
+    </style>
+  </head>
+  <body>
+
+    <!-- Repeating page header -->
+    <div id="page-header">
+      <div class="header">
+        <table class="header-table">
+          <tr>
+            {% if logo_b64 %}
+            <td class="logo-box">
+              <img src="data:image/png;base64,{{ logo_b64 }}" alt="Logo">
+            </td>
+            {% endif %}
+            <td class="header-center">
+              <p class="header-dx">{{ dx_nombre }}</p>
+              <p class="header-clinic">{{ clinica_nombre }}</p>
+              {% if sede_info %}<p class="header-address">Dirección: {{ sede_info }}</p>{% endif %}
+            </td>
+            <td class="header-right">
+              <p class="header-label">Fecha de prescripción</p>
+              <p class="header-date">{{ fecha_prescripcion }}</p>
+            </td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- DX heading -->
+    <p style="font-size:13px; font-weight:bold; text-align:center; text-transform:uppercase; margin: 0 0 12px 0;">{{ dx_nombre }}</p>
+
+    <!-- Patient identification panel -->
+    <div class="section panel">
+      <p class="section-title">Identificación y datos generales del paciente</p>
+      <table class="patient-table">
+        <tr>
+          <td style="width:50%"><span class="lbl">Nombres:</span> {{ paciente_nombres }}</td>
+          <td><span class="lbl">Apellidos:</span> {{ paciente_apellidos }}</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Tipo de ID:</span> {{ paciente_tipo_doc }}</td>
+          <td><span class="lbl">No. de Identificación:</span> {{ paciente_numero_doc }}</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Fecha de nacimiento:</span> {{ paciente_fecha_nac }}</td>
+          <td><span class="lbl">Edad:</span> {{ paciente_edad }}</td>
+        </tr>
+        <tr>
+          <td><span class="lbl">Sexo:</span> {{ paciente_sexo }}</td>
+          {% if paciente_ciudad %}<td><span class="lbl">Ciudad:</span> {{ paciente_ciudad }}</td>{% endif %}
+        </tr>
+        {% if paciente_direccion %}
+        <tr>
+          <td colspan="2"><span class="lbl">Dirección:</span> {{ paciente_direccion }}</td>
+        </tr>
+        {% endif %}
+        {% if paciente_telefono %}
+        <tr>
+          <td colspan="2"><span class="lbl">Teléfono:</span> {{ paciente_telefono }}</td>
+        </tr>
+        {% endif %}
+        {% if fecha_atencion %}
+        <tr>
+          <td colspan="2">
+            <span class="lbl">Fecha y hora de atención:</span> {{ fecha_atencion }}
+            {% if nombre_consulta %} &nbsp;·&nbsp; <span class="lbl">Consulta:</span> {{ nombre_consulta }}{% endif %}
+          </td>
+        </tr>
+        {% endif %}
+      </table>
+    </div>
+
+    <!-- Prescription content panel -->
+    <div class="section panel">
+      <p class="prescription-date">FECHA DE PRESCRIPCIÓN: {{ fecha_prescripcion }} Horas</p>
+      <div class="content-area">{{ contenido }}</div>
+    </div>
+
+    <!-- Signature panel -->
+    {% if profesional_nombre %}
+    <div class="firma-panel">
+      {% if firma_b64 %}
+      <img class="firma-img" src="data:image/png;base64,{{ firma_b64 }}" alt="Firma digital">
+      {% else %}
+      <div style="height:70px;"></div>
+      {% endif %}
+      <hr class="firma-hr">
+      <p class="firma-name">{{ profesional_nombre }}</p>
+      {% if profesional_cc_line %}
+      <p class="firma-reg">{{ profesional_cc_line }}</p>
+      {% endif %}
+      {% if profesional_tp %}
+      <p class="firma-reg">Reg. Prof. (TP): {{ profesional_tp }}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+  </body>
+</html>
