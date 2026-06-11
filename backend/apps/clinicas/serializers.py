@@ -144,6 +144,10 @@ class MiClinicaSerializer(serializers.ModelSerializer):
 
 class SedeSerializer(serializers.ModelSerializer):
     nombre_clinica = serializers.SerializerMethodField()
+    clinica = serializers.PrimaryKeyRelatedField(
+        queryset=Clinica.objects.all(),
+        required=False,
+    )
 
     class Meta:
         model = Sede
@@ -161,9 +165,6 @@ class SedeSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
-        extra_kwargs = {
-            "clinica": {"required": False},
-        }
 
     def get_nombre_clinica(self, obj):
         return obj.clinica.nombre
