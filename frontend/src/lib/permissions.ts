@@ -158,6 +158,7 @@ export const canAccess = {
 // ── Ruta de aterrizaje post-login ─────────────────────────────────────────────
 
 export function defaultRoute(user: AuthUser): string {
+  if (isSuperAdmin(user)) return '/admin'
   if (hasPermission(user, PERM.REPORTES_VER)) return '/dashboard'
   if (isProfesional(user) || hasPermission(user, PERM.HISTORIA_ESCRIBIR)) return '/atenciones'
   if (hasPermission(user, PERM.AGENDA_VER)) return '/agenda'
