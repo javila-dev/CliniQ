@@ -48,9 +48,10 @@ const createSchema = z.object({
   especialidades: z.array(z.string()),
 })
 
-const editSchema = createSchema.omit({ email: true }).extend({
+const editSchema = createSchema.omit({ email: true, sede_principal: true }).extend({
   activo: z.boolean(),
   numero_documento: z.string().optional(),
+  sede_principal: z.string().optional(), // puede ser null/vacío en colaboradores sin sede asignada
 })
 
 type CreateForm = z.infer<typeof createSchema>
@@ -394,6 +395,22 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
   })
   const sedes = sedesData?.results ?? []
 
+  // Build edit values from the best available source (detail preferred over list item)
+  const editSrc = colaboradorDetail ?? (isEdit ? colaborador : null)
+  const editValues: EditForm | undefined = editSrc ? {
+    first_name:       editSrc.first_name       ?? '',
+    last_name:        editSrc.last_name        ?? '',
+    numero_documento: editSrc.numero_documento ?? '',
+    telefono:         editSrc.telefono         ?? '',
+    role_id:          editSrc.role_id          ?? '',
+    sede_principal:   editSrc.sede_principal   ?? '',
+    sedes_ids:        editSrc.sedes            ?? [],
+    tipo_contrato:    editSrc.tipo_contrato    ?? 'empleado',
+    fecha_ingreso:    editSrc.fecha_ingreso    ?? '',
+    especialidades:   editSrc.especialidades_detalle?.map((e) => e.id) ?? editSrc.especialidades ?? [],
+    activo:           editSrc.activo           ?? true,
+  } : undefined
+
   // Create form
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
@@ -407,43 +424,14 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     },
   })
 
-  // Edit form
+  // Edit form — `values` auto-syncs when editValues changes (no useEffect needed)
   const editForm = useForm<EditForm>({
     resolver: zodResolver(editSchema),
-    defaultValues: {
-      first_name: '',
-      last_name: '',
-      numero_documento: '',
-      telefono: '',
-      role_id: '',
-      sede_principal: '',
-      sedes_ids: [],
-      tipo_contrato: 'empleado',
-      fecha_ingreso: '',
-      especialidades: [],
-      activo: true,
-    },
+    values: editValues,
   })
 
   useEffect(() => {
-    if (open && isEdit) {
-      // Use detail when available, fall back to list item (which now has user fields).
-      const src = colaboradorDetail ?? colaborador
-      if (!src) return
-      editForm.reset({
-        first_name:        src.first_name       ?? '',
-        last_name:         src.last_name        ?? '',
-        numero_documento:  src.numero_documento ?? '',
-        telefono:          src.telefono         ?? '',
-        role_id:           src.role_id          ?? '',
-        sede_principal:    src.sede_principal   ?? '',
-        sedes_ids:         src.sedes            ?? [],
-        tipo_contrato:     src.tipo_contrato,
-        fecha_ingreso:     src.fecha_ingreso    ?? '',
-        especialidades:    src.especialidades_detalle?.map((e) => e.id) ?? src.especialidades ?? [],
-        activo:            src.activo,
-      })
-    } else if (!open && !colaborador) {
+    if (!open && !colaborador) {
       createForm.reset({
         role_id: '',
         numero_documento: '',
@@ -453,7 +441,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
         fecha_ingreso: new Date().toISOString().split('T')[0],
       })
     }
-  }, [open, colaborador?.id, colaboradorDetail])
+  }, [open, colaborador])
 
   const createMut = useMutation({
     mutationFn: colaboradoresApi.create,
@@ -484,7 +472,12 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
 
   const onCreateSubmit = (data: CreateForm) => createMut.mutate(data)
   const onEditSubmit = (data: EditForm) => {
-    if (colaborador) editMut.mutate({ id: colaborador.id, data })
+    if (!colaborador) return
+    // La API prohíbe enviar sedes_ids cuando sede_principal es null
+    const payload: EditForm = !data.sede_principal
+      ? { ...data, sedes_ids: [] }
+      : data
+    editMut.mutate({ id: colaborador.id, data: payload })
   }
 
   const isPending = createMut.isPending || editMut.isPending

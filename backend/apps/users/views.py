@@ -501,6 +501,10 @@ class UserViewSet(GenericViewSet):
         )
         if self.request.user.rol != "superadmin":
             qs = qs.filter(clinica=self.request.user.clinica)
+        else:
+            clinica_header = self.request.headers.get("X-Clinica-Id", "").strip()
+            if clinica_header:
+                qs = qs.filter(clinica_id=clinica_header)
         rol = self.request.query_params.get("rol")
         if rol:
             qs = qs.filter(rol_dinamico__slug=rol)

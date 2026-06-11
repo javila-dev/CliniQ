@@ -44,8 +44,10 @@ export interface Colaborador {
   rol?: UserRole
   role_id?: string | null
   role_nombre?: string | null
+  es_profesional?: boolean
   telefono?: string | null
   foto_perfil?: string | null
+  clinica_id?: string
   // colaborador fields
   tipo_contrato: TipoContrato
   sede_principal: string | null
@@ -91,8 +93,18 @@ export interface UpdateColaboradorRequest {
 }
 
 export interface ColaboradorProfesional {
-  id: string            // user.id del profesional
-  colaborador_id: string // UUID del perfil laboral (Colaborador), usado en citas
+  id: string                       // user.id del profesional
+  colaborador_id: string           // UUID del perfil laboral (Colaborador), usado en citas
   nombre_completo: string
+  first_name?: string
+  last_name?: string
+  email?: string
+  telefono?: string | null
+  rol?: string
+  role_id?: string | null
+  role_nombre?: string | null
+  sede_principal?: string | null
+  sede_principal_nombre?: string | null
+  activo?: boolean
   especialidades: ColaboradorEspecialidad[]
 }

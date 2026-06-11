@@ -50,7 +50,8 @@ const NAV = {
 }
 
 function allow(user: AuthUser | null, item: typeof NAV[keyof typeof NAV]): boolean {
-  if (item.href === '/atenciones') return isProfesional(user) || hasPermission(user, item.perm)
+  if (item.href === '/dashboard')     return canAccess.dashboard(user)
+  if (item.href === '/atenciones')    return isProfesional(user) || hasPermission(user, item.perm)
   if (item.href === '/configuracion') return canAccess.configuracion(user)
   return hasPermission(user, item.perm)
 }

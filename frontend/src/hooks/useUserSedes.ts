@@ -2,16 +2,17 @@ import { useQuery } from '@tanstack/react-query'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { useAuthStore } from '@/store/authStore'
+import { isAdminOrSuperAdmin } from '@/lib/permissions'
 import type { ColaboradorSede } from '@/types/colaboradores'
 
 /**
  * Devuelve las sedes a las que el usuario tiene acceso:
- * - sede_id === null (admin/superadmin): todas las sedes activas de la clínica
+ * - admin/superadmin o sede_id === null: todas las sedes activas de la clínica
  * - otros: las sedes asignadas a su perfil de colaborador (sedes_detalle)
  */
 export function useUserSedes(): { sedes: ColaboradorSede[]; isLoading: boolean } {
   const { user } = useAuthStore()
-  const isAllSedes = !user?.sede_id
+  const isAllSedes = isAdminOrSuperAdmin(user) || !user?.sede_id
 
   const { data: todasSedes, isLoading: loadingTodas } = useQuery({
     queryKey: ['sedes', 'activas'],

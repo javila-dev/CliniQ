@@ -69,6 +69,10 @@ export function isSuperAdmin(user: AuthUser | null | undefined): boolean {
   return user?.rol === 'superadmin'
 }
 
+export function isAdminOrSuperAdmin(user: AuthUser | null | undefined): boolean {
+  return user?.rol === 'superadmin' || user?.rol === 'admin'
+}
+
 export function hasPermission(
   user: AuthUser | null | undefined,
   key: PermKey | string,
@@ -112,7 +116,7 @@ export const canAccess = {
     isSuperAdmin(u),
 
   dashboard: (u: AuthUser | null | undefined) =>
-    hasPermission(u, PERM.REPORTES_VER),
+    isAdminOrSuperAdmin(u) || hasPermission(u, PERM.REPORTES_VER),
 
   atenciones: (u: AuthUser | null | undefined) =>
     isProfesional(u) || hasPermission(u, PERM.HISTORIA_ESCRIBIR),
@@ -159,7 +163,7 @@ export const canAccess = {
 
 export function defaultRoute(user: AuthUser): string {
   if (isSuperAdmin(user)) return '/admin'
-  if (hasPermission(user, PERM.REPORTES_VER)) return '/dashboard'
+  if (isAdminOrSuperAdmin(user) || hasPermission(user, PERM.REPORTES_VER)) return '/dashboard'
   if (isProfesional(user) || hasPermission(user, PERM.HISTORIA_ESCRIBIR)) return '/atenciones'
   if (hasPermission(user, PERM.AGENDA_VER)) return '/agenda'
   if (hasPermission(user, PERM.PACIENTES_VER)) return '/pacientes'
