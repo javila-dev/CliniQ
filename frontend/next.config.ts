@@ -4,6 +4,10 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Evita el 308 (slash final -> sin slash) en cada request. No cambia el
+  // routing de las paginas, solo desactiva el redirect automatico. El slash
+  // que Django exige se garantiza con el "/" forzado en el destino del rewrite.
+  skipTrailingSlashRedirect: true,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   async rewrites() {
