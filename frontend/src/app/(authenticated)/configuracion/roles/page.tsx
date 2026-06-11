@@ -90,28 +90,30 @@ function PermisosEditor({
 
         return (
           <div key={grupo.modulo} className="border rounded-lg overflow-hidden">
-            <button
-              type="button"
-              className="w-full flex items-center justify-between px-3 py-2.5 bg-gray-50/80 hover:bg-gray-100/80 transition-colors"
-              onClick={() => toggleGrupo(grupo.modulo)}
-            >
-              <div className="flex items-center gap-2">
-                {!readonly && (
-                  <button
-                    type="button"
-                    onClick={e => { e.stopPropagation(); toggleTodosGrupo(grupo) }}
-                    className="text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {todos
-                      ? <CheckSquare className="h-4 w-4 text-rose-500" />
-                      : <Square className="h-4 w-4" />}
-                  </button>
-                )}
-                <span className="text-sm font-semibold capitalize">{grupo.modulo}</span>
-                <span className="text-xs text-muted-foreground">{marcados}/{claves.length}</span>
-              </div>
-              {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
-            </button>
+            <div className="flex items-center bg-gray-50/80 hover:bg-gray-100/80 transition-colors">
+              {!readonly && (
+                <button
+                  type="button"
+                  onClick={() => toggleTodosGrupo(grupo)}
+                  className="px-3 py-2.5 shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  {todos
+                    ? <CheckSquare className="h-4 w-4 text-rose-500" />
+                    : <Square className="h-4 w-4" />}
+                </button>
+              )}
+              <button
+                type="button"
+                className="flex-1 flex items-center justify-between px-3 py-2.5"
+                onClick={() => toggleGrupo(grupo.modulo)}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-semibold capitalize">{grupo.modulo}</span>
+                  <span className="text-xs text-muted-foreground">{marcados}/{claves.length}</span>
+                </div>
+                {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
+              </button>
+            </div>
 
             {open && (
               <div className="divide-y divide-gray-50">

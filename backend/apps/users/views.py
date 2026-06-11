@@ -489,7 +489,7 @@ class UserViewSet(GenericViewSet):
         }
         if self.action == "cambiar_password":
             return [IsAuthenticated()]
-        if self.action == "limite":
+        if self.action in {"limite", "reenviar_invitacion"}:
             return [IsAdmin()]
         return [RequirePermission(permission_map.get(self.action, "usuarios.ver"))()]
 
@@ -604,6 +604,25 @@ class UserViewSet(GenericViewSet):
         user.set_password(nueva)
         user.save(update_fields=["password"])
         return Response({"ok": True})
+
+    @action(detail=True, methods=["post"], url_path="reenviar_invitacion")
+    def reenviar_invitacion(self, request, pk=None):
+        user = self.get_object()
+
+        if user.last_login is not None:
+            return error_response(
+                "El usuario ya activo su cuenta y no necesita una nueva invitacion.",
+                "USER_ALREADY_ACTIVATED",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        _, url, email_enviado = services.generar_link_invitacion(user)
+
+        return Response({
+            "ok": True,
+            "url": url,
+            "email_enviado": email_enviado,
+        })
 
     @action(detail=True, methods=["post"], url_path="activar")
     def activar(self, request, pk=None):

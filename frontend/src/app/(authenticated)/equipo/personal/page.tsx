@@ -8,7 +8,7 @@ import {
   Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
-import { usuariosApi } from '@/lib/api/usuarios'
+import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -17,7 +17,8 @@ import { ColaboradorSheet } from '@/components/colaboradores/ColaboradorSheet'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
-import { isSuperAdmin, defaultRoute } from '@/lib/permissions'
+import { isSuperAdmin, hasPermission, PERM } from '@/lib/permissions'
+import { PageHeader } from '@/components/shared/PageHeader'
 import type { Colaborador } from '@/types/colaboradores'
 import type { PlanLimite } from '@/types/usuarios'
 
@@ -312,7 +313,7 @@ export default function PersonalPage() {
   const router = useRouter()
   const { user: currentUser, impersonate } = useAuthStore()
   const canImpersonate = isSuperAdmin(currentUser)
-  const isAdmin = currentUser?.rol === 'admin' || isSuperAdmin(currentUser)
+  const isAdmin = hasPermission(currentUser, PERM.USUARIOS_CREAR)
 
   const [search, setSearch] = useState('')
   const [filtroRol, setFiltroRol] = useState('todos')
@@ -337,12 +338,38 @@ export default function PersonalPage() {
     queryFn: () => colaboradoresApi.list(params),
   })
 
-  const { data: limite } = useQuery({
-    queryKey: ['usuarios-limite'],
-    queryFn: () => usuariosApi.getLimite(),
-    staleTime: 30_000,
+  // Plan: solo max_usuarios y sin_limite — raramente cambia
+  const { data: planInfo } = useQuery({
+    queryKey: ['mi-plan'],
+    queryFn: () => clinicasApi.getMiPlan(),
+    staleTime: 5 * 60_000,
     enabled: isAdmin,
   })
+
+  // Conteo real de activos — query ligera que se invalida en cada toggle/create
+  const { data: activosPage } = useQuery({
+    queryKey: ['colaboradores-activos-count'],
+    queryFn: () => colaboradoresApi.list({ activo: true, page_size: 1 }),
+    staleTime: 0,
+    enabled: isAdmin,
+  })
+
+  // Construir PlanLimite combinando ambas fuentes
+  const limite: import('@/types/usuarios').PlanLimite | undefined = planInfo
+    ? (() => {
+        const sinLimite   = planInfo.sin_limite
+        const maxUsuarios = planInfo.max_usuarios
+        const activos     = activosPage?.count ?? planInfo.usuarios_activos
+        const slots       = sinLimite || maxUsuarios === null ? null : Math.max(0, maxUsuarios - activos)
+        return {
+          max_usuarios:     maxUsuarios,
+          usuarios_activos: activos,
+          puede_agregar:    sinLimite || (maxUsuarios !== null && activos < maxUsuarios),
+          slots_disponibles: slots,
+          sin_limite:       sinLimite,
+        }
+      })()
+    : undefined
 
   const puedeAgregar = limite?.puede_agregar ?? true
 
@@ -351,7 +378,7 @@ export default function PersonalPage() {
       colaboradoresApi.update(id, { activo }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
-      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
+      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
     },
   })
 
@@ -365,6 +392,12 @@ export default function PersonalPage() {
 
   return (
     <div className="space-y-5">
+
+      <PageHeader
+        title="Equipo"
+        description="Gestiona los colaboradores y usuarios de tu clínica."
+        backHref="/configuracion"
+      />
 
       {/* Sub-header */}
       <div className="flex items-center justify-between gap-4 flex-wrap">

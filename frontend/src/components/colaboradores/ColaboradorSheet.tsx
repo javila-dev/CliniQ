@@ -5,7 +5,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { rolesApi } from '@/lib/api/roles'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -459,7 +459,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     mutationFn: colaboradoresApi.create,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
-      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
+      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
       authApi.invitar(variables.email).catch(() => {})
       onOpenChange(false)
     },
@@ -474,7 +474,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
       console.log('PATCH colaborador response:', JSON.stringify(res, null, 2))
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
       qc.invalidateQueries({ queryKey: ['colaborador-detail', colaborador?.id] })
-      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
+      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
       onOpenChange(false)
     },
     onError: (err: any) => {
@@ -727,6 +727,16 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
           ) : (
             // ── CREATE FORM ──
             <form id="colaborador-form" onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
+              {/* Bloqueo por límite de plan */}
+              {!puedeAgregar && (
+                <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3">
+                  <AlertCircle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
+                  <p className="text-sm text-amber-800">
+                    Has alcanzado el límite de usuarios activos de tu plan. Desactiva un usuario existente o actualiza tu plan para agregar uno nuevo.
+                  </p>
+                </div>
+              )}
+
               {/* Email solo en creación */}
               <div className="space-y-1.5">
                 <Label>Correo electrónico</Label>
@@ -782,7 +792,16 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancelar
           </Button>
-          <Button form="colaborador-form" type="submit" disabled={isPending || (isEdit && isLoadingDetail)}>
+          <Button
+            form="colaborador-form"
+            type="submit"
+            disabled={
+              isPending ||
+              (isEdit && isLoadingDetail) ||
+              (!isEdit && !puedeAgregar) ||
+              (isEdit && !colaborador?.activo && !puedeAgregar && editForm.watch('activo') === true)
+            }
+          >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {isEdit ? 'Guardar cambios' : 'Crear colaborador'}
           </Button>

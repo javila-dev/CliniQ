@@ -3079,6 +3079,32 @@ Ejemplo de error:
 Sin body. Retorna el usuario actualizado.
 No se puede desactivar al propio usuario autenticado.
 
+### Reenviar invitación
+
+`POST /usuarios/{id}/reenviar_invitacion/`
+
+Requiere: rol `admin` o `superadmin`.
+
+Útil cuando el email de activación no llegó o expiró. Genera un nuevo link de invitación (invalida el anterior si existía) e intenta enviar el email. **Devuelve siempre la URL** para que el admin la copie y la envíe manualmente si el email falla.
+
+Solo funciona si el usuario **aún no ha iniciado sesión**. Si ya activó su cuenta devuelve error.
+
+Response:
+```json
+{
+  "ok": true,
+  "url": "https://app.cliniq.co/activar?token=abc123...",
+  "email_enviado": true
+}
+```
+
+Si el canal de email no está configurado, `email_enviado` será `false` pero la `url` sigue siendo válida — el admin puede compartirla directamente con el usuario por WhatsApp, teléfono, etc.
+
+Error si el usuario ya activó su cuenta:
+```json
+{ "error": "El usuario ya activo su cuenta y no necesita una nueva invitacion.", "code": "USER_ALREADY_ACTIVATED" }
+```
+
 ### Permisos
 
 - Los endpoints de usuarios requieren permisos dinámicos `usuarios.*`.

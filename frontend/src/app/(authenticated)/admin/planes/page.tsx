@@ -216,10 +216,11 @@ export default function PlanesPage() {
   const [editando, setEditando]       = useState<Plan | null>(null)
   const [eliminando, setEliminando]   = useState<Plan | null>(null)
 
-  const { data: planes = [], isLoading } = useQuery({
+  const { data: planesData, isLoading } = useQuery({
     queryKey: ['admin-planes'],
     queryFn:  () => adminApi.planes.list(),
   })
+  const planes = planesData?.results ?? []
 
   const qc = useQueryClient()
 

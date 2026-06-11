@@ -294,6 +294,45 @@ def request_password_reset(email: str) -> None:
     send_password_reset_email(user)
 
 
+def generar_link_invitacion(user: User) -> tuple:
+    """
+    Crea un token de invitación nuevo (invalida el anterior) y envía el email.
+    Retorna (token, url, email_enviado) — siempre genera el link aunque el email falle.
+    No respeta el cooldown: sirve para reenvíos forzados desde el panel admin.
+    """
+    expiration_hours = settings.PASSWORD_INVITATION_TOKEN_TTL_HOURS
+    invite_token = create_password_reset_token(
+        user,
+        purpose=PasswordResetToken.Purpose.INVITE,
+        expiration_hours=expiration_hours,
+    )
+    url = build_password_reset_url(invite_token.token)
+
+    email_enviado = False
+    try:
+        if not (email_backend_requires_password() and not settings.EMAIL_HOST_PASSWORD):
+            nombre = user.first_name.strip() or user.nombre_completo
+            subject = "Activa tu acceso a CliniQ"
+            body = (
+                f"Hola {nombre},\n\n"
+                "Tu cuenta en CliniQ ya fue creada.\n"
+                f"Usa este enlace para crear tu contrasena y activar tu acceso:\n{url}\n\n"
+                f"El enlace vence en {expiration_hours} horas.\n"
+                "Si no esperabas esta invitacion, puedes ignorar este correo."
+            )
+            html_body = build_invitation_email_html(
+                nombre=nombre,
+                url=url,
+                expiration_hours=expiration_hours,
+            )
+            enviar_email(to=[user.email], subject=subject, body=body, html_body=html_body)
+            email_enviado = True
+    except Exception:
+        pass
+
+    return invite_token, url, email_enviado
+
+
 def send_user_invitation(email: str, *, clinica=None) -> None:
     queryset = User.objects.all()
     if clinica is not None:

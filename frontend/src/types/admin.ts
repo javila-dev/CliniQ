@@ -21,6 +21,8 @@ export interface AdminTenant {
   total_usuarios: number
   usuarios_activos: number
   total_sedes: number
+  // usuario admin inicial creado con admin_email; null si no se creó o ya activó
+  admin_usuario_pendiente: { id: string; email: string } | null
   created_at: string
   updated_at: string
 }
