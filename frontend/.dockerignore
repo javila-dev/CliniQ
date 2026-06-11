@@ -1,6 +1,12 @@
 node_modules
 .next
+.pnpm-store
+.git
+.gitignore
 .env.local
 .env*.local
 *.log
 npm-debug.log*
+Dockerfile*
+docker-compose*.yml
+build-and-push.ps1
