@@ -12,7 +12,6 @@ SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
 
 # Proxy / Traefik
-USE_X_FORWARDED_HOST = True
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Django 4+ requires the public origin(s) in CSRF_TRUSTED_ORIGINS for POST requests.
