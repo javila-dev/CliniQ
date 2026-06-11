@@ -6,7 +6,7 @@ services:
       dockerfile: Dockerfile.prod
     image: cliniq-backend:latest
     restart: unless-stopped
-    env_file: .env.prod
+    env_file: .env
     ports:
       - "8000:8000"
     networks:
