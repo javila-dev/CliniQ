@@ -27,8 +27,10 @@ var/
 sdist/
 develop-eggs/
 .installed.cfg
-lib/
-lib64/
+venv/lib/
+venv/lib64/
+.venv/lib/
+.venv/lib64/
 
 # Virtual environments
 venv/
