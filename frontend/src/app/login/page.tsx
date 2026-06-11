@@ -178,7 +178,7 @@ export default function LoginPage() {
 
           {/* Footer */}
           <p className="text-[11px] text-white/20 mt-8">
-            © {new Date().getFullYear()} CliniQ · Clínica Dra. Maroly González
+            © {new Date().getFullYear()} CliniQ
           </p>
         </div>
       </div>

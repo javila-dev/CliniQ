@@ -2,6 +2,7 @@ from .base import *  # noqa: F403,F401
 
 
 DEBUG = False
+APPEND_SLASH = False
 
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 SESSION_COOKIE_SECURE = True

@@ -34,6 +34,10 @@ Thumbs.db
 .vscode/
 .idea/
 
+# pnpm
+.pnpm-store/
+pnpm-debug.log*
+
 # Logs
 *.log
 npm-debug.log*
