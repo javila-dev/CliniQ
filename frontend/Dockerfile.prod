@@ -11,8 +11,17 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
+# Server-side: destino del rewrite /proxy/* -> backend interno
 ARG BACKEND_URL=http://backend:8000
 ENV BACKEND_URL=${BACKEND_URL}
+# Client-side (NEXT_PUBLIC_*): se inlinea en el bundle en build time.
+# El .env esta gitignoreado, asi que el valor debe venir como ARG.
+ARG NEXT_PUBLIC_API_URL=/proxy/v1
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
+ARG NEXT_PUBLIC_BACKEND_ORIGIN=http://backend:8000
+ENV NEXT_PUBLIC_BACKEND_ORIGIN=${NEXT_PUBLIC_BACKEND_ORIGIN}
+ARG NEXT_PUBLIC_DOCUMENSO_URL=https://documenso.2asoft.tech
+ENV NEXT_PUBLIC_DOCUMENSO_URL=${NEXT_PUBLIC_DOCUMENSO_URL}
 RUN pnpm run build
 
 FROM node:18-alpine AS runner

@@ -4,7 +4,9 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
 const nextConfig: NextConfig = {
   output: 'standalone',
-  skipTrailingSlashRedirect: true,
+  // Django (DRF) requiere slash final en las rutas (/api/v1/auth/login/).
+  // Sin esto, Next.js elimina el slash al reenviar el rewrite y Django da 404.
+  trailingSlash: true,
   eslint: { ignoreDuringBuilds: true },
   typescript: { ignoreBuildErrors: true },
   async rewrites() {
