@@ -161,6 +161,9 @@ class SedeSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+        extra_kwargs = {
+            "clinica": {"required": False},
+        }
 
     def get_nombre_clinica(self, obj):
         return obj.clinica.nombre

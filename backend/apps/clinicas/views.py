@@ -326,6 +326,11 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
 
     def perform_create(self, serializer):
         clinica = serializer.validated_data.get("clinica")
+        if clinica is None:
+            clinica_id = self.request.headers.get("X-Clinica-Id", "").strip() or getattr(self.request.user, "clinica_id", None)
+            if not clinica_id:
+                raise ValidationError({"clinica": "No se pudo determinar la clinica."})
+            clinica = get_object_or_404(Clinica, pk=clinica_id)
         if clinica and clinica.pk:
             c = Clinica.objects.select_related("plan").filter(pk=clinica.pk).first()
             if c and c.plan and c.plan.max_sedes > 0:
@@ -334,7 +339,7 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
                     raise ValidationError(
                         f"La clinica ha alcanzado el limite de {c.plan.max_sedes} sedes de su plan '{c.plan.nombre}'."
                     )
-        serializer.save()
+        serializer.save(clinica=clinica)
 
     def perform_destroy(self, instance):
         if sede_tiene_citas(instance):
