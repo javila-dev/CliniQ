@@ -363,9 +363,10 @@ interface Props {
   open: boolean
   onOpenChange: (v: boolean) => void
   colaborador?: Colaborador | null
+  puedeAgregar?: boolean
 }
 
-export function ColaboradorSheet({ open, onOpenChange, colaborador }: Props) {
+export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar = true }: Props) {
   const qc = useQueryClient()
   const isEdit = !!colaborador
 
@@ -458,6 +459,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador }: Props) {
     mutationFn: colaboradoresApi.create,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
+      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
       authApi.invitar(variables.email).catch(() => {})
       onOpenChange(false)
     },
@@ -472,6 +474,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador }: Props) {
       console.log('PATCH colaborador response:', JSON.stringify(res, null, 2))
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
       qc.invalidateQueries({ queryKey: ['colaborador-detail', colaborador?.id] })
+      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
       onOpenChange(false)
     },
     onError: (err: any) => {
@@ -701,12 +704,23 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador }: Props) {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="true">Activo</SelectItem>
+                        <SelectItem
+                          value="true"
+                          disabled={!colaborador?.activo && !puedeAgregar}
+                        >
+                          Activo
+                        </SelectItem>
                         <SelectItem value="false">Inactivo</SelectItem>
                       </SelectContent>
                     </Select>
                   )}
                 />
+                {!colaborador?.activo && !puedeAgregar && (
+                  <p className="text-xs text-amber-600 flex items-center gap-1">
+                    <span>⚠</span>
+                    Límite de usuarios activos alcanzado. No es posible reactivar este colaborador.
+                  </p>
+                )}
               </div>
             </form>
             )

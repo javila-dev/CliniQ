@@ -26,6 +26,7 @@ El backend ya tiene implementados estos módulos:
 - `H27` catálogo comercial de tratamientos
 - `H27.1` ítems de cotización con tipo semántico (`tratamiento`, `procedimiento`, `libre`)
 - `H29` storage MinIO con bucket público y privado
+- `H30` planes y límites de usuarios por clínica (multitenant)
 
 Todo cuelga de `api/v1/`.
 
@@ -3868,6 +3869,309 @@ Después de un check-in exitoso, el serializer de `Cita` incluye:
 - `checkin_metodo`: `"otp_whatsapp"` | `"foto_presencial"` | `null`
 - `checkin_en`: timestamp del check-in o `null`
 - `checkin_foto_url`: URL firmada de la foto (solo si `checkin_metodo == "foto_presencial"`)
+
+---
+
+## Planes y límites de usuarios (H30)
+
+Control multitenant de cuántos usuarios activos puede tener cada clínica según su plan.
+
+### Modelo Plan
+
+```
+id           UUID
+nombre       string
+descripcion  string
+max_usuarios int  (0 = sin límite)
+activo       bool
+```
+
+### Consultar uso del plan de mi clínica
+
+`GET /clinicas/mi-clinica/plan/`
+
+Requiere: rol `admin` o `superadmin`.
+
+```json
+{
+  "plan": {
+    "id": "uuid",
+    "nombre": "Profesional",
+    "descripcion": "Hasta 10 usuarios activos",
+    "max_usuarios": 10,
+    "activo": true,
+    "created_at": "...",
+    "updated_at": "..."
+  },
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": 3,
+  "sin_limite": false
+}
+```
+
+Si la clínica no tiene plan o el plan tiene `max_usuarios = 0`:
+
+```json
+{
+  "plan": null,
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": null,
+  "sin_limite": true
+}
+```
+
+### Verificación rápida de límite para el frontend
+
+`GET /usuarios/limite/`
+
+Requiere: rol `admin` o `superadmin`. Útil para saber si mostrar/deshabilitar el botón "Agregar usuario".
+
+```json
+{
+  "max_usuarios": 10,
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": 3,
+  "sin_limite": false
+}
+```
+
+Cuando no hay límite:
+
+```json
+{
+  "max_usuarios": null,
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": null,
+  "sin_limite": true
+}
+```
+
+### Enforcement automático
+
+Al crear un usuario (`POST /usuarios/`) o reactivar uno (`POST /usuarios/{id}/activar/`), el backend verifica el límite automáticamente. Si se alcanzó:
+
+```json
+{
+  "error": "La clinica ha alcanzado el limite de 10 usuarios activos de su plan 'Profesional'.",
+  "code": "PLAN_LIMIT_REACHED"
+}
+```
+
+HTTP 403.
+
+---
+
+### Gestión de planes (solo Superadmin)
+
+#### Listar planes
+
+`GET /clinicas/planes/`
+
+Requiere: rol `admin` o `superadmin`.
+
+```json
+[
+  {
+    "id": "uuid",
+    "nombre": "Básico",
+    "descripcion": "Hasta 3 usuarios",
+    "max_usuarios": 3,
+    "activo": true,
+    "created_at": "...",
+    "updated_at": "..."
+  }
+]
+```
+
+#### Crear plan
+
+`POST /clinicas/planes/`  — solo Superadmin
+
+```json
+{
+  "nombre": "Empresarial",
+  "descripcion": "Hasta 30 usuarios activos",
+  "max_usuarios": 30
+}
+```
+
+#### Editar plan
+
+`PATCH /clinicas/planes/{id}/`  — solo Superadmin
+
+```json
+{ "max_usuarios": 50 }
+```
+
+#### Eliminar plan
+
+`DELETE /clinicas/planes/{id}/`  — solo Superadmin
+
+Falla con HTTP 400 si el plan está asignado a clínicas activas:
+
+```json
+{
+  "error": "No se puede eliminar un plan asignado a clinicas activas.",
+  "code": "PLAN_IN_USE"
+}
+```
+
+#### Asignar plan a una clínica
+
+`PATCH /clinicas/clinicas/{id}/asignar_plan/`  — solo Superadmin
+
+```json
+{ "plan": "uuid-del-plan" }
+```
+
+Para quitar el plan: enviar `"plan": null`.
+
+Respuesta: objeto completo de la clínica con `plan` y `plan_nombre` actualizados.
+
+---
+
+## Panel Admin — superadmin (P18)
+
+Sección exclusiva para usuarios con `rol === 'superadmin'`. Todos los endpoints bajo `/api/v1/admin/` requieren JWT con ese rol; cualquier otro recibe **HTTP 403**.
+
+No existe `is_staff`. El único guard es `rol === 'superadmin'`.
+
+---
+
+### Tenants (`/admin/tenants/`)
+
+#### Listar todos los tenants
+
+`GET /api/v1/admin/tenants/`
+
+Soporta `?search=` (busca en nombre, nit, email) y `?ordering=nombre|-nombre|created_at|-created_at`.
+
+```json
+[
+  {
+    "id": "uuid",
+    "nombre": "Clínica Ejemplo",
+    "nit": "900123456-1",
+    "email": "admin@clinica.com",
+    "telefono": "3001234567",
+    "activo": true,
+    "plan": {
+      "id": "uuid",
+      "nombre": "Pro",
+      "descripcion": "Hasta 10 usuarios y 3 sedes",
+      "max_usuarios": 10,
+      "max_sedes": 3,
+      "precio": "299000.00",
+      "activo": true,
+      "created_at": "...",
+      "updated_at": "..."
+    },
+    "total_usuarios": 5,
+    "usuarios_activos": 4,
+    "total_sedes": 2,
+    "created_at": "2024-01-01T00:00:00Z",
+    "updated_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+`plan` es `null` si la clínica no tiene plan asignado. `total_usuarios` cuenta todos los usuarios (activos e inactivos); `usuarios_activos` solo los activos.
+
+#### Detalle de tenant
+
+`GET /api/v1/admin/tenants/{id}/`
+
+Misma forma que cada ítem del listado.
+
+#### Crear tenant
+
+`POST /api/v1/admin/tenants/`
+
+```json
+{
+  "nombre": "Clínica Nueva",
+  "nit": "900987654-3",
+  "email": "contacto@clinicanueva.com",
+  "telefono": "3009876543",
+  "plan": "uuid-del-plan",
+  "admin_email": "admin@clinicanueva.com"
+}
+```
+
+- `plan` y `admin_email` son opcionales.
+- Si se envía `admin_email`, el backend crea un usuario `admin` para esa clínica y le envía una invitación por correo para que defina su contraseña. Los roles del sistema (admin, recepcion, profesional) se crean automáticamente.
+
+Errores:
+```json
+{ "error": "Ya existe una clinica con ese NIT.", "nit": [...] }
+{ "error": "Ya existe un usuario con ese email.", "code": "ADMIN_EMAIL_DUPLICATE" }
+```
+
+#### Editar tenant
+
+`PATCH /api/v1/admin/tenants/{id}/`
+
+Acepta cualquier combinación de: `nombre`, `nit`, `email`, `telefono`, `activo`, `plan`.
+
+Para asignar plan: `{ "plan": "uuid" }`. Para quitar plan: `{ "plan": null }`.
+
+#### Inactivar tenant
+
+`PATCH /api/v1/admin/tenants/{id}/` con `{ "activo": false }`.
+
+Los usuarios del tenant no se eliminan, pero **no pueden iniciar sesión** mientras la clínica esté inactiva:
+
+```json
+{ "error": "La clinica no esta activa. Contacta al administrador.", "code": "CLINICA_INACTIVA" }
+```
+
+HTTP 403.
+
+---
+
+### Planes (`/admin/planes/`)
+
+CRUD completo de planes. Los mismos endpoints también están disponibles en `/api/v1/clinicas/planes/`.
+
+#### Listar
+
+`GET /api/v1/admin/planes/` — cualquier usuario autenticado con rol admin+.
+
+#### Crear
+
+`POST /api/v1/admin/planes/` — solo superadmin.
+
+```json
+{
+  "nombre": "Empresarial",
+  "descripcion": "Hasta 30 usuarios y 5 sedes",
+  "max_usuarios": 30,
+  "max_sedes": 5,
+  "precio": "499000.00"
+}
+```
+
+Campos `max_usuarios`, `max_sedes` y `precio` son opcionales (default 0 / null). `0` en `max_usuarios` o `max_sedes` significa sin límite.
+
+**Los límites son hard limits:**
+- `max_usuarios`: el backend bloquea crear o reactivar usuarios si se alcanza → `PLAN_LIMIT_REACHED` HTTP 403.
+- `max_sedes`: el backend bloquea crear nuevas sedes si se alcanza → `SEDE_LIMIT_REACHED` HTTP 400.
+
+#### Editar
+
+`PATCH /api/v1/admin/planes/{id}/` — solo superadmin.
+
+#### Eliminar
+
+`DELETE /api/v1/admin/planes/{id}/` — solo superadmin. Falla si hay tenants activos asignados:
+
+```json
+{ "error": "No se puede eliminar un plan asignado a clinicas activas.", "code": "PLAN_IN_USE" }
+```
 
 ---
 

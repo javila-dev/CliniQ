@@ -87,7 +87,7 @@ const CHANNELS: {
     canal: 'whatsapp',
     icon: MessageCircle,
     label: 'WhatsApp',
-    description: 'Envía la cotización con PDF adjunto al número del paciente vía n8n',
+    description: 'Envía la cotización con PDF adjunto al teléfono registrado del paciente',
     color: 'text-green-600 bg-green-50',
   },
   {
@@ -158,7 +158,7 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
 
     } catch {
       const msgs: Record<CanalEnvio, string> = {
-        whatsapp: 'No se pudo enviar por WhatsApp. Revisa la configuración de n8n.',
+        whatsapp: 'No se pudo enviar por WhatsApp. Verifica que el paciente tenga un teléfono registrado.',
         email: 'No se pudo enviar el correo. Revisa la configuración de email.',
         pdf: 'No se pudo descargar el PDF. Intenta de nuevo.',
       }

@@ -1,18 +1,23 @@
 import logging
 from uuid import UUID
 
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.clinicas.models import (
     Clinica,
     PasoProtocolo,
+    Plan,
     Sede,
     Servicio,
     ServicioConsentimiento,
@@ -22,11 +27,16 @@ from apps.clinicas.models import (
     TratamientoProcedimiento,
 )
 from apps.clinicas.serializers import (
+    AdminTenantCreateSerializer,
+    AdminTenantSerializer,
+    AdminTenantUpdateSerializer,
     ClinicaRecordatorioConfigSerializer,
     ClinicaSerializer,
     ClinicaSlotIntervalSerializer,
     MiClinicaSerializer,
     PasoProtocoloSerializer,
+    PlanSerializer,
+    PlanUsageSerializer,
     ProcedimientoSerializer,
     SedeSerializer,
     ServicioSerializer,
@@ -37,7 +47,7 @@ from apps.clinicas.serializers import (
 )
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file
-from apps.users.permissions import HasClinicamente, RequirePermission
+from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission
 
 
 logger = logging.getLogger(__name__)
@@ -68,6 +78,10 @@ class ClinicaViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action in {"partial_update", "update", "slot_interval", "recordatorio_config", "mi_clinica_logo", "clinica_logo"}:
             permission_classes = (RequirePermission("clinicas.editar"),)
+        elif self.action == "asignar_plan":
+            permission_classes = (IsSuperAdmin,)
+        elif self.action == "plan_usage":
+            permission_classes = (IsAdmin,)
         else:
             permission_classes = (RequirePermission("clinicas.ver"),)
         return [permission() for permission in permission_classes]
@@ -151,6 +165,135 @@ class ClinicaViewSet(ModelViewSet):
         clinica = self.get_object()
         return self._save_or_delete_logo(request, clinica)
 
+    def plan_usage(self, request):
+        clinica = self._get_request_clinica()
+        activos = User.objects.filter(clinica=clinica, activo=True).count()
+        plan = getattr(clinica, "plan", None)
+
+        if plan is None or plan.max_usuarios == 0:
+            data = {
+                "plan": PlanSerializer(plan).data if plan else None,
+                "usuarios_activos": activos,
+                "puede_agregar": True,
+                "slots_disponibles": None,
+                "sin_limite": True,
+            }
+        else:
+            slots = max(0, plan.max_usuarios - activos)
+            data = {
+                "plan": PlanSerializer(plan).data,
+                "usuarios_activos": activos,
+                "puede_agregar": activos < plan.max_usuarios,
+                "slots_disponibles": slots,
+                "sin_limite": False,
+            }
+        return Response(data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["patch"], url_path="asignar_plan")
+    def asignar_plan(self, request, pk=None):
+        clinica = self.get_object()
+        plan_id = request.data.get("plan")
+        if plan_id in (None, ""):
+            clinica.plan = None
+        else:
+            clinica.plan = get_object_or_404(Plan, id=plan_id)
+        clinica.save(update_fields=["plan", "updated_at"])
+        return Response(ClinicaSerializer(clinica, context={"request": request}).data, status=status.HTTP_200_OK)
+
+
+class AdminTenantViewSet(ModelViewSet):
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    permission_classes = [IsSuperAdmin]
+    search_fields = ("nombre", "nit", "email")
+    ordering_fields = ("nombre", "created_at")
+
+    def get_queryset(self):
+        from django.db.models import Count, Q
+        return (
+            Clinica.objects.select_related("plan")
+            .annotate(
+                total_usuarios=Count("usuarios", distinct=True),
+                usuarios_activos=Count("usuarios", filter=Q(usuarios__activo=True), distinct=True),
+                total_sedes=Count("sedes", filter=Q(sedes__activo=True), distinct=True),
+            )
+            .order_by("nombre")
+        )
+
+    def get_serializer_class(self):
+        if self.action == "create":
+            return AdminTenantCreateSerializer
+        if self.action in {"update", "partial_update"}:
+            return AdminTenantUpdateSerializer
+        return AdminTenantSerializer
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "request": self.request}
+
+    def create(self, request, *args, **kwargs):
+        from apps.users.rbac import ensure_default_roles_for_clinica
+        from apps.users.models import Rol
+        from apps.users import services as user_services
+
+        serializer = AdminTenantCreateSerializer(data=request.data, context=self.get_serializer_context())
+        serializer.is_valid(raise_exception=True)
+        admin_email = serializer.validated_data.get("admin_email", "").strip()
+
+        with transaction.atomic():
+            clinica = serializer.save()
+            ensure_default_roles_for_clinica(clinica)
+
+            if admin_email:
+                if User.objects.filter(email__iexact=admin_email).exists():
+                    return Response(
+                        {"error": "Ya existe un usuario con ese email.", "code": "ADMIN_EMAIL_DUPLICATE"},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                rol_admin = Rol.objects.filter(clinica=clinica, slug="admin", activo=True).first()
+                admin_user = User(
+                    email=admin_email,
+                    clinica=clinica,
+                    rol="admin",
+                    rol_dinamico=rol_admin,
+                )
+                admin_user.set_unusable_password()
+                admin_user.save()
+                try:
+                    user_services.send_invitation_email(admin_user)
+                except Exception:
+                    pass
+
+        clinica_data = self.get_queryset().get(pk=clinica.pk)
+        return Response(AdminTenantSerializer(clinica_data).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, pk=None):
+        clinica = self.get_object()
+        serializer = AdminTenantUpdateSerializer(clinica, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        clinica_data = self.get_queryset().get(pk=clinica.pk)
+        return Response(AdminTenantSerializer(clinica_data).data, status=status.HTTP_200_OK)
+
+
+class PlanViewSet(ModelViewSet):
+    serializer_class = PlanSerializer
+    queryset = Plan.objects.all()
+    http_method_names = ["get", "post", "patch", "delete", "head", "options"]
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            return [IsSuperAdmin()]
+        return [IsAdmin()]
+
+    def destroy(self, request, pk=None):
+        plan = self.get_object()
+        if plan.clinicas.filter(activo=True).exists():
+            return Response(
+                {"error": "No se puede eliminar un plan asignado a clinicas activas.", "code": "PLAN_IN_USE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        plan.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
 
 class SedeViewSet(HasClinicamente, ModelViewSet):
     serializer_class = SedeSerializer
@@ -181,10 +324,20 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
             queryset = queryset.filter(clinica_id=clinica)
         return queryset
 
+    def perform_create(self, serializer):
+        clinica = serializer.validated_data.get("clinica")
+        if clinica and clinica.pk:
+            c = Clinica.objects.select_related("plan").filter(pk=clinica.pk).first()
+            if c and c.plan and c.plan.max_sedes > 0:
+                total_activas = c.sedes.filter(activo=True).count()
+                if total_activas >= c.plan.max_sedes:
+                    raise ValidationError(
+                        f"La clinica ha alcanzado el limite de {c.plan.max_sedes} sedes de su plan '{c.plan.nombre}'."
+                    )
+        serializer.save()
+
     def perform_destroy(self, instance):
         if sede_tiene_citas(instance):
-            from rest_framework.exceptions import ValidationError
-
             raise ValidationError({"error": "No se puede eliminar una sede con citas asociadas."})
         instance.delete()
 

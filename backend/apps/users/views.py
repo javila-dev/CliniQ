@@ -15,6 +15,7 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.db import OperationalError, ProgrammingError
 from django.db.models.deletion import ProtectedError
 
+from apps.clinicas.models import Clinica
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
 from apps.users.permissions import IsAdmin, RequirePermission
@@ -34,6 +35,22 @@ from apps.users.serializers import (
 )
 
 User = get_user_model()
+
+
+def _check_clinica_user_limit(clinica):
+    """Returns (error_message, error_code) si se alcanzó el límite, o None si puede agregar."""
+    plan = getattr(clinica, "plan", None)
+    if plan is None or plan.max_usuarios == 0:
+        return None
+    activos = clinica.usuarios.filter(activo=True).count()
+    if activos >= plan.max_usuarios:
+        return (
+            f"La clinica ha alcanzado el limite de {plan.max_usuarios} usuarios activos de su plan '{plan.nombre}'.",
+            "PLAN_LIMIT_REACHED",
+        )
+    return None
+
+
 PROTECTED_RELATION_LABELS = {
     "agenda.cita": "citas",
     "agenda.bloqueoagenda": "bloqueos de agenda",
@@ -75,6 +92,17 @@ class LoginView(APIView):
             serializer.is_valid(raise_exception=True)
         except Exception:
             return error_response("Credenciales invalidas.", "INVALID_CREDENTIALS", status.HTTP_401_UNAUTHORIZED)
+
+        user = serializer.user
+        if getattr(user, "clinica_id", None):
+            clinica = Clinica.objects.filter(id=user.clinica_id).values("activo").first()
+            if clinica and not clinica["activo"]:
+                return error_response(
+                    "La clinica no esta activa. Contacta al administrador.",
+                    "CLINICA_INACTIVA",
+                    status.HTTP_403_FORBIDDEN,
+                )
+
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
@@ -461,6 +489,8 @@ class UserViewSet(GenericViewSet):
         }
         if self.action == "cambiar_password":
             return [IsAuthenticated()]
+        if self.action == "limite":
+            return [IsAdmin()]
         return [RequirePermission(permission_map.get(self.action, "usuarios.ver"))()]
 
     def get_queryset(self):
@@ -496,6 +526,13 @@ class UserViewSet(GenericViewSet):
     def create(self, request):
         serializer = UserCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
+        if request.user.rol != "superadmin" and request.user.clinica_id:
+            clinica = Clinica.objects.select_related("plan").filter(id=request.user.clinica_id).first()
+            if clinica:
+                limit_error = _check_clinica_user_limit(clinica)
+                if limit_error:
+                    message, code = limit_error
+                    return error_response(message, code, status.HTTP_403_FORBIDDEN)
         user = serializer.save()
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
@@ -526,6 +563,33 @@ class UserViewSet(GenericViewSet):
             )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=False, methods=["get"], url_path="limite")
+    def limite(self, request):
+        clinica = None
+        if request.user.rol != "superadmin" and request.user.clinica_id:
+            clinica = Clinica.objects.select_related("plan").filter(id=request.user.clinica_id).first()
+
+        activos = clinica.usuarios.filter(activo=True).count() if clinica else 0
+        plan = getattr(clinica, "plan", None) if clinica else None
+
+        if plan is None or plan.max_usuarios == 0:
+            return Response({
+                "max_usuarios": None,
+                "usuarios_activos": activos,
+                "puede_agregar": True,
+                "slots_disponibles": None,
+                "sin_limite": True,
+            })
+
+        slots = max(0, plan.max_usuarios - activos)
+        return Response({
+            "max_usuarios": plan.max_usuarios,
+            "usuarios_activos": activos,
+            "puede_agregar": activos < plan.max_usuarios,
+            "slots_disponibles": slots,
+            "sin_limite": False,
+        })
+
     @action(detail=True, methods=["post"], url_path="cambiar_password")
     def cambiar_password(self, request, pk=None):
         user = self.get_object()
@@ -544,6 +608,13 @@ class UserViewSet(GenericViewSet):
     @action(detail=True, methods=["post"], url_path="activar")
     def activar(self, request, pk=None):
         user = self.get_object()
+        if not user.activo and user.clinica_id:
+            clinica = Clinica.objects.select_related("plan").filter(id=user.clinica_id).first()
+            if clinica:
+                limit_error = _check_clinica_user_limit(clinica)
+                if limit_error:
+                    message, code = limit_error
+                    return error_response(message, code, status.HTTP_403_FORBIDDEN)
         user.activo = True
         user.save(update_fields=["activo"])
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)

@@ -5,18 +5,21 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Search, Users, Stethoscope, PhoneCall,
-  Pencil, ToggleLeft, ToggleRight, LogIn,
+  Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
+import { usuariosApi } from '@/lib/api/usuarios'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ColaboradorSheet } from '@/components/colaboradores/ColaboradorSheet'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { isSuperAdmin, defaultRoute } from '@/lib/permissions'
 import type { Colaborador } from '@/types/colaboradores'
+import type { PlanLimite } from '@/types/usuarios'
 
 // ─── helpers ──────────────────────────────────────────────────
 
@@ -53,6 +56,56 @@ const ROL_CONFIG: Record<string, { label: string; icon: React.ElementType; class
   recepcion:   { label: 'Recepción',   icon: PhoneCall,   className: 'bg-sky-50 text-sky-700 ring-sky-200/60'    },
 }
 
+// ─── PlanLimitBanner ──────────────────────────────────────────
+
+function PlanLimitBanner({ limite }: { limite: PlanLimite }) {
+  if (limite.sin_limite) return null
+
+  const { usuarios_activos, max_usuarios, slots_disponibles, puede_agregar } = limite
+  const pct = max_usuarios ? Math.min((usuarios_activos / max_usuarios) * 100, 100) : 0
+  const isWarning = pct >= 80
+  const isFull = !puede_agregar
+
+  return (
+    <div className={cn(
+      'flex items-center gap-3 rounded-xl border px-4 py-3',
+      isFull
+        ? 'bg-red-50 border-red-200'
+        : isWarning
+          ? 'bg-amber-50 border-amber-200'
+          : 'bg-blue-50/60 border-blue-200/60',
+    )}>
+      <AlertCircle className={cn(
+        'h-4 w-4 shrink-0',
+        isFull ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-blue-400',
+      )} />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2 mb-1.5">
+          <span className="text-xs font-medium text-foreground">
+            {usuarios_activos} de {max_usuarios} usuarios activos en el plan
+          </span>
+          {isFull ? (
+            <span className="text-xs font-semibold text-red-600">Límite alcanzado</span>
+          ) : slots_disponibles !== null ? (
+            <span className="text-xs text-muted-foreground">
+              {slots_disponibles} slot{slots_disponibles !== 1 ? 's' : ''} libre{slots_disponibles !== 1 ? 's' : ''}
+            </span>
+          ) : null}
+        </div>
+        <div className="h-1.5 w-full rounded-full bg-white/70 overflow-hidden">
+          <div
+            className={cn(
+              'h-full rounded-full transition-all duration-300',
+              isFull ? 'bg-red-400' : isWarning ? 'bg-amber-400' : 'bg-blue-400',
+            )}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ─── Row ──────────────────────────────────────────────────────
 
 function ColaboradorRow({
@@ -60,15 +113,19 @@ function ColaboradorRow({
   onEdit,
   onToggle,
   onImpersonate,
+  canActivate,
 }: {
   colaborador: Colaborador
   onEdit: () => void
   onToggle: () => void
   onImpersonate?: () => void
+  canActivate: boolean
 }) {
   const rol = ROL_CONFIG[colaborador.rol]
   const contrato = CONTRATO_CONFIG[colaborador.tipo_contrato]
   const RolIcon = rol?.icon ?? Stethoscope
+
+  const toggleDisabled = !colaborador.activo && !canActivate
 
   return (
     <div className={cn(
@@ -163,20 +220,36 @@ function ColaboradorRow({
         >
           <Pencil className="h-3.5 w-3.5" />
         </button>
-        <button
-          onClick={(e) => { e.stopPropagation(); onToggle() }}
-          className={cn(
-            'flex items-center justify-center h-7 w-7 rounded-md transition-colors',
-            colaborador.activo
-              ? 'hover:bg-red-50 text-muted-foreground hover:text-red-500'
-              : 'hover:bg-green-50 text-muted-foreground hover:text-green-600'
-          )}
-          title={colaborador.activo ? 'Desactivar' : 'Activar'}
-        >
-          {colaborador.activo
-            ? <ToggleRight className="h-4 w-4" />
-            : <ToggleLeft className="h-4 w-4" />}
-        </button>
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <button
+                  onClick={(e) => { e.stopPropagation(); if (!toggleDisabled) onToggle() }}
+                  disabled={toggleDisabled}
+                  className={cn(
+                    'flex items-center justify-center h-7 w-7 rounded-md transition-colors',
+                    toggleDisabled
+                      ? 'opacity-40 cursor-not-allowed text-muted-foreground'
+                      : colaborador.activo
+                        ? 'hover:bg-red-50 text-muted-foreground hover:text-red-500'
+                        : 'hover:bg-green-50 text-muted-foreground hover:text-green-600'
+                  )}
+                  title={toggleDisabled ? 'Límite de usuarios alcanzado' : colaborador.activo ? 'Desactivar' : 'Activar'}
+                >
+                  {colaborador.activo
+                    ? <ToggleRight className="h-4 w-4" />
+                    : <ToggleLeft className="h-4 w-4" />}
+                </button>
+              </span>
+            </TooltipTrigger>
+            {toggleDisabled && (
+              <TooltipContent>
+                Límite de usuarios alcanzado. Actualiza tu plan para agregar más.
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </TooltipProvider>
       </div>
     </div>
   )
@@ -239,6 +312,7 @@ export default function PersonalPage() {
   const router = useRouter()
   const { user: currentUser, impersonate } = useAuthStore()
   const canImpersonate = isSuperAdmin(currentUser)
+  const isAdmin = currentUser?.rol === 'admin' || isSuperAdmin(currentUser)
 
   const [search, setSearch] = useState('')
   const [filtroRol, setFiltroRol] = useState('todos')
@@ -263,10 +337,22 @@ export default function PersonalPage() {
     queryFn: () => colaboradoresApi.list(params),
   })
 
+  const { data: limite } = useQuery({
+    queryKey: ['usuarios-limite'],
+    queryFn: () => usuariosApi.getLimite(),
+    staleTime: 30_000,
+    enabled: isAdmin,
+  })
+
+  const puedeAgregar = limite?.puede_agregar ?? true
+
   const toggleMut = useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       colaboradoresApi.update(id, { activo }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['colaboradores'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['colaboradores'] })
+      qc.invalidateQueries({ queryKey: ['usuarios-limite'] })
+    },
   })
 
   const allColaboradores = data?.results ?? []
@@ -285,16 +371,32 @@ export default function PersonalPage() {
         <p className="text-sm text-muted-foreground">
           {isLoading ? 'Cargando...' : `${data?.count ?? 0} colaborador${(data?.count ?? 0) !== 1 ? 'es' : ''} registrados`}
         </p>
-        <Button onClick={handleNew}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          Nuevo colaborador
-        </Button>
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span>
+                <Button onClick={handleNew} disabled={!puedeAgregar}>
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Nuevo colaborador
+                </Button>
+              </span>
+            </TooltipTrigger>
+            {!puedeAgregar && (
+              <TooltipContent>
+                Has alcanzado el límite de usuarios activos de tu plan.
+              </TooltipContent>
+            )}
+          </Tooltip>
+        </TooltipProvider>
       </div>
 
       {/* Stats */}
       {!isLoading && allColaboradores.length > 0 && (
         <StatsBar data={allColaboradores} />
       )}
+
+      {/* Banner de uso del plan — solo visible para admin */}
+      {isAdmin && limite && <PlanLimitBanner limite={limite} />}
 
       {/* Filtros */}
       <div className="flex flex-col sm:flex-row gap-2.5">
@@ -375,6 +477,7 @@ export default function PersonalPage() {
             <ColaboradorRow
               key={c.id}
               colaborador={c}
+              canActivate={puedeAgregar}
               onEdit={() => handleEdit(c)}
               onToggle={() => toggleMut.mutate({ id: c.id, activo: !c.activo })}
               onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}
@@ -387,6 +490,7 @@ export default function PersonalPage() {
         open={sheetOpen}
         onOpenChange={(v) => { setSheetOpen(v); if (!v) setEditTarget(null) }}
         colaborador={editTarget}
+        puedeAgregar={puedeAgregar}
       />
     </div>
   )

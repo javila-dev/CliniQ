@@ -7,6 +7,7 @@ from apps.core.storage import get_public_url
 from apps.clinicas.models import (
     Clinica,
     PasoProtocolo,
+    Plan,
     Sede,
     Servicio,
     ServicioConsentimiento,
@@ -17,13 +18,41 @@ from apps.clinicas.models import (
 )
 
 
+class PlanSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Plan
+        fields = ("id", "nombre", "descripcion", "max_usuarios", "max_sedes", "precio", "activo", "created_at", "updated_at")
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate_max_usuarios(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El numero maximo de usuarios no puede ser negativo.")
+        return value
+
+    def validate_max_sedes(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El numero maximo de sedes no puede ser negativo.")
+        return value
+
+
+class PlanUsageSerializer(serializers.Serializer):
+    plan = PlanSerializer(allow_null=True)
+    usuarios_activos = serializers.IntegerField()
+    puede_agregar = serializers.BooleanField()
+    slots_disponibles = serializers.IntegerField(allow_null=True)
+    sin_limite = serializers.BooleanField()
+
+
 class ClinicaSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
+    plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
 
     class Meta:
         model = Clinica
         fields = (
             "id",
+            "plan",
+            "plan_nombre",
             "nombre",
             "nit",
             "telefono",
@@ -34,7 +63,7 @@ class ClinicaSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "logo", "logo_url", "created_at", "updated_at")
+        read_only_fields = ("id", "logo", "logo_url", "plan_nombre", "created_at", "updated_at")
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
@@ -586,3 +615,72 @@ def sede_tiene_citas(sede):
     except LookupError:
         return False
     return cita_model.objects.filter(sede=sede).exists()
+
+
+class AdminTenantSerializer(serializers.ModelSerializer):
+    plan = PlanSerializer(read_only=True)
+    total_usuarios = serializers.IntegerField(read_only=True, default=0)
+    usuarios_activos = serializers.IntegerField(read_only=True, default=0)
+    total_sedes = serializers.IntegerField(read_only=True, default=0)
+
+    class Meta:
+        model = Clinica
+        fields = (
+            "id",
+            "nombre",
+            "nit",
+            "email",
+            "telefono",
+            "activo",
+            "plan",
+            "total_usuarios",
+            "usuarios_activos",
+            "total_sedes",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+
+class AdminTenantCreateSerializer(serializers.ModelSerializer):
+    plan = serializers.PrimaryKeyRelatedField(
+        queryset=Plan.objects.filter(activo=True),
+        required=False,
+        allow_null=True,
+    )
+    admin_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+
+    class Meta:
+        model = Clinica
+        fields = ("nombre", "nit", "email", "telefono", "plan", "admin_email")
+        extra_kwargs = {"telefono": {"required": False}, "email": {"required": False}}
+
+    def validate_nit(self, value):
+        if Clinica.objects.filter(nit=value).exists():
+            raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
+        return value
+
+    def create(self, validated_data):
+        validated_data.pop("admin_email", None)
+        return Clinica.objects.create(**validated_data)
+
+
+class AdminTenantUpdateSerializer(serializers.ModelSerializer):
+    plan = serializers.PrimaryKeyRelatedField(
+        queryset=Plan.objects.all(),
+        required=False,
+        allow_null=True,
+    )
+
+    class Meta:
+        model = Clinica
+        fields = ("nombre", "nit", "email", "telefono", "activo", "plan")
+        extra_kwargs = {"nit": {"required": False}}
+
+    def validate_nit(self, value):
+        queryset = Clinica.objects.filter(nit=value)
+        if self.instance:
+            queryset = queryset.exclude(pk=self.instance.pk)
+        if queryset.exists():
+            raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
+        return value

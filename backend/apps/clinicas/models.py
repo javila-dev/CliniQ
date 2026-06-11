@@ -3,9 +3,45 @@ from django.db import models
 from apps.core.models import BaseModel
 
 
+class Plan(BaseModel):
+    nombre = models.CharField(max_length=100)
+    descripcion = models.TextField(blank=True)
+    max_usuarios = models.PositiveIntegerField(
+        default=0,
+        help_text="Numero maximo de usuarios activos. 0 significa sin limite.",
+    )
+    max_sedes = models.PositiveIntegerField(
+        default=0,
+        help_text="Numero maximo de sedes activas. 0 significa sin limite.",
+    )
+    precio = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Precio mensual del plan. Null si es gratuito o no aplica.",
+    )
+
+    class Meta:
+        db_table = "planes"
+        ordering = ["max_usuarios", "nombre"]
+
+    def __str__(self) -> str:
+        limite = f"{self.max_usuarios} usuarios" if self.max_usuarios > 0 else "sin limite"
+        return f"{self.nombre} ({limite})"
+
+
 class Clinica(BaseModel):
+    plan = models.ForeignKey(
+        Plan,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="clinicas",
+    )
     nombre = models.CharField(max_length=255)
     nit = models.CharField(max_length=50, unique=True)
+    email = models.EmailField(blank=True, default="")
     telefono = models.CharField(max_length=20, blank=True)
     logo = models.ImageField(upload_to="clinicas/logos/", null=True, blank=True)
     slot_interval_min = models.PositiveIntegerField(default=15)

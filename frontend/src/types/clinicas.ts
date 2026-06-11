@@ -2,6 +2,7 @@ export interface Clinica {
   id: string
   nombre: string
   nit: string | null
+  email: string | null
   telefono: string | null
   logo: string | null
   slot_interval_min: number

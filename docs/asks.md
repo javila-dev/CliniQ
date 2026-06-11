@@ -783,3 +783,191 @@ Si la lista es independiente de una cita (historial del paciente), el campo a mo
 
 **Acción para el frontend:** usar `template_nombre` (ya presente) en la vista de lista independiente. Para la vista en contexto de cita, leer el nombre desde `consentimiento_info` de la cita, que ya tiene el servicio resuelto.
 
+---
+
+## 18. Endpoints y campos necesarios para la vista Admin (tenants + planes)
+
+**Pregunta (Frontend):**
+
+Se va a construir una sección `/admin` accesible solo a usuarios con `rol === 'superadmin'` (o `is_staff`, ver punto 18.1). Necesitamos confirmar la existencia y forma de varios endpoints antes de arrancar.
+
+---
+
+### 18.1 ¿Existe o se va a agregar `is_staff` en `/auth/me/`?
+
+El tipo `AuthUser` tiene `rol: string`. La condición de acceso hoy es `rol === 'superadmin'`.
+
+¿Hay usuarios que deban acceder al panel admin sin ser `superadmin`? Si sí, confirmar el nombre exacto del campo (¿`is_staff: boolean`?) para agregarlo a `AuthUser`. Si no, seguimos con `rol === 'superadmin'` como único guard.
+
+---
+
+### 18.2 Listado de todos los tenants
+
+El endpoint actual `/clinicas/clinicas/` está scoped al tenant activo vía `X-Clinica-Id`. Para el panel admin necesitamos ver **todos** los tenants.
+
+¿Existe o se puede agregar `GET /admin/tenants/` (o similar) que ignore `X-Clinica-Id` y devuelva todos los tenants paginado?
+
+Campos mínimos por ítem:
+```json
+{
+  "id": "uuid",
+  "nombre": "Clínica Ejemplo",
+  "nit": "900123456-1",
+  "telefono": "3001234567",
+  "email": "admin@clinica.com",
+  "activo": true,
+  "plan": { "id": "uuid", "nombre": "Pro", "precio": "299000.00" },
+  "total_usuarios": 5,
+  "total_sedes": 2,
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+Preguntas:
+- ¿Existe el campo `email` en el modelo `Clinica`? Si no, ¿se puede agregar?
+- ¿Se devuelven `total_usuarios` y `total_sedes` inline o hay que pedirlos por separado?
+- ¿Qué prefijo de ruta prefieren para el panel admin: `/admin/`, `/superadmin/`, u otro?
+
+---
+
+### 18.3 Crear / editar / inactivar tenant
+
+¿Los endpoints para crear (`POST`) y editar (`PATCH`) tenants estarán en la misma ruta admin (`/admin/tenants/`) o se reutiliza algún endpoint existente con permisos extendidos?
+
+Para inactivar: ¿`PATCH /admin/tenants/{id}/` con `{ "activo": false }` es suficiente, o hay un endpoint dedicado? ¿Inactivar bloquea el login de los usuarios de ese tenant?
+
+Al crear un tenant, ¿el backend crea automáticamente un usuario `admin` inicial? Si sí, ¿qué campos se necesitan en el body (email, password temporal)?
+
+---
+
+### 18.4 Modelo y CRUD de Planes
+
+Recurso completamente nuevo. ¿Existe algún modelo de Plan/Suscripción en el backend?
+
+Modelo esperado:
+```json
+{
+  "id": "uuid",
+  "nombre": "Starter",
+  "descripcion": "Ideal para clínicas pequeñas",
+  "max_usuarios": 5,
+  "max_sedes": 1,
+  "precio": "99000.00",
+  "activo": true,
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+Endpoints necesarios:
+```
+GET    /admin/planes/        — listar planes
+POST   /admin/planes/        — crear plan
+PATCH  /admin/planes/{id}/   — editar plan
+DELETE /admin/planes/{id}/   — eliminar o inactivar plan
+```
+
+Preguntas:
+- ¿`max_usuarios` y `max_sedes` son límites que el backend valida (hard limits) o solo descriptivos para la UI?
+- ¿`precio` tiene soporte de intervalos (mensual/anual) o es un número libre?
+- ¿Se puede eliminar un plan que ya tiene tenants asignados, o solo inactivarlo?
+
+---
+
+### 18.5 Asociar un plan a un tenant
+
+¿Cómo se asigna un plan a un tenant? Opciones:
+- **A)** `PATCH /admin/tenants/{id}/` acepta `plan_id` en el body.
+- **B)** Endpoint dedicado: `POST /admin/tenants/{id}/assign-plan/` con `{ "plan_id": "uuid" }`.
+
+¿Cuál implementarán?
+
+---
+
+### 18.6 Auth en endpoints admin
+
+Los usuarios `superadmin` no tienen `clinica_id`, por lo que no envían `X-Clinica-Id`. ¿Los endpoints `/admin/*` autorizan exclusivamente por JWT (ignorando ese header) y están protegidos con un guard de `is_superadmin` o `is_staff`?
+
+**Respuesta (Backend):**
+
+### 18.1 `is_staff`
+
+No se agrega `is_staff`. El único guard es `rol === 'superadmin'`. Los endpoints `/api/v1/admin/*` rechazan cualquier petición que no tenga ese rol con HTTP 403. No hay otro tipo de usuario con acceso al panel admin.
+
+### 18.2 Listado de tenants
+
+`GET /api/v1/admin/tenants/`
+
+Se agregó el campo `email` al modelo `Clinica`. Los campos `total_usuarios`, `usuarios_activos` y `total_sedes` se calculan por anotación y vienen inline. No hay llamadas adicionales.
+
+Shape de cada ítem:
+```json
+{
+  "id": "uuid",
+  "nombre": "Clínica Ejemplo",
+  "nit": "900123456-1",
+  "email": "admin@clinica.com",
+  "telefono": "3001234567",
+  "activo": true,
+  "plan": {
+    "id": "uuid",
+    "nombre": "Pro",
+    "descripcion": "...",
+    "max_usuarios": 10,
+    "max_sedes": 3,
+    "precio": "299000.00",
+    "activo": true
+  },
+  "total_usuarios": 5,
+  "usuarios_activos": 4,
+  "total_sedes": 2,
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-01T00:00:00Z"
+}
+```
+
+Soporta `?search=` (nombre, nit, email) y `?ordering=nombre|-nombre|created_at|-created_at`.
+
+### 18.3 Crear / editar / inactivar tenant
+
+**Crear:** `POST /api/v1/admin/tenants/`
+
+```json
+{
+  "nombre": "Clínica Nueva",
+  "nit": "900987654-3",
+  "telefono": "3009876543",
+  "email": "contacto@clinicanueva.com",
+  "plan": "uuid-del-plan",
+  "admin_email": "admin@clinicanueva.com"
+}
+```
+
+- `plan` y `admin_email` son opcionales.
+- Si se envía `admin_email`, se crea automáticamente un usuario `admin` y se le envía invitación por email para definir contraseña. Si el email ya existe → `ADMIN_EMAIL_DUPLICATE` 400.
+- Los roles por defecto (admin, recepcion, profesional) se crean automáticamente.
+
+**Editar:** `PATCH /api/v1/admin/tenants/{id}/` — acepta `nombre`, `nit`, `email`, `telefono`, `activo`, `plan`.
+
+**Inactivar:** `PATCH /api/v1/admin/tenants/{id}/` con `{ "activo": false }`. Los usuarios existentes no se tocan, pero **no pueden hacer login** mientras la clínica esté inactiva (devuelve `CLINICA_INACTIVA` HTTP 403).
+
+### 18.4 Modelo y CRUD de Planes
+
+El modelo `Plan` existe desde H30. Campos:
+
+| Campo | Notas |
+|---|---|
+| `max_usuarios` | Hard limit — validado al crear/activar usuarios |
+| `max_sedes` | Hard limit — validado al crear nuevas sedes |
+| `precio` | Solo descriptivo, no afecta cobros |
+
+CRUD (escritura solo superadmin): `GET/POST/PATCH/DELETE /api/v1/admin/planes/`. También disponibles en `/api/v1/clinicas/planes/`.
+
+### 18.5 Asociar plan a tenant
+
+Incluido en `PATCH /api/v1/admin/tenants/{id}/` con `{ "plan": "uuid" }` o `{ "plan": null }`.
+
+### 18.6 Auth en endpoints admin
+
+Todos los endpoints `/api/v1/admin/*` autorizan exclusivamente por JWT con `rol === 'superadmin'`. El header `X-Clinica-Id` es ignorado. Ver `api.md` §Panel Admin (superadmin).
+

@@ -18,6 +18,7 @@ import {
   Stethoscope,
   ClipboardList,
   Wallet,
+  ShieldCheck,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -26,7 +27,7 @@ import { cn } from '@/lib/utils'
 import { NavigationProgress } from './NavigationProgress'
 import { ImpersonationBanner } from './ImpersonationBanner'
 import { ThemeApplier } from './ThemeApplier'
-import { hasPermission, isProfesional, canAccess, PERM } from '@/lib/permissions'
+import { hasPermission, isProfesional, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
 
@@ -62,6 +63,10 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const atencionItems: NavItem[] = [n.agenda, n.pacientes, n.cotizaciones, n.cartera, n.cobros].filter(vis)
 
   const entries: NavEntry[] = []
+
+  if (isSuperAdmin(user)) {
+    entries.push({ section: 'Admin', items: [{ href: '/admin', label: 'Panel admin', icon: ShieldCheck }] })
+  }
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
   if (vis(n.atenciones)) entries.push(n.atenciones)

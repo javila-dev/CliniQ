@@ -79,3 +79,11 @@ export interface UpdateUsuarioRequest {
   role_id?: string
   rol?: string
 }
+
+export interface PlanLimite {
+  max_usuarios: number | null
+  usuarios_activos: number
+  puede_agregar: boolean
+  slots_disponibles: number | null
+  sin_limite: boolean
+}

@@ -158,8 +158,8 @@ export default function RecordatoriosConfigPage() {
         <div className="space-y-1">
           <p className="text-xs font-medium text-blue-700">¿Cómo funcionan los recordatorios?</p>
           <p className="text-xs text-blue-600">
-            n8n consulta periódicamente las citas pendientes de recordatorio y envía mensajes por WhatsApp o SMS
-            según el canal de contacto del paciente. También puedes solicitar un recordatorio manual
+            Los recordatorios se envían automáticamente al teléfono registrado del paciente
+            según el canal de contacto configurado. También puedes solicitar un recordatorio manual
             desde el detalle de cualquier cita activa.
           </p>
         </div>
