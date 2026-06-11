@@ -165,6 +165,12 @@ class SedeSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+        # Suppress the auto-generated UniqueTogetherValidator for (clinica, nombre).
+        # When clinica comes from the X-Clinica-Id header (not the body), that validator
+        # fires enforce_required_fields and raises {"clinica": "Este campo es requerido."}
+        # before perform_create can inject the clinica. The manual check in validate() covers
+        # the case where clinica IS supplied in the body; the DB constraint is the safety net.
+        validators = []
 
     def get_nombre_clinica(self, obj):
         return obj.clinica.nombre
