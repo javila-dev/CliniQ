@@ -7,8 +7,6 @@ services:
     image: cliniq-backend:latest
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8000:8000"
     networks:
       - cliniq_network
       - shared-services
