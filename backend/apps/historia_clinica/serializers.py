@@ -3,7 +3,9 @@ from datetime import date
 from rest_framework import serializers
 
 from apps.core.storage import get_signed_url
+from apps.users.permissions import get_clinica_activa
 from apps.historia_clinica.models import (
+    AnotacionZona,
     ConsentimientoInformado,
     FotoClinica,
     HistoriaClinica,
@@ -326,8 +328,30 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
         return attrs
 
     def create(self, validated_data):
+        import uuid
+        from apps.configuracion.models import DocumensoConsentimientoTemplate
+
         request = self.context["request"]
-        validated_data["clinica"] = request.user.clinica or validated_data["paciente"].clinica
+        validated_data["clinica"] = get_clinica_activa(request) or validated_data["paciente"].clinica
+
+        # Si el token parece un UUID interno, resolver el FK plantilla
+        token = validated_data.get("documenso_template_token", "")
+        if token and not validated_data.get("plantilla_id"):
+            try:
+                uuid.UUID(token)
+                try:
+                    plantilla = DocumensoConsentimientoTemplate.objects.get(
+                        id=token,
+                        clinica=validated_data["clinica"],
+                    )
+                    validated_data["plantilla"] = plantilla
+                    if not validated_data.get("documenso_template_nombre"):
+                        validated_data["documenso_template_nombre"] = plantilla.nombre or plantilla.get_tipo_display()
+                except DocumensoConsentimientoTemplate.DoesNotExist:
+                    pass
+            except ValueError:
+                pass
+
         return super().create(validated_data)
 
 
@@ -524,3 +548,40 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
                 usuario=request.user,
             )
         return orden
+
+
+class AnotacionZonaSerializer(serializers.ModelSerializer):
+    diagrama_nombre = serializers.CharField(source="diagrama.nombre", read_only=True)
+
+    class Meta:
+        model = AnotacionZona
+        fields = (
+            "id", "nota", "diagrama", "diagrama_nombre",
+            "x", "y", "radio",
+            "texto", "tipo_aplicacion", "parametros",
+            "activo", "created_at", "updated_at",
+        )
+        read_only_fields = ("id", "diagrama_nombre", "created_at", "updated_at")
+
+    def validate_x(self, value):
+        if not (0.0 <= value <= 1.0):
+            raise serializers.ValidationError("x debe estar entre 0.0 y 1.0.")
+        return value
+
+    def validate_y(self, value):
+        if not (0.0 <= value <= 1.0):
+            raise serializers.ValidationError("y debe estar entre 0.0 y 1.0.")
+        return value
+
+    def validate_radio(self, value):
+        if not (0.0 < value <= 0.5):
+            raise serializers.ValidationError("radio debe estar entre 0.0 y 0.5.")
+        return value
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        nota = attrs.get("nota", getattr(self.instance, "nota", None))
+        if nota and request.user.rol != "superadmin":
+            if nota.historia.clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError({"nota": "La nota no pertenece a tu clinica."})
+        return attrs

@@ -2,10 +2,15 @@ from django.contrib import admin
 
 from apps.clinicas.models import (
     Clinica,
+    DiagramaCorporal,
+    GrupoZonas,
+    GrupoZonasDiagrama,
     PasoProtocolo,
     Sede,
     Servicio,
     ServicioConsentimiento,
+    ServicioDiagrama,
+    ServicioGrupoZonas,
     TipoSesion,
     TipoSesionProcedimiento,
     TratamientoCatalogo,
@@ -33,11 +38,18 @@ class SedeAdmin(admin.ModelAdmin):
     list_filter = ("activo", "ciudad", "clinica")
 
 
+class ServicioDiagramaInline(admin.TabularInline):
+    model = ServicioDiagrama
+    extra = 0
+    fields = ("diagrama", "orden", "activo")
+
+
 @admin.register(Servicio)
 class ServicioAdmin(admin.ModelAdmin):
     list_display = ("nombre", "clinica", "duracion_min", "precio", "tiene_protocolo", "activo")
     search_fields = ("nombre", "descripcion", "clinica__nombre")
     list_filter = ("clinica", "activo", "tiene_protocolo")
+    inlines = (ServicioDiagramaInline,)
 
 
 @admin.register(ServicioConsentimiento)
@@ -73,6 +85,35 @@ class TipoSesionAdmin(admin.ModelAdmin):
     list_display = ("nombre", "tratamiento", "cantidad", "orden", "es_compromiso", "activo")
     search_fields = ("nombre", "tratamiento__nombre")
     list_filter = ("activo", "es_compromiso", "tratamiento__clinica")
+
+
+@admin.register(DiagramaCorporal)
+class DiagramaCorporalAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "orden", "activo", "created_at")
+    search_fields = ("nombre",)
+    list_filter = ("activo",)
+    ordering = ("orden", "nombre")
+
+
+class GrupoZonasDiagramaInline(admin.TabularInline):
+    model = GrupoZonasDiagrama
+    extra = 0
+    fields = ("diagrama", "orden")
+
+
+@admin.register(GrupoZonas)
+class GrupoZonasAdmin(admin.ModelAdmin):
+    list_display = ("nombre", "activo", "created_at")
+    search_fields = ("nombre",)
+    list_filter = ("activo",)
+    inlines = (GrupoZonasDiagramaInline,)
+
+
+@admin.register(ServicioGrupoZonas)
+class ServicioGrupoZonasAdmin(admin.ModelAdmin):
+    list_display = ("servicio", "grupo", "orden", "activo")
+    search_fields = ("servicio__nombre", "grupo__nombre")
+    list_filter = ("activo",)
 
 
 @admin.register(TipoSesionProcedimiento)

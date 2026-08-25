@@ -14,7 +14,7 @@ from apps.caja.serializers import (
     RechazarGastoSerializer,
 )
 from apps.cobros.models import Cobro, PagoRecibido
-from apps.users.permissions import RequirePermission
+from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 class CategoriaGastoViewSet(ModelViewSet):
@@ -176,8 +176,9 @@ class CierreCajaViewSet(ModelViewSet):
 
         from apps.clinicas.models import Sede
         try:
-            if request.user.rol != "superadmin":
-                sede = Sede.objects.get(id=sede_id, clinica=request.user.clinica)
+            clinica_activa = get_clinica_activa(request)
+            if clinica_activa is not None:
+                sede = Sede.objects.get(id=sede_id, clinica=clinica_activa)
             else:
                 sede = Sede.objects.get(id=sede_id)
         except Sede.DoesNotExist:

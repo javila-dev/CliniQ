@@ -158,4 +158,27 @@ class CobroCreateSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"cita": "Esta cita ya tiene un cobro asociado."}
             )
+
+        if (
+            origen == Cobro.Origen.CITA
+            and cita
+            and not cita.item_cotizacion_id
+            and cita.servicio_id
+            and getattr(cita.servicio, "precio_base", None) is not None
+        ):
+            precio_base = cita.servicio.precio_base
+            items = attrs.get("items") or []
+            precio_diferente = any(
+                item.get("precio_unitario") != precio_base
+                for item in items
+                if item.get("tipo") == "servicio"
+            )
+            if precio_diferente:
+                from apps.users.authorization import user_has_permission
+                request = self.context.get("request")
+                if not request or not user_has_permission(request.user, "cobros.cambiar_precio", request=request):
+                    raise serializers.ValidationError(
+                        {"items": "No tienes permiso para modificar el precio de un servicio con precio fijo."}
+                    )
+
         return attrs

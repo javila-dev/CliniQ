@@ -5,17 +5,25 @@ from django.db import transaction
 
 from apps.core.storage import get_public_url
 from apps.clinicas.models import (
+    Campana,
+    CampanaItem,
     Clinica,
+    DiagramaCorporal,
+    GrupoZonas,
+    GrupoZonasDiagrama,
     PasoProtocolo,
     Plan,
     Sede,
     Servicio,
     ServicioConsentimiento,
+    ServicioDiagrama,
+    ServicioGrupoZonas,
     TipoSesion,
     TipoSesionProcedimiento,
     TratamientoCatalogo,
     TratamientoProcedimiento,
 )
+from apps.consentimientos.models import PlantillaAsistencia
 
 
 class PlanSerializer(serializers.ModelSerializer):
@@ -46,6 +54,7 @@ class PlanUsageSerializer(serializers.Serializer):
 class ClinicaSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
+    trial_days_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = Clinica
@@ -59,11 +68,27 @@ class ClinicaSerializer(serializers.ModelSerializer):
             "logo",
             "logo_url",
             "slot_interval_min",
+            "bloquear_agenda_por_deuda",
+            "dias_gracia_deuda",
+            "trial_expires_at",
+            "trial_days_remaining",
+            "onboarding_completado",
             "activo",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "logo", "logo_url", "plan_nombre", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "logo", "logo_url", "plan_nombre",
+            "trial_expires_at", "trial_days_remaining",
+            "created_at", "updated_at",
+        )
+
+    def get_trial_days_remaining(self, obj):
+        if obj.plan_id is not None or not obj.trial_expires_at:
+            return None
+        from django.utils import timezone
+        delta = obj.trial_expires_at - timezone.now()
+        return max(0, delta.days)
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
@@ -82,6 +107,11 @@ class ClinicaSerializer(serializers.ModelSerializer):
     def validate_slot_interval_min(self, value):
         if value < 5 or value > 60:
             raise serializers.ValidationError("El intervalo de slots debe estar entre 5 y 60 minutos.")
+        return value
+
+    def validate_dias_gracia_deuda(self, value):
+        if value < 0:
+            raise serializers.ValidationError("Los días de gracia no pueden ser negativos.")
         return value
 
 
@@ -113,6 +143,9 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     ciudad = serializers.SerializerMethodField()
     direccion = serializers.SerializerMethodField()
+    wizard = serializers.SerializerMethodField()
+    registro_publico = serializers.SerializerMethodField()
+    registro_publico_token = serializers.CharField(source="token_registro_publico", read_only=True)
 
     class Meta:
         model = Clinica
@@ -124,6 +157,12 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "ciudad",
             "direccion",
             "logo_url",
+            "wizard",
+            "registro_publico",
+            "registro_publico_token",
+            "facial_verificacion_habilitada",
+            "modulo_estetico_habilitado",
+            "modulo_obesidad_habilitado",
         )
         read_only_fields = fields
 
@@ -140,6 +179,20 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     def get_direccion(self, obj):
         sede = self._get_sede_principal(obj)
         return sede.direccion if sede else ""
+
+    def get_wizard(self, obj):
+        from apps.configuracion.models import ConfiguracionWizard
+        config, _ = ConfiguracionWizard.objects.get_or_create(clinica=obj)
+        return {
+            "paso_checkin": config.paso_checkin,
+            "paso_pago": config.paso_pago,
+            "paso_firma_asistencia": config.paso_firma_asistencia,
+            "paso_verificacion_facial": config.paso_verificacion_facial,
+        }
+
+    def get_registro_publico(self, obj):
+        from apps.configuracion.registro_publico import registro_publico_config_as_dict
+        return registro_publico_config_as_dict(obj)
 
 
 class SedeSerializer(serializers.ModelSerializer):
@@ -205,6 +258,7 @@ class ServicioSerializer(serializers.ModelSerializer):
     tiene_protocolo = serializers.BooleanField(read_only=True)
     pasos_protocolo = serializers.SerializerMethodField()
     consentimientos_requeridos = serializers.SerializerMethodField()
+    diagramas = serializers.SerializerMethodField()
 
     class Meta:
         model = Servicio
@@ -217,10 +271,12 @@ class ServicioSerializer(serializers.ModelSerializer):
             "duracion_min",
             "precio",
             "precio_referencia",
+            "precio_base",
             "vigencia_meses",
             "tiene_protocolo",
             "pasos_protocolo",
             "consentimientos_requeridos",
+            "diagramas",
             "activo",
             "created_at",
             "updated_at",
@@ -229,6 +285,7 @@ class ServicioSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "clinica": {"required": False},
             "precio": {"required": False, "allow_null": True},
+            "precio_base": {"required": False, "allow_null": True},
         }
 
     def validate_clinica(self, value):
@@ -243,6 +300,13 @@ class ServicioSerializer(serializers.ModelSerializer):
             return None
         if value <= 0:
             raise serializers.ValidationError("El precio debe ser mayor a 0.")
+        return value
+
+    def validate_precio_base(self, value):
+        if value in (None, ""):
+            return None
+        if value <= 0:
+            raise serializers.ValidationError("El precio base debe ser mayor a 0.")
         return value
 
     def validate_duracion_min(self, value):
@@ -270,13 +334,32 @@ class ServicioSerializer(serializers.ModelSerializer):
                 "id": str(relacion.template_id),
                 "template_id": str(relacion.template_id),
                 "template_token": relacion.template.template_token,
-                "template_nombre": relacion.template.get_tipo_display(),
+                "template_nombre": relacion.template.nombre or relacion.template.get_tipo_display(),
                 "activo": relacion.template.activo,
                 "orden": relacion.orden,
                 "tipo": relacion.template.tipo,
             }
             for relacion in relaciones
         ]
+
+    def get_diagramas(self, obj):
+        # Resuelve a través de grupos_zonas → diagramas para contar cuántos hay
+        grupos = (
+            obj.grupos_zonas
+            .filter(activo=True)
+            .prefetch_related("grupo__diagramas__diagrama")
+            .order_by("orden")
+        )
+        result = []
+        for rel in grupos:
+            for gd in rel.grupo.diagramas.order_by("orden"):
+                result.append({
+                    "id": str(gd.diagrama_id),
+                    "nombre": gd.diagrama.nombre,
+                    "imagen_url": get_public_url(gd.diagrama.imagen.name) if gd.diagrama.imagen else None,
+                    "orden": gd.orden,
+                })
+        return result
 
 
 class ProcedimientoSerializer(ServicioSerializer):
@@ -290,10 +373,12 @@ class ProcedimientoSerializer(ServicioSerializer):
             "duracion_min",
             "precio",
             "precio_referencia",
+            "precio_base",
             "vigencia_meses",
             "tiene_protocolo",
             "pasos_protocolo",
             "consentimientos_requeridos",
+            "diagramas",
             "activo",
             "created_at",
             "updated_at",
@@ -354,7 +439,10 @@ class PasoProtocoloSerializer(serializers.ModelSerializer):
 class ServicioConsentimientoSerializer(serializers.ModelSerializer):
     template_id = serializers.UUIDField(read_only=True)
     template_token = serializers.CharField(source="template.template_token", read_only=True)
-    template_nombre = serializers.CharField(source="template.get_tipo_display", read_only=True)
+    template_nombre = serializers.SerializerMethodField()
+
+    def get_template_nombre(self, obj):
+        return obj.template.nombre or obj.template.get_tipo_display()
     tipo = serializers.CharField(source="template.tipo", read_only=True)
     activo_template = serializers.BooleanField(source="template.activo", read_only=True)
 
@@ -632,6 +720,13 @@ class AdminTenantSerializer(serializers.ModelSerializer):
     total_usuarios = serializers.IntegerField(read_only=True, default=0)
     usuarios_activos = serializers.IntegerField(read_only=True, default=0)
     total_sedes = serializers.IntegerField(read_only=True, default=0)
+    admin_usuario_pendiente = serializers.SerializerMethodField()
+
+    def get_admin_usuario_pendiente(self, obj):
+        usuario = obj.usuarios.filter(is_active=False, rol="admin").order_by("date_joined").first()
+        if usuario is None:
+            return None
+        return {"id": str(usuario.id), "email": usuario.email}
 
     class Meta:
         model = Clinica
@@ -643,13 +738,17 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "telefono",
             "activo",
             "plan",
+            "facial_verificacion_habilitada",
+            "modulo_estetico_habilitado",
+            "modulo_obesidad_habilitado",
             "total_usuarios",
             "usuarios_activos",
             "total_sedes",
+            "admin_usuario_pendiente",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = ("id", "total_usuarios", "usuarios_activos", "total_sedes", "created_at", "updated_at")
 
 
 class AdminTenantCreateSerializer(serializers.ModelSerializer):
@@ -684,8 +783,8 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Clinica
-        fields = ("nombre", "nit", "email", "telefono", "activo", "plan")
-        extra_kwargs = {"nit": {"required": False}}
+        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_habilitada", "modulo_estetico_habilitado", "modulo_obesidad_habilitado")
+        extra_kwargs = {"nit": {"required": False}, "facial_verificacion_habilitada": {"required": False}, "modulo_estetico_habilitado": {"required": False}, "modulo_obesidad_habilitado": {"required": False}}
 
     def validate_nit(self, value):
         queryset = Clinica.objects.filter(nit=value)
@@ -694,3 +793,216 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
         if queryset.exists():
             raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
         return value
+
+
+# ─── Campañas ─────────────────────────────────────────────────────────────────
+
+
+class CampanaItemSerializer(serializers.ModelSerializer):
+    procedimiento_nombre = serializers.CharField(source="procedimiento.nombre", read_only=True, allow_null=True)
+    tratamiento_nombre = serializers.CharField(source="tratamiento.nombre", read_only=True, allow_null=True)
+
+    class Meta:
+        model = CampanaItem
+        fields = (
+            "id",
+            "procedimiento",
+            "procedimiento_nombre",
+            "tratamiento",
+            "tratamiento_nombre",
+            "precio_campana",
+            "activo",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        procedimiento = attrs.get("procedimiento", getattr(self.instance, "procedimiento", None))
+        tratamiento = attrs.get("tratamiento", getattr(self.instance, "tratamiento", None))
+        if not procedimiento and not tratamiento:
+            raise serializers.ValidationError("Se debe especificar al menos procedimiento o tratamiento.")
+        if procedimiento and tratamiento:
+            raise serializers.ValidationError("Solo se puede especificar procedimiento o tratamiento, no ambos.")
+        return attrs
+
+    def validate_precio_campana(self, value):
+        if value < 0:
+            raise serializers.ValidationError("El precio de campaña no puede ser negativo.")
+        return value
+
+
+class CampanaSerializer(serializers.ModelSerializer):
+    items = CampanaItemSerializer(many=True, read_only=True)
+    sedes = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Sede.objects.all(),
+        required=False,
+    )
+    sedes_ids = serializers.PrimaryKeyRelatedField(
+        source="sedes",
+        queryset=Sede.objects.all(),
+        many=True,
+        required=False,
+        write_only=True,
+    )
+    sedes_nombres = serializers.SerializerMethodField()
+    stats = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Campana
+        fields = (
+            "id",
+            "nombre",
+            "descripcion",
+            "fecha_inicio",
+            "fecha_fin",
+            "sedes",
+            "sedes_ids",
+            "sedes_nombres",
+            "items",
+            "stats",
+            "activo",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_sedes_nombres(self, obj):
+        return list(obj.sedes.values_list("nombre", flat=True))
+
+    def get_stats(self, obj):
+        from apps.clinicas.campana_stats import format_campana_stats
+
+        stats_map = self.context.get("stats_map") or {}
+        return format_campana_stats(obj.id, stats_map)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        data["sedes"] = [str(sede_id) for sede_id in data.get("sedes") or []]
+        return data
+
+    def validate(self, attrs):
+        fecha_inicio = attrs.get("fecha_inicio", getattr(self.instance, "fecha_inicio", None))
+        fecha_fin = attrs.get("fecha_fin", getattr(self.instance, "fecha_fin", None))
+        if fecha_inicio and fecha_fin and fecha_fin < fecha_inicio:
+            raise serializers.ValidationError({"fecha_fin": "La fecha de fin no puede ser anterior a la de inicio."})
+        return attrs
+
+    def create(self, validated_data):
+        sedes = validated_data.pop("sedes", [])
+        campana = Campana.objects.create(**validated_data)
+        if sedes:
+            campana.sedes.set(sedes)
+        return campana
+
+    def update(self, instance, validated_data):
+        sedes = validated_data.pop("sedes", None)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+        if sedes is not None:
+            instance.sedes.set(sedes)
+        return instance
+
+
+
+class PlantillaAsistenciaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = PlantillaAsistencia
+        fields = ("id", "clinica", "nombre", "documenso_template_token", "activo")
+        read_only_fields = ("id",)
+        extra_kwargs = {
+            "clinica": {"required": False},
+        }
+
+
+
+class RegistroClinicaSerializer(serializers.Serializer):
+    nombre_clinica = serializers.CharField(max_length=255)
+    nit = serializers.CharField(max_length=50)
+    nombre_admin = serializers.CharField(max_length=150)
+    apellido_admin = serializers.CharField(max_length=150)
+    email = serializers.EmailField()
+    telefono = serializers.CharField(max_length=30)
+
+    def validate_nit(self, value):
+        if Clinica.objects.filter(nit=value).exists():
+            raise serializers.ValidationError("Ya existe una clínica con este NIT.")
+        return value
+
+    def validate_email(self, value):
+        from apps.users.models import User
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Ya existe una cuenta con este email.")
+        return value.lower()
+
+
+# ─── Diagramas corporales ──────────────────────────────────────────────────────
+
+
+class DiagramaCorporalSerializer(serializers.ModelSerializer):
+    imagen_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = DiagramaCorporal
+        fields = ("id", "nombre", "imagen", "imagen_url", "orden", "activo")
+        read_only_fields = ("id", "imagen_url")
+        extra_kwargs = {"imagen": {"write_only": True, "required": False}}
+
+    def get_imagen_url(self, obj):
+        if not obj.imagen:
+            return None
+        return get_public_url(obj.imagen.name)
+
+
+class ServicioDiagramaSerializer(serializers.ModelSerializer):
+    diagrama_nombre = serializers.CharField(source="diagrama.nombre", read_only=True)
+    imagen_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ServicioDiagrama
+        fields = ("id", "diagrama", "diagrama_nombre", "imagen_url", "orden", "activo")
+        read_only_fields = ("id", "diagrama_nombre", "imagen_url")
+
+    def get_imagen_url(self, obj):
+        if not obj.diagrama.imagen:
+            return None
+        return get_public_url(obj.diagrama.imagen.name)
+
+
+# ─── Grupos de zonas ───────────────────────────────────────────────────────────
+
+
+class GrupoZonasDiagramaSerializer(serializers.ModelSerializer):
+    diagrama_nombre = serializers.CharField(source="diagrama.nombre", read_only=True)
+    imagen_url = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GrupoZonasDiagrama
+        fields = ("id", "diagrama", "diagrama_nombre", "imagen_url", "orden")
+        read_only_fields = ("id", "diagrama_nombre", "imagen_url")
+
+    def get_imagen_url(self, obj):
+        if not obj.diagrama.imagen:
+            return None
+        return get_public_url(obj.diagrama.imagen.name)
+
+
+class GrupoZonasSerializer(serializers.ModelSerializer):
+    diagramas = GrupoZonasDiagramaSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = GrupoZonas
+        fields = ("id", "nombre", "activo", "diagramas", "created_at", "updated_at")
+        read_only_fields = ("id", "diagramas", "created_at", "updated_at")
+
+
+class ServicioGrupoZonasSerializer(serializers.ModelSerializer):
+    grupo_nombre = serializers.CharField(source="grupo.nombre", read_only=True)
+    grupo_diagramas = GrupoZonasDiagramaSerializer(source="grupo.diagramas", many=True, read_only=True)
+
+    class Meta:
+        model = ServicioGrupoZonas
+        fields = ("id", "grupo", "grupo_nombre", "grupo_diagramas", "orden", "activo")
+        read_only_fields = ("id", "grupo_nombre", "grupo_diagramas")

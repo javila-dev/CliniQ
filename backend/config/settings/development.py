@@ -13,6 +13,8 @@ LOGGING = {
     "loggers": {
         "apps.cotizaciones": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
         "apps.agenda": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "apps.consentimientos": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
+        "apps.historia_clinica": {"handlers": ["console"], "level": "DEBUG", "propagate": False},
     },
 }
 

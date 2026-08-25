@@ -37,6 +37,12 @@ class User(AbstractUser, BaseModel):
     registro_profesional = models.CharField(max_length=60, blank=True, default="")
     firma_digital = models.ImageField(upload_to="firmas_profesionales/", null=True, blank=True)
 
+    # Sesion unica: identifica la sesion activa vigente. Un login nuevo la
+    # rota y cierra cualquier otra sesion (ver apps.users.services.iniciar_sesion_unica).
+    sesion_actual_id = models.CharField(max_length=64, blank=True, default="")
+    sesion_actual_dispositivo = models.CharField(max_length=255, blank=True, default="")
+    sesion_actual_iniciada_en = models.DateTimeField(null=True, blank=True)
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = "email"

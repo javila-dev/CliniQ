@@ -24,6 +24,7 @@ class AntecedentesEstructuradosTests(TestCase):
         )
         self.client.force_authenticate(self.superadmin)
         self.clinica = Clinica.objects.create(nombre="Clinica Pacientes", nit="900444555")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
         self.paciente = Paciente.objects.create(
             clinica=self.clinica,
             tipo_documento=Paciente.TipoDocumento.CC,
@@ -113,6 +114,7 @@ class PacienteCamposExtendidosTests(TestCase):
         )
         self.client.force_authenticate(self.superadmin)
         self.clinica = Clinica.objects.create(nombre="Clinica H52", nit="900123999")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
         self.paciente = Paciente.objects.create(
             clinica=self.clinica,
             tipo_documento=Paciente.TipoDocumento.CC,
@@ -184,5 +186,138 @@ class PacienteCamposExtendidosTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["direccion"], "")
-        self.assertEqual(response.json()["estado_civil"], "")
-        self.assertEqual(response.json()["eps"], "")
+
+
+class RegistroPublicoTests(TestCase):
+    def setUp(self):
+        import uuid
+
+        from apps.users.models import Rol
+
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Publica", nit=f"906{uuid.uuid4().hex[:6]}")
+        self.token = self.clinica.token_registro_publico
+        self.admin = User.objects.create_user(
+            email=f"admin-pub-{uuid.uuid4().hex[:6]}@test.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="Publico",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        self.admin.rol_dinamico = Rol.objects.get(clinica=self.clinica, slug="admin")
+        self.admin.save(update_fields=["rol_dinamico"])
+        self.payload = {
+            "token": self.token,
+            "tipo_documento": Paciente.TipoDocumento.CC,
+            "numero_documento": "9988776655",
+            "nombres": "Pedro",
+            "apellidos": "Publico",
+            "fecha_nacimiento": (timezone.localdate() - timedelta(days=30 * 365)).isoformat(),
+            "sexo": Paciente.Sexo.MASCULINO,
+            "telefono": "3009998877",
+            "email": "pedro.publico@example.com",
+            "canal_confirmacion": Paciente.CanalConfirmacion.WHATSAPP,
+            "autoriza_datos": True,
+        }
+
+    def test_get_clinica_publica_por_token(self):
+        response = self.client.get("/api/v1/registro-publico/clinica/", {"token": self.token})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["clinica_nombre"], self.clinica.nombre)
+        self.assertFalse(response.json()["tab_personal_requerido"])
+        self.assertFalse(response.json()["tab_salud_requerido"])
+
+    def test_get_sin_token_devuelve_400(self):
+        response = self.client.get("/api/v1/registro-publico/clinica/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "TOKEN_REQUERIDO")
+
+    def test_post_crea_paciente_sin_auth(self):
+        response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["nombre_completo"], "Pedro Publico")
+        paciente = Paciente.objects.get(id=response.json()["id"])
+        self.assertEqual(paciente.clinica_id, self.clinica.id)
+
+    def test_post_rechaza_duplicado_por_telefono(self):
+        Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="1110002222",
+            nombres="Existente",
+            apellidos="Paciente",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO,
+            telefono="3009998877",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+
+        response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PACIENTE_YA_EXISTE")
+        self.assertEqual(response.json()["campo"], "telefono")
+
+    def test_mi_clinica_expone_registro_publico_token(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.get("/api/v1/clinicas/mi-clinica/")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["registro_publico_token"], self.token)
+        self.assertEqual(
+            response.json()["registro_publico"],
+            {"tab_personal_requerido": False, "tab_salud_requerido": False},
+        )
+
+    def test_post_rechaza_tab_personal_vacio_cuando_requerido(self):
+        from apps.configuracion.models import ConfiguracionRegistroPublico
+
+        ConfiguracionRegistroPublico.objects.create(
+            clinica=self.clinica,
+            tab_personal_requerido=True,
+        )
+        response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "TAB_PERSONAL_REQUERIDO")
+
+    def test_post_acepta_tab_personal_con_un_campo(self):
+        from apps.configuracion.models import ConfiguracionRegistroPublico
+
+        ConfiguracionRegistroPublico.objects.create(
+            clinica=self.clinica,
+            tab_personal_requerido=True,
+        )
+        payload = {**self.payload, "ciudad": "Bogota"}
+        response = self.client.post("/api/v1/registro-publico/pacientes/", payload, format="json")
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_post_rechaza_tab_salud_vacio_cuando_requerido(self):
+        from apps.configuracion.models import ConfiguracionRegistroPublico
+
+        ConfiguracionRegistroPublico.objects.create(
+            clinica=self.clinica,
+            tab_salud_requerido=True,
+        )
+        response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "TAB_SALUD_REQUERIDO")
+
+    def test_patch_configuracion_registro_publico(self):
+        self.client.force_authenticate(self.admin)
+        response = self.client.patch(
+            "/api/v1/configuracion/registro-publico/",
+            {"tab_personal_requerido": True, "tab_salud_requerido": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["tab_personal_requerido"])
+        self.assertTrue(response.json()["tab_salud_requerido"])

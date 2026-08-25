@@ -1,6 +1,7 @@
 from datetime import timedelta
 from html import escape
 import secrets
+import uuid
 from urllib.parse import urlencode
 
 from django.conf import settings
@@ -8,6 +9,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
+from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 
 from apps.notificaciones.services import email_backend_requires_password, enviar_email
 from apps.users.models import PasswordResetToken
@@ -292,6 +294,57 @@ def request_password_reset(email: str) -> None:
     except User.DoesNotExist:
         return
     send_password_reset_email(user)
+
+
+def _describir_dispositivo(user_agent: str) -> str:
+    ua = (user_agent or "").lower()
+    if "edg/" in ua:
+        navegador = "Edge"
+    elif "chrome/" in ua:
+        navegador = "Chrome"
+    elif "firefox/" in ua:
+        navegador = "Firefox"
+    elif "safari/" in ua:
+        navegador = "Safari"
+    else:
+        navegador = "un navegador"
+
+    if "android" in ua:
+        so = "Android"
+    elif "iphone" in ua or "ipad" in ua:
+        so = "iOS"
+    elif "mac os" in ua:
+        so = "Mac"
+    elif "windows" in ua:
+        so = "Windows"
+    elif "linux" in ua:
+        so = "Linux"
+    else:
+        so = ""
+
+    return f"{navegador} en {so}" if so else navegador
+
+
+def iniciar_sesion_unica(user, *, user_agent: str = "") -> str:
+    """
+    Cierra cualquier otra sesion activa del usuario (invalida sus refresh
+    tokens vigentes) y genera un nuevo identificador de sesion.
+
+    El identificador se embebe en el JWT (claim 'sid', ver LoginSerializer.get_token).
+    ClinicScopedJWTAuthentication compara ese claim contra user.sesion_actual_id en
+    cada request, asi que la sesion anterior lo detecta en su siguiente peticion.
+    """
+    ya_bloqueados = BlacklistedToken.objects.filter(token__user=user).values_list("token_id", flat=True)
+    pendientes = OutstandingToken.objects.filter(user=user).exclude(id__in=ya_bloqueados)
+    for token in pendientes:
+        BlacklistedToken.objects.get_or_create(token=token)
+
+    session_id = uuid.uuid4().hex
+    user.sesion_actual_id = session_id
+    user.sesion_actual_dispositivo = _describir_dispositivo(user_agent)
+    user.sesion_actual_iniciada_en = timezone.now()
+    user.save(update_fields=["sesion_actual_id", "sesion_actual_dispositivo", "sesion_actual_iniciada_en"])
+    return session_id
 
 
 def generar_link_invitacion(user: User) -> tuple:

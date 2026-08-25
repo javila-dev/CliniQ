@@ -74,7 +74,7 @@ class CarteraFlowTests(TestCase):
             clinica=self.clinica,
             paciente=self.paciente,
             profesional=self.superadmin,
-            estado=Cotizacion.Estado.ENVIADA,
+            estado=Cotizacion.Estado.BORRADOR,
         )
         item = self.cotizacion.items.create(
             descripcion="Toxina botulinica",

@@ -2,6 +2,7 @@ from datetime import date
 
 from django.db import models
 from django.utils import timezone
+from pgvector.django import VectorField
 
 from apps.core.models import BaseModel
 
@@ -124,6 +125,10 @@ class Paciente(BaseModel):
             (hoy.month, hoy.day) < (self.fecha_nacimiento.month, self.fecha_nacimiento.day)
         )
 
+    foto_control = models.ImageField(upload_to="pacientes/fotos_control/", null=True, blank=True)
+    embedding_facial = VectorField(dimensions=512, null=True, blank=True)
+    embedding_actualizado_en = models.DateTimeField(null=True, blank=True)
+
     def save(self, *args, **kwargs):
         if self.autoriza_datos and self.fecha_autorizacion is None:
             self.fecha_autorizacion = timezone.now()
@@ -176,3 +181,70 @@ class AntecedentePaciente(BaseModel):
 
     def __str__(self) -> str:
         return f"Antecedentes de {self.paciente.nombre_completo}"
+
+
+class ConfiguracionFacial(BaseModel):
+    clinica = models.OneToOneField(
+        "clinicas.Clinica",
+        on_delete=models.CASCADE,
+        related_name="configuracion_facial",
+    )
+    # Verificación / check-in
+    umbral_alta = models.FloatField(default=0.85)
+    umbral_media = models.FloatField(default=0.70)
+    checkin_automatico = models.BooleanField(default=False)
+    # Calidad de enrollment
+    min_det_score = models.FloatField(default=0.70)
+    min_blur_score = models.FloatField(default=60.0)
+    min_brightness = models.FloatField(default=50.0)
+    max_brightness = models.FloatField(default=230.0)
+    max_yaw = models.FloatField(default=25.0)
+    max_pitch = models.FloatField(default=20.0)
+    max_roll = models.FloatField(default=25.0)
+    min_face_area_pct = models.FloatField(default=8.0)
+
+    class Meta:
+        db_table = "configuracion_facial"
+
+    def __str__(self) -> str:
+        return f"ConfiguracionFacial — {self.clinica}"
+
+
+class CheckIn(BaseModel):
+    class Confidence(models.TextChoices):
+        ALTA = "alta", "Alta"
+        MEDIA = "media", "Media"
+        BAJA = "baja", "Baja"
+
+    paciente = models.ForeignKey(
+        "pacientes.Paciente",
+        on_delete=models.CASCADE,
+        related_name="checkins",
+    )
+    cita = models.ForeignKey(
+        "agenda.Cita",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checkins",
+    )
+    foto_live = models.ImageField(upload_to="pacientes/checkins/", null=True, blank=True)
+    score = models.FloatField()
+    confidence = models.CharField(max_length=10, choices=Confidence.choices)
+    match = models.BooleanField()
+    requiere_confirmacion = models.BooleanField(default=False)
+    det_score_live = models.FloatField()
+    realizado_por = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="checkins_realizados",
+    )
+
+    class Meta:
+        db_table = "checkins_faciales"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"CheckIn {self.paciente.nombre_completo} — {self.confidence}"

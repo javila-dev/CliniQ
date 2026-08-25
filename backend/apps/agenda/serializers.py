@@ -1,3 +1,5 @@
+import logging
+
 from django.db import models
 from django.utils import timezone
 from rest_framework import serializers
@@ -6,8 +8,28 @@ from apps.agenda.models import BloqueoAgenda, Cita, RegistroConfirmacion
 from apps.clinicas.models import Sede
 from apps.core.storage import get_signed_url
 from apps.historia_clinica.models import ConsentimientoInformado
+from apps.historia_clinica.services import descargar_pdf_documenso, guardar_pdf_firmado
 from apps.protocolos.models import SesionProcedimiento
 from apps.users.models import User
+
+logger = logging.getLogger(__name__)
+
+
+def _archivo_url(consentimiento) -> str | None:
+    if not consentimiento:
+        return None
+    if not consentimiento.archivo and consentimiento.documenso_document_id:
+        try:
+            pdf_bytes = descargar_pdf_documenso(consentimiento.documenso_document_id)
+            if pdf_bytes:
+                guardar_pdf_firmado(
+                    consentimiento,
+                    pdf_bytes,
+                    filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
+                )
+        except Exception:
+            logger.exception("Auto-recuperacion PDF fallida | consentimiento_id=%s", consentimiento.id)
+    return get_signed_url(consentimiento.archivo.name) if consentimiento.archivo else None
 
 
 class RegistroConfirmacionSerializer(serializers.ModelSerializer):
@@ -49,7 +71,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
             .select_related("template")
             .order_by("orden")
         ):
-            token = relacion.template.template_token
+            token = relacion.template.template_token or str(relacion.template.id)
             if token in seen_tokens:
                 continue
             seen_tokens.add(token)
@@ -69,10 +91,10 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
             resultado.append(
                 {
                     "template_token": token,
-                    "template_nombre": relacion.template.get_tipo_display(),
+                    "template_nombre": relacion.template.nombre or relacion.template.get_tipo_display(),
                     "vigente": vigente,
                     "consentimiento_id": str(consentimiento.id) if consentimiento else None,
-                    "archivo_url": get_signed_url(consentimiento.archivo.name) if consentimiento and consentimiento.archivo else None,
+                    "archivo_url": _archivo_url(consentimiento),
                 }
             )
 
@@ -101,10 +123,11 @@ def build_consentimiento_info(cita):
     resultado = []
     todos_firmados = True
     for template in templates:
+        token = template.template_token or str(template.id)
         consentimiento = (
             ConsentimientoInformado.objects.filter(
                 paciente_id=cita.paciente_id,
-                documenso_template_token=template.template_token,
+                documenso_template_token=token,
                 firmado=True,
             )
             .filter(models.Q(fecha_vencimiento__isnull=True) | models.Q(fecha_vencimiento__gte=hoy))
@@ -116,11 +139,11 @@ def build_consentimiento_info(cita):
             todos_firmados = False
         resultado.append(
             {
-                "template_token": template.template_token,
-                "template_nombre": template.get_tipo_display(),
+                "template_token": token,
+                "template_nombre": template.nombre or template.get_tipo_display(),
                 "vigente": vigente,
                 "consentimiento_id": str(consentimiento.id) if consentimiento else None,
-                "archivo_url": get_signed_url(consentimiento.archivo.name) if consentimiento and consentimiento.archivo else None,
+                "archivo_url": _archivo_url(consentimiento),
             }
         )
     return {"todos_firmados": todos_firmados, "consentimientos": resultado}
@@ -139,6 +162,9 @@ class CitaSerializer(serializers.ModelSerializer):
     sesion_ejecutada_id = serializers.SerializerMethodField()
     checkin_foto_url = serializers.SerializerMethodField()
     servicio_precio = serializers.SerializerMethodField()
+    servicio_precio_base = serializers.SerializerMethodField()
+    firma_asistencia_archivo_url = serializers.SerializerMethodField()
+    cobro_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Cita
@@ -177,7 +203,13 @@ class CitaSerializer(serializers.ModelSerializer):
             "checkin_metodo",
             "checkin_en",
             "checkin_foto_url",
+            "firma_asistencia_estado",
+            "firma_asistencia_documento_id",
+            "firma_asistencia_signing_token",
+            "firma_asistencia_archivo_url",
             "servicio_precio",
+            "servicio_precio_base",
+            "cobro_id",
             "created_by",
             "created_at",
             "updated_at",
@@ -197,7 +229,13 @@ class CitaSerializer(serializers.ModelSerializer):
             "checkin_metodo",
             "checkin_en",
             "checkin_foto_url",
+            "firma_asistencia_estado",
+            "firma_asistencia_documento_id",
+            "firma_asistencia_signing_token",
+            "firma_asistencia_archivo_url",
             "servicio_precio",
+            "servicio_precio_base",
+            "cobro_id",
             "created_by",
             "created_at",
             "updated_at",
@@ -225,9 +263,26 @@ class CitaSerializer(serializers.ModelSerializer):
         path = obj.checkin_foto_url or (obj.checkin_foto.name if obj.checkin_foto else "")
         return get_signed_url(path, expires_in=3600) or ""
 
+    def get_firma_asistencia_archivo_url(self, obj):
+        path = obj.firma_asistencia_archivo.name if obj.firma_asistencia_archivo else ""
+        return get_signed_url(path, expires_in=3600) if path else None
+
+    def get_cobro_id(self, obj):
+        try:
+            return str(obj.cobro.id)
+        except Exception:
+            return None
+
     def get_servicio_precio(self, obj):
         if obj.servicio_id and obj.servicio:
             return obj.servicio.precio
+        return None
+
+    def get_servicio_precio_base(self, obj):
+        if obj.item_cotizacion_id:
+            return None
+        if obj.servicio_id and obj.servicio:
+            return obj.servicio.precio_base
         return None
 
     def get_sesion_ejecutada_id(self, obj):
@@ -320,8 +375,16 @@ class CitaSerializer(serializers.ModelSerializer):
 
 
 class BloqueoAgendaSerializer(serializers.ModelSerializer):
-    profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
-    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
+    profesional_nombre = serializers.CharField(
+        source="profesional.nombre_completo", read_only=True, allow_null=True
+    )
+    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True, allow_null=True)
+    creado_por_nombre = serializers.CharField(
+        source="creado_por.nombre_completo", read_only=True, allow_null=True
+    )
+    aprobado_por_nombre = serializers.CharField(
+        source="aprobado_por.nombre_completo", read_only=True, allow_null=True
+    )
 
     class Meta:
         model = BloqueoAgenda
@@ -334,11 +397,31 @@ class BloqueoAgendaSerializer(serializers.ModelSerializer):
             "fecha_inicio",
             "fecha_fin",
             "motivo",
+            "estado",
+            "creado_por",
+            "creado_por_nombre",
+            "aprobado_por",
+            "aprobado_por_nombre",
+            "aprobado_en",
             "activo",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "estado",
+            "creado_por",
+            "creado_por_nombre",
+            "aprobado_por",
+            "aprobado_por_nombre",
+            "aprobado_en",
+            "created_at",
+            "updated_at",
+        )
+        extra_kwargs = {
+            "profesional": {"required": False, "allow_null": True},
+            "sede": {"required": False, "allow_null": True},
+        }
 
     def validate(self, attrs):
         profesional = attrs.get("profesional", getattr(self.instance, "profesional", None))
@@ -346,12 +429,22 @@ class BloqueoAgendaSerializer(serializers.ModelSerializer):
         fecha_inicio = attrs.get("fecha_inicio", getattr(self.instance, "fecha_inicio", None))
         fecha_fin = attrs.get("fecha_fin", getattr(self.instance, "fecha_fin", None))
 
+        if not profesional and not sede:
+            raise serializers.ValidationError(
+                "Se debe especificar al menos un profesional o una sede para el bloqueo."
+            )
         if profesional and not profesional.es_profesional:
-            raise serializers.ValidationError({"profesional": "Solo se pueden bloquear agendas de usuarios profesionales."})
+            raise serializers.ValidationError(
+                {"profesional": "Solo se pueden bloquear agendas de usuarios profesionales."}
+            )
         if profesional and sede and profesional.clinica_id != sede.clinica_id:
-            raise serializers.ValidationError({"profesional": "El profesional no pertenece a la clinica de la sede."})
+            raise serializers.ValidationError(
+                {"profesional": "El profesional no pertenece a la clinica de la sede."}
+            )
         if fecha_inicio and fecha_fin and fecha_fin <= fecha_inicio:
-            raise serializers.ValidationError({"fecha_fin": "La fecha fin debe ser mayor a la fecha inicio."})
+            raise serializers.ValidationError(
+                {"fecha_fin": "La fecha fin debe ser mayor a la fecha inicio."}
+            )
         return attrs
 
 

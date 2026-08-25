@@ -22,6 +22,11 @@ def cita_checkin_otp_expira_en():
     return timezone.now() + timedelta(minutes=5)
 
 
+def cita_firma_asistencia_upload_path(instance, filename):
+    hoy = timezone.now()
+    return f"firma_asistencia/{hoy.year}/{hoy.month:02d}/{instance.id}.pdf"
+
+
 class Cita(BaseModel):
     class Estado(models.TextChoices):
         PENDIENTE = "pendiente", "Pendiente"
@@ -128,6 +133,23 @@ class Cita(BaseModel):
     checkin_foto = models.ImageField(upload_to=cita_checkin_upload_path, null=True, blank=True)
     checkin_foto_url = models.CharField(max_length=2048, blank=True)
 
+    class FirmaAsistenciaEstado(models.TextChoices):
+        SIN_FIRMA = "sin_firma", "Sin firma"
+        ENVIADA = "enviada", "Enviada"
+        FIRMADA = "firmada", "Firmada"
+        RECHAZADA = "rechazada", "Rechazada"
+
+    firma_asistencia_estado = models.CharField(
+        max_length=20,
+        choices=FirmaAsistenciaEstado.choices,
+        default=FirmaAsistenciaEstado.SIN_FIRMA,
+    )
+    firma_asistencia_documento_id = models.CharField(max_length=200, blank=True)
+    firma_asistencia_signing_token = models.CharField(max_length=500, blank=True)
+    firma_asistencia_archivo = models.FileField(
+        upload_to=cita_firma_asistencia_upload_path, null=True, blank=True
+    )
+
     class Meta:
         db_table = "citas"
         ordering = ["fecha_inicio"]
@@ -157,27 +179,64 @@ class CitaCheckinOTP(models.Model):
 
 
 class BloqueoAgenda(BaseModel):
+    class Estado(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        APROBADO = "aprobado", "Aprobado"
+        RECHAZADO = "rechazado", "Rechazado"
+
+    clinica = models.ForeignKey(
+        "clinicas.Clinica",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="bloqueos_agenda",
+    )
     profesional = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="bloqueos_agenda",
         limit_choices_to={"es_profesional": True},
     )
     sede = models.ForeignKey(
         "clinicas.Sede",
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="bloqueos_agenda",
     )
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField()
-    motivo = models.CharField(max_length=200, blank=True)
+    motivo = models.CharField(max_length=500, blank=True)
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE,
+    )
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bloqueos_creados",
+    )
+    aprobado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="bloqueos_aprobados",
+    )
+    aprobado_en = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "bloqueos_agenda"
         ordering = ["fecha_inicio"]
 
     def __str__(self) -> str:
-        return f"Bloqueo {self.profesional} - {self.fecha_inicio}"
+        target = self.profesional or self.sede
+        return f"Bloqueo {target} - {self.fecha_inicio}"
 
 
 class ConfirmacionToken(BaseModel):

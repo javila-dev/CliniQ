@@ -15,7 +15,7 @@ from apps.colaboradores.serializers import (
     ProfesionalListSerializer,
     colaborador_tiene_citas_futuras,
 )
-from apps.users.permissions import HasClinicamente, RequirePermission
+from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -41,8 +41,9 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
 
     def get_queryset(self):
         queryset = ModelViewSet.get_queryset(self)
-        if self.request.user.rol != "superadmin":
-            queryset = queryset.filter(sede_principal__clinica=self.request.user.clinica)
+        clinica_activa = get_clinica_activa(self.request)
+        if clinica_activa is not None:
+            queryset = queryset.filter(sede_principal__clinica=clinica_activa)
         activo = self.request.query_params.get("activo")
         tipo_contrato = self.request.query_params.get("tipo_contrato")
         sede_principal = self.request.query_params.get("sede_principal")

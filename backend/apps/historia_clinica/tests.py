@@ -2,7 +2,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -157,6 +157,7 @@ class ConsentimientoIniciarFirmaTests(TestCase):
         response.json.return_value = payload
         return response
 
+    @override_settings(DOCUMENSO_FALLBACK_EMAIL="")
     @patch("apps.historia_clinica.services.requests.request")
     def test_iniciar_firma_crea_documento_y_guarda_token(self, mocked_request):
         mocked_request.side_effect = [

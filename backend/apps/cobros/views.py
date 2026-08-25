@@ -2,7 +2,8 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -23,6 +24,9 @@ from apps.cobros.services import agregar_item_cobro, registrar_pago
 from apps.inventario.models import Insumo
 from apps.users.permissions import RequirePermission
 from django.utils import timezone
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class CobroViewSet(ModelViewSet):
@@ -70,8 +74,21 @@ class CobroViewSet(ModelViewSet):
 
     @transaction.atomic
     def create(self, request, *args, **kwargs):
-        serializer = CobroCreateSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        cita_id = request.data.get("cita")
+        if cita_id:
+            existing = Cobro.objects.filter(cita_id=cita_id).first()
+            if existing:
+                return Response(CobroSerializer(existing, context={"request": request}).data, status=status.HTTP_200_OK)
+
+        serializer = CobroCreateSerializer(data=request.data, context={"request": request})
+        if not serializer.is_valid():
+            logger.warning(
+                "DEBUG cobros create 400 | user_id=%s payload=%s errors=%s",
+                getattr(request.user, "id", None),
+                request.data,
+                serializer.errors,
+            )
+            raise ValidationError(serializer.errors)
 
         items_data = serializer.validated_data.pop("items", [])
         cita = serializer.validated_data.get("cita")
@@ -181,15 +198,44 @@ class CobroViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
-        hoy = timezone.localdate()
-        inicio_mes = hoy.replace(day=1)
-        return Response(
-            {
-                "hoy": self._resumen_periodo(hoy, hoy),
-                "mes_actual": self._resumen_periodo(inicio_mes, hoy),
-            },
-            status=status.HTTP_200_OK,
+        qs = self.get_queryset()
+
+        estado = request.query_params.get("estado")
+        origen = request.query_params.get("origen")
+        search = request.query_params.get("search")
+        fecha_desde = request.query_params.get("fecha_desde")
+        fecha_hasta = request.query_params.get("fecha_hasta")
+
+        if estado:
+            qs = qs.filter(estado=estado)
+        if origen:
+            qs = qs.filter(origen=origen)
+        if search:
+            qs = qs.filter(Q(paciente__nombres__icontains=search) | Q(paciente__apellidos__icontains=search))
+        if fecha_desde:
+            qs = qs.filter(fecha__date__gte=fecha_desde)
+        if fecha_hasta:
+            qs = qs.filter(fecha__date__lte=fecha_hasta)
+
+        qs_activo = qs.exclude(estado=Cobro.Estado.ANULADO)
+        agg = qs_activo.aggregate(
+            total_recaudado=Sum("pagos__valor"),
+            total_cobrado=Sum("total"),
         )
+        total_recaudado = Decimal(agg["total_recaudado"] or 0)
+        total_cobrado   = Decimal(agg["total_cobrado"] or 0)
+        total_pendiente = max(total_cobrado - total_recaudado, Decimal(0))
+        total_cobros   = qs.count()
+        total_pagados  = qs.filter(estado=Cobro.Estado.PAGADO).count()
+        total_pendientes = qs.filter(estado__in=[Cobro.Estado.PENDIENTE, Cobro.Estado.PAGADO_PARCIAL]).count()
+
+        return Response({
+            "total_recaudado":  f"{total_recaudado:.2f}",
+            "total_pendiente":  f"{total_pendiente:.2f}",
+            "total_cobros":     total_cobros,
+            "total_pagados":    total_pagados,
+            "total_pendientes": total_pendientes,
+        }, status=status.HTTP_200_OK)
 
     def _pagos_queryset(self):
         qs = PagoRecibido.objects.select_related("cobro", "cobro__sede")

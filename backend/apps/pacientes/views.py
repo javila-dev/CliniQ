@@ -1,22 +1,30 @@
+import asyncio
+
 from django.db.models import Q
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.parsers import MultiPartParser
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.agenda.models import Cita
 from apps.clinicas.models import TratamientoCatalogo
-from apps.pacientes.models import AntecedentePaciente, Paciente
+from apps.pacientes import face_client, face_service
+from apps.pacientes.carga_masiva import CargaMasivaError, procesar_carga_masiva_pacientes
+from apps.pacientes.models import AntecedentePaciente, CheckIn, ConfiguracionFacial, Paciente
 from apps.pacientes.serializers import (
     AntecedentePacienteSerializer,
     BusquedaPacienteSerializer,
     PacienteSerializer,
 )
+from apps.historia_clinica.models import ConsentimientoInformado
+from apps.historia_clinica.serializers import ConsentimientoInformadoSerializer
 from apps.protocolos.models import ConsentimientoPaciente
 from apps.protocolos.serializers import ConsentimientoPacienteSerializer
-from apps.users.permissions import HasClinicamente, RequirePermission
+from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
 class PacienteViewSet(HasClinicamente, ModelViewSet):
@@ -28,7 +36,7 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
     def get_permissions(self):
         if self.action == "destroy":
             permission_classes = (RequirePermission("pacientes.eliminar"),)
-        elif self.action == "create":
+        elif self.action in {"create", "carga_masiva"}:
             permission_classes = (RequirePermission("pacientes.crear"),)
         elif self.action in {"update", "partial_update"}:
             permission_classes = (RequirePermission("pacientes.editar"),)
@@ -38,6 +46,10 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             else:
                 permission_classes = (RequirePermission("pacientes.antecedentes.editar"),)
         elif self.action in {"consentimientos", "subir_pdf_consentimiento", "verificar_consentimientos"}:
+            permission_classes = (RequirePermission("pacientes.ver"),)
+        elif self.action == "enrollment":
+            permission_classes = (RequirePermission("pacientes.editar"),)
+        elif self.action == "checkin":
             permission_classes = (RequirePermission("pacientes.ver"),)
         else:
             permission_classes = (RequirePermission("pacientes.ver"),)
@@ -61,12 +73,32 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         return queryset.order_by("apellidos", "nombres")
 
     def perform_create(self, serializer):
-        clinica = serializer.validated_data.get("clinica") or getattr(self.request.user, "clinica", None)
+        clinica = serializer.validated_data.get("clinica") or get_clinica_activa(self.request)
         if clinica is None:
             raise ValidationError(
                 {"clinica": "El usuario autenticado no tiene una clinica asociada."}
             )
         serializer.save(clinica=clinica)
+
+    @action(detail=False, methods=["post"], url_path="carga_masiva", parser_classes=[MultiPartParser])
+    def carga_masiva(self, request):
+        archivo = request.FILES.get("archivo")
+        if archivo is None:
+            return Response({"error": "Se requiere el campo 'archivo'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response(
+                {"error": "El usuario autenticado no tiene una clinica asociada."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            resultado = procesar_carga_masiva_pacientes(archivo, clinica=clinica, context={"request": request})
+        except CargaMasivaError as exc:
+            return Response({"error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+        return Response(resultado, status=status.HTTP_200_OK)
 
     def _can_manage_antecedentes(self, paciente):
         user = self.request.user
@@ -140,8 +172,36 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
     def consentimientos(self, request, pk=None):
         paciente = self.get_object()
         if request.method == "GET":
-            queryset = ConsentimientoPaciente.objects.filter(paciente=paciente).select_related("procedimiento")
-            return Response(ConsentimientoPacienteSerializer(queryset, many=True, context={"request": request}).data)
+            # Consentimientos manuales (modelo legado)
+            qs_manual = ConsentimientoPaciente.objects.filter(paciente=paciente).select_related("procedimiento")
+            manual = ConsentimientoPacienteSerializer(qs_manual, many=True, context={"request": request}).data
+
+            # Consentimientos Documenso (modelo nuevo) — solo los firmados
+            qs_documenso = ConsentimientoInformado.objects.filter(
+                paciente=paciente, firmado=True
+            ).select_related("plantilla")
+            serialized = ConsentimientoInformadoSerializer(
+                qs_documenso, many=True, context={"request": request}
+            ).data
+            documenso = []
+            for c_obj, c_data in zip(qs_documenso, serialized):
+                documenso.append({
+                    "id": str(c_obj.id),
+                    "template_token": c_obj.documenso_template_token or "",
+                    "template_nombre": c_data.get("template_nombre") or c_data.get("documenso_template_nombre") or "",
+                    "procedimiento": None,
+                    "procedimiento_nombre": None,
+                    "fecha_firma": c_data.get("fecha_firma"),
+                    "vigencia_hasta": c_data.get("fecha_vencimiento"),
+                    "metodo": "documenso",
+                    "archivo_url": c_data.get("archivo_url") or "",
+                    "documenso_envelope_id": c_obj.documenso_document_id,
+                    "notas": c_obj.notas,
+                    "estado": c_data.get("vigente") and "vigente" or "vencido",
+                    "created_at": c_data.get("created_at"),
+                })
+
+            return Response(list(manual) + documenso)
 
         serializer = ConsentimientoPacienteSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
@@ -194,3 +254,129 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         consentimiento.archivo = archivo
         consentimiento.save(update_fields=["archivo", "updated_at"])
         return Response(ConsentimientoPacienteSerializer(consentimiento, context={"request": request}).data)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="enrollment",
+        parser_classes=[MultiPartParser],
+    )
+    def enrollment(self, request, pk=None):
+        paciente = self.get_object()
+
+        if not paciente.clinica.facial_verificacion_habilitada:
+            return Response(
+                {"error": "El módulo de verificación facial no está habilitado para esta clínica.", "code": "FACIAL_NO_HABILITADO"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        foto = request.FILES.get("photo")
+        if foto is None:
+            return Response({"error": "Se requiere el campo 'photo'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        config, _ = ConfiguracionFacial.objects.get_or_create(clinica=paciente.clinica)
+
+        try:
+            resultado_raw = asyncio.run(face_client.validate_enrollment(foto.read(), foto.name, config=config))
+        except Exception as exc:
+            return Response(
+                {"error": f"Error al contactar el servicio de reconocimiento facial: {exc}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        evaluacion = face_service.evaluar_enrollment(config, resultado_raw)
+
+        if not evaluacion["valid"]:
+            return Response(
+                {
+                    "valid": False,
+                    "errors": evaluacion["errors"],
+                    "warnings": evaluacion["warnings"],
+                },
+                status=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            )
+
+        # Guardar foto en MinIO y embedding en el paciente
+        foto.seek(0)
+        paciente.foto_control = foto  # usa DEFAULT_FILE_STORAGE (MinIO)
+        paciente.embedding_facial = evaluacion["embedding"]
+        paciente.embedding_actualizado_en = timezone.now()
+        paciente.save(update_fields=["foto_control", "embedding_facial", "embedding_actualizado_en", "updated_at"])  # foto_control → MinIO vía DEFAULT_FILE_STORAGE
+
+        return Response(
+            {
+                "valid": True,
+                "warnings": evaluacion["warnings"],
+                "message": "Foto de control registrada correctamente.",
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="checkin",
+        parser_classes=[MultiPartParser],
+    )
+    def checkin(self, request, pk=None):
+        paciente = self.get_object()
+
+        if not paciente.clinica.facial_verificacion_habilitada:
+            return Response(
+                {"error": "El módulo de verificación facial no está habilitado para esta clínica.", "code": "FACIAL_NO_HABILITADO"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if paciente.embedding_facial is None:
+            return Response(
+                {
+                    "error": "El paciente no tiene foto de control registrada.",
+                    "code": "ENROLLMENT_REQUIRED",
+                },
+                status=status.HTTP_428_PRECONDITION_REQUIRED,
+            )
+
+        foto = request.FILES.get("live_photo")
+        if foto is None:
+            return Response({"error": "Se requiere el campo 'live_photo'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        config, _ = ConfiguracionFacial.objects.get_or_create(clinica=paciente.clinica)
+
+        try:
+            resultado_raw = asyncio.run(
+                face_client.verify(foto.read(), [float(x) for x in paciente.embedding_facial], config=config)
+            )
+        except Exception as exc:
+            return Response(
+                {"error": f"Error al contactar el servicio de reconocimiento facial: {exc}"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        resultado = face_service.evaluar_checkin(config, resultado_raw)
+
+        cita_id = request.data.get("cita_id")
+        cita = None
+        if cita_id:
+            cita = Cita.objects.filter(id=cita_id, paciente=paciente).first()
+
+        foto.seek(0)
+        checkin = CheckIn(
+            paciente=paciente,
+            cita=cita,
+            score=resultado["score"],
+            confidence=resultado["confidence"],
+            match=resultado["match"],
+            requiere_confirmacion=resultado["requiere_confirmacion"],
+            det_score_live=resultado["det_score_live"],
+            realizado_por=request.user,
+        )
+        checkin.foto_live.save(f"checkin_{paciente.id}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.jpg", foto, save=True)
+
+        return Response(resultado, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="checkins")
+    def checkins(self, request, pk=None):
+        paciente = self.get_object()
+        qs = paciente.checkins.select_related("cita", "realizado_por").order_by("-created_at")
+        from apps.pacientes.serializers import CheckInSerializer
+        return Response(CheckInSerializer(qs, many=True, context={"request": request}).data)

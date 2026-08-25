@@ -24,7 +24,11 @@ api_urlpatterns = [
     path("notificaciones/", include("apps.notificaciones.urls")),
     path("caja/", include("apps.caja.urls")),
     path("reportes/", include("apps.reportes.urls")),
+    path("registro-publico/", include("apps.pacientes.public_urls")),
+    path("registro-clinica/", include("apps.clinicas.registro_urls")),
     path("admin/", include("apps.clinicas.admin_urls")),
+    path("core/", include("apps.core.urls")),
+    path("obesidad/", include("apps.obesidad.urls")),
 ]
 
 urlpatterns = [

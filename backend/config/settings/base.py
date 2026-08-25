@@ -40,6 +40,7 @@ THIRD_PARTY_APPS = [
     "rest_framework",
     "rest_framework_simplejwt.token_blacklist",
     "django_filters",
+    "pgvector.django",
 ]
 
 LOCAL_APPS = [
@@ -62,6 +63,7 @@ LOCAL_APPS = [
     "apps.cotizaciones",
     "apps.cartera",
     "apps.protocolos",
+    "apps.obesidad",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -117,6 +119,7 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
+        "apps.users.permissions.TrialNotExpired",
     ),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -125,6 +128,11 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
     "PAGE_SIZE": 25,
+    # Cuantos reverse proxies de confianza hay delante de Django (Traefik = 1).
+    # Sin esto, SimpleRateThrottle usa el X-Forwarded-For completo tal como lo
+    # manda el cliente para identificarlo -- un atacante puede mandar un valor
+    # distinto en cada intento y esquivar el limite de intentos por completo.
+    "NUM_PROXIES": config("DRF_NUM_PROXIES", default=1, cast=int),
 }
 
 SIMPLE_JWT = {
@@ -139,6 +147,7 @@ CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-clinica-id",
+    "x-active-clinica",
 ]
 
 LANGUAGE_CODE = "es-co"
@@ -213,3 +222,6 @@ DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", default="CliniQ <no-reply@nore
 SERVER_EMAIL = config("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+FACE_SERVICE_URL = config("FACE_SERVICE_URL", default="http://face-service:8001")
+FACE_SERVICE_API_KEY = config("FACE_SERVICE_API_KEY", default="")

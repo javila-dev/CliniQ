@@ -23,7 +23,7 @@ from apps.protocolos.services import (
     verificar_otp,
 )
 from apps.users.models import User
-from apps.users.permissions import IsAdmin, IsAdminOrRecepcion
+from apps.users.permissions import IsAdmin, IsAdminOrProfesional, IsAdminOrRecepcion
 
 
 class TratamientoPacienteViewSet(ModelViewSet):
@@ -78,6 +78,8 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
     http_method_names = ["get", "post"]
 
     def get_permissions(self):
+        if self.action in {"marcar_completado", "marcar_completada", "marcar_inasistencia"}:
+            return [IsAdminOrProfesional()]
         return [IsAuthenticated()]
 
     def get_queryset(self):
@@ -98,10 +100,18 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
         sesion = self.get_object()
         cita = None
         profesional = None
-        if request.data.get("cita_id"):
-            cita = get_object_or_404(Cita, id=request.data["cita_id"])
-        if request.data.get("profesional_id"):
-            profesional = get_object_or_404(User, id=request.data["profesional_id"])
+        cita_id = request.data.get("cita_id")
+        profesional_id = request.data.get("profesional_id")
+        if cita_id:
+            cita_qs = Cita.objects.all()
+            if request.user.rol != "superadmin":
+                cita_qs = cita_qs.filter(sede__clinica=request.user.clinica)
+            cita = get_object_or_404(cita_qs, id=cita_id)
+        if profesional_id:
+            profesional_qs = User.objects.all()
+            if request.user.rol != "superadmin":
+                profesional_qs = profesional_qs.filter(clinica=request.user.clinica)
+            profesional = get_object_or_404(profesional_qs, id=profesional_id)
         elif request.user.rol == "profesional":
             profesional = request.user
         try:

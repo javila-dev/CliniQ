@@ -1,7 +1,61 @@
 from django.db import transaction
+from django.db.models import Q
 from rest_framework import serializers
 
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion
+from apps.users.authorization import user_has_permission
+from apps.users.permissions import get_clinica_activa
+
+
+def lookup_campana_item(*, clinica, sede, procedimiento=None, tratamiento=None):
+    from datetime import date
+    from apps.clinicas.models import CampanaItem
+
+    if not clinica or not (procedimiento or tratamiento):
+        return None
+
+    hoy = date.today()
+    qs = CampanaItem.objects.filter(
+        activo=True,
+        campana__activo=True,
+        campana__fecha_inicio__lte=hoy,
+        campana__fecha_fin__gte=hoy,
+        campana__clinica=clinica,
+    ).select_related("campana")
+    if sede:
+        qs = qs.filter(Q(campana__sedes__isnull=True) | Q(campana__sedes=sede)).distinct()
+    else:
+        qs = qs.filter(campana__sedes__isnull=True)
+    if procedimiento:
+        qs = qs.filter(procedimiento=procedimiento)
+    else:
+        qs = qs.filter(tratamiento=tratamiento)
+    return qs.first()
+
+
+def lookup_precio_campana(*, clinica, sede, procedimiento=None, tratamiento=None):
+    item = lookup_campana_item(
+        clinica=clinica,
+        sede=sede,
+        procedimiento=procedimiento,
+        tratamiento=tratamiento,
+    )
+    return item.precio_campana if item else None
+
+
+def resolve_campana_for_item(*, clinica, sede, procedimiento=None, tratamiento=None, valor_unitario=None):
+    """Return the campaign whose price was applied, or None."""
+    if valor_unitario in (None, ""):
+        return None
+    campana_item = lookup_campana_item(
+        clinica=clinica,
+        sede=sede,
+        procedimiento=procedimiento,
+        tratamiento=tratamiento,
+    )
+    if campana_item and campana_item.precio_campana == valor_unitario:
+        return campana_item.campana
+    return None
 
 
 class ItemCotizacionSerializer(serializers.ModelSerializer):
@@ -15,6 +69,9 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
     citas_agendadas = serializers.SerializerMethodField()
     citas_completadas = serializers.SerializerMethodField()
     citas_restantes = serializers.SerializerMethodField()
+    precio_campana_disponible = serializers.SerializerMethodField()
+    campana_id = serializers.SerializerMethodField()
+    campana_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemCotizacion
@@ -32,15 +89,20 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             "periodicidad",
             "valor_unitario",
             "descuento_porcentaje",
+            "precio_bloqueado",
             "subtotal",
             "citas_agendadas",
             "citas_completadas",
             "citas_restantes",
+            "precio_campana_disponible",
+            "campana_id",
+            "campana_nombre",
         )
         extra_kwargs = {
             "descripcion": {"required": False, "allow_blank": True},
             "num_citas": {"required": False},
             "valor_unitario": {"required": False},
+            "precio_bloqueado": {"required": False},
         }
 
     def validate_num_citas(self, value):
@@ -100,7 +162,63 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"descripcion": "Este campo es obligatorio."})
         if attrs.get("valor_unitario", getattr(self.instance, "valor_unitario", None)) in (None, ""):
             raise serializers.ValidationError({"valor_unitario": "Este campo es obligatorio."})
+
+        # Si el item tiene precio bloqueado y el usuario intenta un valor diferente al de catálogo,
+        # requiere el permiso cotizaciones.cambiar_precio, salvo que el valor coincida con una campaña activa.
+        precio_bloqueado = attrs.get(
+            "precio_bloqueado",
+            getattr(self.instance, "precio_bloqueado", False),
+        )
+        if precio_bloqueado:
+            valor_unitario = attrs.get(
+                "valor_unitario",
+                getattr(self.instance, "valor_unitario", None),
+            )
+            catalogo_precio = None
+            if tratamiento and tratamiento.precio_estimado is not None:
+                catalogo_precio = tratamiento.precio_estimado
+            elif procedimiento and getattr(procedimiento, "precio_base", None) is not None:
+                catalogo_precio = procedimiento.precio_base
+            if catalogo_precio is not None and valor_unitario is not None and valor_unitario != catalogo_precio:
+                clinica, sede = self._resolve_clinica_sede()
+                precio_campana = lookup_precio_campana(
+                    clinica=clinica,
+                    sede=sede,
+                    procedimiento=procedimiento,
+                    tratamiento=tratamiento,
+                )
+                permite_por_campana = precio_campana is not None and valor_unitario == precio_campana
+                if not permite_por_campana and not (
+                    request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
+                ):
+                    raise serializers.ValidationError({
+                        "valor_unitario": "No tienes permiso para modificar el precio de un item con precio bloqueado.",
+                        "code": "PRECIO_BLOQUEADO",
+                    })
+
+        clinica, sede = self._resolve_clinica_sede()
+        valor_unitario = attrs.get(
+            "valor_unitario",
+            getattr(self.instance, "valor_unitario", None),
+        )
+        attrs["campana"] = resolve_campana_for_item(
+            clinica=clinica,
+            sede=sede,
+            procedimiento=procedimiento,
+            tratamiento=tratamiento,
+            valor_unitario=valor_unitario,
+        )
+
         return attrs
+
+    def _resolve_clinica_sede(self):
+        cotizacion = getattr(self.instance, "cotizacion", None)
+        if cotizacion is not None:
+            return cotizacion.clinica, cotizacion.sede
+        cotizacion_ref = self.context.get("cotizacion_ref")
+        if cotizacion_ref is not None:
+            return cotizacion_ref.clinica, cotizacion_ref.sede
+        return self.context.get("draft_clinica"), self.context.get("draft_sede")
 
     def get_tratamiento_nombre(self, obj):
         return obj.tratamiento.nombre if obj.tratamiento_id else None
@@ -118,16 +236,55 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
     def get_citas_restantes(self, obj):
         return obj.citas_restantes()
 
+    def _get_campana_item(self, obj):
+        cache = getattr(self, "_campana_cache", None)
+        if cache is None:
+            self._campana_cache = {}
+            cache = self._campana_cache
+        obj_key = str(obj.pk)
+        if obj_key in cache:
+            return cache[obj_key]
+
+        result = None
+        if obj.procedimiento or obj.tratamiento:
+            result = lookup_campana_item(
+                clinica=obj.cotizacion.clinica,
+                sede=getattr(obj.cotizacion, "sede", None),
+                procedimiento=obj.procedimiento,
+                tratamiento=obj.tratamiento,
+            )
+
+        cache[obj_key] = result
+        return result
+
+    def get_precio_campana_disponible(self, obj):
+        item = self._get_campana_item(obj)
+        return str(item.precio_campana) if item else None
+
+    def get_campana_id(self, obj):
+        if obj.campana_id:
+            return str(obj.campana_id)
+        item = self._get_campana_item(obj)
+        return str(item.campana_id) if item else None
+
+    def get_campana_nombre(self, obj):
+        if obj.campana_id:
+            return obj.campana.nombre
+        item = self._get_campana_item(obj)
+        return item.campana.nombre if item else None
+
     def _hydrate_from_tratamiento(self, attrs):
         tratamiento = attrs.get("tratamiento")
         if not tratamiento:
             return attrs
         if not attrs.get("descripcion"):
             attrs["descripcion"] = tratamiento.nombre
-        if attrs.get("valor_unitario") in (None, "") and tratamiento.precio_estimado is not None:
-            attrs["valor_unitario"] = tratamiento.precio_estimado
         if not attrs.get("num_citas"):
             attrs["num_citas"] = tratamiento.total_sesiones or 1
+        if tratamiento.precio_estimado is not None:
+            attrs["precio_bloqueado"] = True
+            if attrs.get("valor_unitario") in (None, ""):
+                attrs["valor_unitario"] = tratamiento.precio_estimado
         return attrs
 
     def _hydrate_from_procedimiento(self, attrs):
@@ -136,12 +293,18 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             return attrs
         if not attrs.get("descripcion"):
             attrs["descripcion"] = procedimiento.nombre
-        if attrs.get("valor_unitario") in (None, "") and procedimiento.precio is not None:
-            attrs["valor_unitario"] = procedimiento.precio
         if not attrs.get("num_citas"):
             attrs["num_citas"] = 1
         if not attrs.get("duracion_estimada") and procedimiento.duracion_min:
             attrs["duracion_estimada"] = f"{procedimiento.duracion_min} min"
+        precio_base = getattr(procedimiento, "precio_base", None)
+        if precio_base is not None:
+            attrs["precio_bloqueado"] = True
+            if attrs.get("valor_unitario") in (None, ""):
+                attrs["valor_unitario"] = precio_base
+        elif procedimiento.precio is not None:
+            if attrs.get("valor_unitario") in (None, ""):
+                attrs["valor_unitario"] = procedimiento.precio
         return attrs
 
     def to_internal_value(self, data):
@@ -236,6 +399,28 @@ class CotizacionSerializer(serializers.ModelSerializer):
         ).data
         return ret
 
+    def to_internal_value(self, data):
+        items_field = self.fields.get("items")
+        if items_field is not None:
+            child = items_field.child
+            if self.instance is not None:
+                child.context["cotizacion_ref"] = self.instance
+            else:
+                request = self.context.get("request")
+                if request:
+                    clinica_draft = get_clinica_activa(request)
+                    if clinica_draft:
+                        child.context["draft_clinica"] = clinica_draft
+                sede_id = data.get("sede") if isinstance(data, dict) else None
+                if sede_id:
+                    from apps.clinicas.models import Sede
+
+                    try:
+                        child.context["draft_sede"] = Sede.objects.get(pk=sede_id)
+                    except (Sede.DoesNotExist, ValueError, TypeError):
+                        pass
+        return super().to_internal_value(data)
+
     def validate(self, attrs):
         request = self.context["request"]
         paciente = attrs.get("paciente", getattr(self.instance, "paciente", None))
@@ -284,7 +469,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         items_data = validated_data.pop("items")
         formas_pago_data = validated_data.pop("formas_pago")
         request = self.context["request"]
-        clinica = request.user.clinica or validated_data["paciente"].clinica
+        clinica = get_clinica_activa(request) or validated_data["paciente"].clinica
         if not validated_data.get("sede"):
             validated_data["sede"] = clinica.sedes.filter(activo=True).order_by("created_at").first()
         cotizacion = Cotizacion.objects.create(
@@ -338,7 +523,11 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
 
 class CambiarEstadoCotizacionSerializer(serializers.Serializer):
-    estado = serializers.ChoiceField(choices=((Cotizacion.Estado.ACEPTADA, "Aceptada"),))
+    estado = serializers.ChoiceField(choices=(
+        (Cotizacion.Estado.ACEPTADA, "Aceptada"),
+        (Cotizacion.Estado.DESCARTADA, "Descartada"),
+        (Cotizacion.Estado.BORRADOR, "Borrador"),
+    ))
 
 
 class EnviarCotizacionEmailSerializer(serializers.Serializer):

@@ -3,7 +3,7 @@ from datetime import date, timedelta
 from rest_framework import serializers
 
 from apps.clinicas.models import Clinica
-from apps.pacientes.models import AntecedentePaciente, Paciente
+from apps.pacientes.models import AntecedentePaciente, CheckIn, Paciente
 
 
 class PacienteSerializer(serializers.ModelSerializer):
@@ -21,6 +21,8 @@ class PacienteSerializer(serializers.ModelSerializer):
         default="",
     )
     tiene_antecedentes = serializers.SerializerMethodField()
+    tiene_foto_control = serializers.SerializerMethodField()
+    foto_control_url = serializers.SerializerMethodField()
     escolaridad = serializers.ChoiceField(
         choices=Paciente.Escolaridad.choices,
         required=False,
@@ -90,6 +92,8 @@ class PacienteSerializer(serializers.ModelSerializer):
             "autoriza_datos",
             "fecha_autorizacion",
             "tiene_antecedentes",
+            "tiene_foto_control",
+            "foto_control_url",
             "activo",
             "created_at",
             "updated_at",
@@ -101,12 +105,26 @@ class PacienteSerializer(serializers.ModelSerializer):
             "nombre_completo",
             "edad",
             "fecha_autorizacion",
+            "tiene_antecedentes",
+            "tiene_foto_control",
+            "foto_control_url",
             "created_at",
             "updated_at",
         )
 
     def get_tiene_antecedentes(self, obj):
         return hasattr(obj, "antecedentes")
+
+    def get_tiene_foto_control(self, obj):
+        if not obj.clinica.facial_verificacion_habilitada:
+            return None  # addon no activo en esta clínica — frontend ignora el banner
+        return obj.embedding_facial is not None
+
+    def get_foto_control_url(self, obj):
+        if not obj.foto_control:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.foto_control.url) if request else obj.foto_control.url
 
     def validate_numero_documento(self, value):
         tipo_documento = self.initial_data.get("tipo_documento")
@@ -152,6 +170,35 @@ class PacienteSerializer(serializers.ModelSerializer):
                     {"numero_documento": "Ya existe un paciente con ese documento en la clinica."}
                 )
         return attrs
+
+
+class CheckInSerializer(serializers.ModelSerializer):
+    foto_live_url = serializers.SerializerMethodField()
+    realizado_por_nombre = serializers.CharField(source="realizado_por.nombre_completo", read_only=True, default=None)
+    cita_fecha = serializers.DateTimeField(source="cita.fecha_hora", read_only=True, default=None)
+    cita_id = serializers.UUIDField(source="cita.id", read_only=True, default=None)
+
+    class Meta:
+        model = CheckIn
+        fields = (
+            "id",
+            "foto_live_url",
+            "score",
+            "confidence",
+            "match",
+            "requiere_confirmacion",
+            "det_score_live",
+            "realizado_por_nombre",
+            "cita_id",
+            "cita_fecha",
+            "created_at",
+        )
+
+    def get_foto_live_url(self, obj):
+        if not obj.foto_live:
+            return None
+        request = self.context.get("request")
+        return request.build_absolute_uri(obj.foto_live.url) if request else obj.foto_live.url
 
 
 class BusquedaPacienteSerializer(serializers.ModelSerializer):

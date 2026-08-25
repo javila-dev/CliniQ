@@ -1,3 +1,5 @@
+import logging
+
 from django.http import HttpResponse
 from django.db.models import Prefetch
 import requests
@@ -10,7 +12,7 @@ from rest_framework.viewsets import ModelViewSet
 from apps.agenda.models import Cita
 from apps.cartera.models import Cartera, CuotaCartera
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
-from apps.cotizaciones.pdf import render_cotizacion_pdf
+from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_cotizacion_pdf
 from apps.cotizaciones.serializers import (
     CambiarEstadoCotizacionSerializer,
     CotizacionEnvioSerializer,
@@ -20,13 +22,17 @@ from apps.cotizaciones.serializers import (
 )
 from apps.notificaciones.services import email_provider_config, enviar_documento_whatsapp_webhook, enviar_email
 from apps.protocolos.services import consentimientos_pendientes_cotizacion
+from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import RequirePermission
+
+logger = logging.getLogger(__name__)
 
 
 TRANSICIONES_COTIZACION = {
-    Cotizacion.Estado.BORRADOR: {Cotizacion.Estado.ACEPTADA},
+    Cotizacion.Estado.BORRADOR: {Cotizacion.Estado.ACEPTADA, Cotizacion.Estado.DESCARTADA},
+    Cotizacion.Estado.ACEPTADA: {Cotizacion.Estado.BORRADOR},
     Cotizacion.Estado.VENCIDA: set(),
-    Cotizacion.Estado.ACEPTADA: set(),
+    Cotizacion.Estado.DESCARTADA: set(),
 }
 
 
@@ -52,7 +58,7 @@ class CotizacionViewSet(ModelViewSet):
     ordering_fields = ("created_at", "updated_at")
 
     def get_permissions(self):
-        if self.action in {"list", "retrieve", "pdf", "envios"}:
+        if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia"}:
             return [RequirePermission("cotizaciones.ver")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
@@ -110,6 +116,20 @@ class CotizacionViewSet(ModelViewSet):
         permitidos = set(TRANSICIONES_COTIZACION.get(cotizacion.estado, set()))
         if nuevo_estado not in permitidos:
             raise ValidationError({"error": "Transicion de estado invalida.", "code": "INVALID_TRANSITION"})
+
+        if nuevo_estado == Cotizacion.Estado.BORRADOR:
+            if not (user_is_tenant_admin(request.user) or request.user.rol == "superadmin"):
+                raise ValidationError({"error": "Solo admin o superadmin pueden revertir a borrador.", "code": "PERMISSION_DENIED"})
+            from apps.cobros.models import Cobro
+            if cotizacion.cobros.exclude(estado=Cobro.Estado.ANULADO).exists():
+                raise ValidationError({"error": "La cotización tiene cobros activos. Anúlos primero.", "code": "COTIZACION_CON_COBROS"})
+            tiene_citas = any(
+                item.citas_no_canceladas() > 0
+                for item in cotizacion.items.filter(activo=True).prefetch_related("citas")
+            )
+            if tiene_citas:
+                raise ValidationError({"error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS"})
+
         cotizacion.estado = nuevo_estado
         cotizacion.save(update_fields=["estado", "updated_at"])
         consentimientos_pendientes = []
@@ -134,10 +154,52 @@ class CotizacionViewSet(ModelViewSet):
                         fecha_esperada=forma_pago.fecha,
                     )
             consentimientos_pendientes = consentimientos_pendientes_cotizacion(cotizacion)
+            compromiso_pago = self._generar_compromiso_pago_si_aplica(cotizacion)
         payload = self.get_serializer(cotizacion).data
         if nuevo_estado == Cotizacion.Estado.ACEPTADA:
             payload["consentimientos_pendientes"] = consentimientos_pendientes
+            payload["compromiso_pago"] = self._serializar_compromiso_pago(compromiso_pago)
         return Response(payload, status=status.HTTP_200_OK)
+
+    def _serializar_compromiso_pago(self, compromiso_pago):
+        if not compromiso_pago:
+            return None
+        from apps.consentimientos.serializers import ConsentimientoSerializer
+
+        return ConsentimientoSerializer(compromiso_pago).data
+
+    def _generar_compromiso_pago_si_aplica(self, cotizacion):
+        """
+        Si la clinica tiene activo el requisito de consentimiento de compromiso
+        de pago / compra promocional (configuracion.ConfiguracionCartera), lo
+        genera en estado pendiente de firma. El texto legal (politica de no
+        devolucion, plazos, etc.) es responsabilidad de cada clinica via su
+        propia plantilla — este metodo solo dispara la generacion.
+        """
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+        from apps.consentimientos.services import generar_consentimiento
+
+        config = ConfiguracionCartera.objects.filter(
+            clinica_id=cotizacion.clinica_id,
+            requiere_consentimiento_promocional=True,
+        ).select_related("plantilla_compromiso_pago").first()
+        if not config or not config.plantilla_compromiso_pago:
+            return None
+
+        existente = Consentimiento.objects.filter(
+            cotizacion=cotizacion, plantilla=config.plantilla_compromiso_pago,
+        ).exclude(estado=Consentimiento.Estado.REVOCADO).first()
+        if existente:
+            return existente
+
+        try:
+            return generar_consentimiento(cotizacion=cotizacion, plantilla=config.plantilla_compromiso_pago)
+        except Exception:
+            logger.exception(
+                "[cambiar_estado] fallo al generar compromiso de pago | cotizacion_id=%s", cotizacion.id,
+            )
+            return None
 
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):
@@ -145,6 +207,14 @@ class CotizacionViewSet(ModelViewSet):
         pdf_bytes = render_cotizacion_pdf(cotizacion)
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="cotizacion-{cotizacion.id}.pdf"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="consolidado_asistencia")
+    def consolidado_asistencia(self, request, pk=None):
+        cotizacion = self.get_object()
+        pdf_bytes = render_consolidado_asistencia_pdf(cotizacion)
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'attachment; filename="consolidado-asistencia-{cotizacion.id}.pdf"'
         return response
 
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")

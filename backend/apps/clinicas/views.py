@@ -12,15 +12,23 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
 from apps.clinicas.models import (
+    Campana,
+    CampanaItem,
     Clinica,
+    DiagramaCorporal,
+    GrupoZonas,
+    GrupoZonasDiagrama,
     PasoProtocolo,
     Plan,
     Sede,
     Servicio,
     ServicioConsentimiento,
+    ServicioDiagrama,
+    ServicioGrupoZonas,
     TipoSesion,
     TipoSesionProcedimiento,
     TratamientoCatalogo,
@@ -30,24 +38,33 @@ from apps.clinicas.serializers import (
     AdminTenantCreateSerializer,
     AdminTenantSerializer,
     AdminTenantUpdateSerializer,
+    CampanaItemSerializer,
+    CampanaSerializer,
     ClinicaRecordatorioConfigSerializer,
     ClinicaSerializer,
     ClinicaSlotIntervalSerializer,
+    DiagramaCorporalSerializer,
+    GrupoZonasSerializer,
+    GrupoZonasDiagramaSerializer,
     MiClinicaSerializer,
     PasoProtocoloSerializer,
+    PlantillaAsistenciaSerializer,
     PlanSerializer,
     PlanUsageSerializer,
     ProcedimientoSerializer,
     SedeSerializer,
     ServicioSerializer,
     ServicioConsentimientoSerializer,
+    ServicioDiagramaSerializer,
+    ServicioGrupoZonasSerializer,
     TipoSesionSerializer,
     TratamientoCatalogoSerializer,
     sede_tiene_citas,
 )
+from apps.consentimientos.models import PlantillaAsistencia
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file
-from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission
+from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -96,17 +113,10 @@ class ClinicaViewSet(ModelViewSet):
         return super().get_serializer_class()
 
     def _get_request_clinica(self):
-        user = self.request.user
-        if user.rol == "superadmin":
-            clinica_id = self.request.query_params.get("clinica_id") or self.request.data.get("clinica_id")
-            if clinica_id:
-                return get_object_or_404(Clinica.objects.prefetch_related("sedes"), id=clinica_id)
-            if user.clinica_id:
-                return get_object_or_404(Clinica.objects.prefetch_related("sedes"), id=user.clinica_id)
-            raise ValidationError({"error": "Debes indicar clinica_id para esta operacion.", "code": "CLINICA_REQUERIDA"})
-        if user.clinica_id:
-            return get_object_or_404(Clinica.objects.prefetch_related("sedes"), id=user.clinica_id)
-        raise ValidationError({"error": "El usuario no tiene una clinica asociada.", "code": "CLINICA_NO_ASIGNADA"})
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"error": "No hay clínica activa para esta solicitud.", "code": "CLINICA_REQUERIDA"})
+        return get_object_or_404(Clinica.objects.prefetch_related("sedes"), id=clinica.id)
 
     @action(detail=True, methods=["get", "patch"], url_path="slot_interval")
     def slot_interval(self, request, pk=None):
@@ -130,9 +140,67 @@ class ClinicaViewSet(ModelViewSet):
             serializer = self.get_serializer(clinica)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="setup-checklist")
+    def setup_checklist(self, request):
+        from apps.users.models import User as UserModel
+
+        clinica = self._get_request_clinica()
+
+        tiene_logo = bool(clinica.logo)
+        tiene_telefono = bool(clinica.telefono)
+        tiene_sedes = Sede.objects.filter(clinica=clinica, activo=True).exists()
+        from apps.colaboradores.models import Colaborador
+        tiene_profesional = Colaborador.objects.filter(
+            user__clinica=clinica, activo=True, user__is_active=True
+        ).exists()
+        tiene_servicios = Servicio.objects.filter(clinica=clinica, activo=True).exists()
+        tiene_consentimientos = DocumensoConsentimientoTemplate.objects.filter(
+            clinica=clinica, activo=True, nombre__gt=""
+        ).exists()
+
+        return Response({
+            "items": [
+                {
+                    "key": "clinica",
+                    "label": "Datos de la clínica",
+                    "completado": tiene_logo and tiene_telefono,
+                    "href": "/configuracion/clinica",
+                },
+                {
+                    "key": "sedes",
+                    "label": "Configuración de sedes",
+                    "completado": tiene_sedes,
+                    "href": "/configuracion/sedes",
+                },
+                {
+                    "key": "usuarios",
+                    "label": "Agregar un profesional",
+                    "completado": tiene_profesional,
+                    "href": "/equipo/personal",
+                },
+                {
+                    "key": "servicios",
+                    "label": "Configurar servicios",
+                    "completado": tiene_servicios,
+                    "href": "/configuracion/procedimientos",
+                },
+                {
+                    "key": "consentimientos",
+                    "label": "Configurar consentimientos",
+                    "completado": tiene_consentimientos,
+                    "href": "/configuracion/consentimientos",
+                },
+            ]
+        })
+
     def mi_clinica(self, request):
         clinica = self._get_request_clinica()
-        serializer = self.get_serializer(clinica)
+        if request.method.lower() == "patch":
+            serializer = self.get_serializer(clinica, data=request.data, partial=True)
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+        else:
+            serializer = self.get_serializer(clinica)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def _save_or_delete_logo(self, request, clinica):
@@ -167,26 +235,39 @@ class ClinicaViewSet(ModelViewSet):
 
     def plan_usage(self, request):
         clinica = self._get_request_clinica()
-        activos = User.objects.filter(clinica=clinica, activo=True).count()
         plan = getattr(clinica, "plan", None)
 
-        if plan is None or plan.max_usuarios == 0:
-            data = {
-                "plan": PlanSerializer(plan).data if plan else None,
-                "usuarios_activos": activos,
-                "puede_agregar": True,
-                "slots_disponibles": None,
-                "sin_limite": True,
-            }
+        activos = User.objects.filter(clinica=clinica, activo=True).count()
+        sedes_activas = Sede.objects.filter(clinica=clinica, activo=True).count()
+
+        sin_limite_usuarios = plan is None or plan.max_usuarios == 0
+        sin_limite_sedes = plan is None or plan.max_sedes == 0
+
+        if sin_limite_usuarios:
+            slots_usuarios = None
+            puede_agregar = True
         else:
-            slots = max(0, plan.max_usuarios - activos)
-            data = {
-                "plan": PlanSerializer(plan).data,
-                "usuarios_activos": activos,
-                "puede_agregar": activos < plan.max_usuarios,
-                "slots_disponibles": slots,
-                "sin_limite": False,
-            }
+            slots_usuarios = max(0, plan.max_usuarios - activos)
+            puede_agregar = activos < plan.max_usuarios
+
+        if sin_limite_sedes:
+            slots_sedes = None
+            puede_agregar_sede = True
+        else:
+            slots_sedes = max(0, plan.max_sedes - sedes_activas)
+            puede_agregar_sede = sedes_activas < plan.max_sedes
+
+        data = {
+            "plan": PlanSerializer(plan).data if plan else None,
+            "usuarios_activos": activos,
+            "puede_agregar": puede_agregar,
+            "slots_disponibles": slots_usuarios,
+            "sin_limite": sin_limite_usuarios,
+            "sedes_activas": sedes_activas,
+            "puede_agregar_sede": puede_agregar_sede,
+            "slots_disponibles_sedes": slots_sedes,
+            "sin_limite_sedes": sin_limite_sedes,
+        }
         return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["patch"], url_path="asignar_plan")
@@ -668,6 +749,132 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
                     raise ValidationError({"error": f"No existe paso: {paso_id}"})
         return Response({"ok": True}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get", "post"], url_path="grupos")
+    def grupos(self, request, pk=None):
+        servicio = self.get_object()
+        if request.method == "GET":
+            rels = (
+                servicio.grupos_zonas
+                .filter(activo=True)
+                .select_related("grupo")
+                .prefetch_related("grupo__diagramas__diagrama")
+                .order_by("orden")
+            )
+            return Response(ServicioGrupoZonasSerializer(rels, many=True).data)
+
+        self._check_gestion_permission(request)
+        grupo_id = request.data.get("grupo")
+        orden = request.data.get("orden", servicio.grupos_zonas.filter(activo=True).count() + 1)
+        grupo = get_object_or_404(GrupoZonas, id=grupo_id, activo=True)
+        rel, created = ServicioGrupoZonas.objects.get_or_create(
+            servicio=servicio,
+            grupo=grupo,
+            defaults={"orden": orden},
+        )
+        if not created:
+            rel.activo = True
+            rel.orden = orden
+            rel.save(update_fields=["activo", "orden", "updated_at"])
+        rel_fresh = ServicioGrupoZonas.objects.select_related("grupo").prefetch_related("grupo__diagramas__diagrama").get(pk=rel.pk)
+        return Response(ServicioGrupoZonasSerializer(rel_fresh).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["delete"], url_path=r"grupos/(?P<grupo_id>[^/.]+)")
+    def eliminar_grupo(self, request, pk=None, grupo_id=None):
+        self._check_gestion_permission(request)
+        servicio = self.get_object()
+        rel = get_object_or_404(ServicioGrupoZonas, servicio=servicio, grupo_id=grupo_id)
+        rel.activo = False
+        rel.save(update_fields=["activo", "updated_at"])
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def _check_gestion_permission(self, request):
+        from apps.users.permissions import RequirePermission
+        perm = RequirePermission("servicios.gestionar")()
+        if not perm.has_permission(request, self):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied()
+
+
+class GrupoZonasViewSet(ModelViewSet):
+    serializer_class = GrupoZonasSerializer
+    queryset = GrupoZonas.objects.prefetch_related("diagramas__diagrama").all()
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy", "agregar_diagrama", "eliminar_diagrama"}:
+            return [RequirePermission("servicios.gestionar")()]
+        return [RequirePermission("servicios.ver")()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        activo = self.request.query_params.get("activo")
+        if activo is not None:
+            qs = qs.filter(activo=activo.lower() == "true")
+        return qs.order_by("nombre")
+
+    @action(detail=True, methods=["post"], url_path="diagramas")
+    def agregar_diagrama(self, request, pk=None):
+        grupo = self.get_object()
+        diagrama_id = request.data.get("diagrama")
+        orden = request.data.get("orden", grupo.diagramas.count() + 1)
+        diagrama = get_object_or_404(DiagramaCorporal, id=diagrama_id, activo=True)
+        rel, _ = GrupoZonasDiagrama.objects.get_or_create(
+            grupo=grupo, diagrama=diagrama, defaults={"orden": orden}
+        )
+        rel.orden = orden
+        rel.save(update_fields=["orden", "updated_at"])
+        return Response(GrupoZonasDiagramaSerializer(rel).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["delete"], url_path=r"diagramas/(?P<diagrama_id>[^/.]+)")
+    def eliminar_diagrama(self, request, pk=None, diagrama_id=None):
+        grupo = self.get_object()
+        rel = get_object_or_404(GrupoZonasDiagrama, grupo=grupo, diagrama_id=diagrama_id)
+        rel.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class DiagramaCorporalViewSet(ModelViewSet):
+    serializer_class = DiagramaCorporalSerializer
+    queryset = DiagramaCorporal.objects.all().order_by("orden", "nombre")
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            return [IsSuperAdmin()]
+        return [IsAuthenticated()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        # En escritura y detalle se necesita el objeto sin importar su estado activo
+        if self.action in {"update", "partial_update", "destroy", "retrieve"}:
+            return qs
+        if self.request.query_params.get("activo", "").lower() == "false":
+            return qs
+        return qs.filter(activo=True)
+
+    def _save_imagen_publica(self, imagen_file, instance_id: str) -> str:
+        import os
+        _, ext = os.path.splitext(imagen_file.name)
+        path = f"diagramas_corporales/{instance_id}{ext.lower()}"
+        upload_public_file(imagen_file.read(), path, imagen_file.content_type or "image/png")
+        return path
+
+    def perform_create(self, serializer):
+        imagen = self.request.FILES.get("imagen")
+        instance = serializer.save(imagen=None)
+        if imagen:
+            path = self._save_imagen_publica(imagen, str(instance.id))
+            instance.imagen = path
+            instance.save(update_fields=["imagen"])
+
+    def perform_update(self, serializer):
+        imagen = self.request.FILES.get("imagen")
+        if imagen:
+            instance = serializer.instance
+            path = self._save_imagen_publica(imagen, str(instance.id))
+            serializer.save(imagen=path)
+        else:
+            serializer.save()
+
 
 class ProcedimientoViewSet(ServicioViewSet):
     serializer_class = ProcedimientoSerializer
@@ -809,3 +1016,184 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
         tipo.activo = False
         tipo.save(update_fields=["activo", "updated_at"])
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── Campañas ─────────────────────────────────────────────────────────────────
+
+
+class CampanaViewSet(HasClinicamente, ModelViewSet):
+    serializer_class = CampanaSerializer
+    queryset = Campana.objects.select_related("clinica").prefetch_related("items", "sedes").all()
+    search_fields = ("nombre", "descripcion")
+    ordering_fields = ("nombre", "fecha_inicio", "fecha_fin", "created_at")
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve", "activas"}:
+            permission_classes = (RequirePermission("campanas.gestionar"),)
+        else:
+            permission_classes = (RequirePermission("campanas.gestionar"),)
+        return [p() for p in permission_classes]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        activo = self.request.query_params.get("activo")
+        if activo is not None:
+            queryset = queryset.filter(activo=activo.lower() == "true")
+        return queryset
+
+    def _stats_context(self, campanas):
+        from apps.clinicas.campana_stats import get_stats_map
+
+        campana_ids = [campana.id for campana in campanas]
+        return {**self.get_serializer_context(), "stats_map": get_stats_map(campana_ids)}
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        campanas = page if page is not None else queryset
+        serializer = self.get_serializer(campanas, many=True, context=self._stats_context(campanas))
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, context=self._stats_context([instance]))
+        return Response(serializer.data)
+
+    def perform_create(self, serializer):
+        serializer.save(clinica=get_clinica_activa(self.request))
+
+    def perform_destroy(self, instance):
+        instance.activo = False
+        instance.save(update_fields=["activo", "updated_at"])
+
+    @action(detail=False, methods=["get"], url_path="activas")
+    def activas(self, request):
+        from datetime import date
+        from django.db.models import Q
+
+        hoy = date.today()
+        queryset = self.get_queryset().filter(activo=True, fecha_inicio__lte=hoy, fecha_fin__gte=hoy)
+
+        sede_id = request.query_params.get("sede_id")
+        if sede_id:
+            queryset = queryset.filter(Q(sedes__isnull=True) | Q(sedes__id=sede_id)).distinct()
+
+        campanas = list(queryset)
+        serializer = self.get_serializer(campanas, many=True, context=self._stats_context(campanas))
+        return Response(serializer.data)
+
+    @action(detail=True, methods=["post"], url_path="items")
+    def agregar_item(self, request, pk=None):
+        campana = self.get_object()
+        serializer = CampanaItemSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+
+        procedimiento = serializer.validated_data.get("procedimiento")
+        tratamiento = serializer.validated_data.get("tratamiento")
+        clinica = campana.clinica
+        if procedimiento and procedimiento.clinica_id != clinica.id:
+            return Response({"procedimiento": "No pertenece a esta clinica."}, status=status.HTTP_400_BAD_REQUEST)
+        if tratamiento and tratamiento.clinica_id != clinica.id:
+            return Response({"tratamiento": "No pertenece a esta clinica."}, status=status.HTTP_400_BAD_REQUEST)
+
+        item = serializer.save(campana=campana)
+        return Response(CampanaItemSerializer(item).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["patch", "delete"], url_path=r"items/(?P<item_id>[^/.]+)")
+    def editar_item(self, request, pk=None, item_id=None):
+        campana = self.get_object()
+        item = get_object_or_404(CampanaItem.objects.filter(campana=campana, activo=True), id=item_id)
+
+        if request.method == "DELETE":
+            item.activo = False
+            item.save(update_fields=["activo", "updated_at"])
+            return Response(status=status.HTTP_204_NO_CONTENT)
+
+        serializer = CampanaItemSerializer(item, data=request.data, partial=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(CampanaItemSerializer(item).data)
+
+
+class PlantillaAsistenciaViewSet(HasClinicamente, ModelViewSet):
+    queryset = PlantillaAsistencia.objects.all()
+    serializer_class = PlantillaAsistenciaSerializer
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve"}:
+            return [RequirePermission("clinicas.ver")()]
+        return [RequirePermission("clinicas.config.gestionar")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.rol != "superadmin":
+            queryset = queryset.filter(clinica=user.clinica)
+        activo = self.request.query_params.get("activo")
+        if activo is not None:
+            queryset = queryset.filter(activo=activo.lower() == "true")
+        return queryset
+
+    def perform_create(self, serializer):
+        serializer.save(clinica=get_clinica_activa(self.request))
+
+
+class RegistroClinicaView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request):
+        from apps.clinicas.serializers import RegistroClinicaSerializer
+        from apps.clinicas.services import iniciar_registro_clinica
+
+        serializer = RegistroClinicaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        d = serializer.validated_data
+
+        try:
+            iniciar_registro_clinica(
+                nombre_clinica=d["nombre_clinica"],
+                nit=d["nit"],
+                nombre_admin=d["nombre_admin"],
+                apellido_admin=d["apellido_admin"],
+                email=d["email"],
+                telefono=d["telefono"],
+            )
+        except Exception as exc:
+            return Response(
+                {"error": str(exc), "code": "REGISTRO_FALLIDO"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response(
+            {
+                "mensaje": "Revisa tu correo para confirmar tu dirección y completar el registro.",
+                "email": d["email"],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class VerificarRegistroClinicaView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request, token: str):
+        from apps.clinicas.services import confirmar_registro_clinica
+
+        try:
+            invite_token = confirmar_registro_clinica(token)
+        except ValueError as exc:
+            return Response(
+                {"ok": False, "error": str(exc)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        except Exception:
+            return Response(
+                {"ok": False, "error": "Error interno. Contacta a soporte."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        return Response({"ok": True, "invite_token": invite_token}, status=status.HTTP_200_OK)

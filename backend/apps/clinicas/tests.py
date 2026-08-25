@@ -24,6 +24,7 @@ class ServicioVigenciaTests(TestCase):
         )
         self.client.force_authenticate(self.superadmin)
         self.clinica = Clinica.objects.create(nombre="Clinica Vigencia", nit="901111222")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
 
     def test_servicio_accepts_vigencia_meses(self):
         response = self.client.post(
@@ -290,3 +291,260 @@ class MiClinicaLogoTests(TestCase):
         self.clinica.refresh_from_db()
         self.assertEqual(response.json()["logo_url"], f"http://cdn.test/clinica-static/{self.clinica.logo.name}")
         self.assertNotIn("X-Amz-", response.json()["logo_url"])
+
+
+class CampanaSedesTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Campanas", nit="903000444")
+        self.sede_a = Sede.objects.create(
+            clinica=self.clinica,
+            nombre="Sede Norte",
+            ciudad="Bogota",
+            direccion="Calle 1",
+            telefono="3000000001",
+            horario={"lunes": ["08:00", "18:00"]},
+        )
+        self.sede_b = Sede.objects.create(
+            clinica=self.clinica,
+            nombre="Sede Sur",
+            ciudad="Bogota",
+            direccion="Calle 2",
+            telefono="3000000002",
+            horario={"lunes": ["08:00", "18:00"]},
+        )
+        self.admin = User.objects.create_user(
+            email="admin-campanas@test.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="Campanas",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        from apps.users.models import Rol
+
+        self.admin.rol_dinamico = Rol.objects.get(clinica=self.clinica, slug="admin")
+        self.admin.save(update_fields=["rol_dinamico"])
+        self.client.force_authenticate(self.admin)
+
+    def test_get_y_list_incluyen_sedes_como_array_de_uuids(self):
+        create = self.client.post(
+            "/api/v1/clinicas/campanas/",
+            {
+                "nombre": "Verano",
+                "descripcion": "Promo",
+                "fecha_inicio": "2026-06-01",
+                "fecha_fin": "2026-08-31",
+                "sedes": [str(self.sede_a.id), str(self.sede_b.id)],
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, 201)
+        campana_id = create.json()["id"]
+
+        detail = self.client.get(f"/api/v1/clinicas/campanas/{campana_id}/")
+        listing = self.client.get("/api/v1/clinicas/campanas/")
+
+        self.assertEqual(detail.status_code, 200)
+        self.assertIsInstance(detail.json()["sedes"], list)
+        self.assertEqual(set(detail.json()["sedes"]), {str(self.sede_a.id), str(self.sede_b.id)})
+        self.assertEqual(len(detail.json()["sedes_nombres"]), 2)
+
+        item = next(row for row in listing.json()["results"] if row["id"] == campana_id)
+        self.assertEqual(set(item["sedes"]), {str(self.sede_a.id), str(self.sede_b.id)})
+
+    def test_patch_sedes_persiste_y_vacio_significa_todas(self):
+        create = self.client.post(
+            "/api/v1/clinicas/campanas/",
+            {
+                "nombre": "Otono",
+                "fecha_inicio": "2026-09-01",
+                "fecha_fin": "2026-11-30",
+                "sedes_ids": [str(self.sede_a.id)],
+            },
+            format="json",
+        )
+        campana_id = create.json()["id"]
+
+        patch = self.client.patch(
+            f"/api/v1/clinicas/campanas/{campana_id}/",
+            {"sedes": [str(self.sede_b.id)]},
+            format="json",
+        )
+        self.assertEqual(patch.status_code, 200)
+        self.assertEqual(patch.json()["sedes"], [str(self.sede_b.id)])
+
+        clear = self.client.patch(
+            f"/api/v1/clinicas/campanas/{campana_id}/",
+            {"sedes": []},
+            format="json",
+        )
+        self.assertEqual(clear.status_code, 200)
+        self.assertEqual(clear.json()["sedes"], [])
+        self.assertEqual(clear.json()["sedes_nombres"], [])
+
+
+class CampanaStatsTests(TestCase):
+    def setUp(self):
+        from datetime import timedelta
+        import uuid
+
+        from django.utils import timezone
+
+        from apps.clinicas.models import Campana, CampanaItem
+        from apps.pacientes.models import Paciente
+        from apps.users.models import Rol
+
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Stats", nit=f"905{uuid.uuid4().hex[:6]}")
+        self.sede = Sede.objects.create(
+            clinica=self.clinica,
+            nombre="Principal",
+            ciudad="Bogota",
+            direccion="Calle 1",
+            telefono="3000000000",
+            horario={"lunes": ["08:00", "18:00"]},
+        )
+        self.procedimiento = Servicio.objects.create(
+            clinica=self.clinica,
+            nombre="Laser",
+            descripcion="Facial",
+            duracion_min=45,
+            precio="350000.00",
+            precio_base="350000.00",
+        )
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento="CC",
+            numero_documento=f"DOC{uuid.uuid4().hex[:8]}",
+            nombres="Ana",
+            apellidos="Stats",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo="F",
+            direccion="Calle 2",
+            telefono="3001112233",
+            canal_confirmacion="whatsapp",
+            autoriza_datos=True,
+        )
+        self.admin = User.objects.create_user(
+            email=f"admin-stats-{uuid.uuid4().hex[:6]}@test.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="Stats",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        self.admin.rol_dinamico = Rol.objects.get(clinica=self.clinica, slug="admin")
+        self.admin.save(update_fields=["rol_dinamico"])
+        self.client.force_authenticate(self.admin)
+
+        hoy = timezone.localdate()
+        self.campana = Campana.objects.create(
+            clinica=self.clinica,
+            nombre="Verano",
+            descripcion="Promo",
+            fecha_inicio=hoy - timedelta(days=1),
+            fecha_fin=hoy + timedelta(days=30),
+        )
+        self.campana.sedes.set([self.sede])
+        CampanaItem.objects.create(
+            campana=self.campana,
+            procedimiento=self.procedimiento,
+            precio_campana="280000.00",
+        )
+
+    def _crear_y_aceptar_cotizacion(self, *, valor="280000.00", num_citas=1, descuento="0.00"):
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": valor,
+                        "num_citas": num_citas,
+                        "descuento_porcentaje": descuento,
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": valor}],
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, 201, create.content)
+        cotizacion_id = create.json()["id"]
+
+        patch = self.client.patch(
+            f"/api/v1/cotizaciones/{cotizacion_id}/",
+            {
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": valor,
+                        "num_citas": num_citas,
+                        "descuento_porcentaje": descuento,
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": valor}],
+            },
+            format="json",
+        )
+        self.assertEqual(patch.status_code, 200, patch.content)
+
+        accept = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        self.assertEqual(accept.status_code, 200, accept.content)
+        return cotizacion_id
+
+    def test_get_y_list_incluyen_stats_de_ventas(self):
+        self._crear_y_aceptar_cotizacion()
+
+        detail = self.client.get(f"/api/v1/clinicas/campanas/{self.campana.id}/")
+        listing = self.client.get("/api/v1/clinicas/campanas/")
+
+        self.assertEqual(detail.status_code, 200)
+        stats = detail.json()["stats"]
+        self.assertEqual(stats["cotizaciones_aceptadas"], 1)
+        self.assertEqual(stats["items_vendidos"], 1)
+        self.assertEqual(stats["monto_total"], "280000.00")
+
+        item = next(row for row in listing.json()["results"] if row["id"] == str(self.campana.id))
+        self.assertEqual(item["stats"]["cotizaciones_aceptadas"], 1)
+
+    def test_stats_no_cuentan_cotizaciones_en_borrador(self):
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "280000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "280000.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(create.status_code, 201)
+
+        detail = self.client.get(f"/api/v1/clinicas/campanas/{self.campana.id}/")
+        stats = detail.json()["stats"]
+        self.assertEqual(stats["cotizaciones_aceptadas"], 0)
+        self.assertEqual(stats["items_vendidos"], 0)
+        self.assertEqual(stats["monto_total"], "0.00")
+
+    def test_stats_suma_subtotal_con_descuento(self):
+        self._crear_y_aceptar_cotizacion(valor="280000.00", num_citas=2, descuento="10.00")
+
+        detail = self.client.get(f"/api/v1/clinicas/campanas/{self.campana.id}/")
+        stats = detail.json()["stats"]
+        self.assertEqual(stats["items_vendidos"], 1)
+        self.assertEqual(stats["monto_total"], "504000.00")

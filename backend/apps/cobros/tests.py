@@ -128,7 +128,10 @@ class CobrosIngresosTests(TestCase):
         response = self.client.get("/api/v1/cobros/cobros/resumen/")
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json()["hoy"]["total"], "880000.00")
-        self.assertEqual(response.json()["hoy"]["por_cita"], "500000.00")
-        self.assertEqual(response.json()["hoy"]["por_cotizacion"], "350000.00")
-        self.assertEqual(response.json()["hoy"]["por_libre"], "30000.00")
+        # total_recaudado = suma de pagos (500000 + 350000 + 30000).
+        self.assertEqual(response.json()["total_recaudado"], "880000.00")
+        # total_cobrado = 500000 (cita) + 350000 (cotizacion, recalculada por sus pagos) + 30000 (libre).
+        self.assertEqual(response.json()["total_pendiente"], "0.00")
+        self.assertEqual(response.json()["total_cobros"], 3)
+        self.assertEqual(response.json()["total_pagados"], 0)
+        self.assertEqual(response.json()["total_pendientes"], 3)

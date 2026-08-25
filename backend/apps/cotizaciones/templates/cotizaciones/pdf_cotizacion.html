@@ -227,8 +227,9 @@
       <table class="items-table">
         <thead>
           <tr>
-            <th style="width:50%">Descripcion</th>
+            <th style="width:{% if mostrar_periodicidad %}38%{% else %}50%{% endif %}">Descripcion</th>
             <th>Sesiones</th>
+            {% if mostrar_periodicidad %}<th>Periodicidad</th>{% endif %}
             <th class="text-right">Valor unit.</th>
             <th class="text-right">Desc.</th>
             <th class="text-right">Subtotal</th>
@@ -244,6 +245,7 @@
               {% endif %}
             </td>
             <td>{{ item.num_sesiones }}</td>
+            {% if mostrar_periodicidad %}<td>{{ item.periodicidad }}</td>{% endif %}
             <td class="text-right">{{ item.valor_unitario }}</td>
             <td class="text-right">{{ item.descuento_porcentaje }}</td>
             <td class="text-right">{{ item.subtotal }}</td>
@@ -260,8 +262,9 @@
       <table class="items-table">
         <thead>
           <tr>
-            <th style="width:46%">Descripcion</th>
+            <th style="width:{% if mostrar_periodicidad %}36%{% else %}46%{% endif %}">Descripcion</th>
             <th>Sesiones</th>
+            {% if mostrar_periodicidad %}<th>Periodicidad</th>{% endif %}
             <th class="text-right">Valor unit.</th>
             <th class="text-right">Desc.</th>
             <th class="text-right">Subtotal</th>
@@ -280,6 +283,7 @@
               {% endif %}
             </td>
             <td>{{ item.num_citas }}</td>
+            {% if mostrar_periodicidad %}<td>{{ item.periodicidad }}</td>{% endif %}
             <td class="text-right">{{ item.valor_unitario }}</td>
             <td class="text-right">{{ item.descuento_porcentaje }}</td>
             <td class="text-right">{{ item.subtotal }}</td>

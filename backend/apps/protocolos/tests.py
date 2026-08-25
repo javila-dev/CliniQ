@@ -9,7 +9,8 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.clinicas.models import Clinica, Servicio, ServicioConsentimiento, TipoSesion, TipoSesionProcedimiento, TratamientoCatalogo
+from apps.clinicas.models import Clinica, Sede, Servicio, ServicioConsentimiento, TipoSesion, TipoSesionProcedimiento, TratamientoCatalogo
+from apps.agenda.models import Cita
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.pacientes.models import Paciente
 from apps.protocolos.models import ConsentimientoPaciente, SesionProcedimiento, TratamientoPaciente
@@ -184,3 +185,110 @@ class ProtocolosFlowTests(TestCase):
         self.assertNotEqual(first, second)
         self.assertIn("X-Amz-", first)
         self.assertIn("X-Amz-", second)
+
+    def test_recepcion_no_puede_marcar_sesion_completada(self):
+        tratamiento = TratamientoPaciente.objects.create(
+            paciente=self.paciente,
+            servicio=self.procedimiento,
+            tratamiento_catalogo=self.tratamiento_catalogo,
+        )
+        sesion = SesionProcedimiento.objects.create(
+            tratamiento=tratamiento,
+            tipo_sesion=self.tipo_sesion,
+            numero=1,
+            procedimiento=self.procedimiento,
+        )
+        recepcion = User.objects.create_user(
+            email="recepcion-protocolos@example.com",
+            password="Secret123!",
+            first_name="Recepcion",
+            last_name="Protocolos",
+            rol=User.Role.RECEPCION,
+            clinica=self.clinica,
+        )
+        self.client.force_authenticate(recepcion)
+
+        complete = self.client.post(f"/api/v1/protocolos/sesiones/{sesion.id}/marcar_completada/", {}, format="json")
+        self.assertEqual(complete.status_code, 403)
+
+        inasistencia = self.client.post(f"/api/v1/protocolos/sesiones/{sesion.id}/marcar_inasistencia/", {}, format="json")
+        self.assertEqual(inasistencia.status_code, 403)
+
+    def test_marcar_completada_no_permite_cita_ni_profesional_de_otra_clinica(self):
+        tratamiento = TratamientoPaciente.objects.create(
+            paciente=self.paciente,
+            servicio=self.procedimiento,
+            tratamiento_catalogo=self.tratamiento_catalogo,
+        )
+        sesion = SesionProcedimiento.objects.create(
+            tratamiento=tratamiento,
+            tipo_sesion=self.tipo_sesion,
+            numero=1,
+            procedimiento=self.procedimiento,
+        )
+        ConsentimientoPaciente.objects.create(
+            paciente=self.paciente,
+            template_token="consentimiento-tensamax",
+            template_nombre="Otros procedimientos",
+            procedimiento=self.procedimiento,
+            fecha_firma=timezone.localdate(),
+            vigencia_hasta=timezone.localdate() + timedelta(days=365),
+            metodo=ConsentimientoPaciente.Metodo.PRESENCIAL_CONFIRMADO,
+            registrado_por=self.superadmin,
+        )
+
+        otra_clinica = Clinica.objects.create(nombre="Otra Clinica", nit="905000222")
+        otra_sede = Sede.objects.create(
+            clinica=otra_clinica, nombre="Sede Central", ciudad="Bogota", direccion="Cra 1", telefono="3000000001"
+        )
+        otro_paciente = Paciente.objects.create(
+            clinica=otra_clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="987654321",
+            nombres="Ana",
+            apellidos="Perez",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO,
+            direccion="Calle 2",
+            telefono="3000000002",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+        otro_profesional = User.objects.create_user(
+            email="profesional-otra-clinica@example.com",
+            password="Secret123!",
+            first_name="Otro",
+            last_name="Profesional",
+            rol=User.Role.PROFESIONAL,
+            clinica=otra_clinica,
+            es_profesional=True,
+        )
+        otra_cita = Cita.objects.create(
+            paciente=otro_paciente,
+            sede=otra_sede,
+            profesional=otro_profesional,
+            fecha_inicio=timezone.now(),
+            fecha_fin=timezone.now() + timedelta(hours=1),
+            canal_confirmacion=Cita.CanalConfirmacion.WHATSAPP,
+        )
+
+        admin_clinica_propia = User.objects.create_user(
+            email="admin-protocolos@example.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="Protocolos",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        self.client.force_authenticate(admin_clinica_propia)
+
+        complete = self.client.post(
+            f"/api/v1/protocolos/sesiones/{sesion.id}/marcar_completada/",
+            {"cita_id": str(otra_cita.id), "profesional_id": str(otro_profesional.id)},
+            format="json",
+        )
+
+        self.assertEqual(complete.status_code, 404)
+        sesion.refresh_from_db()
+        self.assertIsNone(sesion.cita_id)
+        self.assertIsNone(sesion.profesional_id)

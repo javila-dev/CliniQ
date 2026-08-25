@@ -1,0 +1,464 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    @page {
+      size: A4;
+      margin: 18mm 14mm 16mm 14mm;
+      @bottom-right {
+        content: "Generado por CliniQ · " string(generado-en);
+        font-size: 9px;
+        color: #9ca3af;
+      }
+    }
+
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      color: #1f2937;
+      font-size: 12px;
+      line-height: 1.45;
+      margin: 0;
+    }
+
+    /* ── HEADER ── */
+    .header {
+      border-bottom: 2.5px solid #1e4070;
+      padding-bottom: 14px;
+      margin-bottom: 18px;
+    }
+
+    .header-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .logo-cell {
+      width: 68px;
+      vertical-align: middle;
+    }
+
+    .logo-cell img {
+      max-width: 60px;
+      max-height: 60px;
+      object-fit: contain;
+    }
+
+    .logo-placeholder {
+      width: 56px;
+      height: 56px;
+      background: #dbeafe;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .clinic-cell {
+      vertical-align: middle;
+      padding-left: 10px;
+    }
+
+    .clinic-name {
+      font-size: 15px;
+      font-weight: bold;
+      color: #1e4070;
+      margin: 0 0 3px;
+    }
+
+    .clinic-meta {
+      font-size: 10px;
+      color: #6b7280;
+      margin: 0;
+      line-height: 1.6;
+    }
+
+    .doc-cell {
+      vertical-align: middle;
+      text-align: right;
+    }
+
+    .doc-title {
+      font-size: 14px;
+      font-weight: bold;
+      color: #1e4070;
+      margin: 0 0 3px;
+    }
+
+    .doc-ref {
+      font-size: 10px;
+      color: #9ca3af;
+      margin: 0;
+    }
+
+    .doc-date {
+      font-size: 10px;
+      color: #6b7280;
+      margin: 4px 0 0;
+    }
+
+    /* ── SECTIONS ── */
+    .section {
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 9px;
+      font-weight: bold;
+      color: #9ca3af;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      border-bottom: 0.5px solid #e5e7eb;
+      padding-bottom: 4px;
+      margin: 0 0 8px;
+    }
+
+    .field-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .field-table td {
+      padding: 3px 0;
+      font-size: 11.5px;
+    }
+
+    .field-label {
+      color: #6b7280;
+      width: 40%;
+    }
+
+    .field-value {
+      font-weight: bold;
+      color: #1f2937;
+      text-align: right;
+    }
+
+    /* ── PROCEDURE BOX ── */
+    .procedure-box {
+      border-left: 3px solid #1e4070;
+      background: #f9fafb;
+      padding: 10px 12px;
+      margin: 10px 0 0;
+      border-radius: 0 6px 6px 0;
+    }
+
+    .procedure-label {
+      font-size: 9px;
+      font-weight: bold;
+      color: #9ca3af;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 3px;
+    }
+
+    .procedure-name {
+      font-size: 13px;
+      font-weight: bold;
+      color: #1f2937;
+      margin: 0;
+    }
+
+    /* ── COTIZACION BOX ── */
+    .cotizacion-box {
+      background: #eff6ff;
+      border: 0.5px solid #bfdbfe;
+      border-radius: 6px;
+      padding: 10px 12px;
+      margin-top: 10px;
+    }
+
+    .cotizacion-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .cotizacion-left {
+      vertical-align: middle;
+    }
+
+    .cotizacion-label {
+      font-size: 9px;
+      font-weight: bold;
+      color: #3b82f6;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 3px;
+    }
+
+    .cotizacion-ref {
+      font-size: 12px;
+      font-weight: bold;
+      color: #1e4070;
+      margin: 0;
+    }
+
+    .cotizacion-desc {
+      font-size: 10px;
+      color: #3b82f6;
+      margin: 2px 0 0;
+    }
+
+    .session-badge {
+      background: #1e4070;
+      color: #ffffff;
+      border-radius: 8px;
+      padding: 8px 16px;
+      text-align: center;
+      white-space: nowrap;
+    }
+
+    .session-num {
+      font-size: 20px;
+      font-weight: bold;
+      line-height: 1;
+      display: block;
+    }
+
+    .session-lbl {
+      font-size: 8px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      opacity: 0.8;
+      display: block;
+      margin-top: 2px;
+    }
+
+    /* ── DECLARATION ── */
+    .declaration {
+      background: #f9fafb;
+      border: 0.5px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 12px 14px;
+      margin: 16px 0;
+      font-size: 11.5px;
+      color: #4b5563;
+      line-height: 1.65;
+    }
+
+    .declaration strong {
+      color: #1f2937;
+    }
+
+    /* ── SIGNATURES ── */
+    .sig-section {
+      position: fixed;
+      bottom: 20mm;
+      left: 14mm;
+      right: 14mm;
+    }
+
+    .sig-table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 16px;
+    }
+
+    .sig-cell {
+      width: 48%;
+      vertical-align: top;
+      padding-right: 4%;
+    }
+
+    .sig-cell:last-child {
+      padding-right: 0;
+    }
+
+    .sig-label {
+      font-size: 9px;
+      font-weight: bold;
+      color: #9ca3af;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 0 6px;
+    }
+
+    .sig-area {
+      height: 70px;
+      border-bottom: 1px solid #9ca3af;
+      margin-bottom: 6px;
+    }
+
+    .sig-name {
+      font-size: 11px;
+      color: #6b7280;
+      border-bottom: 0.5px solid #e5e7eb;
+      padding-bottom: 3px;
+      margin-bottom: 3px;
+    }
+
+    .sig-doc {
+      font-size: 10px;
+      color: #9ca3af;
+    }
+
+    /* ── FOOTER ── */
+    .footer {
+      border-top: 0.5px solid #e5e7eb;
+      margin-top: 20px;
+      padding-top: 10px;
+    }
+
+    .footer-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .footer-left {
+      font-size: 9.5px;
+      color: #9ca3af;
+      line-height: 1.6;
+    }
+
+    .footer-right {
+      font-size: 9.5px;
+      color: #9ca3af;
+      text-align: right;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <table class="header-table">
+      <tr>
+        <td class="logo-cell">
+          {% if logo_url %}
+            <img src="{{ logo_url }}" alt="Logo {{ clinica.nombre }}">
+          {% else %}
+            <div class="logo-placeholder"></div>
+          {% endif %}
+        </td>
+        <td class="clinic-cell">
+          <p class="clinic-name">{{ clinica.nombre }}</p>
+          <p class="clinic-meta">
+            {% if clinica.telefono %}{{ clinica.telefono }}{% endif %}
+            {% if clinica.nit %} · NIT {{ clinica.nit }}{% endif %}
+          </p>
+        </td>
+        <td class="doc-cell">
+          <p class="doc-title">Registro de asistencia</p>
+          <p class="doc-ref">#CIT-{{ cita_referencia }}</p>
+          <p class="doc-date">{{ fecha_generacion }}</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- DATOS DEL PACIENTE -->
+  <div class="section">
+    <p class="section-title">Datos del paciente</p>
+    <table class="field-table">
+      <tr>
+        <td class="field-label">Nombre completo</td>
+        <td class="field-value">{{ paciente.nombre_completo }}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Documento de identidad</td>
+        <td class="field-value">{{ documento_paciente }}</td>
+      </tr>
+      {% if paciente.telefono %}
+      <tr>
+        <td class="field-label">Teléfono</td>
+        <td class="field-value">{{ paciente.telefono }}</td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+
+  <!-- DETALLE DE LA CITA -->
+  <div class="section">
+    <p class="section-title">Detalle de la cita</p>
+    <table class="field-table">
+      <tr>
+        <td class="field-label">Fecha y hora</td>
+        <td class="field-value">{{ fecha_cita }}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Profesional</td>
+        <td class="field-value">{{ profesional_nombre }}</td>
+      </tr>
+      <tr>
+        <td class="field-label">Sede</td>
+        <td class="field-value">{{ sede_nombre }}</td>
+      </tr>
+    </table>
+
+    <div class="procedure-box">
+      <p class="procedure-label">Procedimiento a realizar</p>
+      <p class="procedure-name">{{ procedimiento_nombre }}</p>
+    </div>
+
+    {% if cotizacion_info %}
+    <div class="cotizacion-box">
+      <table class="cotizacion-table">
+        <tr>
+          <td class="cotizacion-left">
+            <p class="cotizacion-label">Plan de tratamiento</p>
+            <p class="cotizacion-ref">Cotización #{{ cotizacion_info.referencia }} · {{ cotizacion_info.descripcion }}</p>
+            <p class="cotizacion-desc">Aceptada el {{ cotizacion_info.fecha_aceptacion }}</p>
+          </td>
+          <td style="width:80px; text-align:right; vertical-align:middle;">
+            <div class="session-badge">
+              <span class="session-num">{{ cotizacion_info.sesion_actual }}/{{ cotizacion_info.total_sesiones }}</span>
+              <span class="session-lbl">sesión</span>
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- DECLARACIÓN -->
+  <div class="declaration">
+    Yo, <strong>{{ paciente.nombre_completo }}</strong>, identificado/a con <strong>{{ documento_paciente }}</strong>,
+    declaro que asistí voluntariamente a la presente cita el día
+    <strong>{{ fecha_generacion }}</strong> en las instalaciones de <strong>{{ clinica.nombre }}</strong>,
+    y autorizo la realización del procedimiento indicado. Confirmo haber recibido información
+    sobre el procedimiento y no tener objeciones para su ejecución en esta fecha.
+  </div>
+
+  <!-- FIRMAS -->
+  <div class="sig-section">
+    <table class="sig-table">
+      <tr>
+        <td class="sig-cell">
+          <p class="sig-label">Firma del paciente</p>
+          <div class="sig-area" style="position: relative;">
+            <span style="position:absolute; top:0; left:0; color:white; font-size:1px; line-height:0;">__SIG_TL__</span>
+            <span style="position:absolute; bottom:0; right:0; color:white; font-size:1px; line-height:0;">__SIG_BR__</span>
+          </div>
+          <p class="sig-name">{{ paciente.nombre_completo }}</p>
+          <p class="sig-doc">{{ documento_paciente }}</p>
+        </td>
+        <td class="sig-cell">
+          <p class="sig-label">Firma del profesional</p>
+          <div class="sig-area"></div>
+          <p class="sig-name">{{ profesional_nombre }}</p>
+          <p class="sig-doc">Profesional a cargo</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <table class="footer-table">
+      <tr>
+        <td class="footer-left">
+          Documento generado por CliniQ · Referencia #CIT-{{ cita_referencia }}<br>
+          Este documento tiene validez como registro de asistencia voluntaria.
+        </td>
+        <td class="footer-right">
+          Hora de impresión<br>
+          {{ generado_en }}
+        </td>
+      </tr>
+    </table>
+  </div>
+
+</body>
+</html>

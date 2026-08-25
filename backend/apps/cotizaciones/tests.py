@@ -1,5 +1,6 @@
 from datetime import timedelta
 import tempfile
+import uuid
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -465,3 +466,206 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(envios.json()[0]["notas"], "Descargada manualmente")
         self.assertEqual(detalle.status_code, 200)
         self.assertEqual(detalle.json()["envios"][0]["canal"], "pdf")
+
+
+class CotizacionPrecioCampanaTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Campana Cotizacion", nit="904000555")
+        self.sede = Sede.objects.create(
+            clinica=self.clinica,
+            nombre="Principal",
+            ciudad="Bogota",
+            direccion="Calle 1",
+            telefono="3000000000",
+            horario={"lunes": ["08:00", "18:00"]},
+        )
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="555666777",
+            nombres="Ana",
+            apellidos="Campana",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO,
+            direccion="Calle 2",
+            telefono="3001112233",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+        self.procedimiento = Servicio.objects.create(
+            clinica=self.clinica,
+            nombre="Laser CO2",
+            descripcion="Facial",
+            duracion_min=45,
+            precio="350000.00",
+            precio_base="350000.00",
+        )
+        self.tratamiento = TratamientoCatalogo.objects.create(
+            clinica=self.clinica,
+            nombre="Plan Premium",
+            descripcion="Paquete",
+            precio_estimado="500000.00",
+        )
+        from apps.clinicas.models import Campana, CampanaItem
+        from apps.users.models import Rol
+
+        self.admin = User.objects.create_user(
+            email="admin-cot-campana@test.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="Cotizacion",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        self.admin.rol_dinamico = Rol.objects.get(clinica=self.clinica, slug="admin")
+        self.admin.save(update_fields=["rol_dinamico"])
+        self.client.force_authenticate(self.admin)
+
+        hoy = timezone.localdate()
+        self.campana = Campana.objects.create(
+            clinica=self.clinica,
+            nombre="Verano",
+            descripcion="Promo",
+            fecha_inicio=hoy - timedelta(days=1),
+            fecha_fin=hoy + timedelta(days=30),
+        )
+        self.campana.sedes.set([self.sede])
+        CampanaItem.objects.create(
+            campana=self.campana,
+            procedimiento=self.procedimiento,
+            precio_campana="280000.00",
+        )
+        CampanaItem.objects.create(
+            campana=self.campana,
+            tratamiento=self.tratamiento,
+            precio_campana="430000.00",
+        )
+
+    def test_patch_procedimiento_acepta_precio_campana_con_precio_bloqueado(self):
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "350000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "350000.00"}],
+            },
+            format="json",
+        )
+        cotizacion_id = create.json()["id"]
+
+        patch = self.client.patch(
+            f"/api/v1/cotizaciones/{cotizacion_id}/",
+            {
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "280000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "280000.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(patch.status_code, 200, patch.content)
+        item = patch.json()["items"][0]
+        self.assertTrue(item["precio_bloqueado"])
+        self.assertEqual(item["valor_unitario"], "280000.00")
+        self.assertEqual(item["precio_campana_disponible"], "280000.00")
+
+    def test_patch_procedimiento_rechaza_precio_arbitrario_sin_permiso(self):
+        profesional = User.objects.create_user(
+            email=f"prof-cot-campana-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Prof",
+            last_name="Cotizacion",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "350000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "350000.00"}],
+            },
+            format="json",
+        )
+        cotizacion_id = create.json()["id"]
+
+        self.client.force_authenticate(profesional)
+        patch = self.client.patch(
+            f"/api/v1/cotizaciones/{cotizacion_id}/",
+            {
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "100000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "100000.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(patch.status_code, 400)
+        items_error = patch.json()["items"]
+        code = items_error["code"] if isinstance(items_error, dict) else items_error[0]["code"]
+        if isinstance(code, list):
+            code = code[0]
+        self.assertEqual(code, "PRECIO_BLOQUEADO")
+
+    def test_patch_tratamiento_acepta_precio_campana_con_precio_bloqueado(self):
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "tratamiento",
+                        "tratamiento": str(self.tratamiento.id),
+                        "valor_unitario": "500000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "500000.00"}],
+            },
+            format="json",
+        )
+
+        patch = self.client.patch(
+            f"/api/v1/cotizaciones/{create.json()['id']}/",
+            {
+                "items": [
+                    {
+                        "tipo": "tratamiento",
+                        "tratamiento": str(self.tratamiento.id),
+                        "valor_unitario": "430000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "430000.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(patch.status_code, 200)
+        self.assertEqual(patch.json()["items"][0]["valor_unitario"], "430000.00")

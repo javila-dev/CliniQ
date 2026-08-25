@@ -161,6 +161,13 @@ class ConsentimientoInformado(BaseModel):
     tipo = models.CharField(max_length=30, choices=TipoConsentimiento.choices)
     documenso_template_token = models.CharField(max_length=500, null=True, blank=True)
     documenso_template_nombre = models.CharField(max_length=255, null=True, blank=True)
+    plantilla = models.ForeignKey(
+        "configuracion.DocumensoConsentimientoTemplate",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="consentimientos_informados",
+    )
     fecha_firma = models.DateField(null=True, blank=True)
     firmado = models.BooleanField(default=False)
     archivo = models.FileField(upload_to="consentimientos/", null=True, blank=True)
@@ -384,3 +391,41 @@ class OrdenMedicaAuditoria(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.accion} - {self.orden_id}"
+
+
+class AnotacionZona(BaseModel):
+    class TipoAplicacion(models.TextChoices):
+        EQUIPO     = "equipo",     "Equipo"
+        INYECTABLE = "inyectable", "Inyectable"
+        TOPICO     = "topico",     "Tópico"
+        LASER      = "laser",      "Láser"
+        OTRO       = "otro",       "Otro"
+
+    nota = models.ForeignKey(
+        NotaClinica,
+        on_delete=models.CASCADE,
+        related_name="anotaciones_zona",
+    )
+    diagrama = models.ForeignKey(
+        "clinicas.DiagramaCorporal",
+        on_delete=models.PROTECT,
+        related_name="anotaciones",
+    )
+    x = models.FloatField(help_text="Posición horizontal relativa a la imagen (0.0–1.0)")
+    y = models.FloatField(help_text="Posición vertical relativa a la imagen (0.0–1.0)")
+    radio = models.FloatField(default=0.07, help_text="Radio del área tratada como fracción del ancho de la imagen (0.03–0.5)")
+    texto = models.TextField(blank=True)
+    tipo_aplicacion = models.CharField(
+        max_length=20,
+        choices=TipoAplicacion.choices,
+        blank=True,
+        default="",
+    )
+    parametros = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        db_table = "anotaciones_zona"
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.nota_id} ({self.diagrama.nombre}) x={self.x:.3f} y={self.y:.3f}"

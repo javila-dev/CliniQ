@@ -1,5 +1,6 @@
 from rest_framework.routers import DefaultRouter
 from apps.historia_clinica.views import (
+    AnotacionZonaViewSet,
     ConsentimientoInformadoViewSet,
     FotoClinicaViewSet,
     HistoriaClinicaViewSet,
@@ -20,5 +21,6 @@ router.register("resultados-examenes", ResultadoExamenViewSet, basename="resulta
 router.register("signos-vitales", SignosVitalesViewSet, basename="signos-vitales")
 router.register("plantillas-ordenes", PlantillaOrdenViewSet, basename="plantillas-ordenes")
 router.register("ordenes-medicas", OrdenMedicaViewSet, basename="ordenes-medicas")
+router.register("anotaciones-zona", AnotacionZonaViewSet, basename="anotaciones-zona")
 
 urlpatterns = router.urls

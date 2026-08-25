@@ -7,6 +7,10 @@ from apps.cartera.models import Cartera, CuotaCartera
 
 
 class CuotaCarteraSerializer(serializers.ModelSerializer):
+    aprobada_por_nombre = serializers.CharField(
+        source="aprobada_por.nombre_completo", read_only=True, allow_null=True
+    )
+
     class Meta:
         model = CuotaCartera
         fields = (
@@ -20,6 +24,9 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
             "fecha_pago",
             "medio_pago",
             "observaciones",
+            "excepcion_aprobada",
+            "aprobada_por",
+            "aprobada_por_nombre",
         )
         read_only_fields = fields
 
@@ -75,6 +82,16 @@ class CarteraDetailSerializer(CarteraListSerializer):
 
     class Meta(CarteraListSerializer.Meta):
         fields = CarteraListSerializer.Meta.fields + ("cuotas",)
+
+
+class ModificarPlazoCuotaSerializer(serializers.Serializer):
+    fecha_vencimiento = serializers.DateField(required=False)
+    monto = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"), required=False)
+
+    def validate(self, attrs):
+        if not attrs:
+            raise serializers.ValidationError("Se debe enviar al menos fecha_vencimiento o monto.")
+        return attrs
 
 
 class RegistrarPagoCuotaSerializer(serializers.Serializer):

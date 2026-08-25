@@ -1,11 +1,29 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from urllib.parse import quote
 
 import boto3
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
+
+
+class StorageWriteError(Exception):
+    """El almacenamiento de objetos (MinIO/S3) rechazo o no respondio a una escritura."""
+
+
+# Sin esto, boto3 usa sus timeouts por defecto (~60s conectar + ~60s leer) y
+# reintentos ilimitados en modo legacy: una conexion colgada a MinIO puede
+# bloquear un worker de Django varios minutos antes de fallar.
+_S3_CLIENT_CONFIG = Config(
+    connect_timeout=5,
+    read_timeout=10,
+    retries={"max_attempts": 2, "mode": "standard"},
+)
 
 
 def _s3_client():
@@ -15,6 +33,7 @@ def _s3_client():
         aws_access_key_id=getattr(settings, "MINIO_ACCESS_KEY", ""),
         aws_secret_access_key=getattr(settings, "MINIO_SECRET_KEY", ""),
         region_name=getattr(settings, "MINIO_REGION", "us-east-1"),
+        config=_S3_CLIENT_CONFIG,
     )
 
 
@@ -53,8 +72,12 @@ def upload_private_file(file_bytes: bytes, path: str, content_type: str = "appli
             Body=file_bytes,
             ContentType=content_type,
         )
-    except (BotoCoreError, ClientError):
-        return _write_local_file(path, file_bytes)
+    except (BotoCoreError, ClientError) as exc:
+        logger.error(
+            "No se pudo escribir en MinIO (bucket privado) | bucket=%s key=%s",
+            settings.MINIO_PRIVATE_BUCKET, path, exc_info=True,
+        )
+        raise StorageWriteError(f"No se pudo guardar '{path}' en el bucket privado") from exc
     return path
 
 
@@ -68,12 +91,23 @@ def get_signed_url(path: str, expires_in: int = 3600) -> str | None:
 
     client = _s3_client()
     try:
-        return client.generate_presigned_url(
+        url = client.generate_presigned_url(
             "get_object",
             Params={"Bucket": settings.MINIO_PRIVATE_BUCKET, "Key": path},
             ExpiresIn=expires_in,
         )
+        # boto3 genera la URL con MINIO_ENDPOINT (hostname interno de Docker).
+        # La reemplazamos por MINIO_PUBLIC_BASE_URL para que el navegador pueda resolverla.
+        public_base = getattr(settings, "MINIO_PUBLIC_BASE_URL", "").rstrip("/")
+        internal_base = getattr(settings, "MINIO_ENDPOINT", "").rstrip("/")
+        if public_base and internal_base and internal_base != public_base:
+            url = url.replace(internal_base, public_base, 1)
+        return url
     except (BotoCoreError, ClientError):
+        logger.error(
+            "No se pudo generar URL firmada en MinIO | bucket=%s key=%s",
+            settings.MINIO_PRIVATE_BUCKET, path, exc_info=True,
+        )
         return f"{settings.MEDIA_URL.rstrip('/')}/{_quoted_path(path)}"
 
 
@@ -88,6 +122,10 @@ def delete_private_file(path: str) -> None:
     try:
         _s3_client().delete_object(Bucket=settings.MINIO_PRIVATE_BUCKET, Key=path)
     except (BotoCoreError, ClientError):
+        logger.error(
+            "No se pudo borrar en MinIO (bucket privado) | bucket=%s key=%s",
+            settings.MINIO_PRIVATE_BUCKET, path, exc_info=True,
+        )
         _delete_local_file(path)
 
 
@@ -117,8 +155,12 @@ def upload_public_file(file_bytes: bytes, path: str, content_type: str = "image/
             Body=file_bytes,
             ContentType=content_type,
         )
-    except (BotoCoreError, ClientError):
-        return _write_local_file(path, file_bytes)
+    except (BotoCoreError, ClientError) as exc:
+        logger.error(
+            "No se pudo escribir en MinIO (bucket publico) | bucket=%s key=%s",
+            settings.MINIO_PUBLIC_BUCKET, path, exc_info=True,
+        )
+        raise StorageWriteError(f"No se pudo guardar '{path}' en el bucket publico") from exc
     return path
 
 
@@ -136,6 +178,10 @@ def read_public_file(path: str) -> bytes | None:
         response = client.get_object(Bucket=settings.MINIO_PUBLIC_BUCKET, Key=path)
         return response["Body"].read()
     except (BotoCoreError, ClientError):
+        logger.error(
+            "No se pudo leer de MinIO (bucket publico) | bucket=%s key=%s",
+            settings.MINIO_PUBLIC_BUCKET, path, exc_info=True,
+        )
         return None
 
 
@@ -150,4 +196,8 @@ def delete_public_file(path: str) -> None:
     try:
         _s3_client().delete_object(Bucket=settings.MINIO_PUBLIC_BUCKET, Key=path)
     except (BotoCoreError, ClientError):
+        logger.error(
+            "No se pudo borrar en MinIO (bucket publico) | bucket=%s key=%s",
+            settings.MINIO_PUBLIC_BUCKET, path, exc_info=True,
+        )
         _delete_local_file(path)

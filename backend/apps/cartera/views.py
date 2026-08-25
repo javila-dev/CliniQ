@@ -10,15 +10,17 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.cartera.models import Cartera, CuotaCartera
+from apps.cartera.models import Cartera, CuotaCartera, CuotaCarteraLog
 from apps.cartera.serializers import (
     CarteraDetailSerializer,
     CarteraListSerializer,
     CuotaCarteraSerializer,
+    ModificarPlazoCuotaSerializer,
     RegistrarPagoCuotaSerializer,
 )
 from apps.cobros.models import Cobro
 from apps.cobros.services import registrar_pago
+from apps.core.logging import registrar_accion
 from apps.users.permissions import RequirePermission
 
 
@@ -98,6 +100,10 @@ class CuotaCarteraViewSet(GenericViewSet):
     serializer_class = CuotaCarteraSerializer
 
     def get_permissions(self):
+        if self.action == "aprobar_excepcion":
+            return [RequirePermission("cartera.aprobar_excepcion")()]
+        if self.action == "partial_update":
+            return [RequirePermission("cartera.modificar_plazo")()]
         return [RequirePermission("cartera.registrar_pago")()]
 
     def get_queryset(self):
@@ -106,6 +112,43 @@ class CuotaCarteraViewSet(GenericViewSet):
         if user.rol != "superadmin":
             queryset = queryset.filter(cartera__paciente__clinica=user.clinica)
         return queryset
+
+    @transaction.atomic
+    def partial_update(self, request, pk=None):
+        cuota = self.get_object()
+        if cuota.pagada:
+            raise ValidationError({"error": "No se puede modificar una cuota ya pagada.", "code": "CUOTA_YA_PAGADA"})
+        serializer = ModificarPlazoCuotaSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        datos = serializer.validated_data
+        logs = []
+        if "fecha_vencimiento" in datos:
+            logs.append(CuotaCarteraLog(
+                cuota=cuota,
+                campo="fecha_vencimiento",
+                valor_anterior=str(cuota.fecha_esperada) if cuota.fecha_esperada else "",
+                valor_nuevo=str(datos["fecha_vencimiento"]),
+                modificado_por=request.user,
+            ))
+            cuota.fecha_esperada = datos["fecha_vencimiento"]
+        if "monto" in datos:
+            logs.append(CuotaCarteraLog(
+                cuota=cuota,
+                campo="monto",
+                valor_anterior=str(cuota.valor_esperado),
+                valor_nuevo=str(datos["monto"]),
+                modificado_por=request.user,
+            ))
+            cuota.valor_esperado = datos["monto"]
+        update_fields = ["updated_at"]
+        if "fecha_vencimiento" in datos:
+            update_fields.append("fecha_esperada")
+        if "monto" in datos:
+            update_fields.append("valor_esperado")
+        cuota.save(update_fields=update_fields)
+        CuotaCarteraLog.objects.bulk_create(logs)
+        registrar_accion(request, "cuota.modificar_plazo", cuota, {k: str(v) for k, v in datos.items()})
+        return Response(CuotaCarteraSerializer(cuota).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["patch"], url_path="registrar_pago")
     @transaction.atomic
@@ -166,6 +209,11 @@ class CuotaCarteraViewSet(GenericViewSet):
         )
         cuota.refresh_from_db()
         cobro.refresh_from_db()
+        registrar_accion(request, "cuota.cobrar", cuota, {
+            "valor_pagado": str(cuota.valor_pagado),
+            "medio_pago": cuota.medio_pago,
+            "cobro_id": str(cobro.id),
+        })
         return Response(
             {
                 "cuota": CuotaCarteraSerializer(cuota).data,
@@ -174,3 +222,15 @@ class CuotaCarteraViewSet(GenericViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="aprobar_excepcion")
+    def aprobar_excepcion(self, request, pk=None):
+        cuota = self.get_object()
+        if cuota.pagada:
+            raise ValidationError({"error": "La cuota ya fue pagada.", "code": "CUOTA_YA_PAGADA"})
+        if cuota.excepcion_aprobada:
+            raise ValidationError({"error": "La excepcion ya fue aprobada.", "code": "EXCEPCION_YA_APROBADA"})
+        cuota.excepcion_aprobada = True
+        cuota.aprobada_por = request.user
+        cuota.save(update_fields=["excepcion_aprobada", "aprobada_por", "updated_at"])
+        return Response(CuotaCarteraSerializer(cuota).data, status=status.HTTP_200_OK)

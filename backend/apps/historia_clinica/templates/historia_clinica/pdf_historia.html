@@ -1,0 +1,799 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <style>
+    /* ── Page layout ──────────────────────────────────────────────────────── */
+    @page {
+      size: A4;
+      margin: 18mm 14mm 22mm 14mm;
+      @bottom-left {
+        content: "Historia Clínica · {{ clinica_nombre }} · Documento confidencial";
+        font-size: 8px;
+        color: #9ca3af;
+        font-family: Helvetica, Arial, sans-serif;
+      }
+      @bottom-right {
+        content: "Página " counter(page) " de " counter(pages);
+        font-size: 8px;
+        color: #9ca3af;
+        font-family: Helvetica, Arial, sans-serif;
+      }
+    }
+
+    /* ── Reset & base ─────────────────────────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Helvetica, Arial, sans-serif;
+      font-size: 11px;
+      line-height: 1.5;
+      color: #1f2937;
+      background: #ffffff;
+    }
+
+    /* ── Utilities ────────────────────────────────────────────────────────── */
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .bold { font-weight: bold; }
+    .muted { color: #6b7280; }
+    .small { font-size: 9.5px; }
+    .nowrap { white-space: nowrap; }
+
+    .w-full { width: 100%; }
+    .mt-1 { margin-top: 4px; }
+    .mt-2 { margin-top: 8px; }
+    .mt-3 { margin-top: 12px; }
+    .mb-1 { margin-bottom: 4px; }
+    .mb-2 { margin-bottom: 8px; }
+
+    /* ── Header ───────────────────────────────────────────────────────────── */
+    .page-header {
+      background: #111827;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+
+    .header-table { width: 100%; border-collapse: collapse; }
+    .header-table td { vertical-align: middle; }
+
+    .logo-cell { width: 72px; }
+    .logo-cell img {
+      max-width: 60px;
+      max-height: 48px;
+      object-fit: contain;
+      background: #ffffff;
+      border-radius: 6px;
+      padding: 5px;
+    }
+
+    .clinic-cell { padding-left: 12px; }
+    .clinic-name {
+      font-size: 16px;
+      font-weight: bold;
+      color: #ffffff;
+      line-height: 1.2;
+    }
+    .clinic-meta { font-size: 9px; color: rgba(255,255,255,0.45); margin-top: 3px; }
+
+    .hc-badge-cell { text-align: right; width: 190px; }
+    .hc-title {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.14em;
+      color: rgba(255,255,255,0.45);
+      margin-bottom: 5px;
+    }
+    .hc-badge {
+      display: inline-block;
+      background: rgba(255,255,255,0.10);
+      border: 1px solid rgba(255,255,255,0.22);
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: bold;
+      padding: 6px 12px;
+      letter-spacing: 0.05em;
+    }
+    .hc-meta { font-size: 9px; color: rgba(255,255,255,0.35); margin-top: 4px; }
+
+    /* ── Section headings ─────────────────────────────────────────────────── */
+    .section { margin-bottom: 18px; page-break-inside: avoid; }
+
+    .section-heading {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      color: #6b7280;
+      border-bottom: 1px solid #e5e7eb;
+      padding-bottom: 4px;
+      margin-bottom: 10px;
+    }
+
+    /* ── Grid 2-col (key-value pairs) ─────────────────────────────────────── */
+    .grid-table { width: 100%; border-collapse: collapse; }
+    .grid-table td {
+      width: 50%;
+      vertical-align: top;
+      padding: 3px 6px 3px 0;
+    }
+    .grid-table td:nth-child(even) { padding-left: 16px; border-left: 1px solid #f3f4f6; }
+    .field-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 0.05em; }
+    .field-value { font-size: 11px; font-weight: 600; color: #111827; margin-top: 1px; }
+
+    /* ── Patient summary bar ──────────────────────────────────────────────── */
+    .patient-bar {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 8px 12px;
+      margin-bottom: 14px;
+    }
+    .patient-bar .patient-name {
+      font-size: 15px;
+      font-weight: bold;
+      color: #111827;
+    }
+    .patient-bar .patient-sub {
+      font-size: 10px;
+      color: #6b7280;
+      margin-top: 2px;
+    }
+    .patient-bar-cols { width: 100%; border-collapse: collapse; margin-top: 10px; }
+    .patient-bar-cols td { vertical-align: top; width: 25%; padding-right: 10px; }
+
+    /* ── Antecedentes ─────────────────────────────────────────────────────── */
+    .ant-block {
+      background: #fafafa;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 6px;
+    }
+    .ant-label {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #9ca3af;
+      margin-bottom: 3px;
+    }
+    .ant-value { font-size: 11px; color: #1f2937; white-space: pre-wrap; }
+
+    .alert-block {
+      background: #fff7ed;
+      border: 1px solid #fed7aa;
+      border-left: 4px solid #f97316;
+      border-radius: 4px;
+      padding: 6px 10px;
+      margin-bottom: 6px;
+    }
+    .alert-block .ant-label { color: #c2410c; }
+    .alert-block .ant-value { color: #7c2d12; font-weight: 600; }
+
+    .ant-cols { width: 100%; border-collapse: collapse; }
+    .ant-cols td { vertical-align: top; width: 50%; padding-right: 8px; }
+    .ant-cols td:last-child { padding-right: 0; padding-left: 8px; }
+
+    /* ── Atenciones ───────────────────────────────────────────────────────── */
+    .atencion-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .atencion-header {
+      background: #111827;
+      color: #ffffff;
+      padding: 7px 12px;
+      page-break-after: avoid;
+      break-after: avoid;
+    }
+
+    .atencion-num {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.10em;
+      color: #9ca3af;
+      margin-bottom: 1px;
+    }
+    .atencion-fecha {
+      font-size: 12px;
+      font-weight: bold;
+      margin-top: 1px;
+    }
+    .atencion-meta {
+      font-size: 9.5px;
+      color: #d1d5db;
+      margin-top: 2px;
+    }
+
+    .atencion-body { padding: 12px 14px; }
+
+    .section-card {
+      border: 1px solid #e5e7eb;
+      border-radius: 5px;
+      margin-top: 10px;
+      overflow: hidden;
+    }
+    .section-card:first-child { margin-top: 0; }
+    .section-card-header {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6b7280;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 5px 10px;
+    }
+    .section-card-body {
+      padding: 8px 10px;
+      font-size: 11px;
+      color: #1f2937;
+    }
+    .atencion-text {
+      white-space: pre-wrap;
+    }
+    /* keep for "Registro fotográfico" standalone label */
+    .atencion-section-title {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #6b7280;
+      margin-bottom: 5px;
+      margin-top: 12px;
+    }
+
+    /* Signos vitales */
+    .signos-table { width: 100%; border-collapse: collapse; }
+    .signos-table td {
+      padding: 4px 8px;
+      font-size: 10.5px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+    .signos-table tr:last-child td { border-bottom: none; }
+    .signos-table .sv-label { color: #6b7280; width: 40%; }
+    .signos-table .sv-value { font-weight: 600; }
+
+    /* Fotos */
+    .fotos-grupo {
+      margin-top: 8px;
+      border: 1px solid #e5e7eb;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .fotos-grupo-label {
+      font-size: 9px;
+      font-weight: bold;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #6b7280;
+      background: #f9fafb;
+      border-bottom: 1px solid #e5e7eb;
+      padding: 5px 8px;
+    }
+    .fotos-row { width: 100%; border-collapse: collapse; }
+    .fotos-row-wrap { padding: 8px; }
+    .fotos-row td { vertical-align: top; padding: 0 6px 6px 0; width: 20%; }
+    .foto-thumb {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 3px;
+      border: 1px solid #e5e7eb;
+    }
+    .foto-desc { font-size: 8.5px; color: #9ca3af; margin-top: 2px; }
+
+    /* Zonas */
+    .zonas-row { display: flex; flex-wrap: wrap; gap: 16px; padding: 6px 0; }
+    .zona-bloque { display: flex; flex-direction: column; align-items: flex-start; width: 180px; }
+    .zona-nombre { font-size: 9px; font-weight: 600; color: #374151; margin-bottom: 6px; }
+    .zona-img { width: 180px; height: 180px; display: block; border: 1px solid #e5e7eb; border-radius: 6px; }
+    .zona-lista { margin: 5px 0 0 0; padding: 0; border-collapse: collapse; font-size: 8.5px; color: #374151; line-height: 1.5; width: 180px; }
+    .zona-lista tr { vertical-align: top; }
+    .zona-lista td { padding: 1px 0; }
+    .zona-num-cell { width: 18px; padding-right: 6px; }
+    .zona-texto-cell { padding-left: 0; }
+    .zona-num { display: inline-block; width: 14px; height: 14px; line-height: 14px; text-align: center; background: #2563eb; color: #fff; border-radius: 50%; font-size: 7.5px; font-weight: 700; }
+    .zona-tipo-badge { display: inline-block; font-size: 7px; font-weight: 700; text-transform: uppercase; letter-spacing: .03em; color: #2563eb; background: #eff6ff; padding: 1px 4px; border-radius: 3px; margin-bottom: 2px; }
+    .zona-detalle { font-size: 8.5px; color: #374151; }
+    .zona-obs { font-size: 8px; color: #6b7280; margin-top: 1px; }
+
+    /* Órdenes */
+    .orden-item {
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      padding: 8px 10px;
+      margin-bottom: 6px;
+      background: #f9fafb;
+    }
+    .orden-nombre { font-size: 10px; font-weight: bold; color: #374151; margin-bottom: 4px; }
+    .orden-contenido { font-size: 10.5px; color: #1f2937; white-space: pre-wrap; }
+    .orden-prof { font-size: 9px; color: #9ca3af; margin-top: 3px; }
+
+    /* ── Consentimientos ──────────────────────────────────────────────────── */
+    .consent-table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+    .consent-table thead th {
+      background: #f3f4f6;
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #6b7280;
+      font-weight: bold;
+      padding: 7px 10px;
+      text-align: left;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .consent-table tbody td {
+      padding: 7px 10px;
+      border-bottom: 1px solid #f3f4f6;
+      vertical-align: top;
+    }
+    .consent-table tbody tr:last-child td { border-bottom: none; }
+    .badge-vigente {
+      display: inline-block;
+      background: #dcfce7;
+      color: #15803d;
+      font-size: 8.5px;
+      font-weight: bold;
+      padding: 1px 6px;
+      border-radius: 20px;
+    }
+    .badge-vencido {
+      display: inline-block;
+      background: #fee2e2;
+      color: #b91c1c;
+      font-size: 8.5px;
+      font-weight: bold;
+      padding: 1px 6px;
+      border-radius: 20px;
+    }
+    .badge-pendiente {
+      display: inline-block;
+      background: #fef9c3;
+      color: #a16207;
+      font-size: 8.5px;
+      font-weight: bold;
+      padding: 1px 6px;
+      border-radius: 20px;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────────────── */
+    .doc-footer {
+      margin-top: 28px;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 14px;
+    }
+    .footer-table { width: 100%; border-collapse: collapse; }
+    .footer-table td { vertical-align: middle; }
+
+    .cliniq-logo-cell { width: 90px; text-align: right; }
+    .cliniq-mark {
+      display: inline-block;
+      background: #111827;
+      color: #ffffff;
+      font-size: 10px;
+      font-weight: bold;
+      padding: 4px 9px;
+      border-radius: 5px;
+      letter-spacing: 0.04em;
+    }
+
+    .footer-text {
+      font-size: 9px;
+      color: #9ca3af;
+      line-height: 1.5;
+    }
+    .footer-text strong { color: #6b7280; }
+
+    /* ── Page break helpers ───────────────────────────────────────────────── */
+    .page-break-before { page-break-before: always; }
+    .no-break { page-break-inside: avoid; }
+  </style>
+</head>
+<body>
+
+  <!-- ══ CABECERA ══════════════════════════════════════════════════════════ -->
+  <div class="page-header">
+    <table class="header-table">
+      <tr>
+        <td class="logo-cell">
+          {% if logo_b64 %}
+          <img src="{{ logo_b64 }}" alt="Logo {{ clinica_nombre }}">
+          {% endif %}
+        </td>
+        <td class="clinic-cell">
+          <div class="clinic-name">{{ clinica_nombre }}</div>
+          <div class="clinic-meta">
+            {% if clinica_nit %}NIT {{ clinica_nit }}{% endif %}
+            {% if clinica_telefono %} · Tel. {{ clinica_telefono }}{% endif %}
+            {% if clinica_email %} · {{ clinica_email }}{% endif %}
+            {% if clinica_ciudad %}<br>{{ clinica_ciudad }}{% if clinica_direccion %} · {{ clinica_direccion }}{% endif %}{% endif %}
+          </div>
+        </td>
+        <td class="hc-badge-cell">
+          <div class="hc-title">Historia Clínica</div>
+          <div class="hc-badge">{{ historia_numero }}</div>
+          <div class="hc-meta">Abierta el {{ fecha_apertura }}</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!-- ══ DATOS DEL PACIENTE ════════════════════════════════════════════════ -->
+  <div class="patient-bar">
+    <div class="patient-name">{{ paciente_nombre }}</div>
+    <div class="patient-sub">
+      {{ paciente_tipo_doc }} {{ paciente_numero_doc }}
+      · {{ paciente_sexo }}
+      · Nac. {{ paciente_fecha_nac }} ({{ paciente_edad }})
+    </div>
+    <table class="patient-bar-cols">
+      <tr>
+        <td>
+          <div class="field-label">Teléfono</div>
+          <div class="field-value">{{ paciente_telefono }}</div>
+        </td>
+        <td>
+          <div class="field-label">Email</div>
+          <div class="field-value">{{ paciente_email }}</div>
+        </td>
+        <td>
+          <div class="field-label">Grupo sanguíneo</div>
+          <div class="field-value">{{ paciente_grupo_sanguineo|default:"—" }}</div>
+        </td>
+        <td>
+          {% if paciente_eps %}
+          <div class="field-label">EPS / Aseguradora</div>
+          <div class="field-value">{{ paciente_eps }}{% if paciente_tipo_afiliado %} · {{ paciente_tipo_afiliado }}{% endif %}</div>
+          {% endif %}
+        </td>
+      </tr>
+    </table>
+    <table class="patient-bar-cols" style="margin-top:8px; border-top:1px solid #e5e7eb; padding-top:8px;">
+      <tr>
+        <td>
+          <div class="field-label">Residencia</div>
+          <div class="field-value">
+            {% if paciente_ciudad and paciente_direccion %}{{ paciente_ciudad }} · {{ paciente_direccion }}
+            {% elif paciente_ciudad %}{{ paciente_ciudad }}
+            {% elif paciente_direccion %}{{ paciente_direccion }}
+            {% else %}—{% endif %}
+          </div>
+        </td>
+        <td>
+          <div class="field-label">Ocupación</div>
+          <div class="field-value">{{ paciente_ocupacion|default:"—" }}</div>
+        </td>
+        <td>
+          <div class="field-label">Estado civil</div>
+          <div class="field-value">{{ paciente_estado_civil|default:"—" }}</div>
+        </td>
+        <td>
+          {% if paciente_escolaridad %}
+          <div class="field-label">Escolaridad</div>
+          <div class="field-value">{{ paciente_escolaridad }}</div>
+          {% endif %}
+        </td>
+      </tr>
+    </table>
+    {% if responsable_nombre %}
+    <div style="margin-top:8px; padding-top:8px; border-top:1px solid #e5e7eb;">
+      <span class="field-label">Responsable/Acompañante: </span>
+      <span class="field-value">{{ responsable_nombre }}</span>
+      {% if responsable_parentesco %}<span class="muted small"> ({{ responsable_parentesco }})</span>{% endif %}
+      {% if responsable_telefono %}<span class="muted small"> · {{ responsable_telefono }}</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- ══ ANTECEDENTES ══════════════════════════════════════════════════════ -->
+  {% if antecedentes %}
+  <div class="section">
+    <div class="section-heading">Antecedentes</div>
+
+    {% if antecedentes.alergias or antecedentes.contraindicaciones %}
+    <div class="alert-block">
+      <div class="ant-label">⚠ Alergias y contraindicaciones</div>
+      <div class="ant-value">
+        {% if antecedentes.alergias %}{{ antecedentes.alergias }}{% endif %}
+        {% if antecedentes.alergias and antecedentes.contraindicaciones %} · {% endif %}
+        {% if antecedentes.contraindicaciones %}{{ antecedentes.contraindicaciones }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+
+    <table class="ant-cols">
+      <tr>
+        <td>
+          {% if antecedentes.patologicos %}
+          <div class="ant-block">
+            <div class="ant-label">Patológicos</div>
+            <div class="ant-value">{{ antecedentes.patologicos }}</div>
+          </div>
+          {% endif %}
+          {% if antecedentes.medicamentos %}
+          <div class="ant-block">
+            <div class="ant-label">Medicamentos actuales</div>
+            <div class="ant-value">{{ antecedentes.medicamentos }}</div>
+          </div>
+          {% endif %}
+          {% if antecedentes.toxicos %}
+          <div class="ant-block">
+            <div class="ant-label">Toxicológicos</div>
+            <div class="ant-value">{{ antecedentes.toxicos|join:", " }}</div>
+          </div>
+          {% endif %}
+        </td>
+        <td>
+          {% if antecedentes.quirurgicos %}
+          <div class="ant-block">
+            <div class="ant-label">Quirúrgicos</div>
+            <div class="ant-value">{{ antecedentes.quirurgicos }}</div>
+          </div>
+          {% endif %}
+          {% if antecedentes.traumaticos %}
+          <div class="ant-block">
+            <div class="ant-label">Traumáticos</div>
+            <div class="ant-value">{{ antecedentes.traumaticos }}</div>
+          </div>
+          {% endif %}
+          {% if antecedentes.esteticos %}
+          <div class="ant-block">
+            <div class="ant-label">Antecedentes estéticos</div>
+            <div class="ant-value">{{ antecedentes.esteticos }}</div>
+          </div>
+          {% endif %}
+          {% if antecedentes.tipo_piel %}
+          <div class="ant-block">
+            <div class="ant-label">Clasificación de piel (Fitzpatrick)</div>
+            <div class="ant-value">{{ antecedentes.tipo_piel }}</div>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+    </table>
+
+    {% if antecedentes.familiares %}
+    <div class="ant-block">
+      <div class="ant-label">Antecedentes familiares</div>
+      <div class="ant-value">{{ antecedentes.familiares }}</div>
+    </div>
+    {% endif %}
+
+    {% if antecedentes.gineco %}
+    <div class="ant-block">
+      <div class="ant-label">Ginecoobstétricos</div>
+      <div class="ant-value">
+        G{{ antecedentes.gineco.gestaciones|default:"0" }}
+        P{{ antecedentes.gineco.partos|default:"0" }}
+        A{{ antecedentes.gineco.abortos|default:"0" }}
+        C{{ antecedentes.gineco.cesareas|default:"0" }}
+        {% if antecedentes.gineco.fum != "—" %} · FUM: {{ antecedentes.gineco.fum }}{% endif %}
+        {% if antecedentes.gineco.metodo %} · Anticoncepción: {{ antecedentes.gineco.metodo }}{% endif %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- ══ ATENCIONES ════════════════════════════════════════════════════════ -->
+  {% if notas %}
+  <div class="section-heading">Atenciones clínicas ({{ notas|length }})</div>
+
+  {% for nota in notas %}
+  <div class="atencion-card">
+    <!-- Header de atención -->
+    <div class="atencion-header">
+      <table style="width:100%; border-collapse:collapse;">
+        <tr>
+          <td style="vertical-align:top;">
+            <div class="atencion-num">Atención</div>
+            <div class="atencion-fecha">{{ nota.fecha }}</div>
+            <div class="atencion-meta">
+              {% if nota.profesional %}Prof.: {{ nota.profesional }}{% endif %}
+              {% if nota.profesional and nota.servicio %} · {% endif %}
+              {% if nota.servicio %}{{ nota.servicio }}{% endif %}
+              {% if nota.sede %} · {{ nota.sede }}{% endif %}
+            </div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    <!-- Cuerpo de atención -->
+    <div class="atencion-body">
+
+      <!-- Signos vitales -->
+      {% if nota.signos %}
+      <div class="atencion-section-title">Signos vitales</div>
+      <table class="signos-table">
+        {% for sv in nota.signos.campos %}
+        <tr>
+          <td class="sv-label">{{ sv.label }}</td>
+          <td class="sv-value">{{ sv.value }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+      {% if nota.signos.registrado_por %}
+      <div class="small muted" style="margin-top:3px;">Registrado por {{ nota.signos.registrado_por }}</div>
+      {% endif %}
+      {% endif %}
+
+      <!-- Motivo de consulta -->
+      {% if nota.motivo_consulta %}
+      <div class="atencion-section-title">Motivo de consulta</div>
+      <div class="atencion-text">{{ nota.motivo_consulta }}</div>
+      {% endif %}
+
+      <!-- Plan de manejo -->
+      {% if nota.plan_manejo %}
+      <div class="atencion-section-title">Plan de manejo</div>
+      <div class="atencion-text">{{ nota.plan_manejo }}</div>
+      {% endif %}
+
+      <!-- Zonas anotadas -->
+      {% if nota.zonas %}
+      <div class="atencion-section-title">Zonas tratadas</div>
+      <div class="zonas-row">
+      {% for grupo in nota.zonas %}
+      <div class="zona-bloque">
+        <div class="zona-nombre">{{ grupo.diagrama }}</div>
+        {% if grupo.imagen_b64 %}
+        <img class="zona-img" src="{{ grupo.imagen_b64 }}" alt="{{ grupo.diagrama }}">
+        {% endif %}
+        {% if grupo.anotaciones %}
+        <table class="zona-lista">
+          {% for az in grupo.anotaciones %}
+          <tr>
+            <td class="zona-num-cell"><span class="zona-num">{{ az.num }}</span></td>
+            <td class="zona-texto-cell">
+              {% if az.tipo %}<span class="zona-tipo-badge">{{ az.tipo }}</span>{% endif %}
+              {% if az.detalle %}<div class="zona-detalle">{{ az.detalle }}</div>{% endif %}
+              {% if az.texto %}<div class="zona-obs">{{ az.texto }}</div>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% endif %}
+      </div>
+      {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- Órdenes médicas -->
+      {% if nota.ordenes %}
+      <div class="atencion-section-title">Órdenes médicas</div>
+      {% for orden in nota.ordenes %}
+      <div class="orden-item">
+        <div class="orden-nombre">{{ orden.nombre }}</div>
+        <div class="orden-contenido">{{ orden.contenido }}</div>
+        {% if orden.profesional %}
+        <div class="orden-prof">Emitida por {{ orden.profesional }}</div>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Exámenes / resultados -->
+      {% if nota.examenes %}
+      <div class="atencion-section-title">Resultados de exámenes</div>
+      {% for ex in nota.examenes %}
+      <div class="ant-block">
+        <div class="ant-label">{{ ex.titulo }} · {{ ex.fecha }}</div>
+        {% if ex.descripcion %}<div class="ant-value">{{ ex.descripcion }}</div>{% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+
+      <!-- Fotos clínicas -->
+      {% if nota.fotos %}
+      <div class="atencion-section-title">Registro fotográfico</div>
+      {% for tipo_label, fotos_list in nota.fotos.items %}
+      <div class="fotos-grupo">
+        <div class="fotos-grupo-label">{{ tipo_label }}</div>
+        <div class="fotos-row-wrap"><table class="fotos-row">
+          <tr>
+            {% for foto in fotos_list %}
+            <td>
+              {% if foto.b64 %}
+              <img class="foto-thumb" src="{{ foto.b64 }}" alt="{{ foto.descripcion }}">
+              {% endif %}
+              {% if foto.descripcion or foto.zona %}
+              <div class="foto-desc">{% if foto.zona %}{{ foto.zona }} — {% endif %}{{ foto.descripcion }}</div>
+              {% endif %}
+            </td>
+            {% if forloop.counter|divisibleby:4 %}
+            </tr><tr>
+            {% endif %}
+            {% endfor %}
+            <!-- celdas vacías para completar la fila -->
+            {% with resto=fotos_list|length|divisibleby:4 %}
+            {% if not resto %}
+            {% with columnas_usadas=fotos_list|length|add:0 %}
+            {% endwith %}
+            {% endif %}
+            {% endwith %}
+          </tr>
+        </table></div>
+      </div>
+      {% endfor %}
+      {% endif %}
+
+    </div><!-- /atencion-body -->
+  </div><!-- /atencion-card -->
+  {% endfor %}
+
+  {% else %}
+  <div class="section">
+    <div class="section-heading">Atenciones clínicas</div>
+    <p class="muted small">No hay atenciones registradas en esta historia clínica.</p>
+  </div>
+  {% endif %}
+
+  <!-- ══ CONSENTIMIENTOS ═══════════════════════════════════════════════════ -->
+  {% if consentimientos %}
+  <div class="section">
+    <div class="section-heading">Consentimientos informados</div>
+    <table class="consent-table">
+      <thead>
+        <tr>
+          <th>Tipo / Plantilla</th>
+          <th>Firma</th>
+          <th>Vencimiento</th>
+          <th>Estado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in consentimientos %}
+        <tr>
+          <td>
+            <span class="bold">{{ c.tipo }}</span>
+            {% if c.plantilla %}<br><span class="small muted">{{ c.plantilla }}</span>{% endif %}
+          </td>
+          <td>{{ c.fecha_firma }}</td>
+          <td>{{ c.fecha_vencimiento }}</td>
+          <td>
+            {% if not c.firmado %}
+            <span class="badge-pendiente">Sin firmar</span>
+            {% elif c.vigente %}
+            <span class="badge-vigente">Vigente</span>
+            {% else %}
+            <span class="badge-vencido">Vencido</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- ══ PIE DE PÁGINA ══════════════════════════════════════════════════════ -->
+  <div class="doc-footer">
+    <table class="footer-table">
+      <tr>
+        <td>
+          <div class="footer-text">
+            <strong>Documento generado el {{ fecha_impresion }}</strong>
+            {% if usuario_impresion %} por {{ usuario_impresion }}{% endif %}
+            · Historia Clínica <strong>{{ historia_numero }}</strong><br>
+            Este documento es de carácter <strong>confidencial</strong>. Su divulgación a personas no autorizadas
+            está prohibida y puede constituir una violación de la Ley 1581 de 2012 y el Código de Ética Médica.
+          </div>
+        </td>
+        <td class="cliniq-logo-cell">
+          <div class="cliniq-mark">CliniQ</div>
+          <div class="footer-text text-right" style="margin-top:3px;">cliniq.app</div>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+</body>
+</html>

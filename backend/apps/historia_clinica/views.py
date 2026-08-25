@@ -17,6 +17,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 from weasyprint import HTML
 
 from apps.historia_clinica.models import (
+    AnotacionZona,
     ConsentimientoInformado,
     FotoClinica,
     HistoriaClinica,
@@ -27,6 +28,7 @@ from apps.historia_clinica.models import (
     SignosVitales,
 )
 from apps.historia_clinica.serializers import (
+    AnotacionZonaSerializer,
     ConsentimientoInformadoSerializer,
     FotoClinicaSerializer,
     HistoriaClinicaDetalleSerializer,
@@ -46,10 +48,11 @@ from apps.historia_clinica.services import (
     iniciar_firma_consentimiento,
     marcar_consentimiento_firmado,
 )
+from apps.core.logging import registrar_accion
 from apps.core.storage import read_public_file
 from apps.notificaciones.services import enviar_documento_whatsapp_webhook
 from apps.users.authorization import user_is_tenant_admin
-from apps.users.permissions import IsAdmin, RequirePermission
+from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -188,6 +191,12 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
             return HistoriaClinicaDetalleSerializer
         return HistoriaClinicaResumenSerializer
 
+    def retrieve(self, request, *args, **kwargs):
+        historia = self.get_object()
+        serializer = self.get_serializer(historia)
+        registrar_accion(request, "historia.ver", historia, {"paciente_id": str(historia.paciente_id)})
+        return Response(serializer.data)
+
     def partial_update(self, request, *args, **kwargs):
         # H26.4: motivo_consulta y plan_manejo ahora viven en NotaClinica, no en HistoriaClinica.
         rejected = [f for f in ("motivo_consulta", "plan_manejo") if f in request.data]
@@ -267,6 +276,21 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["get"], url_path="pdf")
+    def pdf(self, request, pk=None):
+        from apps.historia_clinica.pdf import render_historia_pdf
+        historia = self.get_object()
+        include_fotos = request.query_params.get("include_fotos", "true").lower() != "false"
+        try:
+            pdf_bytes = render_historia_pdf(historia, include_fotos=include_fotos, usuario=request.user)
+        except Exception:
+            logger.exception("Error generando PDF de historia | historia_id=%s", historia.id)
+            return Response({"error": "No se pudo generar el PDF."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        nombre = f"historia-{historia.numero}.pdf"
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{nombre}"'
+        return response
 
     @action(detail=True, methods=["get"], url_path="evolucion-signos")
     def evolucion_signos(self, request, pk=None):
@@ -351,8 +375,48 @@ class NotaClinicaViewSet(
             )
         nota.estado = NotaClinica.EstadoNota.COMPLETADA
         nota.save(update_fields=["estado", "updated_at"])
+        registrar_accion(request, "nota.completar", nota, {"historia_id": str(nota.historia_id)})
         serializer = NotaClinicaSerializer(nota, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="zonas")
+    def zonas(self, request, pk=None):
+        """
+        Devuelve los diagramas del servicio de la cita + las anotaciones existentes de esta nota.
+        Es el endpoint principal que carga la pestaña de zonas tratadas.
+        """
+        from apps.core.storage import get_public_url
+        nota = self.get_object()
+        anotaciones = (
+            AnotacionZona.objects
+            .filter(nota=nota, activo=True)
+            .select_related("diagrama")
+            .order_by("created_at")
+        )
+        anotaciones_data = AnotacionZonaSerializer(anotaciones, many=True).data
+
+        diagramas = []
+        if nota.cita_id and nota.cita.servicio_id:
+            from apps.clinicas.models import ServicioGrupoZonas
+            grupos_rels = (
+                ServicioGrupoZonas.objects
+                .filter(servicio_id=nota.cita.servicio_id, activo=True)
+                .prefetch_related("grupo__diagramas__diagrama")
+                .order_by("orden")
+            )
+            seen = set()
+            for srel in grupos_rels:
+                for gd in srel.grupo.diagramas.order_by("orden"):
+                    if gd.diagrama_id not in seen:
+                        seen.add(gd.diagrama_id)
+                        diagramas.append({
+                            "id": str(gd.diagrama_id),
+                            "nombre": gd.diagrama.nombre,
+                            "imagen_url": get_public_url(gd.diagrama.imagen.name) if gd.diagrama.imagen else None,
+                            "orden": gd.orden,
+                        })
+
+        return Response({"diagramas": diagramas, "anotaciones": anotaciones_data})
 
 
 class SignosVitalesViewSet(
@@ -455,6 +519,23 @@ class ConsentimientoInformadoViewSet(
             queryset = queryset.filter(paciente_id=paciente_id)
         return queryset.order_by("documenso_template_nombre", "tipo")
 
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        sin_pdf = [c for c in queryset if c.firmado and not c.archivo and c.documenso_document_id]
+        for consentimiento in sin_pdf:
+            try:
+                pdf_bytes = descargar_pdf_documenso(consentimiento.documenso_document_id)
+                if pdf_bytes:
+                    guardar_pdf_firmado(
+                        consentimiento,
+                        pdf_bytes,
+                        filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
+                    )
+            except Exception:
+                logger.exception("Auto-recuperacion PDF fallida | consentimiento_id=%s", consentimiento.id)
+        serializer = self.get_serializer(queryset, many=True)
+        return Response(serializer.data)
+
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
         if instance.firmado:
@@ -554,8 +635,9 @@ class ConsentimientoInformadoViewSet(
             servicio__consentimientos_requeridos__activo=True,
         ).distinct()
 
-        if request.user.rol != "superadmin":
-            citas_requeridas = citas_requeridas.filter(sede__clinica=request.user.clinica)
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is not None:
+            citas_requeridas = citas_requeridas.filter(sede__clinica=clinica_activa)
 
         for cita in citas_requeridas:
             for template in cita.servicio.consentimientos_requeridos.filter(activo=True):
@@ -706,7 +788,7 @@ class PlantillaOrdenViewSet(ModelViewSet):
         return queryset.order_by("nombre", "-created_at")
 
     def perform_create(self, serializer):
-        serializer.save(clinica=self.request.user.clinica, created_by=self.request.user)
+        serializer.save(clinica=get_clinica_activa(self.request), created_by=self.request.user)
 
     def perform_destroy(self, instance):
         instance.activa = False
@@ -799,3 +881,36 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         return Response({"enviado": True}, status=status.HTTP_200_OK)
+
+
+class AnotacionZonaViewSet(
+    mixins.ListModelMixin,
+    mixins.CreateModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
+    GenericViewSet,
+):
+    serializer_class = AnotacionZonaSerializer
+    queryset = AnotacionZona.objects.select_related("nota", "nota__historia", "nota__historia__clinica", "diagrama").all()
+    http_method_names = ["get", "post", "patch", "delete"]
+
+    def get_permissions(self):
+        if self.action in {"create", "partial_update", "destroy"}:
+            return [RequirePermission("historia.notas.crear")()]
+        return [RequirePermission("historia.ver")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.rol != "superadmin":
+            queryset = queryset.filter(nota__historia__clinica=user.clinica)
+        nota_id = self.request.query_params.get("nota")
+        if self.action == "list":
+            if not nota_id:
+                return queryset.none()
+            queryset = queryset.filter(nota_id=nota_id, activo=True)
+        return queryset
+
+    def perform_destroy(self, instance):
+        instance.activo = False
+        instance.save(update_fields=["activo", "updated_at"])

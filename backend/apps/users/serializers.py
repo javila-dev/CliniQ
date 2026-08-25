@@ -6,6 +6,7 @@ from apps.core.storage import delete_public_file, get_public_url, upload_public_
 from apps.users.authorization import get_user_permission_keys
 from apps.users.models import Permiso, Rol
 from apps.users.services import validate_password_strength
+from apps.users.permissions import get_clinica_activa
 
 
 User = get_user_model()
@@ -57,7 +58,7 @@ def resolve_role(request, *, role_id=None, rol_slug=None, disallowed_slugs=None)
             {"rol": "No se puede asignar este rol desde gestion de usuarios."}
         )
 
-    clinica = request.user.clinica
+    clinica = get_clinica_activa(request)
     if not clinica:
         raise serializers.ValidationError(
             {"clinica": "El usuario autenticado no tiene una clinica asociada."}
@@ -150,7 +151,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         request = self.context["request"]
-        if User.objects.filter(email=value, clinica=request.user.clinica).exists():
+        if User.objects.filter(email=value, clinica=get_clinica_activa(request)).exists():
             raise serializers.ValidationError("Ya existe un usuario con ese email en esta clínica.")
         return value
 
@@ -172,7 +173,7 @@ class UserCreateSerializer(serializers.ModelSerializer):
         validated_data.pop("es_profesional", None)
         user = User(
             **validated_data,
-            clinica=request.user.clinica,
+            clinica=get_clinica_activa(request),
             rol=legacy_storage_role(role.slug),
             rol_dinamico=role,
             es_profesional=False,
@@ -359,10 +360,24 @@ class LoginSerializer(TokenObtainPairSerializer):
         token["rol"] = user_role_slug(user)
         token["clinica_id"] = str(user.clinica_id) if user.clinica_id else None
         token["sede_id"] = user_sede_id(user)
+        token["sid"] = user.sesion_actual_id
         return token
 
     def validate(self, attrs):
+        from apps.users.services import iniciar_sesion_unica
+
         data = super().validate(attrs)
+
+        # Sesion unica: cierra cualquier otra sesion activa de este usuario y
+        # re-emite el token con el nuevo identificador de sesion (get_token ya
+        # corrio una vez arriba, pero con el sid todavia viejo).
+        request = self.context.get("request")
+        user_agent = request.META.get("HTTP_USER_AGENT", "") if request else ""
+        iniciar_sesion_unica(self.user, user_agent=user_agent)
+        refresh = self.get_token(self.user)
+        data["refresh"] = str(refresh)
+        data["access"] = str(refresh.access_token)
+
         data["user"] = {
             "id": str(self.user.id),
             "email": self.user.email,
@@ -425,7 +440,7 @@ class RolSerializer(serializers.ModelSerializer):
     def validate(self, attrs):
         request = self.context["request"]
         slug = attrs.get("slug", getattr(self.instance, "slug", None))
-        qs = Rol.objects.filter(clinica=request.user.clinica, slug=slug)
+        qs = Rol.objects.filter(clinica=get_clinica_activa(request), slug=slug)
         if self.instance:
             qs = qs.exclude(id=self.instance.id)
         if qs.exists():

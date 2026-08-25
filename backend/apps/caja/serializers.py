@@ -98,6 +98,11 @@ class CierreCajaSerializer(serializers.ModelSerializer):
             "cerrado_por",
             "created_at",
         ]
+        # El UniqueTogetherValidator automatico (sede+fecha) intercepta antes
+        # de que perform_create() corra, devolviendo un error generico en vez
+        # del codigo CIERRE_DUPLICADO -- la vista ya hace esa validacion con
+        # un mensaje mas claro.
+        validators = []
 
     def get_cerrado_por_nombre(self, obj):
         return obj.cerrado_por.get_full_name() if obj.cerrado_por_id else None

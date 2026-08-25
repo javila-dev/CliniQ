@@ -64,9 +64,9 @@ def _extraer_signing_token(recipient: dict) -> str | None:
 
 def _obtener_email_destinatario(consentimiento) -> str:
     paciente = consentimiento.paciente
-    email = (paciente.email or "").strip()
-    if email:
-        return email
+    clinica_email = (getattr(paciente.clinica, "email", "") or "").strip()
+    if clinica_email:
+        return clinica_email
     fallback = (getattr(settings, "DOCUMENSO_FALLBACK_EMAIL", "") or "").strip()
     if fallback:
         return fallback
@@ -201,6 +201,16 @@ def iniciar_firma_consentimiento(consentimiento) -> tuple[str, str]:
         logger.info("iniciar_firma | rama=recuperar_token | ok | token=%s...", signing_token[:12])
         return signing_token, consentimiento.documenso_document_id
 
+    # Rama nueva: plantilla self-service con PDF propio
+    if getattr(consentimiento, "plantilla_id", None) and consentimiento.plantilla and consentimiento.plantilla.pdf_file:
+        logger.info("iniciar_firma | rama=plantilla_pdf | plantilla_id=%s", consentimiento.plantilla_id)
+        from apps.consentimientos.services import iniciar_firma_consentimiento_desde_plantilla
+        signing_token, document_id = iniciar_firma_consentimiento_desde_plantilla(consentimiento)
+        consentimiento.documenso_document_id = document_id
+        consentimiento.documenso_signing_token = signing_token
+        consentimiento.save(update_fields=["documenso_document_id", "documenso_signing_token", "updated_at"])
+        return signing_token, document_id
+
     template_token = (consentimiento.documenso_template_token or "").strip()
     if not template_token:
         logger.error("iniciar_firma | sin_template_token | consentimiento_id=%s", consentimiento.id)
@@ -263,8 +273,15 @@ def descargar_pdf_documenso(document_id: str) -> bytes | None:
     headers = {"Authorization": _documenso_api_key()}
 
     try:
-        # Step 1: fetch document fields to extract the envelopeItemId.
-        # GET /api/v2/envelope/item/{envelopeItemId}/download works without S3.
+        pdf_resp = requests.get(
+            f"{base}/api/v1/documents/{document_id}/download",
+            headers=headers,
+            timeout=30,
+        )
+        if pdf_resp.ok:
+            return pdf_resp.content
+
+        # Fallback: buscar envelopeItemId en los fields del documento.
         doc_resp = requests.get(
             f"{base}/api/v1/documents/{document_id}",
             headers=headers,
@@ -278,19 +295,19 @@ def descargar_pdf_documenso(document_id: str) -> bytes | None:
         )
         if not envelope_item_id:
             logger.error(
-                "No se encontró envelopeItemId en el documento de Documenso | document_id=%s",
+                "No se encontró envelopeItemId en el documento de Documenso | document_id=%s | status_directo=%s",
                 document_id,
+                pdf_resp.status_code,
             )
             return None
 
-        # Step 2: download via envelope item endpoint (no S3 required).
-        pdf_resp = requests.get(
+        fallback_resp = requests.get(
             f"{base}/api/v2/envelope/item/{envelope_item_id}/download",
             headers=headers,
             timeout=30,
         )
-        pdf_resp.raise_for_status()
-        return pdf_resp.content
+        fallback_resp.raise_for_status()
+        return fallback_resp.content
 
     except Exception:
         logger.exception("No fue posible descargar el PDF firmado desde Documenso | document_id=%s", document_id)

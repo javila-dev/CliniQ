@@ -13,6 +13,7 @@ class Cotizacion(BaseModel):
         BORRADOR = "borrador", "Borrador"
         ACEPTADA = "aceptada", "Aceptada"
         VENCIDA = "vencida", "Vencida"
+        DESCARTADA = "descartada", "Descartada"
 
     clinica = models.ForeignKey(
         "clinicas.Clinica",
@@ -132,6 +133,18 @@ class ItemCotizacion(BaseModel):
     periodicidad = models.CharField(max_length=100, blank=True)
     valor_unitario = models.DecimalField(max_digits=12, decimal_places=2)
     descuento_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=0)
+    precio_bloqueado = models.BooleanField(
+        default=False,
+        help_text="True si el valor_unitario fue fijado desde el catalogo y requiere permiso para cambiarse.",
+    )
+    campana = models.ForeignKey(
+        "clinicas.Campana",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="items_cotizacion",
+        help_text="Campaña cuyo precio se aplicó en este ítem (para métricas de ventas).",
+    )
 
     class Meta:
         db_table = "items_cotizacion"

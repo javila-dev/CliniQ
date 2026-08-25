@@ -1,3 +1,4 @@
+import logging
 import random
 from datetime import datetime, timedelta
 
@@ -10,6 +11,8 @@ from apps.agenda.models import BloqueoAgenda, Cita, CitaCheckinOTP
 from apps.clinicas.models import Sede
 from apps.colaboradores.models import HorarioColaborador
 from apps.notificaciones.services import get_whatsapp_outbound_webhook_url
+
+logger = logging.getLogger(__name__)
 
 
 class AgendaError(Exception):
@@ -63,6 +66,7 @@ def verificar_disponibilidad_profesional(profesional_id, fecha_inicio, fecha_fin
 
     bloqueos = BloqueoAgenda.objects.filter(
         profesional_id=profesional_id,
+        estado=BloqueoAgenda.Estado.APROBADO,
         fecha_inicio__lt=fecha_fin,
         fecha_fin__gt=fecha_inicio,
     )
@@ -132,10 +136,24 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> 
     if rango_profesional:
         actual, limite = rango_profesional
 
+    bloqueos_sede = list(
+        BloqueoAgenda.objects.filter(
+            sede_id=sede_id,
+            profesional__isnull=True,
+            estado=BloqueoAgenda.Estado.APROBADO,
+            fecha_inicio__date=fecha,
+        ).values_list("fecha_inicio", "fecha_fin")
+    )
+
     slots = []
     while actual + timedelta(minutes=duracion_min) <= limite:
         fin = calcular_fecha_fin(actual, duracion_min)
-        if verificar_horario_sede(sede, actual, fin) and verificar_disponibilidad_profesional(profesional_id, actual, fin):
+        bloqueado_sede = any(b_ini < fin and b_fin > actual for b_ini, b_fin in bloqueos_sede)
+        if (
+            not bloqueado_sede
+            and verificar_horario_sede(sede, actual, fin)
+            and verificar_disponibilidad_profesional(profesional_id, actual, fin)
+        ):
             slots.append(actual)
         actual = actual + timedelta(minutes=intervalo_min)
 
@@ -210,6 +228,39 @@ def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion
 
 
 @transaction.atomic
+def _validar_deuda_paciente(paciente, clinica):
+    from datetime import date, timedelta
+    from decimal import Decimal
+    from django.db.models import Sum
+    from apps.cartera.models import CuotaCartera
+
+    if not clinica.bloquear_agenda_por_deuda:
+        return
+
+    dias_gracia = clinica.dias_gracia_deuda or 0
+    fecha_limite = date.today() - timedelta(days=dias_gracia)
+
+    cuotas_vencidas = CuotaCartera.objects.filter(
+        cartera__paciente=paciente,
+        cartera__paciente__clinica=clinica,
+        pagada=False,
+        excepcion_aprobada=False,
+        fecha_esperada__lt=fecha_limite,
+    )
+
+    if cuotas_vencidas.exists():
+        count = cuotas_vencidas.count()
+        monto = cuotas_vencidas.aggregate(s=Sum("valor_esperado"))["s"] or Decimal("0")
+        raise ValidationError({
+            "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
+            "code": "PACIENTE_CON_DEUDA",
+            "detalle": {
+                "cuotas_vencidas": count,
+                "monto_total": f"{monto:.2f}",
+            },
+        })
+
+
 def crear_cita(data: dict, created_by) -> Cita:
     data = dict(data)
     servicio = data.get("servicio")
@@ -241,6 +292,8 @@ def crear_cita(data: dict, created_by) -> Cita:
         raise ValidationError({"error": "La cita esta fuera del horario del colaborador."})
     if not verificar_disponibilidad_profesional(profesional.id, fecha_inicio, fecha_fin):
         raise ValidationError({"error": "El profesional no esta disponible en ese horario."})
+
+    _validar_deuda_paciente(paciente, sede.clinica)
 
     cita = Cita.objects.create(
         **data,
@@ -274,17 +327,37 @@ def _enviar_otp_whatsapp_cita(paciente, codigo: str):
     secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
     if secret:
         headers["X-Webhook-Secret"] = secret
-    response = requests.post(url, json=payload, headers=headers, timeout=15)
-    response.raise_for_status()
+    logger.debug(
+        "[checkin_otp] enviando webhook | url=%s | telefono=%s",
+        url, paciente.telefono,
+    )
+    try:
+        response = requests.post(url, json=payload, headers=headers, timeout=15)
+        logger.debug(
+            "[checkin_otp] webhook response | status=%s | body=%s",
+            response.status_code, response.text[:500],
+        )
+        response.raise_for_status()
+    except requests.RequestException as exc:
+        logger.error(
+            "[checkin_otp] webhook error | url=%s | exc=%s",
+            url, exc,
+        )
+        raise
 
 
 def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
     estados_validos = {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}
+    logger.debug(
+        "[checkin_otp] iniciar | cita_id=%s | estado=%s | paciente_id=%s | telefono=%s",
+        cita.id, cita.estado, cita.paciente_id, cita.paciente.telefono,
+    )
     if cita.estado not in estados_validos:
         raise AgendaError("La cita no esta en estado valido para iniciar checkin", code="ESTADO_INVALIDO")
 
     otp_existente = getattr(cita, "otp", None)
     if otp_existente and otp_existente.esta_vigente():
+        logger.debug("[checkin_otp] reutilizando OTP vigente | cita_id=%s", cita.id)
         return otp_existente, False
 
     CitaCheckinOTP.objects.filter(cita=cita).delete()

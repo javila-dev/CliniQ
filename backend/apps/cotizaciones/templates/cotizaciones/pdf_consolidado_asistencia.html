@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <style>
+      @page {
+        size: A4;
+        margin: 20mm 14mm 18mm 14mm;
+        @bottom-right {
+          content: "Pagina " counter(page) " de " counter(pages);
+          font-size: 10px;
+          color: #6b7280;
+        }
+      }
+
+      body {
+        font-family: Helvetica, Arial, sans-serif;
+        color: #1f2937;
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .header {
+        background: #1f2937;
+        color: #ffffff;
+        padding: 18px 20px;
+        border-radius: 14px;
+        margin-bottom: 18px;
+      }
+
+      .header-table, .sesiones-table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      .logo-box { width: 120px; vertical-align: top; }
+      .logo-box img {
+        max-width: 100px;
+        max-height: 70px;
+        object-fit: contain;
+        background: #ffffff;
+        border-radius: 10px;
+        padding: 8px;
+      }
+
+      .clinic-title { font-size: 24px; font-weight: bold; margin: 0 0 6px 0; }
+      .muted { color: #6b7280; }
+      .label { font-weight: bold; color: #111827; }
+      .text-right { text-align: right; }
+
+      .section { margin-bottom: 20px; }
+      .section-title {
+        font-size: 13px;
+        font-weight: bold;
+        background: #dbeafe;
+        color: #1d4ed8;
+        padding: 8px 10px;
+        border-radius: 6px 6px 0 0;
+      }
+      .section-meta {
+        font-size: 10px;
+        font-weight: normal;
+        color: #1d4ed8;
+        float: right;
+      }
+
+      .sesiones-table thead th {
+        background: #e5e7eb;
+        color: #111827;
+        font-size: 9px;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+        padding: 8px 6px;
+        border-bottom: 1px solid #cbd5e1;
+        text-align: left;
+      }
+      .sesiones-table tbody td {
+        padding: 7px 6px;
+        border-bottom: 1px solid #e5e7eb;
+        vertical-align: middle;
+        font-size: 10.5px;
+      }
+      .sesiones-table tbody tr:nth-child(even) { background: #f9fafb; }
+
+      .col-num { width: 22px; color: #9ca3af; }
+      .col-firma { width: 110px; text-align: center; }
+      .firma-img { max-width: 100px; max-height: 32px; object-fit: contain; }
+
+      .badge {
+        display: inline-block;
+        font-size: 9px;
+        font-weight: bold;
+        padding: 2px 6px;
+        border-radius: 4px;
+      }
+      .badge-firmada  { background: #dcfce7; color: #15803d; }
+      .badge-enviada  { background: #fef9c3; color: #a16207; }
+      .badge-pendiente,
+      .badge-sin_firma { background: #f3f4f6; color: #6b7280; }
+      .badge-rechazada { background: #fee2e2; color: #b91c1c; }
+
+      .evidencia-nota {
+        font-size: 9px;
+        color: #9ca3af;
+        margin-top: 4px;
+      }
+
+      .footer {
+        margin-top: 20px;
+        font-size: 10px;
+        color: #6b7280;
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="header">
+      <table class="header-table">
+        <tr>
+          <td class="logo-box">
+            {% if logo_url %}<img src="{{ logo_url }}" alt="Logo clinica">{% endif %}
+          </td>
+          <td>
+            <p class="clinic-title">{{ clinica.nombre }}</p>
+            <div>NIT: {{ clinica.nit }}</div>
+            <div>Tel: {{ telefono_clinica }}</div>
+          </td>
+          <td class="text-right">
+            <div class="muted" style="color:#cbd5e1; margin-bottom: 4px;">Consolidado de sesiones</div>
+            <div><span class="label" style="color:#ffffff;">Cotizacion:</span> {{ referencia }}</div>
+            <div><span class="label" style="color:#ffffff;">Paciente:</span> {{ paciente.nombre_completo }}</div>
+            <div><span class="label" style="color:#ffffff;">Documento:</span> {{ documento_paciente }}</div>
+          </td>
+        </tr>
+      </table>
+    </div>
+
+    {% for seccion in secciones %}
+    <div class="section">
+      <div class="section-title">
+        {{ seccion.descripcion }}
+        <span class="section-meta">{{ seccion.citas_registradas }} de {{ seccion.num_citas }} sesiones registradas &middot; {{ seccion.citas_firmadas }} con firma</span>
+      </div>
+      <table class="sesiones-table">
+        <thead>
+          <tr>
+            <th class="col-num">#</th>
+            <th>Procedimiento</th>
+            <th>Fecha</th>
+            <th>Hora</th>
+            <th>Profesional</th>
+            <th class="col-firma">Firma paciente</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for fila in seccion.filas %}
+          <tr>
+            <td class="col-num">{{ fila.numero }}</td>
+            <td>{{ fila.procedimiento }}</td>
+            <td>{{ fila.fecha }}</td>
+            <td>{{ fila.hora }}</td>
+            <td>{{ fila.profesional_nombre }}</td>
+            <td class="col-firma">
+              {% if fila.firma_img_b64 %}
+                <img class="firma-img" src="data:image/png;base64,{{ fila.firma_img_b64 }}" alt="Firma paciente">
+              {% else %}
+                <span class="badge badge-{{ fila.firma_estado }}">{{ fila.firma_estado_label }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endfor %}
+
+    <p class="evidencia-nota">
+      La firma mostrada es la evidencia digital capturada al momento de cada cita (Documenso). La firma del
+      profesional corresponde al nombre de quien atendio la sesion; no incluye firma digital independiente.
+    </p>
+
+    <div class="footer">
+      Documento generado por CliniQ el {{ fecha_generacion }} &middot; Referencia #{{ referencia }}
+    </div>
+  </body>
+</html>

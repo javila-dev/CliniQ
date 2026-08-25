@@ -11,6 +11,19 @@ class ClinicScopedJWTAuthentication(JWTAuthentication):
             return None
 
         user, token = result
+
+        # Sesion unica: si el usuario inicio sesion en otro dispositivo despues
+        # de que se emitiera este token, su 'sid' ya no coincide con la sesion
+        # vigente. sesion_actual_id vacio = usuario aun no paso por un login
+        # posterior a este feature, no se bloquea (evita romper tokens ya emitidos).
+        sesion_actual = getattr(user, "sesion_actual_id", "") or ""
+        if sesion_actual and token.get("sid") != sesion_actual:
+            detail = "Tu sesion se cerro porque iniciaste sesion en otro dispositivo"
+            dispositivo = getattr(user, "sesion_actual_dispositivo", "")
+            if dispositivo:
+                detail += f" ({dispositivo})"
+            raise AuthenticationFailed({"error": detail + ".", "code": "SESION_CERRADA_OTRO_DISPOSITIVO"})
+
         if getattr(user, "rol", None) == "superadmin":
             return user, token
 

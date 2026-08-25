@@ -58,6 +58,17 @@ class CuotaCartera(BaseModel):
     fecha_pago = models.DateField(null=True, blank=True)
     medio_pago = models.CharField(max_length=50, blank=True)
     observaciones = models.CharField(max_length=300, blank=True)
+    excepcion_aprobada = models.BooleanField(
+        default=False,
+        help_text="Si True, se permite agendar citas aunque la cuota esté vencida.",
+    )
+    aprobada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuotas_cartera_aprobadas",
+    )
     registrado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -76,3 +87,29 @@ class CuotaCartera(BaseModel):
 
     def __str__(self) -> str:
         return f"Cuota {self.id} - {self.cartera_id}"
+
+
+class CuotaCarteraLog(models.Model):
+    cuota = models.ForeignKey(
+        CuotaCartera,
+        on_delete=models.CASCADE,
+        related_name="logs",
+    )
+    campo = models.CharField(max_length=50)
+    valor_anterior = models.TextField()
+    valor_nuevo = models.TextField()
+    modificado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuota_cartera_logs",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "cuota_cartera_logs"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"Log {self.campo} cuota {self.cuota_id}"

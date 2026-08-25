@@ -28,9 +28,10 @@ from apps.agenda.serializers import (
     build_consentimiento_info,
 )
 from apps.clinicas.models import Clinica, Sede, Servicio
+from apps.core.logging import registrar_accion
 from apps.notificaciones.services import enviar_recordatorio_cita_webhook
 from apps.users.models import User
-from apps.users.permissions import CanChangeAppointmentState, RequirePermission
+from apps.users.permissions import CanChangeAppointmentState, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,10 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action in {"iniciar_checkin", "verificar_otp", "checkin_foto"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
+        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia"}:
+            permission_classes = (RequirePermission("agenda.citas.editar"),)
+        elif self.action == "registro_asistencia_pdf":
+            permission_classes = (RequirePermission("agenda.citas.ver"),)
         else:
             permission_classes = (RequirePermission("agenda.citas.ver"),)
         return [permission() for permission in permission_classes]
@@ -111,14 +116,19 @@ class CitaViewSet(ModelViewSet):
             queryset = queryset.filter(sede__clinica=user.clinica)
 
         estado = self.request.query_params.get("estado")
+        estado_in = self.request.query_params.get("estado__in")
         estado_confirmacion = self.request.query_params.get("estado_confirmacion")
         profesional = self.request.query_params.get("profesional")
         sede = self.request.query_params.get("sede")
         fecha_inicio_date = self.request.query_params.get("fecha_inicio__date")
         canal_origen = self.request.query_params.get("canal_origen")
+        paciente = self.request.query_params.get("paciente")
+        firma_asistencia_estado = self.request.query_params.get("firma_asistencia_estado")
 
         if estado:
             queryset = queryset.filter(estado=estado)
+        if estado_in:
+            queryset = queryset.filter(estado__in=[e.strip() for e in estado_in.split(",") if e.strip()])
         if estado_confirmacion:
             queryset = queryset.filter(estado_confirmacion=estado_confirmacion)
         if profesional:
@@ -129,12 +139,17 @@ class CitaViewSet(ModelViewSet):
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
         if canal_origen:
             queryset = queryset.filter(canal_origen=canal_origen)
+        if paciente:
+            queryset = queryset.filter(paciente_id=paciente)
+        if firma_asistencia_estado:
+            queryset = queryset.filter(firma_asistencia_estado=firma_asistencia_estado)
 
         return queryset.order_by("fecha_inicio")
 
     def perform_create(self, serializer):
         cita = services.crear_cita(serializer.validated_data, self.request.user)
         serializer.instance = cita
+        registrar_accion(self.request, "cita.crear", cita, {"estado": cita.estado})
 
     def create(self, request, *args, **kwargs):
         import logging
@@ -293,6 +308,10 @@ class CitaViewSet(ModelViewSet):
                 medio=medio,
                 nota=nota,
             )
+        if nuevo_estado == Cita.Estado.CANCELADA:
+            registrar_accion(request, "cita.cancelar", cita, {"motivo": cita.motivo_cancelacion})
+        elif nuevo_estado == Cita.Estado.COMPLETADA:
+            registrar_accion(request, "cita.completar", cita)
         return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="slots_disponibles", pagination_class=None)
@@ -328,9 +347,10 @@ class CitaViewSet(ModelViewSet):
 
         sede_qs = Sede.objects.select_related("clinica").all()
         profesional_qs = User.objects.filter(es_profesional=True)
-        if request.user.rol != "superadmin":
-            sede_qs = sede_qs.filter(clinica=request.user.clinica)
-            profesional_qs = profesional_qs.filter(clinica=request.user.clinica)
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is not None:
+            sede_qs = sede_qs.filter(clinica=clinica_activa)
+            profesional_qs = profesional_qs.filter(clinica=clinica_activa)
 
         try:
             sede = sede_qs.get(id=sede_id)
@@ -358,8 +378,8 @@ class CitaViewSet(ModelViewSet):
 
         if servicio_id:
             servicio_qs = Servicio.objects.all()
-            if request.user.rol != "superadmin":
-                servicio_qs = servicio_qs.filter(clinica=request.user.clinica)
+            if clinica_activa is not None:
+                servicio_qs = servicio_qs.filter(clinica=clinica_activa)
             try:
                 servicio = servicio_qs.get(id=servicio_id)
             except Servicio.DoesNotExist as exc:
@@ -388,7 +408,7 @@ class CitaViewSet(ModelViewSet):
             except ItemCotizacion.DoesNotExist as exc:
                 logger.debug("[slots_disponibles] ERROR: item_cotizacion %s no existe", item_cotizacion_id)
                 raise ValidationError({"item_cotizacion_id": "El item no existe."}) from exc
-            if request.user.rol != "superadmin" and item.cotizacion.clinica_id != request.user.clinica_id:
+            if clinica_activa is not None and item.cotizacion.clinica_id != clinica_activa.id:
                 logger.debug(
                     "[slots_disponibles] ERROR: clinica item (%s) != clinica user (%s)",
                     item.cotizacion.clinica_id, request.user.clinica_id,
@@ -445,8 +465,9 @@ class CitaViewSet(ModelViewSet):
     def hoy(self, request, *args, **kwargs):
         hoy = timezone.localdate()
         queryset = self.get_queryset().filter(fecha_inicio__date=hoy)
-        if request.user.rol != "superadmin" and request.user.clinica_id:
-            queryset = queryset.filter(sede__clinica=request.user.clinica)
+        clinica_hoy = get_clinica_activa(request)
+        if clinica_hoy is not None:
+            queryset = queryset.filter(sede__clinica=clinica_hoy)
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -577,9 +598,17 @@ class CitaViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="iniciar_checkin")
     def iniciar_checkin(self, request, pk=None):
         cita = self.get_object()
+        logger.debug(
+            "[iniciar_checkin] cita_id=%s | estado=%s | user=%s",
+            cita.id, cita.estado, request.user.id,
+        )
         try:
             otp, enviado = iniciar_checkin_otp_cita(cita, self._request_ip(request))
-        except http_requests.RequestException:
+        except http_requests.RequestException as exc:
+            logger.error(
+                "[iniciar_checkin] 502 webhook error | cita_id=%s | exc=%s",
+                cita.id, exc,
+            )
             return Response(
                 {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
@@ -623,6 +652,107 @@ class CitaViewSet(ModelViewSet):
             return Response({"error": str(exc), "code": exc.code, **exc.extra}, status=status.HTTP_400_BAD_REQUEST)
         return Response({"ok": True}, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="enviar_firma_asistencia")
+    def enviar_firma_asistencia(self, request, pk=None):
+        from apps.consentimientos.models import PlantillaAsistencia
+        from apps.consentimientos.services import enviar_firma_asistencia_cita
+        from apps.historia_clinica.services import DocumensoIntegrationError
+
+        cita = self.get_object()
+        template_id = request.data.get("template_id")
+        if not template_id:
+            raise ValidationError({"template_id": "Este campo es requerido."})
+
+        plantilla = PlantillaAsistencia.objects.filter(
+            id=template_id, activo=True, clinica=cita.sede.clinica
+        ).first()
+        if plantilla is None:
+            raise ValidationError({"template_id": "Plantilla no encontrada o inactiva."})
+
+        try:
+            result = enviar_firma_asistencia_cita(cita, plantilla)
+        except DocumensoIntegrationError as exc:
+            return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
+
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="iniciar_registro_asistencia")
+    def iniciar_registro_asistencia(self, request, pk=None):
+        from apps.consentimientos.services import iniciar_registro_asistencia_documenso
+        from apps.historia_clinica.services import DocumensoIntegrationError
+
+        cita = self.get_object()
+        logger.debug(
+            "[iniciar_registro_asistencia] cita_id=%s | estado=%s | user=%s",
+            cita.id, cita.estado, request.user.id,
+        )
+        try:
+            result = iniciar_registro_asistencia_documenso(cita)
+        except DocumensoIntegrationError as exc:
+            logger.error(
+                "[iniciar_registro_asistencia] 502 | cita_id=%s | error=%s",
+                cita.id, exc,
+            )
+            return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="confirmar_firma_asistencia")
+    def confirmar_firma_asistencia(self, request, pk=None):
+        """
+        Confirmación eager de firma de asistencia disparada por el frontend cuando
+        el embed de Documenso reporta onDocumentCompleted. Marca el estado como
+        'firmada' de inmediato sin esperar el webhook de Documenso (que puede llegar
+        tarde o fallar). El webhook sigue siendo el canal para guardar el PDF firmado.
+        """
+        cita = self.get_object()
+        if cita.firma_asistencia_estado == "firmada":
+            serializer = self.get_serializer(cita)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        cita.firma_asistencia_estado = "firmada"
+        cita.save(update_fields=["firma_asistencia_estado", "updated_at"])
+        logger.info(
+            "[confirmar_firma_asistencia] estado actualizado eager | cita_id=%s | user=%s",
+            cita.id, request.user.id,
+        )
+        serializer = self.get_serializer(cita)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="recuperar_pdf_asistencia")
+    def recuperar_pdf_asistencia(self, request, pk=None):
+        from apps.consentimientos.services import recuperar_pdf_asistencia as _recuperar
+
+        cita = self.get_object()
+        if cita.firma_asistencia_estado != "firmada":
+            return Response(
+                {"error": "La cita no tiene firma completada.", "code": "FIRMA_NO_COMPLETADA"},
+                status=status.HTTP_409_CONFLICT,
+            )
+        if cita.firma_asistencia_archivo:
+            serializer = self.get_serializer(cita)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+        ok = _recuperar(cita)
+        if not ok:
+            return Response(
+                {"error": "No fue posible recuperar el PDF desde Documenso.", "code": "DOCUMENSO_ERROR"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        cita.refresh_from_db()
+        serializer = self.get_serializer(cita)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="registro_asistencia_pdf")
+    def registro_asistencia_pdf(self, request, pk=None):
+        from apps.agenda.pdf import render_registro_asistencia_pdf
+
+        cita = self.get_object()
+        pdf_bytes = render_registro_asistencia_pdf(cita)
+        nombre = f"registro_asistencia_CIT-{str(cita.id)[:8].upper()}.pdf"
+        from django.http import HttpResponse
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{nombre}"'
+        return response
+
 
 class ConfirmacionPublicaView(APIView):
     authentication_classes = ()
@@ -648,23 +778,32 @@ class ConfirmacionPublicaView(APIView):
 
 class BloqueoAgendaViewSet(ModelViewSet):
     serializer_class = BloqueoAgendaSerializer
-    queryset = BloqueoAgenda.objects.select_related("profesional", "sede", "sede__clinica").all()
+    queryset = BloqueoAgenda.objects.select_related(
+        "profesional", "sede", "sede__clinica", "clinica", "creado_por", "aprobado_por"
+    ).all()
     ordering_fields = ("fecha_inicio", "created_at")
 
     def get_permissions(self):
         if self.action in {"list", "retrieve"}:
             return [RequirePermission("agenda.bloqueos.ver")()]
-        return [RequirePermission("agenda.bloqueos.gestionar")()]
+        if self.action in {"aprobar", "rechazar"}:
+            return [RequirePermission("agenda.aprobar_bloqueo")()]
+        return [RequirePermission("agenda.crear_bloqueo")()]
 
     def get_queryset(self):
+        from apps.users.authorization import user_has_permission
+
         queryset = super().get_queryset()
         user = self.request.user
         if user.rol != "superadmin":
-            queryset = queryset.filter(sede__clinica=user.clinica)
+            queryset = queryset.filter(
+                Q(sede__clinica=user.clinica) | Q(clinica=user.clinica)
+            )
 
         profesional = self.request.query_params.get("profesional")
         sede = self.request.query_params.get("sede")
         fecha_inicio_date = self.request.query_params.get("fecha_inicio__date")
+        estado = self.request.query_params.get("estado")
 
         if profesional:
             queryset = queryset.filter(profesional_id=profesional)
@@ -672,4 +811,42 @@ class BloqueoAgendaViewSet(ModelViewSet):
             queryset = queryset.filter(sede_id=sede)
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
+        if estado:
+            queryset = queryset.filter(estado=estado)
         return queryset.order_by("fecha_inicio")
+
+    def perform_create(self, serializer):
+        from apps.users.authorization import user_has_permission
+
+        user = self.request.user
+        sede = serializer.validated_data.get("sede")
+        clinica = getattr(sede, "clinica", None) or getattr(user, "clinica", None)
+
+        if user_has_permission(user, "agenda.aprobar_bloqueo", request=self.request):
+            estado = BloqueoAgenda.Estado.APROBADO
+        else:
+            estado = BloqueoAgenda.Estado.PENDIENTE
+
+        serializer.save(creado_por=user, clinica=clinica, estado=estado)
+
+    @action(detail=True, methods=["post"], url_path="aprobar")
+    def aprobar(self, request, pk=None):
+        bloqueo = self.get_object()
+        if bloqueo.estado == BloqueoAgenda.Estado.APROBADO:
+            return Response({"detail": "El bloqueo ya está aprobado."}, status=status.HTTP_400_BAD_REQUEST)
+        bloqueo.estado = BloqueoAgenda.Estado.APROBADO
+        bloqueo.aprobado_por = request.user
+        bloqueo.aprobado_en = timezone.now()
+        bloqueo.save(update_fields=["estado", "aprobado_por", "aprobado_en", "updated_at"])
+        return Response(BloqueoAgendaSerializer(bloqueo, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="rechazar")
+    def rechazar(self, request, pk=None):
+        bloqueo = self.get_object()
+        if bloqueo.estado == BloqueoAgenda.Estado.RECHAZADO:
+            return Response({"detail": "El bloqueo ya está rechazado."}, status=status.HTTP_400_BAD_REQUEST)
+        bloqueo.estado = BloqueoAgenda.Estado.RECHAZADO
+        bloqueo.aprobado_por = request.user
+        bloqueo.aprobado_en = timezone.now()
+        bloqueo.save(update_fields=["estado", "aprobado_por", "aprobado_en", "updated_at"])
+        return Response(BloqueoAgendaSerializer(bloqueo, context={"request": request}).data)

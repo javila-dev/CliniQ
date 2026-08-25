@@ -7,6 +7,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 from rest_framework_simplejwt.exceptions import TokenError
@@ -18,7 +19,7 @@ from django.db.models.deletion import ProtectedError
 from apps.clinicas.models import Clinica
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
-from apps.users.permissions import IsAdmin, RequirePermission
+from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 from apps.users.serializers import (
     InvitationRequestSerializer,
     LoginSerializer,
@@ -67,6 +68,34 @@ def error_response(message: str, code: str, status_code: int) -> Response:
     return Response({"error": message, "code": code}, status=status_code)
 
 
+class LoginThrottle(SimpleRateThrottle):
+    rate = "10/min"
+
+    def get_cache_key(self, request, view):
+        return f"login_{self.get_ident(request)}"
+
+
+class TokenRefreshThrottle(SimpleRateThrottle):
+    rate = "30/min"
+
+    def get_cache_key(self, request, view):
+        return f"token_refresh_{self.get_ident(request)}"
+
+
+class PasswordResetRequestThrottle(SimpleRateThrottle):
+    rate = "5/hour"
+
+    def get_cache_key(self, request, view):
+        return f"password_reset_request_{self.get_ident(request)}"
+
+
+class PasswordResetTokenThrottle(SimpleRateThrottle):
+    rate = "20/hour"
+
+    def get_cache_key(self, request, view):
+        return f"password_reset_token_{self.get_ident(request)}"
+
+
 def _protected_relations_message(exc: ProtectedError) -> str:
     relation_names = sorted(
         {
@@ -85,9 +114,10 @@ def _protected_relations_message(exc: ProtectedError) -> str:
 class LoginView(APIView):
     authentication_classes = ()
     permission_classes = ()
+    throttle_classes = (LoginThrottle,)
 
     def post(self, request, *args, **kwargs):
-        serializer = LoginSerializer(data=request.data)
+        serializer = LoginSerializer(data=request.data, context={"request": request})
         try:
             serializer.is_valid(raise_exception=True)
         except Exception:
@@ -109,6 +139,7 @@ class LoginView(APIView):
 class RefreshView(TokenRefreshView):
     authentication_classes = ()
     permission_classes = ()
+    throttle_classes = (TokenRefreshThrottle,)
 
     def post(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -122,6 +153,7 @@ class RefreshView(TokenRefreshView):
 class PasswordResetRequestView(APIView):
     authentication_classes = ()
     permission_classes = ()
+    throttle_classes = (PasswordResetRequestThrottle,)
 
     def post(self, request, *args, **kwargs):
         serializer = PasswordResetRequestSerializer(data=request.data)
@@ -167,7 +199,7 @@ class InvitationRequestView(APIView):
         serializer.is_valid(raise_exception=True)
 
         try:
-            clinica = None if request.user.rol == "superadmin" else request.user.clinica
+            clinica = get_clinica_activa(request)
             services.send_user_invitation(
                 serializer.validated_data["email"],
                 clinica=clinica,
@@ -204,6 +236,7 @@ class InvitationRequestView(APIView):
 class PasswordResetValidateView(APIView):
     authentication_classes = ()
     permission_classes = ()
+    throttle_classes = (PasswordResetTokenThrottle,)
 
     def get(self, request, token, *args, **kwargs):
         try:
@@ -224,6 +257,7 @@ class PasswordResetValidateView(APIView):
 class PasswordResetConfirmView(APIView):
     authentication_classes = ()
     permission_classes = ()
+    throttle_classes = (PasswordResetTokenThrottle,)
 
     def post(self, request, *args, **kwargs):
         serializer = PasswordResetConfirmSerializer(data=request.data)
@@ -234,28 +268,43 @@ class PasswordResetConfirmView(APIView):
                 return Response({"error": str(message)}, status=status.HTTP_400_BAD_REQUEST)
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
+        raw_token = serializer.validated_data["token"]
+
+        # Peek at the purpose before confirming, to decide whether to auto-login
         try:
-            services.confirm_password_reset(
-                serializer.validated_data["token"],
-                serializer.validated_data["nueva_password"],
-            )
+            pending = services.get_valid_password_reset_token(raw_token)
+        except ValueError as exc:
+            return Response({"error": str(exc), "code": "PASSWORD_RESET_INVALID_TOKEN"}, status=status.HTTP_400_BAD_REQUEST)
+
+        is_invite = pending.purpose == pending.Purpose.INVITE
+
+        try:
+            user = services.confirm_password_reset(raw_token, serializer.validated_data["nueva_password"])
         except ValidationError as exc:
             detail = exc.detail
             message = detail[0] if isinstance(detail, list) else detail
             return Response({"error": str(message)}, status=status.HTTP_400_BAD_REQUEST)
         except ValueError as exc:
+            return Response({"error": str(exc), "code": "PASSWORD_RESET_INVALID_TOKEN"}, status=status.HTTP_400_BAD_REQUEST)
+
+        if is_invite:
+            from apps.users.serializers import LoginSerializer
+            from apps.users.services import iniciar_sesion_unica
+            iniciar_sesion_unica(user, user_agent=request.META.get("HTTP_USER_AGENT", ""))
+            refresh = LoginSerializer.get_token(user)
+            access = refresh.access_token
             return Response(
-                {"error": str(exc), "code": "PASSWORD_RESET_INVALID_TOKEN"},
-                status=status.HTTP_400_BAD_REQUEST,
+                {
+                    "ok": True,
+                    "auto_login": True,
+                    "access": str(access),
+                    "refresh": str(refresh),
+                    "clinica_id": str(user.clinica_id) if user.clinica_id else None,
+                },
+                status=status.HTTP_200_OK,
             )
 
-        return Response(
-            {
-                "ok": True,
-                "message": "La contrasena fue actualizada correctamente.",
-            },
-            status=status.HTTP_200_OK,
-        )
+        return Response({"ok": True, "auto_login": False}, status=status.HTTP_200_OK)
 
 
 class LogoutView(APIView):
@@ -382,7 +431,8 @@ class RolViewSet(GenericViewSet):
         return Response(self.get_serializer(self.get_object()).data, status=status.HTTP_200_OK)
 
     def create(self, request):
-        if not request.user.clinica_id:
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is None:
             return Response(
                 {"error": "El usuario autenticado no tiene una clinica asociada.", "code": "CLINIC_REQUIRED"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -390,7 +440,7 @@ class RolViewSet(GenericViewSet):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         rol = serializer.save(
-            clinica=request.user.clinica,
+            clinica=clinica_activa,
             es_sistema=False,
             editable=True,
         )
@@ -499,12 +549,9 @@ class UserViewSet(GenericViewSet):
             .get_user_model()
             .objects.select_related("clinica", "rol_dinamico", "colaborador__sede_principal")
         )
-        if self.request.user.rol != "superadmin":
-            qs = qs.filter(clinica=self.request.user.clinica)
-        else:
-            clinica_header = self.request.headers.get("X-Clinica-Id", "").strip()
-            if clinica_header:
-                qs = qs.filter(clinica_id=clinica_header)
+        clinica_activa = get_clinica_activa(self.request)
+        if clinica_activa is not None:
+            qs = qs.filter(clinica=clinica_activa)
         rol = self.request.query_params.get("rol")
         if rol:
             qs = qs.filter(rol_dinamico__slug=rol)
@@ -530,13 +577,12 @@ class UserViewSet(GenericViewSet):
     def create(self, request):
         serializer = UserCreateSerializer(data=request.data, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
-        if request.user.rol != "superadmin" and request.user.clinica_id:
-            clinica = Clinica.objects.select_related("plan").filter(id=request.user.clinica_id).first()
-            if clinica:
-                limit_error = _check_clinica_user_limit(clinica)
-                if limit_error:
-                    message, code = limit_error
-                    return error_response(message, code, status.HTTP_403_FORBIDDEN)
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is not None:
+            limit_error = _check_clinica_user_limit(clinica_activa)
+            if limit_error:
+                message, code = limit_error
+                return error_response(message, code, status.HTTP_403_FORBIDDEN)
         user = serializer.save()
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
@@ -569,9 +615,8 @@ class UserViewSet(GenericViewSet):
 
     @action(detail=False, methods=["get"], url_path="limite")
     def limite(self, request):
-        clinica = None
-        if request.user.rol != "superadmin" and request.user.clinica_id:
-            clinica = Clinica.objects.select_related("plan").filter(id=request.user.clinica_id).first()
+        clinica_raw = get_clinica_activa(request)
+        clinica = Clinica.objects.select_related("plan").filter(id=clinica_raw.id).first() if clinica_raw else None
 
         activos = clinica.usuarios.filter(activo=True).count() if clinica else 0
         plan = getattr(clinica, "plan", None) if clinica else None
