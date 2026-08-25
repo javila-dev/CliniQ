@@ -1,9 +1,7 @@
 services:
   frontend:
-    build:
-      context: .
-      dockerfile: Dockerfile.prod
-    image: cliniq-frontend:latest
+    image: jorgeavilag/cliniq:latest
+    pull_policy: always
     restart: unless-stopped
     env_file: .env
     ports:
