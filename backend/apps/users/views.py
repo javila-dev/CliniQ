@@ -1,3 +1,5 @@
+import logging
+
 from django.contrib.auth import get_user_model
 from django.utils.encoding import force_str
 from django.db import transaction
@@ -36,6 +38,7 @@ from apps.users.serializers import (
 )
 
 User = get_user_model()
+logger = logging.getLogger(__name__)
 
 
 def _check_clinica_user_limit(clinica):
@@ -176,6 +179,10 @@ class PasswordResetRequestView(APIView):
                 status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
         except Exception:
+            logger.exception(
+                "Fallo al procesar recuperacion de contrasena | email=%s",
+                serializer.validated_data.get("email"),
+            )
             return error_response(
                 "No fue posible procesar la solicitud de recuperacion.",
                 "PASSWORD_RESET_REQUEST_FAILED",
