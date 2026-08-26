@@ -193,7 +193,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
-        if self.instance and self.instance.rol == "superadmin":
+        if self.instance and self.instance.rol == "superadmin" and ("role_id" in attrs or "rol" in attrs):
             raise serializers.ValidationError({"rol": "No se puede cambiar el rol de un superadmin."})
         if "role_id" in attrs or "rol" in attrs:
             attrs["_rol_dinamico"] = resolve_role(

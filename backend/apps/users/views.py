@@ -3,7 +3,7 @@ import logging
 from django.contrib.auth import get_user_model
 from django.utils.encoding import force_str
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -558,7 +558,13 @@ class UserViewSet(GenericViewSet):
         )
         clinica_activa = get_clinica_activa(self.request)
         if clinica_activa is not None:
-            qs = qs.filter(clinica=clinica_activa)
+            if self.action in {"retrieve", "update", "partial_update", "destroy"}:
+                # Un superadmin no pertenece a ninguna clinica (clinica=None), asi
+                # que el filtro por clinica activa lo excluia de su propio registro
+                # al editar su perfil mientras impersona una clinica (404 falso).
+                qs = qs.filter(Q(clinica=clinica_activa) | Q(id=self.request.user.id))
+            else:
+                qs = qs.filter(clinica=clinica_activa)
         rol = self.request.query_params.get("rol")
         if rol:
             qs = qs.filter(rol_dinamico__slug=rol)
