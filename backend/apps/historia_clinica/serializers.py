@@ -14,7 +14,6 @@ from apps.historia_clinica.models import (
     OrdenMedicaAuditoria,
     PlantillaOrden,
     ResultadoExamen,
-    SignosVitales,
 )
 
 
@@ -391,51 +390,6 @@ class ResultadoExamenSerializer(serializers.ModelSerializer):
         historia = attrs.get("historia")
         if nota and historia and nota.historia_id != historia.id:
             raise serializers.ValidationError({"nota": "La nota no pertenece a esta historia."})
-        return attrs
-
-
-class SignosVitalesSerializer(serializers.ModelSerializer):
-    registrado_por_nombre = serializers.CharField(source="registrado_por.nombre_completo", read_only=True)
-
-    class Meta:
-        model = SignosVitales
-        fields = (
-            "id",
-            "historia",
-            "cita",
-            "peso_kg",
-            "altura_cm",
-            "imc",
-            "tension_sistolica",
-            "tension_diastolica",
-            "frecuencia_cardiaca",
-            "frecuencia_respiratoria",
-            "temperatura_c",
-            "saturacion_oxigeno",
-            "campos_adicionales",
-            "registrado_por",
-            "registrado_por_nombre",
-            "created_at",
-        )
-        read_only_fields = ("id", "imc", "registrado_por", "registrado_por_nombre", "created_at")
-
-    def validate_campos_adicionales(self, value):
-        if not isinstance(value, list):
-            raise serializers.ValidationError("Debe ser una lista de objetos.")
-        for item in value:
-            if not isinstance(item, dict):
-                raise serializers.ValidationError("Cada campo adicional debe ser un objeto.")
-        return value
-
-    def validate(self, attrs):
-        request = self.context["request"]
-        historia = attrs.get("historia", getattr(self.instance, "historia", None))
-        cita = attrs.get("cita", getattr(self.instance, "cita", None))
-
-        if historia and request.user.rol != "superadmin" and historia.clinica_id != request.user.clinica_id:
-            raise serializers.ValidationError({"historia": "La historia no pertenece a tu clinica."})
-        if cita and historia and cita.paciente_id != historia.paciente_id:
-            raise serializers.ValidationError({"cita": "La cita no corresponde al paciente de la historia."})
         return attrs
 
 

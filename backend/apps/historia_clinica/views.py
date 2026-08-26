@@ -25,7 +25,6 @@ from apps.historia_clinica.models import (
     OrdenMedica,
     PlantillaOrden,
     ResultadoExamen,
-    SignosVitales,
 )
 from apps.historia_clinica.serializers import (
     AnotacionZonaSerializer,
@@ -38,9 +37,9 @@ from apps.historia_clinica.serializers import (
     OrdenMedicaSerializer,
     PlantillaOrdenSerializer,
     ResultadoExamenSerializer,
-    SignosVitalesSerializer,
     generar_url_firmada_storage,
 )
+from apps.obesidad.models import MedicionAntropometrica
 from apps.historia_clinica.services import (
     DocumensoIntegrationError,
     descargar_pdf_documenso,
@@ -295,13 +294,13 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
     @action(detail=True, methods=["get"], url_path="evolucion-signos")
     def evolucion_signos(self, request, pk=None):
         historia = self.get_object()
-        signos = historia.signos_vitales.order_by("created_at")
+        signos = MedicionAntropometrica.objects.filter(paciente_id=historia.paciente_id).order_by("fecha")
         campos_base = [
             "peso_kg",
-            "altura_cm",
+            "talla_cm",
             "imc",
-            "tension_sistolica",
-            "tension_diastolica",
+            "presion_sistolica",
+            "presion_diastolica",
             "frecuencia_cardiaca",
             "frecuencia_respiratoria",
             "temperatura_c",
@@ -314,7 +313,7 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
         ]
         series = []
         for registro in signos:
-            row = {"fecha": registro.created_at}
+            row = {"fecha": registro.fecha}
             for campo in campos:
                 value = getattr(registro, campo)
                 if value is not None:
@@ -417,46 +416,6 @@ class NotaClinicaViewSet(
                         })
 
         return Response({"diagramas": diagramas, "anotaciones": anotaciones_data})
-
-
-class SignosVitalesViewSet(
-    mixins.ListModelMixin,
-    mixins.CreateModelMixin,
-    mixins.DestroyModelMixin,
-    GenericViewSet,
-):
-    serializer_class = SignosVitalesSerializer
-    queryset = SignosVitales.objects.select_related(
-        "historia",
-        "historia__clinica",
-        "cita",
-        "registrado_por",
-    ).all()
-    http_method_names = ["get", "post", "delete"]
-
-    def get_permissions(self):
-        if self.action == "create":
-            return [RequirePermission("historia.notas.crear")()]
-        if self.action == "destroy":
-            return [IsAdmin()]
-        return [RequirePermission("historia.ver")()]
-
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        user = self.request.user
-        if user.rol != "superadmin":
-            queryset = queryset.filter(historia__clinica=user.clinica)
-        historia_id = self.request.query_params.get("historia")
-        if self.action == "list":
-            if not historia_id:
-                return queryset.none()
-            queryset = queryset.filter(historia_id=historia_id)
-        elif historia_id:
-            queryset = queryset.filter(historia_id=historia_id)
-        return queryset
-
-    def perform_create(self, serializer):
-        serializer.save(registrado_por=self.request.user)
 
 
 class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, GenericViewSet):

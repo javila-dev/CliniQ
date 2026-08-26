@@ -97,6 +97,12 @@ class MedicionAntropometrica(BaseModel):
         null=True, blank=True,
         related_name="mediciones_antropometricas",
     )
+    cita = models.ForeignKey(
+        "agenda.Cita",
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        related_name="mediciones_antropometricas",
+    )
     fecha             = models.DateTimeField(default=timezone.now)
     peso_kg           = models.DecimalField(max_digits=5, decimal_places=2)
     talla_cm          = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
@@ -122,6 +128,12 @@ class MedicionAntropometrica(BaseModel):
     # Signos vitales
     presion_sistolica  = models.PositiveIntegerField(null=True, blank=True)
     presion_diastolica = models.PositiveIntegerField(null=True, blank=True)
+    frecuencia_cardiaca    = models.PositiveSmallIntegerField(null=True, blank=True)
+    frecuencia_respiratoria = models.PositiveSmallIntegerField(null=True, blank=True)
+    temperatura_c          = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    saturacion_oxigeno     = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    # Campos custom definidos por la clínica (ver configuracion.ConfiguracionSignosVitales.campos_extra)
+    campos_adicionales = models.JSONField(default=list, blank=True)
     tomado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

@@ -20,8 +20,8 @@ from apps.historia_clinica.models import (
     NotaClinica,
     OrdenMedica,
     ResultadoExamen,
-    SignosVitales,
 )
+from apps.obesidad.models import MedicionAntropometrica
 
 logger = logging.getLogger(__name__)
 
@@ -216,10 +216,10 @@ def _build_antecedentes(paciente) -> dict | None:
     }
 
 
-def _build_signos(historia_id: int, cita_id) -> dict | None:
-    qs = SignosVitales.objects.filter(historia_id=historia_id)
+def _build_signos(paciente_id, cita_id) -> dict | None:
+    qs = MedicionAntropometrica.objects.filter(paciente_id=paciente_id)
     if cita_id:
-        sv = qs.filter(cita_id=cita_id).order_by("-created_at").first()
+        sv = qs.filter(cita_id=cita_id).order_by("-fecha").first()
     else:
         sv = None
     if not sv:
@@ -231,14 +231,18 @@ def _build_signos(historia_id: int, cita_id) -> dict | None:
             campos.append({"label": label, "value": f"{value}{' ' + unit if unit else ''}"})
 
     add("Peso", sv.peso_kg, "kg")
-    add("Talla", sv.altura_cm, "cm")
+    add("Talla", sv.talla_cm, "cm")
     add("IMC", sv.imc)
-    if sv.tension_sistolica and sv.tension_diastolica:
-        campos.append({"label": "Tensión arterial", "value": f"{sv.tension_sistolica}/{sv.tension_diastolica} mmHg"})
+    if sv.presion_sistolica and sv.presion_diastolica:
+        campos.append({"label": "Tensión arterial", "value": f"{sv.presion_sistolica}/{sv.presion_diastolica} mmHg"})
     add("Frec. cardíaca", sv.frecuencia_cardiaca, "lpm")
     add("Frec. respiratoria", sv.frecuencia_respiratoria, "rpm")
     add("Temperatura", sv.temperatura_c, "°C")
     add("Sat. O₂", sv.saturacion_oxigeno, "%")
+    if sv.cintura_cm:
+        add("Cintura", sv.cintura_cm, "cm")
+    if sv.cadera_cm:
+        add("Cadera", sv.cadera_cm, "cm")
 
     for extra in (sv.campos_adicionales or []):
         nombre = extra.get("nombre") or extra.get("label") or extra.get("name")
@@ -247,7 +251,33 @@ def _build_signos(historia_id: int, cita_id) -> dict | None:
         if nombre and valor is not None:
             campos.append({"label": nombre, "value": f"{valor}{' ' + unidad if unidad else ''}"})
 
-    return {"campos": campos, "registrado_por": sv.registrado_por.nombre_completo if sv.registrado_por_id else None}
+    return {"campos": campos, "registrado_por": sv.tomado_por.nombre_completo if sv.tomado_por_id else None}
+
+
+def _build_evolucion_seguimiento(paciente_id) -> list[dict]:
+    registros = MedicionAntropometrica.objects.filter(paciente_id=paciente_id).order_by("fecha")
+
+    def _fmt(value, unit=""):
+        if value is None:
+            return "—"
+        return f"{value}{' ' + unit if unit else ''}"
+
+    rows = []
+    for sv in registros:
+        pa = f"{sv.presion_sistolica}/{sv.presion_diastolica}" if sv.presion_sistolica and sv.presion_diastolica else "—"
+        rows.append({
+            "fecha": _fmt_date(sv.fecha),
+            "peso": _fmt(sv.peso_kg, "kg"),
+            "imc": _fmt(sv.imc),
+            "pa": pa,
+            "fc": _fmt(sv.frecuencia_cardiaca, "lpm"),
+            "temp": _fmt(sv.temperatura_c, "°C"),
+            "spo2": _fmt(sv.saturacion_oxigeno, "%"),
+            "cintura": _fmt(sv.cintura_cm, "cm"),
+            "cadera": _fmt(sv.cadera_cm, "cm"),
+            "grasa_pct": _fmt(sv.grasa_corporal_pct, "%"),
+        })
+    return rows
 
 
 def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
@@ -274,7 +304,7 @@ def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
                 sede = cita.sede.nombre
 
         # Signos vitales de esa cita
-        signos = _build_signos(historia.id, nota.cita_id)
+        signos = _build_signos(historia.paciente_id, nota.cita_id)
 
         # Fotos agrupadas por tipo
         fotos_payload = {}
@@ -443,6 +473,7 @@ def build_historia_pdf_context(historia: HistoriaClinica, *, include_fotos: bool
 
         # Contenido clínico
         "antecedentes": _build_antecedentes(paciente),
+        "evolucion_seguimiento": _build_evolucion_seguimiento(paciente.id),
         "notas": _build_notas(historia, include_fotos=include_fotos),
         "consentimientos": _build_consentimientos(historia),
     }

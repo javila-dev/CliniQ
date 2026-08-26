@@ -89,6 +89,7 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
             "id",
             "paciente",
             "nota",
+            "cita",
             "fecha",
             "peso_kg",
             "talla_cm",
@@ -110,6 +111,11 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
             "grasa_visceral",
             "presion_sistolica",
             "presion_diastolica",
+            "frecuencia_cardiaca",
+            "frecuencia_respiratoria",
+            "temperatura_c",
+            "saturacion_oxigeno",
+            "campos_adicionales",
             "tomado_por",
             "tomado_por_nombre",
             "activo",
@@ -117,6 +123,7 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "imc", "icc", "tomado_por_nombre", "created_at", "updated_at")
+        extra_kwargs = {"tomado_por": {"required": False}}
 
     def validate_peso_kg(self, value):
         if value <= 0 or value > 500:

@@ -1,6 +1,5 @@
 import os
 from datetime import date
-from decimal import Decimal, ROUND_HALF_UP
 
 from django.db import models, transaction
 from django.db.models import Max
@@ -249,54 +248,6 @@ class ResultadoExamen(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.historia.numero} - {self.titulo}"
-
-
-class SignosVitales(BaseModel):
-    historia = models.ForeignKey(
-        HistoriaClinica,
-        on_delete=models.CASCADE,
-        related_name="signos_vitales",
-    )
-    cita = models.ForeignKey(
-        "agenda.Cita",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="signos_vitales",
-    )
-    peso_kg = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    altura_cm = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
-    imc = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True, editable=False)
-    tension_sistolica = models.SmallIntegerField(null=True, blank=True)
-    tension_diastolica = models.SmallIntegerField(null=True, blank=True)
-    frecuencia_cardiaca = models.SmallIntegerField(null=True, blank=True)
-    frecuencia_respiratoria = models.SmallIntegerField(null=True, blank=True)
-    temperatura_c = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
-    saturacion_oxigeno = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
-    campos_adicionales = models.JSONField(default=list, blank=True)
-    registrado_por = models.ForeignKey(
-        settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="signos_vitales_registrados",
-    )
-
-    class Meta:
-        db_table = "signos_vitales"
-        ordering = ["-created_at"]
-
-    def save(self, *args, **kwargs):
-        if self.peso_kg and self.altura_cm and self.altura_cm > 0:
-            peso = Decimal(self.peso_kg)
-            altura_m = Decimal(self.altura_cm) / Decimal("100")
-            imc = peso / (altura_m * altura_m)
-            self.imc = imc.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
-        else:
-            self.imc = None
-        return super().save(*args, **kwargs)
-
-    def __str__(self) -> str:
-        return f"{self.historia.numero} - {self.created_at:%Y-%m-%d %H:%M}"
 
 
 class PlantillaOrden(BaseModel):

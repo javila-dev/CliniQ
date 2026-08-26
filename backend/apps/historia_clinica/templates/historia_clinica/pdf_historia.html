@@ -582,6 +582,45 @@
   </div>
   {% endif %}
 
+  <!-- ══ EVOLUCIÓN DE SIGNOS VITALES Y MEDIDAS ═══════════════════════════════ -->
+  {% if evolucion_seguimiento %}
+  <div class="section">
+    <div class="section-heading">Evolución de signos vitales y medidas ({{ evolucion_seguimiento|length }})</div>
+    <table class="consent-table">
+      <thead>
+        <tr>
+          <th>Fecha</th>
+          <th>Peso</th>
+          <th>IMC</th>
+          <th>PA</th>
+          <th>FC</th>
+          <th>Temp.</th>
+          <th>SpO₂</th>
+          <th>Cintura</th>
+          <th>Cadera</th>
+          <th>Grasa %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in evolucion_seguimiento %}
+        <tr>
+          <td class="nowrap">{{ r.fecha }}</td>
+          <td>{{ r.peso }}</td>
+          <td>{{ r.imc }}</td>
+          <td>{{ r.pa }}</td>
+          <td>{{ r.fc }}</td>
+          <td>{{ r.temp }}</td>
+          <td>{{ r.spo2 }}</td>
+          <td>{{ r.cintura }}</td>
+          <td>{{ r.cadera }}</td>
+          <td>{{ r.grasa_pct }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
   <!-- ══ ATENCIONES ════════════════════════════════════════════════════════ -->
   {% if notas %}
   <div class="section-heading">Atenciones clínicas ({{ notas|length }})</div>

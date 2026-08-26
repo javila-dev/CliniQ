@@ -13,8 +13,8 @@ from apps.historia_clinica.models import (
     NotaClinica,
     OrdenMedica,
     PlantillaOrden,
-    SignosVitales,
 )
+from apps.obesidad.models import MedicionAntropometrica
 from apps.pacientes.models import Paciente
 
 
@@ -415,27 +415,26 @@ class H87H89HistoriaClinicaTests(TestCase):
 
     def test_signos_vitales_crea_imc_y_entrega_evolucion(self):
         response = self.client.post(
-            "/api/v1/historia-clinica/signos-vitales/",
+            "/api/v1/obesidad/mediciones/",
             {
-                "historia": str(self.historia.id),
+                "paciente": str(self.paciente.id),
                 "peso_kg": "62.50",
-                "altura_cm": "165.00",
-                "tension_sistolica": 120,
-                "tension_diastolica": 70,
-                "campos_adicionales": [{"nombre": "Grasa corporal", "valor": "22", "unidad": "%"}],
+                "talla_cm": "165.0",
+                "presion_sistolica": 120,
+                "presion_diastolica": 70,
             },
             format="json",
         )
 
         self.assertEqual(response.status_code, 201)
-        signo = SignosVitales.objects.get()
-        self.assertEqual(str(signo.imc), "22.96")
-        self.assertEqual(response.json()["registrado_por"], str(self.superadmin.id))
+        medicion = MedicionAntropometrica.objects.get()
+        self.assertEqual(str(medicion.imc), "22.96")
+        self.assertEqual(response.json()["tomado_por"], str(self.superadmin.id))
 
         evolucion = self.client.get(f"/api/v1/historia-clinica/historias/{self.historia.id}/evolucion-signos/")
 
         self.assertEqual(evolucion.status_code, 200)
-        self.assertEqual(evolucion.json()["campos"], ["peso_kg", "altura_cm", "imc", "tension_sistolica", "tension_diastolica"])
+        self.assertEqual(evolucion.json()["campos"], ["peso_kg", "talla_cm", "imc", "presion_sistolica", "presion_diastolica"])
         self.assertEqual(len(evolucion.json()["series"]), 1)
         self.assertEqual(evolucion.json()["series"][0]["peso_kg"], 62.5)
         self.assertEqual(evolucion.json()["series"][0]["imc"], 22.96)
