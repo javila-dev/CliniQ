@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Users, CheckCircle2,
   ArrowRight, Plus, TrendingUp, DollarSign,
-  FileText, UserX, ChevronRight, AlertTriangle, Wallet,
+  FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -15,18 +15,21 @@ import {
 import { reportesApi } from '@/lib/api/reportes'
 import { carteraApi } from '@/lib/api/cartera'
 import { agendaApi } from '@/lib/api/agenda'
+import { notificacionesFallidasApi } from '@/lib/api/notificaciones'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess, hasPermission, PERM } from '@/lib/permissions'
-import { formatTime, cn } from '@/lib/utils'
+import { SetupChecklist, useSetupChecklist } from '@/components/shared/SetupChecklist'
+import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
+import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
+import { toast } from '@/hooks/use-toast'
 import type { EstadoCita } from '@/types/agenda'
 import type { PacienteSinReagendar } from '@/types/reportes'
 
@@ -231,6 +234,79 @@ function SheetPacientesSinReagendar({
   )
 }
 
+function SheetNotificacionesFallidas({
+  open, onClose, notificaciones,
+}: {
+  open: boolean
+  onClose: () => void
+  notificaciones: import('@/lib/api/notificaciones').NotificacionFallida[]
+}) {
+  const queryClient = useQueryClient()
+  const { mutate: resolver, isPending, variables: idResolviendo } = useMutation({
+    mutationFn: (id: string) => notificacionesFallidasApi.resolver(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['notificaciones', 'fallidas'] })
+      toast.success('Marcada como resuelta')
+    },
+    onError: () => {
+      toast.error('No se pudo actualizar', 'Intenta de nuevo.')
+    },
+  })
+
+  return (
+    <Sheet open={open} onOpenChange={v => !v && onClose()}>
+      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle className="flex items-center gap-2">
+            <BellOff className="h-5 w-5 text-red-500" />
+            Envíos de WhatsApp fallidos
+          </SheetTitle>
+          <p className="text-sm text-muted-foreground">
+            {notificaciones.length} notificaci{notificaciones.length !== 1 ? 'ones' : 'ón'} que no se pudo{notificaciones.length !== 1 ? 'ieron' : ''} enviar
+          </p>
+        </SheetHeader>
+
+        <div className="space-y-2">
+          {notificaciones.map(n => (
+            <div
+              key={n.id}
+              className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50/50"
+            >
+              <div className="h-8 w-8 rounded-full bg-red-50 flex items-center justify-center shrink-0 mt-0.5">
+                <AlertTriangle className="h-4 w-4 text-red-500" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">
+                  {n.paciente_nombre || n.telefono || 'Paciente sin identificar'}
+                </p>
+                <p className="text-xs text-muted-foreground">{n.tipo_notificacion_display}</p>
+                {n.motivo && (
+                  <p className="text-[11px] text-red-600/80 mt-1 line-clamp-2">{n.motivo}</p>
+                )}
+                <p className="text-[11px] text-muted-foreground/70 mt-1">
+                  {new Date(n.created_at).toLocaleString('es-CO', {
+                    day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit',
+                  })}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                className="shrink-0"
+                disabled={isPending && idResolviendo === n.id}
+                onClick={() => resolver(n.id)}
+              >
+                <Check className="h-3.5 w-3.5 mr-1" />
+                Resuelta
+              </Button>
+            </div>
+          ))}
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export default function DashboardPage() {
   return <RoleGuard check={canAccess.dashboard}><DashboardContent /></RoleGuard>
 }
@@ -239,8 +315,11 @@ function DashboardContent() {
   const { user } = useAuthStore()
   const [tabOcupacion, setTabOcupacion] = useState<'mes' | 'hoy'>('mes')
   const [sheetPacientes, setSheetPacientes] = useState(false)
+  const [sheetNotificacionesFallidas, setSheetNotificacionesFallidas] = useState(false)
   const [sedeId, setSedeId] = useState<string | null>(null)
 
+  const { allDone: checklistDone } = useSetupChecklist()
+  const esSoloProfesional = user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.REPORTES_VER)
   const canVerCotizaciones = hasPermission(user, PERM.COTIZACIONES_VER)
   const sede = sedeId ?? undefined
 
@@ -256,8 +335,8 @@ function DashboardContent() {
   const { data: ingresos, isLoading: ingresosLoading } = useQuery({
     queryKey: ['reportes', 'ingresos', '30d', sedeId],
     queryFn: () => {
-      const fin = new Date().toISOString().split('T')[0]
-      const ini = new Date(Date.now() - 29 * 86400000).toISOString().split('T')[0]
+      const fin = todayISO()
+      const ini = addDaysISO(fin, -29)
       return reportesApi.getIngresos({ fecha_inicio: ini, fecha_fin: fin, agrupar_por: 'dia', sede_id: sede })
     },
     staleTime: STALE,
@@ -281,7 +360,7 @@ function DashboardContent() {
   const { data: ocupacionHoy, isLoading: ocupacionHoyLoading } = useQuery({
     queryKey: ['reportes', 'ocupacion', 'hoy', sedeId],
     queryFn: () => {
-      const hoy = new Date().toISOString().split('T')[0]
+      const hoy = todayISO()
       return reportesApi.getOcupacion({ fecha_inicio: hoy, fecha_fin: hoy, sede_id: sede })
     },
     staleTime: STALE,
@@ -290,10 +369,15 @@ function DashboardContent() {
   })
 
   const { data: citasHoyData, isLoading: citasLoading } = useQuery({
-    queryKey: ['citas', 'hoy', sedeId],
+    queryKey: ['citas', 'hoy', sedeId, esSoloProfesional ? user?.id : null],
     queryFn: () => {
-      const hoy = new Date().toISOString().split('T')[0]
-      return agendaApi.citas.list({ fecha_inicio__date: hoy, sede: sedeId ?? undefined, page_size: 100 })
+      const hoy = todayISO()
+      return agendaApi.citas.list({
+        fecha_inicio__date: hoy,
+        sede: sedeId ?? undefined,
+        page_size: 100,
+        ...(esSoloProfesional && user?.id ? { profesional: user.id } : {}),
+      })
     },
     staleTime: STALE,
     refetchInterval: STALE,
@@ -321,7 +405,7 @@ function DashboardContent() {
   const { data: citasSinCerrarData } = useQuery({
     queryKey: ['citas', 'sin-cerrar-mes', sedeId],
     queryFn: () => {
-      const ayer = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+      const ayer = addDaysISO(todayISO(), -1)
       const { ini } = mesActual()
       return agendaApi.citas.list({
         fecha_inicio__date__gte: ini,
@@ -341,9 +425,21 @@ function DashboardContent() {
     refetchInterval: STALE,
   })
 
+  const { data: notificacionesFallidasData } = useQuery({
+    queryKey: ['notificaciones', 'fallidas'],
+    queryFn: () => notificacionesFallidasApi.list({ resuelta: false }),
+    staleTime: STALE,
+    refetchInterval: STALE,
+  })
+  const notificacionesFallidas = notificacionesFallidasData?.results ?? []
+
   const enCurso = citasHoy?.filter(c => c.estado === 'en_curso') ?? []
-  const totalCitas = kpis?.citas_hoy.total ?? 0
-  const completadas = kpis?.citas_hoy.completadas ?? 0
+  const totalCitas = esSoloProfesional
+    ? (citasHoy?.length ?? 0)
+    : (kpis?.citas_hoy.total ?? 0)
+  const completadas = esSoloProfesional
+    ? (citasHoy?.filter(c => c.estado === 'completada').length ?? 0)
+    : (kpis?.citas_hoy.completadas ?? 0)
 
   const ocupacionActiva = tabOcupacion === 'mes' ? ocupacionMes : ocupacionHoy
   const ocupacionLoading = tabOcupacion === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
@@ -360,8 +456,154 @@ function DashboardContent() {
   const totalNoAtendidas = totalNoAsistioMes + citasSinCerrarMes.length
   const pctNoAtendidas = totalCitasMes > 0 ? (totalNoAtendidas / totalCitasMes) * 100 : 0
 
+  if (esSoloProfesional) {
+    return (
+      <div className="w-[80%] mx-auto space-y-6">
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
+          <div className="relative z-10">
+            <p className="text-white/70 text-sm mb-0.5 capitalize">{todayLong()}</p>
+            <h1 className="text-2xl font-bold">{greeting()}, {user?.first_name}</h1>
+            <p className="text-white/80 text-sm mt-1">
+              {enCurso.length > 0
+                ? <><span className="font-semibold text-white">{enCurso.length}</span> cita{enCurso.length !== 1 ? 's' : ''} en curso ahora mismo</>
+                : totalCitas === 0
+                  ? 'No hay citas agendadas para hoy'
+                  : <><span className="font-semibold text-white">{totalCitas}</span> cita{totalCitas !== 1 ? 's' : ''} agendada{totalCitas !== 1 ? 's' : ''} para hoy</>
+              }
+            </p>
+          </div>
+          <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
+          <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
+          <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
+        </div>
+
+        {/* KPIs simples */}
+        <div className="grid grid-cols-2 gap-4">
+          <KPICard
+            label="Citas hoy"
+            value={totalCitas}
+            icon={CalendarDays}
+            iconBg="bg-blue-50"
+            iconColor="text-blue-500"
+            loading={citasLoading}
+          />
+          <KPICard
+            label="Completadas"
+            value={completadas}
+            sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
+            icon={CheckCircle2}
+            iconBg="bg-green-50"
+            iconColor="text-green-500"
+            loading={citasLoading}
+          />
+        </div>
+
+        {/* Citas + accesos */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            <div className="flex items-center justify-between px-5 py-4 border-b">
+              <div className="flex items-center gap-2">
+                <CalendarDays className="h-4 w-4 text-primary" />
+                <h2 className="font-semibold text-sm">Mis citas de hoy</h2>
+              </div>
+              <Link href="/agenda" className="text-xs text-primary hover:underline flex items-center gap-1">
+                Ver agenda <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+            <div className="divide-y">
+              {citasLoading ? (
+                <div className="p-4 space-y-3">
+                  {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
+                </div>
+              ) : !citasHoy?.length ? (
+                <div className="flex flex-col items-center py-12 text-center px-4">
+                  <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
+                  <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
+                  <Button size="sm" className="mt-3" asChild>
+                    <Link href="/agenda">
+                      <Plus className="h-3.5 w-3.5 mr-1.5" />
+                      Ver agenda
+                    </Link>
+                  </Button>
+                </div>
+              ) : (
+                citasHoy.map(cita => (
+                  <Link
+                    key={cita.id}
+                    href={`/agenda?cita=${cita.id}`}
+                    className={cn(
+                      'flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors border-l-4',
+                      ESTADO_LEFT[cita.estado]
+                    )}
+                  >
+                    <div className="text-center w-12 shrink-0">
+                      <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
+                      <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
+                      <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
+                    </div>
+                    <CitaStatusBadge estado={cita.estado} />
+                  </Link>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+              <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
+              <div className="space-y-2">
+                {[
+                  { href: '/agenda', icon: CalendarDays, label: 'Agenda', desc: 'Ver mi agenda del día' },
+                  { href: '/atenciones', icon: CheckCircle2, label: 'Atenciones', desc: 'Cola de atenciones' },
+                  { href: '/pacientes', icon: Users, label: 'Pacientes', desc: 'Buscar pacientes' },
+                ].map(({ href, icon: Icon, label, desc }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
+                  >
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                      <Icon className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+
+            {!citasLoading && totalCitas > 0 && (
+              <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+                <h2 className="font-semibold text-sm mb-3">Progreso del día</h2>
+                <div className="space-y-2">
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>{completadas} de {totalCitas} completadas</span>
+                    <span>{Math.round((completadas / totalCitas) * 100)}%</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                    <div
+                      className="h-full bg-green-400 rounded-full transition-all"
+                      style={{ width: `${(completadas / totalCitas) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
+    <div className="w-[80%] mx-auto space-y-6">
 
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
@@ -383,6 +625,98 @@ function DashboardContent() {
         <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
         <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
       </div>
+
+      {/* Checklist + KPIs */}
+      {!checklistDone ? (
+        <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 items-start">
+          <SetupChecklist />
+          <div className="grid grid-cols-2 gap-4">
+            <KPICard
+              label="Citas hoy"
+              value={kpis?.citas_hoy.total ?? 0}
+              sub={`${kpis?.citas_hoy.pendientes ?? 0} pendientes · ${kpis?.citas_hoy.confirmadas ?? 0} confirmadas`}
+              icon={CalendarDays}
+              iconBg="bg-blue-50"
+              iconColor="text-blue-500"
+              loading={kpisLoading}
+            />
+            <KPICard
+              label="Ingresos hoy"
+              value={kpis ? COP.format(Number(kpis.cobros_hoy.total_cop)) : '—'}
+              sub={`${kpis?.cobros_hoy.pagados ?? 0} cobros pagados`}
+              icon={DollarSign}
+              iconBg="bg-emerald-50"
+              iconColor="text-emerald-500"
+              loading={kpisLoading}
+            />
+            <KPICard
+              label="Completadas"
+              value={completadas}
+              sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
+              icon={CheckCircle2}
+              iconBg="bg-green-50"
+              iconColor="text-green-500"
+              loading={kpisLoading}
+            />
+            <KPICard
+              label="No atendidas (mes)"
+              value={ocupacionMesLoading ? '—' : totalNoAtendidas}
+              sub={
+                totalCitasMes > 0
+                  ? `${pctNoAtendidas.toFixed(1)}% · ${totalNoAsistioMes} no asistieron, ${citasSinCerrarMes.length} sin cerrar`
+                  : undefined
+              }
+              icon={UserX}
+              iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
+              iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
+              loading={ocupacionMesLoading}
+            />
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          <KPICard
+            label="Citas hoy"
+            value={kpis?.citas_hoy.total ?? 0}
+            sub={`${kpis?.citas_hoy.pendientes ?? 0} pendientes · ${kpis?.citas_hoy.confirmadas ?? 0} confirmadas`}
+            icon={CalendarDays}
+            iconBg="bg-blue-50"
+            iconColor="text-blue-500"
+            loading={kpisLoading}
+          />
+          <KPICard
+            label="Ingresos hoy"
+            value={kpis ? COP.format(Number(kpis.cobros_hoy.total_cop)) : '—'}
+            sub={`${kpis?.cobros_hoy.pagados ?? 0} cobros pagados`}
+            icon={DollarSign}
+            iconBg="bg-emerald-50"
+            iconColor="text-emerald-500"
+            loading={kpisLoading}
+          />
+          <KPICard
+            label="Completadas"
+            value={completadas}
+            sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
+            icon={CheckCircle2}
+            iconBg="bg-green-50"
+            iconColor="text-green-500"
+            loading={kpisLoading}
+          />
+          <KPICard
+            label="No atendidas (mes)"
+            value={ocupacionMesLoading ? '—' : totalNoAtendidas}
+            sub={
+              totalCitasMes > 0
+                ? `${pctNoAtendidas.toFixed(1)}% · ${totalNoAsistioMes} no asistieron, ${citasSinCerrarMes.length} sin cerrar`
+                : undefined
+            }
+            icon={UserX}
+            iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
+            iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
+            loading={ocupacionMesLoading}
+          />
+        </div>
+      )}
 
       {/* Filtro por sede */}
       {sedes.length > 1 && (
@@ -414,50 +748,6 @@ function DashboardContent() {
           ))}
         </div>
       )}
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPICard
-          label="Citas hoy"
-          value={kpis?.citas_hoy.total ?? 0}
-          sub={`${kpis?.citas_hoy.pendientes ?? 0} pendientes · ${kpis?.citas_hoy.confirmadas ?? 0} confirmadas`}
-          icon={CalendarDays}
-          iconBg="bg-blue-50"
-          iconColor="text-blue-500"
-          loading={kpisLoading}
-        />
-        <KPICard
-          label="Ingresos hoy"
-          value={kpis ? COP.format(Number(kpis.cobros_hoy.total_cop)) : '—'}
-          sub={`${kpis?.cobros_hoy.pagados ?? 0} cobros pagados`}
-          icon={DollarSign}
-          iconBg="bg-emerald-50"
-          iconColor="text-emerald-500"
-          loading={kpisLoading}
-        />
-        <KPICard
-          label="Completadas"
-          value={completadas}
-          sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
-          icon={CheckCircle2}
-          iconBg="bg-green-50"
-          iconColor="text-green-500"
-          loading={kpisLoading}
-        />
-        <KPICard
-          label="No atendidas (mes)"
-          value={ocupacionMesLoading ? '—' : totalNoAtendidas}
-          sub={
-            totalCitasMes > 0
-              ? `${pctNoAtendidas.toFixed(1)}% · ${totalNoAsistioMes} no asistieron, ${citasSinCerrarMes.length} sin cerrar`
-              : undefined
-          }
-          icon={UserX}
-          iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
-          iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
-          loading={ocupacionMesLoading}
-        />
-      </div>
 
       {/* Cotizaciones del mes + Cartera */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -557,6 +847,27 @@ function DashboardContent() {
         </>
       )}
 
+      {/* Envíos de WhatsApp fallidos (recordatorios, OTP, cotizaciones, órdenes) */}
+      {notificacionesFallidas.length > 0 && (
+        <>
+          <button
+            onClick={() => setSheetNotificacionesFallidas(true)}
+            className="w-full flex items-center gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3 text-sm text-red-800 hover:bg-red-100 transition-colors text-left"
+          >
+            <BellOff className="h-4 w-4 shrink-0" />
+            <span className="flex-1 font-medium">
+              {notificacionesFallidas.length} envío{notificacionesFallidas.length !== 1 ? 's' : ''} de WhatsApp no se pudo{notificacionesFallidas.length !== 1 ? 'ieron' : ''} enviar
+            </span>
+            <ArrowRight className="h-4 w-4 shrink-0" />
+          </button>
+          <SheetNotificacionesFallidas
+            open={sheetNotificacionesFallidas}
+            onClose={() => setSheetNotificacionesFallidas(false)}
+            notificaciones={notificacionesFallidas}
+          />
+        </>
+      )}
+
       {/* Gráfica + Cobros por medio de pago */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
@@ -613,23 +924,29 @@ function DashboardContent() {
           ) : (
             <div className="divide-y divide-gray-50">
               <div className="grid grid-cols-4 px-5 py-2 bg-gray-50/60">
-                {['Servicio', 'Citas', 'Ingresos', 'Margen'].map(h => (
+                {['Servicio', 'Citas', 'Ingresos', '% del total'].map(h => (
                   <span key={h} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{h}</span>
                 ))}
               </div>
-              {servicios.slice(0, 6).map(s => (
-                <div key={s.servicio_nombre} className="grid grid-cols-4 px-5 py-2.5 items-center hover:bg-gray-50/50">
-                  <span className="text-sm truncate pr-2">{s.servicio_nombre}</span>
-                  <span className="text-sm text-muted-foreground">{s.cantidad_citas}</span>
-                  <span className="text-sm font-medium">{COP.format(Number(s.ingresos))}</span>
-                  <span className={cn(
-                    'text-sm font-semibold',
-                    Number(s.margen_pct) >= 50 ? 'text-emerald-600' : Number(s.margen_pct) >= 20 ? 'text-amber-600' : 'text-red-500'
-                  )}>
-                    {Number(s.margen_pct).toFixed(0)}%
-                  </span>
-                </div>
-              ))}
+              {(() => {
+                const totalIngresos = servicios.reduce((sum, s) => sum + Number(s.ingresos), 0)
+                return servicios.slice(0, 6).map(s => {
+                  const pct = totalIngresos > 0 ? (Number(s.ingresos) / totalIngresos) * 100 : 0
+                  return (
+                    <div key={s.servicio_nombre} className="grid grid-cols-4 px-5 py-2.5 items-center hover:bg-gray-50/50">
+                      <span className="text-sm truncate pr-2">{s.servicio_nombre}</span>
+                      <span className="text-sm text-muted-foreground">{s.cantidad_citas}</span>
+                      <span className="text-sm font-medium">{COP.format(Number(s.ingresos))}</span>
+                      <span className={cn(
+                        'text-sm font-semibold',
+                        pct >= 30 ? 'text-emerald-600' : pct >= 10 ? 'text-amber-600' : 'text-muted-foreground'
+                      )}>
+                        {pct.toFixed(1)}%
+                      </span>
+                    </div>
+                  )
+                })
+              })()}
             </div>
           )}
         </div>

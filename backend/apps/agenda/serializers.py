@@ -461,6 +461,7 @@ class ConfirmarManualSerializer(serializers.Serializer):
 
 
 class RecordatorioPendienteSerializer(serializers.ModelSerializer):
+    paciente_id = serializers.UUIDField(source="paciente.id", read_only=True)
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
     paciente_telefono = serializers.CharField(source="paciente.telefono", read_only=True)
     paciente_email = serializers.EmailField(source="paciente.email", read_only=True)
@@ -488,6 +489,7 @@ class RecordatorioPendienteSerializer(serializers.ModelSerializer):
             "sede_id",
             "sede_nombre",
             "sede_telefono",
+            "paciente_id",
             "paciente_nombre",
             "paciente_telefono",
             "paciente_email",

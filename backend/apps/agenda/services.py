@@ -320,6 +320,8 @@ def _enviar_otp_whatsapp_cita(paciente, codigo: str):
         "nombre": paciente.nombres,
         "apellido": paciente.apellidos,
         "telefono": paciente.telefono,
+        "clinica_id": str(paciente.clinica_id) if paciente.clinica_id else "",
+        "paciente_id": str(paciente.id),
         "tipo_notificacion": "checkin_otp",
         "codigo": codigo,
     }
