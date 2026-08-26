@@ -2,12 +2,14 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
+from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.clinicas.models import Clinica
+from apps.clinicas.models import Clinica, DiagramaCorporal
 from apps.historia_clinica.models import (
+    AnotacionZona,
     ConsentimientoInformado,
     HistoriaClinica,
     NotaClinica,
@@ -438,6 +440,34 @@ class H87H89HistoriaClinicaTests(TestCase):
         self.assertEqual(len(evolucion.json()["series"]), 1)
         self.assertEqual(evolucion.json()["series"][0]["peso_kg"], 62.5)
         self.assertEqual(evolucion.json()["series"][0]["imc"], 22.96)
+
+    def test_zonas_historial_agrupa_solo_notas_con_anotaciones_activas(self):
+        diagrama = DiagramaCorporal.objects.create(
+            nombre="Rostro Frontal",
+            imagen=SimpleUploadedFile("rostro.png", b"fake-png-content", content_type="image/png"),
+        )
+        nota_con_zonas = NotaClinica.objects.create(historia=self.historia, estado=NotaClinica.EstadoNota.COMPLETADA)
+        nota_sin_zonas = NotaClinica.objects.create(historia=self.historia, estado=NotaClinica.EstadoNota.COMPLETADA)
+        AnotacionZona.objects.create(
+            nota=nota_con_zonas, diagrama=diagrama, x=0.5, y=0.5, radio=0.1,
+            texto="Zona tratada", tipo_aplicacion="laser",
+        )
+        AnotacionZona.objects.create(
+            nota=nota_con_zonas, diagrama=diagrama, x=0.2, y=0.2, radio=0.05,
+            texto="", tipo_aplicacion="laser", activo=False,
+        )
+
+        response = self.client.get(f"/api/v1/historia-clinica/historias/{self.historia.id}/zonas/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["nota_id"], str(nota_con_zonas.id))
+        self.assertEqual(len(data[0]["diagramas"]), 1)
+        self.assertEqual(data[0]["diagramas"][0]["nombre"], "Rostro Frontal")
+        self.assertEqual(len(data[0]["anotaciones"]), 1)
+        self.assertEqual(data[0]["anotaciones"][0]["texto"], "Zona tratada")
+        self.assertNotIn(str(nota_sin_zonas.id), [n["nota_id"] for n in data])
 
     def test_nota_clinica_flujo_borrador_autosave_completar(self):
         """H26: POST crea borrador → PATCH auto-guarda → POST completar finaliza."""

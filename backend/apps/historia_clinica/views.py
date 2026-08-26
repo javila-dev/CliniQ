@@ -6,6 +6,7 @@ from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db.models import Count
+from django.db.models import Prefetch
 from django.db.models import Q
 from django.http import HttpResponse
 from django.template.loader import render_to_string
@@ -320,6 +321,55 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
                     row[campo] = float(value) if hasattr(value, "__float__") else value
             series.append(row)
         return Response({"campos": campos, "series": series}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="zonas")
+    def zonas(self, request, pk=None):
+        """
+        Historial de zonas tratadas (solo lectura) de todas las visitas de esta
+        historia clinica. A diferencia de NotaClinicaViewSet.zonas (una sola
+        nota, editable), esto agrega todas las notas completadas que tengan
+        anotaciones reales, para la pestaña de Zonas en la historia del paciente.
+        """
+        from apps.core.storage import get_public_url
+
+        historia = self.get_object()
+        notas = (
+            NotaClinica.objects
+            .filter(historia=historia, estado=NotaClinica.EstadoNota.COMPLETADA)
+            .select_related("cita", "cita__servicio")
+            .prefetch_related(
+                Prefetch(
+                    "anotaciones_zona",
+                    queryset=AnotacionZona.objects.filter(activo=True).select_related("diagrama").order_by("created_at"),
+                )
+            )
+            .order_by("-created_at")
+        )
+
+        resultado = []
+        for nota in notas:
+            anotaciones = list(nota.anotaciones_zona.all())
+            if not anotaciones:
+                continue
+
+            diagramas = {}
+            for a in anotaciones:
+                if a.diagrama_id not in diagramas:
+                    diagramas[a.diagrama_id] = {
+                        "id": str(a.diagrama_id),
+                        "nombre": a.diagrama.nombre,
+                        "imagen_url": get_public_url(a.diagrama.imagen.name) if a.diagrama.imagen else None,
+                    }
+
+            resultado.append({
+                "nota_id": str(nota.id),
+                "fecha": nota.created_at,
+                "servicio": nota.cita.servicio.nombre if nota.cita_id and nota.cita.servicio_id else None,
+                "diagramas": list(diagramas.values()),
+                "anotaciones": AnotacionZonaSerializer(anotaciones, many=True).data,
+            })
+
+        return Response(resultado, status=status.HTTP_200_OK)
 
 
 class NotaClinicaViewSet(
