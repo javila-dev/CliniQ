@@ -34,7 +34,7 @@ class PlantillaConsentimientoSerializer(serializers.ModelSerializer):
 
 class ConsentimientoSerializer(serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
-    plantilla_nombre = serializers.CharField(source="plantilla.nombre", read_only=True)
+    plantilla_nombre = serializers.CharField(source="plantilla.nombre", read_only=True, default=None)
     cita_fecha_inicio = serializers.DateTimeField(source="cita.fecha_inicio", read_only=True)
     cotizacion_referencia = serializers.SerializerMethodField()
     pdf_url = serializers.SerializerMethodField()

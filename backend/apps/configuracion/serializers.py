@@ -13,35 +13,13 @@ from apps.pacientes.models import ConfiguracionFacial
 
 
 class ConfiguracionCarteraSerializer(serializers.ModelSerializer):
-    plantilla_compromiso_pago_nombre = serializers.CharField(
-        source="plantilla_compromiso_pago.nombre", read_only=True, default=None,
-    )
-
     class Meta:
         model = ConfiguracionCartera
         fields = (
             "requiere_consentimiento_promocional",
-            "plantilla_compromiso_pago",
-            "plantilla_compromiso_pago_nombre",
             "updated_at",
         )
-        read_only_fields = ("plantilla_compromiso_pago_nombre", "updated_at")
-
-    def validate(self, attrs):
-        plantilla = attrs.get("plantilla_compromiso_pago", getattr(self.instance, "plantilla_compromiso_pago", None))
-        requiere = attrs.get(
-            "requiere_consentimiento_promocional",
-            getattr(self.instance, "requiere_consentimiento_promocional", False),
-        )
-        if requiere and not plantilla:
-            raise serializers.ValidationError(
-                {"plantilla_compromiso_pago": "Selecciona una plantilla antes de activar este requisito."}
-            )
-        if plantilla and plantilla.clinica_id != self.instance.clinica_id:
-            raise serializers.ValidationError(
-                {"plantilla_compromiso_pago": "La plantilla no pertenece a tu clinica."}
-            )
-        return attrs
+        read_only_fields = ("updated_at",)
 
 
 class DocumensoConsentimientoTemplateSerializer(serializers.ModelSerializer):

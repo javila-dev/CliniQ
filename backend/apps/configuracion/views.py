@@ -239,7 +239,7 @@ class ConfiguracionHistoriaViewSet(GenericViewSet):
 
 class ConfiguracionCarteraViewSet(GenericViewSet):
     serializer_class = ConfiguracionCarteraSerializer
-    queryset = ConfiguracionCartera.objects.select_related("clinica", "plantilla_compromiso_pago").all()
+    queryset = ConfiguracionCartera.objects.select_related("clinica").all()
     http_method_names = ["get", "patch", "head", "options"]
 
     def get_permissions(self):

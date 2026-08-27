@@ -89,7 +89,10 @@ class Consentimiento(BaseModel):
     plantilla = models.ForeignKey(
         PlantillaConsentimiento,
         on_delete=models.PROTECT,
+        null=True,
+        blank=True,
         related_name="consentimientos",
+        help_text="Nulo para el compromiso de pago estandar (texto no configurable).",
     )
     contenido_snapshot = models.TextField()
     hash_contenido = models.CharField(max_length=64)

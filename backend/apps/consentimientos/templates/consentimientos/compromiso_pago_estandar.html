@@ -1,0 +1,44 @@
+<h1>Compromiso de pago</h1>
+
+<p>
+  Yo, <strong>{{ paciente.nombre_completo }}</strong>, identificado(a) con
+  <strong>{{ paciente.tipo_documento }} {{ paciente.numero_documento }}</strong>, declaro que
+  he aceptado la cotización de servicios de <strong>{{ clinica.nombre }}</strong> por un valor
+  total de <strong>${{ costo_total|floatformat:0 }}</strong> y me comprometo a pagar dicho
+  valor en las condiciones que se describen a continuación.
+</p>
+
+<h2>Detalle del pago</h2>
+<p>
+  Valor total de la cotización: <strong>${{ costo_total|floatformat:0 }}</strong><br>
+  {% if abono_inicial is not None %}Abono inicial acordado: <strong>${{ abono_inicial|floatformat:0 }}</strong><br>{% endif %}
+  Saldo pendiente al momento de la firma: <strong>${{ saldo_pendiente|floatformat:0 }}</strong>
+</p>
+
+{% if cuotas %}
+<h2>Plan de pagos acordado</h2>
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
+  <tr>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Fecha</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Concepto</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor</td>
+  </tr>
+  {% for cuota in cuotas %}
+  <tr>
+    <td style="padding:4px 6px 4px 0;">{{ cuota.fecha_esperada|date:"d/m/Y" }}</td>
+    <td style="padding:4px 6px;">{{ cuota.descripcion|default:"Cuota" }}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right;"><strong>${{ cuota.valor_esperado|floatformat:0 }}</strong></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Condiciones</h2>
+<p>
+  Me comprometo a cumplir con los pagos en las fechas acordadas. En caso de incumplimiento,
+  autorizo a <strong>{{ clinica.nombre }}</strong> a suspender la prestación de los servicios
+  pendientes hasta regularizar la situación. Declaro que la información aquí consignada es
+  correcta y que acepto este compromiso de forma libre y voluntaria.
+</p>
+
+<p style="font-size:10px; color:#9ca3af;">Documento generado el {{ fecha_generacion|date:"d/m/Y" }}.</p>

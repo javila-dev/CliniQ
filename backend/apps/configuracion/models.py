@@ -83,15 +83,10 @@ class ConfiguracionCartera(BaseModel):
         on_delete=models.CASCADE,
         related_name="config_cartera",
     )
+    # Al aceptar una cotizacion se genera un compromiso de pago estandar
+    # (texto fijo, no configurable) pendiente de firma. La clinica solo lo
+    # activa o desactiva aqui.
     requiere_consentimiento_promocional = models.BooleanField(default=False)
-    plantilla_compromiso_pago = models.ForeignKey(
-        "consentimientos.PlantillaConsentimiento",
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="+",
-        help_text="Plantilla (ambito=cotizacion) usada al aceptar una cotizacion, si esta activo el requisito.",
-    )
 
     class Meta:
         db_table = "configuracion_cartera"

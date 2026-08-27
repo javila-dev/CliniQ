@@ -36,11 +36,11 @@ def renderizar_template_con_datos(cita, plantilla: PlantillaConsentimiento) -> s
     return template.render(context)
 
 
-def renderizar_template_cotizacion_con_datos(cotizacion, plantilla: PlantillaConsentimiento) -> str:
+def _contexto_merge_cotizacion(cotizacion) -> dict:
     """
-    Arma el contexto de merge fields para plantillas con ambito=COTIZACION
-    (ej. compromiso de pago / consentimiento de compra promocional). La
-    cartera puede no existir aun si se genera antes de aceptar la cotizacion.
+    Contexto de merge fields compartido por las plantillas con ambito=COTIZACION
+    y por el documento estandar de compromiso de pago. La cartera puede no
+    existir aun si se genera antes de aceptar la cotizacion.
     """
     cartera = getattr(cotizacion, "cartera", None)
     cuotas = list(cartera.cuotas.order_by("fecha_esperada")) if cartera else []
@@ -52,22 +52,42 @@ def renderizar_template_cotizacion_con_datos(cotizacion, plantilla: PlantillaCon
     # seria igual al total.
     saldo_compromiso = (costo_total - abono_inicial) if abono_inicial is not None else costo_total
 
+    return {
+        "paciente": cotizacion.paciente,
+        "cotizacion": cotizacion,
+        "clinica": cotizacion.clinica,
+        "sede": cotizacion.sede,
+        "cartera": cartera,
+        "cuotas": cuotas,
+        "costo_total": costo_total,
+        "abono_inicial": abono_inicial,
+        "saldo_pendiente": saldo_compromiso,
+        "fecha_generacion": timezone.localdate(),
+    }
+
+
+def renderizar_template_cotizacion_con_datos(cotizacion, plantilla: PlantillaConsentimiento) -> str:
+    """
+    Renderiza una plantilla con ambito=COTIZACION redactada por la clinica
+    (ej. consentimiento de compra promocional por servicio) con los datos de
+    la cotizacion.
+    """
     template = Template(plantilla.contenido_html)
-    context = Context(
-        {
-            "paciente": cotizacion.paciente,
-            "cotizacion": cotizacion,
-            "clinica": cotizacion.clinica,
-            "sede": cotizacion.sede,
-            "cartera": cartera,
-            "cuotas": cuotas,
-            "costo_total": costo_total,
-            "abono_inicial": abono_inicial,
-            "saldo_pendiente": saldo_compromiso,
-            "fecha_generacion": timezone.localdate(),
-        }
-    )
-    return template.render(context)
+    return template.render(Context(_contexto_merge_cotizacion(cotizacion)))
+
+
+COMPROMISO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/compromiso_pago_estandar.html"
+
+
+def renderizar_compromiso_pago_estandar(cotizacion) -> str:
+    """
+    Cuerpo estandar (no configurable) del compromiso de pago. La clinica solo
+    activa o desactiva el requisito en ConfiguracionCartera; el texto es fijo,
+    igual que el registro de asistencia.
+    """
+    from django.template.loader import render_to_string
+
+    return render_to_string(COMPROMISO_PAGO_ESTANDAR_TEMPLATE, _contexto_merge_cotizacion(cotizacion))
 
 
 def generar_pdf_consentimiento(consentimiento: Consentimiento) -> bytes:
@@ -101,7 +121,11 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
     context = {
         "clinica": clinica,
         "logo_url": _build_logo_url(clinica),
-        "doc_title": consentimiento.plantilla.nombre or "Consentimiento",
+        "doc_title": (
+            consentimiento.plantilla.nombre
+            if consentimiento.plantilla_id and consentimiento.plantilla.nombre
+            else ("Compromiso de pago" if consentimiento.cotizacion_id else "Consentimiento")
+        ),
         "doc_ref": doc_ref,
         "paciente": consentimiento.paciente,
         "documento_paciente": f"{consentimiento.paciente.tipo_documento} {consentimiento.paciente.numero_documento}",
@@ -209,7 +233,10 @@ def generar_consentimiento(cita=None, plantilla: PlantillaConsentimiento = None,
         raise ValueError("Debes indicar exactamente uno: cita o cotizacion.")
 
     if cotizacion is not None:
-        contenido_snapshot = renderizar_template_cotizacion_con_datos(cotizacion, plantilla)
+        if plantilla is not None:
+            contenido_snapshot = renderizar_template_cotizacion_con_datos(cotizacion, plantilla)
+        else:
+            contenido_snapshot = renderizar_compromiso_pago_estandar(cotizacion)
         paciente = cotizacion.paciente
     else:
         contenido_snapshot = renderizar_template_con_datos(cita, plantilla)

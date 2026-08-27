@@ -170,11 +170,10 @@ class CotizacionViewSet(ModelViewSet):
 
     def _generar_compromiso_pago_si_aplica(self, cotizacion):
         """
-        Si la clinica tiene activo el requisito de consentimiento de compromiso
-        de pago / compra promocional (configuracion.ConfiguracionCartera), lo
-        genera en estado pendiente de firma. El texto legal (politica de no
-        devolucion, plazos, etc.) es responsabilidad de cada clinica via su
-        propia plantilla — este metodo solo dispara la generacion.
+        Si la clinica tiene activo el requisito de compromiso de pago
+        (configuracion.ConfiguracionCartera.requiere_consentimiento_promocional),
+        genera el documento estandar en estado pendiente de firma. El texto es
+        fijo y no configurable — la clinica solo activa o desactiva el requisito.
         """
         from apps.configuracion.models import ConfiguracionCartera
         from apps.consentimientos.models import Consentimiento
@@ -183,18 +182,18 @@ class CotizacionViewSet(ModelViewSet):
         config = ConfiguracionCartera.objects.filter(
             clinica_id=cotizacion.clinica_id,
             requiere_consentimiento_promocional=True,
-        ).select_related("plantilla_compromiso_pago").first()
-        if not config or not config.plantilla_compromiso_pago:
+        ).first()
+        if not config:
             return None
 
         existente = Consentimiento.objects.filter(
-            cotizacion=cotizacion, plantilla=config.plantilla_compromiso_pago,
+            cotizacion=cotizacion, plantilla__isnull=True,
         ).exclude(estado=Consentimiento.Estado.REVOCADO).first()
         if existente:
             return existente
 
         try:
-            return generar_consentimiento(cotizacion=cotizacion, plantilla=config.plantilla_compromiso_pago)
+            return generar_consentimiento(cotizacion=cotizacion, plantilla=None)
         except Exception:
             logger.exception(
                 "[cambiar_estado] fallo al generar compromiso de pago | cotizacion_id=%s", cotizacion.id,

@@ -467,6 +467,63 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(detalle.status_code, 200)
         self.assertEqual(detalle.json()["envios"][0]["canal"], "pdf")
 
+    def _crear_y_aceptar_cotizacion(self):
+        create_response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+        cotizacion_id = create_response.json()["id"]
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        return cotizacion_id, response
+
+    def test_compromiso_pago_estandar_se_genera_al_aceptar_si_esta_activo(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+
+        cotizacion_id, response = self._crear_y_aceptar_cotizacion()
+
+        compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
+        self.assertIsNone(compromiso.plantilla_id)
+        self.assertEqual(compromiso.estado, Consentimiento.Estado.PENDIENTE)
+        self.assertIn("Compromiso de pago", compromiso.contenido_snapshot)
+        self.assertIn(self.paciente.nombre_completo, compromiso.contenido_snapshot)
+        self.assertIsNotNone(response.json().get("compromiso_pago"))
+
+    def test_compromiso_pago_no_se_genera_si_el_requisito_esta_desactivado(self):
+        from apps.consentimientos.models import Consentimiento
+
+        cotizacion_id, response = self._crear_y_aceptar_cotizacion()
+
+        self.assertFalse(Consentimiento.objects.filter(cotizacion_id=cotizacion_id).exists())
+        self.assertIsNone(response.json().get("compromiso_pago"))
+
+    def test_compromiso_pago_estandar_es_idempotente(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+        from apps.cotizaciones.models import Cotizacion
+        from apps.cotizaciones.views import CotizacionViewSet
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        cotizacion_id, _ = self._crear_y_aceptar_cotizacion()
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+
+        # Segunda pasada por el generador: no debe crear un segundo documento.
+        segundo = CotizacionViewSet()._generar_compromiso_pago_si_aplica(cotizacion)
+
+        self.assertEqual(
+            Consentimiento.objects.filter(cotizacion_id=cotizacion_id, plantilla__isnull=True).count(),
+            1,
+        )
+        self.assertEqual(str(segundo.id), str(Consentimiento.objects.get(cotizacion_id=cotizacion_id).id))
+
 
 class CotizacionPrecioCampanaTests(TestCase):
     def setUp(self):
