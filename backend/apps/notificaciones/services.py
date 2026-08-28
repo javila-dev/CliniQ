@@ -64,17 +64,17 @@ def enviar_documento_whatsapp_webhook(
     return payload
 
 
-def enviar_mensaje_whatsapp_webhook(
+def enviar_link_firma_whatsapp(
     *,
     paciente,
-    tipo_notificacion: str,
-    texto: str,
+    documento_tipo: str,
+    link: str,
     metadata: dict | None = None,
 ) -> dict:
-    """Envia un mensaje de texto (sin adjunto) al mismo webhook outbound de n8n.
-    A diferencia de enviar_documento_whatsapp_webhook, no sube ningun PDF: el
-    payload lleva `mensaje` y n8n arma el envio de texto por Lyvio segun
-    `tipo_notificacion`."""
+    """Envia por WhatsApp (mismo webhook outbound de n8n -> Lyvio) un enlace para
+    firmar un documento. Generico: consentimientos, registro de asistencia,
+    compromiso de pago, etc. No sube ningun PDF; n8n arma el texto desde la
+    plantilla de WhatsApp usando `documento_tipo` y `link`."""
     url = get_whatsapp_outbound_webhook_url()
     if not url:
         raise ValueError("Webhook no configurado")
@@ -86,8 +86,9 @@ def enviar_mensaje_whatsapp_webhook(
         "clinica_id": str(paciente.clinica_id) if paciente.clinica_id else "",
         "clinica_nombre": paciente.clinica.nombre if paciente.clinica else "",
         "paciente_id": str(paciente.id),
-        "tipo_notificacion": tipo_notificacion,
-        "mensaje": texto,
+        "tipo_notificacion": "firma_documento",
+        "documento_tipo": documento_tipo,
+        "link": link,
     }
     if metadata:
         payload["metadata"] = metadata

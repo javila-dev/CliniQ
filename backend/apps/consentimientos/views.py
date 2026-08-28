@@ -15,7 +15,7 @@ from apps.consentimientos.serializers import (
 )
 from apps.consentimientos.services import (
     confirmar_firma_compromiso_pago,
-    enviar_link_firma_compromiso_pago,
+    enviar_link_firma_consentimiento,
     firmar_consentimiento,
     generar_consentimiento,
     iniciar_firma_compromiso_pago_documenso,
@@ -128,7 +128,7 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         with transaction.atomic():
             consentimiento = Consentimiento.objects.select_for_update().get(pk=self.get_object().pk)
             try:
-                result = enviar_link_firma_compromiso_pago(consentimiento)
+                result = enviar_link_firma_consentimiento(consentimiento)
             except DocumensoIntegrationError as exc:
                 return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
             except ValueError as exc:

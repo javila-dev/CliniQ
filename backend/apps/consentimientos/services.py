@@ -206,12 +206,22 @@ def url_firma_documenso(signing_token: str) -> str:
     return f"{base}/sign/{signing_token}" if base and signing_token else ""
 
 
-def enviar_link_firma_compromiso_pago(consentimiento: Consentimiento) -> dict:
+def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
+    if consentimiento.plantilla_id:
+        return consentimiento.plantilla.nombre
+    if consentimiento.cotizacion_id:
+        return "compromiso de pago"
+    return "consentimiento"
+
+
+def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
     """Genera (o recupera) el envelope de Documenso y envia el enlace de firma
-    al paciente por WhatsApp via n8n. Si el paciente no tiene telefono, no
-    envia nada y solo devuelve el link para copiar."""
+    al paciente por WhatsApp via n8n (rama generica `firma_documento`). Si el
+    paciente no tiene telefono, no envia nada y solo devuelve el link para copiar.
+    Sirve para compromiso de pago y para cualquier consentimiento con flujo
+    Documenso."""
     from apps.historia_clinica.services import DocumensoIntegrationError
-    from apps.notificaciones.services import enviar_mensaje_whatsapp_webhook
+    from apps.notificaciones.services import enviar_link_firma_whatsapp
 
     result = iniciar_firma_compromiso_pago_documenso(consentimiento)
     signing_token = result.get("signing_token") or ""
@@ -220,30 +230,25 @@ def enviar_link_firma_compromiso_pago(consentimiento: Consentimiento) -> dict:
         raise DocumensoIntegrationError("No se pudo obtener el enlace de firma de Documenso.")
 
     paciente = consentimiento.paciente
-    clinica_nombre = paciente.clinica.nombre if paciente.clinica else "la clinica"
     telefono = (paciente.telefono or "").strip()
     enviado = False
 
     if telefono:
-        texto = (
-            f"Hola {paciente.nombres}, para completar tu tratamiento en {clinica_nombre} "
-            f"necesitamos tu firma del compromiso de pago. Firmalo aqui: {signing_url}"
-        )
         try:
-            enviar_mensaje_whatsapp_webhook(
+            enviar_link_firma_whatsapp(
                 paciente=paciente,
-                tipo_notificacion="firma_compromiso_pago",
-                texto=texto,
+                documento_tipo=_documento_tipo_consentimiento(consentimiento),
+                link=signing_url,
                 metadata={
                     "consentimiento_id": str(consentimiento.id),
                     "cotizacion_id": str(consentimiento.cotizacion_id) if consentimiento.cotizacion_id else "",
-                    "signing_url": signing_url,
+                    "cita_id": str(consentimiento.cita_id) if consentimiento.cita_id else "",
                 },
             )
             enviado = True
         except ValueError:
             # Webhook no configurado: devolvemos el link igual para copiar.
-            logger.warning("[enviar_link_firma_compromiso_pago] webhook no configurado | consentimiento_id=%s", consentimiento.id)
+            logger.warning("[enviar_link_firma_consentimiento] webhook no configurado | consentimiento_id=%s", consentimiento.id)
 
     return {"enviado": enviado, "signing_url": signing_url, "telefono": telefono}
 
