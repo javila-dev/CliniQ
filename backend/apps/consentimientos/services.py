@@ -201,6 +201,53 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
     return {"signing_token": signing_token or "", "document_id": str(envelope_id)}
 
 
+def url_firma_documenso(signing_token: str) -> str:
+    base = (settings.DOCUMENSO_API_URL or "").rstrip("/")
+    return f"{base}/sign/{signing_token}" if base and signing_token else ""
+
+
+def enviar_link_firma_compromiso_pago(consentimiento: Consentimiento) -> dict:
+    """Genera (o recupera) el envelope de Documenso y envia el enlace de firma
+    al paciente por WhatsApp via n8n. Si el paciente no tiene telefono, no
+    envia nada y solo devuelve el link para copiar."""
+    from apps.historia_clinica.services import DocumensoIntegrationError
+    from apps.notificaciones.services import enviar_mensaje_whatsapp_webhook
+
+    result = iniciar_firma_compromiso_pago_documenso(consentimiento)
+    signing_token = result.get("signing_token") or ""
+    signing_url = url_firma_documenso(signing_token)
+    if not signing_url:
+        raise DocumensoIntegrationError("No se pudo obtener el enlace de firma de Documenso.")
+
+    paciente = consentimiento.paciente
+    clinica_nombre = paciente.clinica.nombre if paciente.clinica else "la clinica"
+    telefono = (paciente.telefono or "").strip()
+    enviado = False
+
+    if telefono:
+        texto = (
+            f"Hola {paciente.nombres}, para completar tu tratamiento en {clinica_nombre} "
+            f"necesitamos tu firma del compromiso de pago. Firmalo aqui: {signing_url}"
+        )
+        try:
+            enviar_mensaje_whatsapp_webhook(
+                paciente=paciente,
+                tipo_notificacion="firma_compromiso_pago",
+                texto=texto,
+                metadata={
+                    "consentimiento_id": str(consentimiento.id),
+                    "cotizacion_id": str(consentimiento.cotizacion_id) if consentimiento.cotizacion_id else "",
+                    "signing_url": signing_url,
+                },
+            )
+            enviado = True
+        except ValueError:
+            # Webhook no configurado: devolvemos el link igual para copiar.
+            logger.warning("[enviar_link_firma_compromiso_pago] webhook no configurado | consentimiento_id=%s", consentimiento.id)
+
+    return {"enviado": enviado, "signing_url": signing_url, "telefono": telefono}
+
+
 def confirmar_firma_compromiso_pago(consentimiento: Consentimiento) -> Consentimiento:
     """Confirmacion eager disparada por el frontend al completar el embed de firma."""
     if consentimiento.estado != Consentimiento.Estado.FIRMADO:

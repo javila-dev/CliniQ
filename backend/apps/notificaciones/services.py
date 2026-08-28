@@ -64,6 +64,43 @@ def enviar_documento_whatsapp_webhook(
     return payload
 
 
+def enviar_mensaje_whatsapp_webhook(
+    *,
+    paciente,
+    tipo_notificacion: str,
+    texto: str,
+    metadata: dict | None = None,
+) -> dict:
+    """Envia un mensaje de texto (sin adjunto) al mismo webhook outbound de n8n.
+    A diferencia de enviar_documento_whatsapp_webhook, no sube ningun PDF: el
+    payload lleva `mensaje` y n8n arma el envio de texto por Lyvio segun
+    `tipo_notificacion`."""
+    url = get_whatsapp_outbound_webhook_url()
+    if not url:
+        raise ValueError("Webhook no configurado")
+
+    payload = {
+        "nombre": paciente.nombres,
+        "apellido": paciente.apellidos,
+        "telefono": paciente.telefono,
+        "clinica_id": str(paciente.clinica_id) if paciente.clinica_id else "",
+        "clinica_nombre": paciente.clinica.nombre if paciente.clinica else "",
+        "paciente_id": str(paciente.id),
+        "tipo_notificacion": tipo_notificacion,
+        "mensaje": texto,
+    }
+    if metadata:
+        payload["metadata"] = metadata
+
+    headers = {}
+    if settings.N8N_WEBHOOK_SECRET:
+        headers["X-Webhook-Secret"] = settings.N8N_WEBHOOK_SECRET
+
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    response.raise_for_status()
+    return payload
+
+
 def get_appointment_reminders_webhook_url() -> str:
     path = getattr(settings, "N8N_APPOINTMENT_REMINDERS_WEBHOOK", "")
     if not path:

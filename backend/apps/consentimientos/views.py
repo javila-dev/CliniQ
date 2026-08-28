@@ -15,6 +15,7 @@ from apps.consentimientos.serializers import (
 )
 from apps.consentimientos.services import (
     confirmar_firma_compromiso_pago,
+    enviar_link_firma_compromiso_pago,
     firmar_consentimiento,
     generar_consentimiento,
     iniciar_firma_compromiso_pago_documenso,
@@ -62,7 +63,7 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         "plantilla",
     ).all()
     def get_permissions(self):
-        if self.action in {"generar", "iniciar_firma_documenso", "confirmar_firma_documenso"}:
+        if self.action in {"generar", "iniciar_firma_documenso", "confirmar_firma_documenso", "enviar_link_documenso"}:
             permission_classes = (RequirePermission("consentimientos.generar"),)
         elif self.action == "revocar":
             permission_classes = (RequirePermission("consentimientos.revocar"),)
@@ -121,6 +122,18 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         consentimiento = self.get_object()
         consentimiento = confirmar_firma_compromiso_pago(consentimiento)
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="enviar_link_documenso")
+    def enviar_link_documenso(self, request, pk=None):
+        with transaction.atomic():
+            consentimiento = Consentimiento.objects.select_for_update().get(pk=self.get_object().pk)
+            try:
+                result = enviar_link_firma_compromiso_pago(consentimiento)
+            except DocumensoIntegrationError as exc:
+                return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
+            except ValueError as exc:
+                return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
+        return Response(result, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="revocar")
     def revocar(self, request, pk=None):
