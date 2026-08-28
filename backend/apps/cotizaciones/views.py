@@ -1,7 +1,10 @@
 import logging
+from collections import defaultdict
+from datetime import datetime
 
 from django.http import HttpResponse
 from django.db.models import Prefetch
+from django.utils import timezone
 import requests
 from rest_framework import status
 from rest_framework.decorators import action
@@ -9,7 +12,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.agenda.models import Cita
+from apps.agenda.models import Cita, RegistroConfirmacion
+from apps.core.models import LogAccion
 from apps.cartera.models import Cartera, CuotaCartera
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_cotizacion_pdf
@@ -58,7 +62,7 @@ class CotizacionViewSet(ModelViewSet):
     ordering_fields = ("created_at", "updated_at")
 
     def get_permissions(self):
-        if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia"}:
+        if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia", "historial_sesiones"}:
             return [RequirePermission("cotizaciones.ver")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
@@ -381,3 +385,124 @@ class CotizacionViewSet(ModelViewSet):
 
             payload["items"].append(item_data)
         return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="historial_sesiones")
+    def historial_sesiones(self, request, pk=None):
+        """Línea de tiempo de cada sesión (cita) de la cotización: agendada,
+        reagendada, confirmada, check-in, atendida, cancelada, no asistió."""
+        cotizacion = self.get_object()
+        items = list(
+            cotizacion.items.filter(activo=True).prefetch_related(
+                Prefetch(
+                    "citas",
+                    queryset=Cita.objects.select_related("profesional", "sede", "created_by", "paciente")
+                    .prefetch_related(
+                        Prefetch(
+                            "registros_confirmacion",
+                            queryset=RegistroConfirmacion.objects.select_related("usuario").order_by("created_at"),
+                        )
+                    )
+                    .order_by("fecha_inicio"),
+                ),
+            )
+        )
+
+        cita_ids = [str(cita.id) for item in items for cita in item.citas.all()]
+        reagendas = defaultdict(list)
+        if cita_ids:
+            logs = (
+                LogAccion.objects.filter(
+                    objeto_tipo="Cita", objeto_id__in=cita_ids, accion="cita.reagendar"
+                )
+                .select_related("usuario")
+                .order_by("created_at")
+            )
+            for log in logs:
+                reagendas[log.objeto_id].append(log)
+
+        sesiones = []
+        for item in items:
+            for idx, cita in enumerate(item.citas.all(), start=1):
+                sesiones.append(
+                    {
+                        "item_id": str(item.id),
+                        "item_descripcion": item.descripcion,
+                        "cita_id": str(cita.id),
+                        "sesion_numero": idx,
+                        "fecha_inicio": cita.fecha_inicio,
+                        "estado_actual": cita.estado,
+                        "profesional_nombre": cita.profesional.nombre_completo,
+                        "sede_nombre": cita.sede.nombre,
+                        "eventos": _eventos_cita(cita, reagendas.get(str(cita.id), [])),
+                    }
+                )
+        sesiones.sort(key=lambda s: s["fecha_inicio"])
+        return Response(
+            {"cotizacion_id": str(cotizacion.id), "sesiones": sesiones},
+            status=status.HTTP_200_OK,
+        )
+
+
+_CHECKIN_LABEL = {"otp_whatsapp": "Check-in por WhatsApp", "foto_presencial": "Check-in con foto"}
+_MEDIO_LABEL = dict(RegistroConfirmacion.Medio.choices)
+
+
+def _nombre_usuario(user, fallback="Sistema"):
+    if not user:
+        return fallback
+    return getattr(user, "nombre_completo", "") or user.get_full_name() or user.email or fallback
+
+
+def _eventos_cita(cita, reagenda_logs):
+    eventos = [
+        {
+            "tipo": "agendada",
+            "fecha": cita.created_at,
+            "usuario": _nombre_usuario(cita.created_by),
+            "detalle": f"Programada para el {timezone.localtime(cita.fecha_inicio):%d/%m/%Y %H:%M}",
+        }
+    ]
+    for log in reagenda_logs:
+        detalle = log.detalle or {}
+        try:
+            nueva = timezone.localtime(datetime.fromisoformat(detalle["fecha_nueva"]))
+            texto = f"Movida al {nueva:%d/%m/%Y %H:%M}"
+        except (KeyError, ValueError, TypeError):
+            texto = ""
+        eventos.append(
+            {
+                "tipo": "reagendada",
+                "fecha": log.created_at,
+                "usuario": _nombre_usuario(log.usuario),
+                "detalle": texto,
+            }
+        )
+    for reg in cita.registros_confirmacion.all():
+        eventos.append(
+            {
+                "tipo": reg.estado_resultante,
+                "fecha": reg.created_at,
+                "usuario": reg.usuario_nombre or _nombre_usuario(reg.usuario),
+                "detalle": reg.nota or (_MEDIO_LABEL.get(reg.medio, "") if reg.medio else ""),
+            }
+        )
+    if cita.checkin_en:
+        eventos.append(
+            {
+                "tipo": "checkin",
+                "fecha": cita.checkin_en,
+                "usuario": cita.paciente.nombre_completo,
+                "detalle": _CHECKIN_LABEL.get(cita.checkin_metodo, ""),
+            }
+        )
+    if cita.estado == Cita.Estado.COMPLETADA and cita.fecha_fin_real:
+        eventos.append(
+            {
+                "tipo": "atendida",
+                "fecha": cita.fecha_fin_real,
+                "usuario": cita.profesional.nombre_completo,
+                "detalle": "",
+            }
+        )
+    eventos.sort(key=lambda e: e["fecha"])
+    return eventos

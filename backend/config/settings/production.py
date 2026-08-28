@@ -23,3 +23,24 @@ CSRF_TRUSTED_ORIGINS = config(
     cast=Csv(),
 )
 
+# ---------------------------------------------------------------------------
+# Sentry (monitoreo de errores). Sin SENTRY_DSN en el entorno, no hace nada:
+# no se inicializa el SDK y la app arranca igual.
+# ---------------------------------------------------------------------------
+SENTRY_DSN = config("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import sentry_sdk
+
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        environment=config("SENTRY_ENVIRONMENT", default="production"),
+        release=config("SENTRY_RELEASE", default=None) or None,
+        # Solo errores por defecto: sin muestreo de performance (0 = nada de
+        # overhead ni consumo de cuota por trazas). Subir vía env si se quiere.
+        traces_sample_rate=config("SENTRY_TRACES_SAMPLE_RATE", default=0.0, cast=float),
+        # App clínica: nunca adjuntar PII ni cuerpos de request (pueden llevar
+        # datos de pacientes).
+        send_default_pii=False,
+        max_request_body_size="never",
+    )
+

@@ -1,5 +1,6 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
+import hmac
 import logging
 
 from django.conf import settings
@@ -35,6 +36,15 @@ from apps.users.permissions import CanChangeAppointmentState, RequirePermission,
 
 
 logger = logging.getLogger(__name__)
+
+
+def _n8n_secret_ok(request) -> bool:
+    """Valida el header X-N8N-Secret con comparación de tiempo constante."""
+    expected = settings.N8N_WEBHOOK_SECRET or ""
+    received = request.headers.get("X-N8N-Secret", "")
+    if not expected:
+        return False
+    return hmac.compare_digest(received.encode("utf-8"), expected.encode("utf-8"))
 
 
 FLUJOS_ESTADO = {
@@ -205,11 +215,22 @@ class CitaViewSet(ModelViewSet):
         ):
             raise ValidationError({"error": "El profesional no esta disponible en ese horario."})
 
+        fecha_anterior = instance.fecha_inicio
         serializer.save(
             fecha_fin=fecha_fin,
             duracion_min=duracion_min,
             canal_confirmacion=paciente.canal_confirmacion,
         )
+        if serializer.instance.fecha_inicio != fecha_anterior:
+            registrar_accion(
+                self.request,
+                "cita.reagendar",
+                serializer.instance,
+                {
+                    "fecha_anterior": fecha_anterior.isoformat(),
+                    "fecha_nueva": serializer.instance.fecha_inicio.isoformat(),
+                },
+            )
 
     @action(detail=True, methods=["post"], url_path="cambiar_estado")
     def cambiar_estado(self, request, pk=None):
@@ -492,8 +513,7 @@ class CitaViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="recordatorios_pendientes", pagination_class=None)
     def recordatorios_pendientes(self, request, *args, **kwargs):
-        secret = request.headers.get("X-N8N-Secret", "")
-        if not settings.N8N_WEBHOOK_SECRET or secret != settings.N8N_WEBHOOK_SECRET:
+        if not _n8n_secret_ok(request):
             return Response({"error": "No autorizado.", "code": "N8N_UNAUTHORIZED"}, status=status.HTTP_401_UNAUTHORIZED)
 
         now = timezone.now()
@@ -538,8 +558,7 @@ class CitaViewSet(ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="marcar_recordatorio_enviado")
     def marcar_recordatorio_enviado(self, request, pk=None):
-        secret = request.headers.get("X-N8N-Secret", "")
-        if not settings.N8N_WEBHOOK_SECRET or secret != settings.N8N_WEBHOOK_SECRET:
+        if not _n8n_secret_ok(request):
             return Response({"error": "No autorizado.", "code": "N8N_UNAUTHORIZED"}, status=status.HTTP_401_UNAUTHORIZED)
 
         cita = self.get_object()
