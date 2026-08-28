@@ -47,10 +47,11 @@ from apps.historia_clinica.services import (
     guardar_pdf_firmado,
     iniciar_firma_consentimiento,
     marcar_consentimiento_firmado,
+    url_firma_documenso,
 )
 from apps.core.logging import registrar_accion
 from apps.core.storage import read_public_file
-from apps.notificaciones.services import enviar_documento_whatsapp_webhook
+from apps.notificaciones.services import enviar_documento_whatsapp_webhook, enviar_link_firma_whatsapp
 from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
@@ -712,6 +713,38 @@ class ConsentimientoInformadoViewSet(
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["post"], url_path="enviar_link_firma")
+    def enviar_link_firma(self, request, pk=None):
+        consentimiento = self.get_object()
+        try:
+            signing_token, _ = iniciar_firma_consentimiento(consentimiento)
+        except DocumensoIntegrationError as exc:
+            return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
+
+        link = url_firma_documenso(signing_token)
+        if not link:
+            return Response(
+                {"error": "No se pudo obtener el enlace de firma de Documenso.", "code": "DOCUMENSO_ERROR"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        paciente = consentimiento.paciente
+        telefono = (getattr(paciente, "telefono", "") or "").strip()
+        enviado = False
+        if telefono:
+            try:
+                enviar_link_firma_whatsapp(
+                    paciente=paciente,
+                    documento_tipo=consentimiento.documenso_template_nombre or "consentimiento informado",
+                    link=link,
+                    metadata={"consentimiento_informado_id": str(consentimiento.id)},
+                )
+                enviado = True
+            except ValueError:
+                pass
+
+        return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="reintentar_pdf")
     def reintentar_pdf(self, request, pk=None):

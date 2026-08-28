@@ -99,7 +99,7 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action in {"iniciar_checkin", "verificar_otp", "checkin_foto"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia"}:
+        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "enviar_link_firma_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action == "registro_asistencia_pdf":
             permission_classes = (RequirePermission("agenda.citas.ver"),)
@@ -695,6 +695,41 @@ class CitaViewSet(ModelViewSet):
             )
             return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
         return Response(result, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="enviar_link_firma_asistencia")
+    def enviar_link_firma_asistencia(self, request, pk=None):
+        from apps.consentimientos.services import iniciar_registro_asistencia_documenso
+        from apps.historia_clinica.services import DocumensoIntegrationError, url_firma_documenso
+        from apps.notificaciones.services import enviar_link_firma_whatsapp
+
+        cita = self.get_object()
+        try:
+            result = iniciar_registro_asistencia_documenso(cita)
+        except DocumensoIntegrationError as exc:
+            return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
+
+        link = url_firma_documenso(result.get("signing_token") or "")
+        if not link:
+            return Response(
+                {"error": "No se pudo obtener el enlace de firma de Documenso.", "code": "DOCUMENSO_ERROR"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        telefono = (getattr(cita.paciente, "telefono", "") or "").strip()
+        enviado = False
+        if telefono:
+            try:
+                enviar_link_firma_whatsapp(
+                    paciente=cita.paciente,
+                    documento_tipo="registro de asistencia",
+                    link=link,
+                    metadata={"cita_id": str(cita.id)},
+                )
+                enviado = True
+            except ValueError:
+                pass
+
+        return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="confirmar_firma_asistencia")
     def confirmar_firma_asistencia(self, request, pk=None):

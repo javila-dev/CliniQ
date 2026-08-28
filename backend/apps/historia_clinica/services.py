@@ -170,6 +170,12 @@ def obtener_signing_token_documento(document_id: str, *, recipient_email: str | 
     return _extraer_signing_token(recipient)
 
 
+def url_firma_documenso(signing_token: str) -> str:
+    """URL publica de firma de Documenso para un signing_token dado."""
+    base = (settings.DOCUMENSO_API_URL or "").rstrip("/")
+    return f"{base}/sign/{signing_token}" if base and signing_token else ""
+
+
 def iniciar_firma_consentimiento(consentimiento) -> tuple[str, str]:
     logger.info(
         "iniciar_firma | consentimiento_id=%s | paciente_id=%s | template_token=%s | doc_id=%s | signing_token_guardado=%s",

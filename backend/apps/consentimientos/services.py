@@ -201,11 +201,6 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
     return {"signing_token": signing_token or "", "document_id": str(envelope_id)}
 
 
-def url_firma_documenso(signing_token: str) -> str:
-    base = (settings.DOCUMENSO_API_URL or "").rstrip("/")
-    return f"{base}/sign/{signing_token}" if base and signing_token else ""
-
-
 def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     if consentimiento.plantilla_id:
         return consentimiento.plantilla.nombre
@@ -220,7 +215,7 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
     paciente no tiene telefono, no envia nada y solo devuelve el link para copiar.
     Sirve para compromiso de pago y para cualquier consentimiento con flujo
     Documenso."""
-    from apps.historia_clinica.services import DocumensoIntegrationError
+    from apps.historia_clinica.services import DocumensoIntegrationError, url_firma_documenso
     from apps.notificaciones.services import enviar_link_firma_whatsapp
 
     result = iniciar_firma_compromiso_pago_documenso(consentimiento)
