@@ -1,3 +1,9 @@
+# Playwright
+e2e/playwright/.auth/
+e2e/test-results/
+e2e/playwright-report/
+e2e/node_modules/
+
 # Environment
 .env
 .env.*
@@ -10,6 +16,12 @@ setup.sh
 # Claude & Agents
 .claude/
 agents/
+.impeccable/
+.codegraph/
+
+# Servicio facial: ahora es un microservicio centralizado en el servidor,
+# ya no vive en este repo.
+face-service/
 
 # Python
 __pycache__/
