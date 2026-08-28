@@ -306,6 +306,23 @@ class CitaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El usuario asignado debe tener es_profesional=True.")
         return value
 
+    def validate_fecha_inicio(self, value):
+        ahora = timezone.now()
+        if not self.instance:
+            if value < ahora:
+                raise serializers.ValidationError("No se puede agendar una cita en una fecha u hora pasada.")
+            return value
+        # Reagendar: solo se bloquea si se mueve a una fecha pasada y la cita aún
+        # no ha comenzado. Reenviar la misma fecha (editar otros campos) o corregir
+        # citas ya iniciadas/cerradas no se bloquea.
+        if (
+            value != self.instance.fecha_inicio
+            and value < ahora
+            and self.instance.estado in (Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA)
+        ):
+            raise serializers.ValidationError("No se puede reagendar una cita a una fecha u hora pasada.")
+        return value
+
     def validate(self, attrs):
         paciente = attrs.get("paciente", getattr(self.instance, "paciente", None))
         sede = attrs.get("sede", getattr(self.instance, "sede", None))
