@@ -315,6 +315,18 @@ class CitaViewSet(ModelViewSet):
             update_fields.append("fecha_inicio_real")
 
         cita.save(update_fields=list(dict.fromkeys(update_fields)))
+
+        if nuevo_estado == Cita.Estado.CANCELADA:
+            # Liberar las sesiones de tratamiento vinculadas a esta cita para que
+            # puedan reagendarse. El cupo del ítem de cotización ya queda libre vía
+            # citas_no_canceladas(); esto suelta además el FK de la SesionProcedimiento,
+            # que si no bloquea el reagendado con SESION_YA_VINCULADA.
+            from apps.protocolos.models import SesionProcedimiento
+
+            cita.sesiones_protocolo.filter(
+                estado=SesionProcedimiento.Estado.PENDIENTE
+            ).update(cita=None, updated_at=timezone.now())
+
         if nuevo_estado in {
             Cita.Estado.CONFIRMADA,
             Cita.Estado.EN_ESPERA,
