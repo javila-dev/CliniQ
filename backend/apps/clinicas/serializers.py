@@ -3,6 +3,7 @@ from rest_framework import serializers
 
 from django.db import transaction
 
+from apps.colaboradores.models import Colaborador
 from apps.core.storage import get_public_url
 from apps.clinicas.models import (
     Campana,
@@ -363,6 +364,17 @@ class ServicioSerializer(serializers.ModelSerializer):
 
 
 class ProcedimientoSerializer(ServicioSerializer):
+    # Profesionales que realizan este procedimiento. Es el mismo M2M
+    # Colaborador.especialidades, editable también desde este lado para no tener
+    # que abrir el perfil de cada profesional al crear un procedimiento.
+    profesionales = serializers.PrimaryKeyRelatedField(
+        many=True,
+        source="colaboradores",
+        required=False,
+        queryset=Colaborador.objects.select_related("user", "sede_principal"),
+    )
+    profesionales_detalle = serializers.SerializerMethodField()
+
     class Meta(ServicioSerializer.Meta):
         fields = (
             "id",
@@ -379,10 +391,34 @@ class ProcedimientoSerializer(ServicioSerializer):
             "pasos_protocolo",
             "consentimientos_requeridos",
             "diagramas",
+            "profesionales",
+            "profesionales_detalle",
             "activo",
             "created_at",
             "updated_at",
         )
+
+    def get_profesionales_detalle(self, obj):
+        return [
+            {"id": str(c.id), "nombre": c.user.nombre_completo}
+            for c in obj.colaboradores.all()
+        ]
+
+    def validate_profesionales(self, value):
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated or request.user.rol == "superadmin":
+            return value
+        for colaborador in value:
+            if not colaborador.user.es_profesional:
+                raise serializers.ValidationError("Solo se pueden asignar profesionales.")
+            clinica_id = (
+                colaborador.sede_principal.clinica_id
+                if colaborador.sede_principal_id
+                else colaborador.user.clinica_id
+            )
+            if clinica_id and clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError("Algún profesional no pertenece a esta clínica.")
+        return value
 
 
 class PasoProtocoloSerializer(serializers.ModelSerializer):

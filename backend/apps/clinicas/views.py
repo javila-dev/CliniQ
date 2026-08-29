@@ -879,6 +879,9 @@ class DiagramaCorporalViewSet(ModelViewSet):
 class ProcedimientoViewSet(ServicioViewSet):
     serializer_class = ProcedimientoSerializer
 
+    def get_queryset(self):
+        return super().get_queryset().prefetch_related("colaboradores__user")
+
 
 class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
     serializer_class = TratamientoCatalogoSerializer
