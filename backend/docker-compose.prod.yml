@@ -7,8 +7,11 @@ services:
     image: cliniq-backend:latest
     restart: unless-stopped
     env_file: .env
-    ports:
-      - "8001:8000"
+    # Sin `ports:` a proposito: Traefik/Dokploy enruta a este contenedor por la
+    # red `shared-services` en el puerto interno 8000 (Container Port en el
+    # dominio de Dokploy). Publicar 8001:8000 en el host dejaba la API accesible
+    # por HTTP plano saltandose TLS, rate-limiting del borde y permitiendo
+    # spoofear X-Forwarded-Proto (SECURE_PROXY_SSL_HEADER).
     networks:
       - cliniq_network
       - shared-services
