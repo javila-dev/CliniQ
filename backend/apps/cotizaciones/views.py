@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime
+from datetime import date, datetime
 
 from django.http import HttpResponse
 from django.db.models import Prefetch
@@ -74,6 +74,25 @@ class CotizacionViewSet(ModelViewSet):
         activo = self.request.query_params.get("activo")
         if activo is None:
             queryset = queryset.filter(activo=True)
+
+        queryset = self._filtrar_por_fecha(queryset)
+        return queryset
+
+    def _filtrar_por_fecha(self, queryset):
+        def parse(valor):
+            try:
+                return date.fromisoformat(valor)
+            except (TypeError, ValueError):
+                raise ValidationError(
+                    {"error": "Rango de fechas invalido.", "code": "FECHA_INVALIDA"}
+                )
+
+        fecha_desde = self.request.query_params.get("fecha_desde")
+        fecha_hasta = self.request.query_params.get("fecha_hasta")
+        if fecha_desde:
+            queryset = queryset.filter(created_at__date__gte=parse(fecha_desde))
+        if fecha_hasta:
+            queryset = queryset.filter(created_at__date__lte=parse(fecha_hasta))
         return queryset
 
     def perform_destroy(self, instance):

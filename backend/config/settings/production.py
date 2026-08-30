@@ -30,6 +30,7 @@ CSRF_TRUSTED_ORIGINS = config(
 SENTRY_DSN = config("SENTRY_DSN", default="")
 if SENTRY_DSN:
     import sentry_sdk
+    from django.core.exceptions import DisallowedHost, SuspiciousOperation
 
     sentry_sdk.init(
         dsn=SENTRY_DSN,
@@ -42,5 +43,8 @@ if SENTRY_DSN:
         # datos de pacientes).
         send_default_pii=False,
         max_request_body_size="never",
+        # Ruido de bots/escáneres que pegan al IP:puerto crudo en vez del dominio.
+        # Django ya responde 400 (SuspiciousOperation), no es un fallo de la app.
+        ignore_errors=[DisallowedHost, SuspiciousOperation],
     )
 

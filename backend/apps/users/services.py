@@ -57,81 +57,61 @@ def build_auth_email_html(
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>{safe_title}</title>
   </head>
-  <body style="margin:0; padding:0; background-color:#f5f7fb; font-family:Arial, Helvetica, sans-serif; color:#1f1730;">
-    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:linear-gradient(180deg, #22121f 0%, #2f1630 100%); padding:32px 16px;">
+  <body style="margin:0; padding:0; background-color:#f4f4f5; font-family:-apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, Helvetica, sans-serif; color:#27272a;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background-color:#f4f4f5; padding:40px 16px;">
       <tr>
         <td align="center">
-          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:600px;">
+          <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:520px;">
             <tr>
-              <td style="padding:0 0 24px 0; text-align:center;">
-                <div style="display:inline-block; padding:10px 18px; border-radius:999px; background:rgba(255,255,255,0.08); color:#ff8fb1; font-size:12px; font-weight:700; letter-spacing:1.8px; text-transform:uppercase;">
-                  CliniQ
-                </div>
+              <td style="padding:0 4px 20px;">
+                <span style="font-size:15px; font-weight:700; letter-spacing:0.4px; color:#c7358b;">CliniQ</span>
               </td>
             </tr>
             <tr>
-              <td style="background:#ffffff; border-radius:28px; overflow:hidden; box-shadow:0 20px 60px rgba(22, 12, 32, 0.28);">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0">
+              <td style="background:#ffffff; border:1px solid #e4e4e7; border-radius:12px; padding:40px;">
+                <p style="margin:0 0 10px; font-size:12px; font-weight:600; letter-spacing:0.8px; text-transform:uppercase; color:#a1a1aa;">
+                  {safe_badge}
+                </p>
+                <h1 style="margin:0 0 12px; font-size:22px; line-height:1.35; font-weight:700; color:#18181b;">
+                  {safe_title}
+                </h1>
+                <p style="margin:0 0 28px; font-size:15px; line-height:1.6; color:#52525b;">
+                  {safe_preview}
+                </p>
+                <p style="margin:0 0 16px; font-size:15px; line-height:1.6; color:#3f3f46;">
+                  Hola {safe_name},
+                </p>
+                <p style="margin:0 0 28px; font-size:15px; line-height:1.6; color:#3f3f46;">
+                  {safe_intro}
+                </p>
+                <table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 28px;">
                   <tr>
-                    <td style="padding:40px 40px 24px; background:linear-gradient(135deg, #ff4fa3 0%, #d83fa4 48%, #54d8ff 100%);">
-                      <div style="display:inline-block; padding:8px 14px; border-radius:999px; background:rgba(255,255,255,0.16); color:#ffffff; font-size:12px; font-weight:700; letter-spacing:1.4px; text-transform:uppercase;">
-                        {safe_badge}
-                      </div>
-                      <h1 style="margin:18px 0 10px; color:#ffffff; font-size:34px; line-height:1.15; font-weight:800;">
-                        {safe_title}
-                      </h1>
-                      <p style="margin:0; color:rgba(255,255,255,0.92); font-size:16px; line-height:1.7;">
-                        {safe_preview}
-                      </p>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:36px 40px 12px;">
-                      <p style="margin:0 0 16px; font-size:16px; line-height:1.7; color:#43364c;">
-                        Hola {safe_name},
-                      </p>
-                      <p style="margin:0 0 16px; font-size:16px; line-height:1.7; color:#43364c;">
-                        {safe_intro}
-                      </p>
-                      <table role="presentation" cellspacing="0" cellpadding="0" style="margin:28px 0 24px;">
-                        <tr>
-                          <td align="center" style="border-radius:14px; background:linear-gradient(135deg, #ff4fa3 0%, #d93e9f 100%);">
-                            <a href="{safe_url}" style="display:inline-block; padding:16px 28px; font-size:16px; font-weight:700; color:#ffffff; text-decoration:none; border-radius:14px;">
-                              {safe_button}
-                            </a>
-                          </td>
-                        </tr>
-                      </table>
-                      <div style="padding:18px 20px; border-radius:18px; background:#f8eef6; border:1px solid #f2d5e5; margin:0 0 24px;">
-                        <p style="margin:0 0 8px; font-size:14px; font-weight:700; color:#a23373;">
-                          Importante
-                        </p>
-                        <p style="margin:0; font-size:14px; line-height:1.7; color:#5d4c66;">
-                          Este enlace vence en {expiration_hours} horas y solo puede usarse una vez.
-                        </p>
-                      </div>
-                      <p style="margin:0 0 12px; font-size:14px; line-height:1.7; color:#5d4c66;">
-                        Si el boton no funciona, copia y pega esta URL en tu navegador:
-                      </p>
-                      <p style="margin:0 0 20px; font-size:13px; line-height:1.8; word-break:break-all;">
-                        <a href="{safe_url}" style="color:#c7358b; text-decoration:none;">{safe_url}</a>
-                      </p>
-                      <p style="margin:0; font-size:14px; line-height:1.7; color:#5d4c66;">
-                        {safe_footer}
-                      </p>
-                    </td>
-                  </tr>
-                  <tr>
-                    <td style="padding:24px 40px 36px; border-top:1px solid #f1e7ef;">
-                      <p style="margin:0 0 6px; font-size:13px; font-weight:700; color:#1f1730;">
-                        CliniQ
-                      </p>
-                      <p style="margin:0; font-size:13px; line-height:1.7; color:#7d6d86;">
-                        Plataforma de gestion clinica para equipos que necesitan una experiencia clara, segura y profesional.
-                      </p>
+                    <td style="border-radius:8px; background:#c7358b;">
+                      <a href="{safe_url}" style="display:inline-block; padding:13px 26px; font-size:15px; font-weight:600; color:#ffffff; text-decoration:none;">
+                        {safe_button}
+                      </a>
                     </td>
                   </tr>
                 </table>
+                <p style="margin:0 0 24px; padding-left:14px; border-left:2px solid #e4e4e7; font-size:13px; line-height:1.6; color:#71717a;">
+                  Este enlace vence en {expiration_hours} horas y solo puede usarse una vez.
+                </p>
+                <p style="margin:0 0 6px; font-size:13px; line-height:1.6; color:#71717a;">
+                  Si el boton no funciona, copia y pega esta URL en tu navegador:
+                </p>
+                <p style="margin:0 0 24px; font-size:13px; line-height:1.7; word-break:break-all;">
+                  <a href="{safe_url}" style="color:#c7358b; text-decoration:none;">{safe_url}</a>
+                </p>
+                <p style="margin:0; font-size:13px; line-height:1.6; color:#71717a;">
+                  {safe_footer}
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 4px 0;">
+                <p style="margin:0; font-size:12px; line-height:1.6; color:#a1a1aa;">
+                  CliniQ &mdash; Plataforma de gestion clinica.
+                </p>
               </td>
             </tr>
           </table>
