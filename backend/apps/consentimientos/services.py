@@ -770,6 +770,147 @@ def recuperar_pdf_asistencia(cita) -> bool:
     return True
 
 
+def _estado_firma_desde_envelope(payload: dict) -> str:
+    """Traduce la respuesta de ``GET /api/v2/envelope/{id}`` de Documenso a
+    uno de: ``"firmada"`` | ``"rechazada"`` | ``"pendiente"``.
+
+    Se consulta de forma defensiva porque las claves varian entre versiones de
+    Documenso: estado global, ``completedAt``, y el estado por firmante.
+    """
+    status = str(
+        payload.get("status")
+        or payload.get("documentStatus")
+        or payload.get("envelopeStatus")
+        or ""
+    ).upper()
+    recipients = payload.get("recipients") or []
+
+    # Rechazo explicito de algun firmante.
+    for r in recipients:
+        rechazo = (r.get("rejectionReason") or r.get("declineReason") or "").strip()
+        estado_r = str(r.get("signingStatus") or r.get("status") or "").upper()
+        if rechazo or estado_r in {"REJECTED", "DECLINED"}:
+            return "rechazada"
+    if status in {"REJECTED", "DECLINED"}:
+        return "rechazada"
+
+    if status in {"COMPLETED", "COMPLETE"} or payload.get("completedAt"):
+        return "firmada"
+
+    firmantes = [
+        r for r in recipients
+        if str(r.get("role") or "SIGNER").upper() in {"SIGNER", "APPROVER"}
+    ]
+    if firmantes:
+        estados = [
+            str(r.get("signingStatus") or r.get("status") or "").upper() for r in firmantes
+        ]
+        if all(e in {"SIGNED", "COMPLETED"} for e in estados) and any(estados):
+            return "firmada"
+        if all(r.get("signedAt") for r in firmantes):
+            return "firmada"
+
+    return "pendiente"
+
+
+def verificar_firma_asistencia_en_documenso(cita) -> str:
+    """Consulta el documento directamente en Documenso (sin esperar el webhook)
+    y reconcilia ``cita.firma_asistencia_estado``. Devuelve el estado resultante.
+
+    Pensado como respaldo manual: el flujo normal sigue siendo el webhook.
+    """
+    from apps.historia_clinica.services import DocumensoIntegrationError, _fetch_documenso_json
+
+    estado_actual = cita.firma_asistencia_estado
+    if estado_actual == "firmada":
+        return estado_actual
+
+    envelope_id = (cita.firma_asistencia_documento_id or "").strip()
+    if not envelope_id:
+        logger.warning("[verificar_firma_asistencia] sin documento_id | cita_id=%s", cita.id)
+        return estado_actual
+
+    try:
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+    except DocumensoIntegrationError:
+        logger.warning(
+            "[verificar_firma_asistencia] no se pudo consultar el envelope | cita_id=%s | envelope_id=%s",
+            cita.id, envelope_id,
+        )
+        return estado_actual
+
+    nuevo = _estado_firma_desde_envelope(payload)
+    logger.info(
+        "[verificar_firma_asistencia] cita_id=%s | envelope_id=%s | estado_documenso=%s | estado_local=%s",
+        cita.id, envelope_id, nuevo, estado_actual,
+    )
+
+    if nuevo == "firmada":
+        cita.firma_asistencia_estado = "firmada"
+        cita.save(update_fields=["firma_asistencia_estado", "updated_at"])
+        if not cita.firma_asistencia_archivo:
+            try:
+                recuperar_pdf_asistencia(cita)
+            except Exception:
+                logger.exception(
+                    "[verificar_firma_asistencia] fallo al recuperar PDF | cita_id=%s", cita.id
+                )
+    elif nuevo == "rechazada" and estado_actual != "rechazada":
+        cita.firma_asistencia_estado = "rechazada"
+        cita.save(update_fields=["firma_asistencia_estado", "updated_at"])
+
+    return cita.firma_asistencia_estado
+
+
+def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento) -> str:
+    """Analogo de :func:`verificar_firma_asistencia_en_documenso` para el
+    ``Consentimiento`` (compromiso de pago / consentimientos con flujo Documenso).
+    Devuelve ``"firmado"`` | ``"pendiente"`` (mismo vocabulario que el modelo).
+    """
+    from apps.historia_clinica.services import DocumensoIntegrationError, _fetch_documenso_json
+
+    if consentimiento.estado == Consentimiento.Estado.FIRMADO:
+        return consentimiento.estado
+
+    envelope_id = (consentimiento.documenso_documento_id or "").strip()
+    if not envelope_id:
+        logger.warning(
+            "[verificar_firma_compromiso_pago] sin documento_id | consentimiento_id=%s",
+            consentimiento.id,
+        )
+        return consentimiento.estado
+
+    try:
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+    except DocumensoIntegrationError:
+        logger.warning(
+            "[verificar_firma_compromiso_pago] no se pudo consultar el envelope | consentimiento_id=%s | envelope_id=%s",
+            consentimiento.id, envelope_id,
+        )
+        return consentimiento.estado
+
+    nuevo = _estado_firma_desde_envelope(payload)
+    logger.info(
+        "[verificar_firma_compromiso_pago] consentimiento_id=%s | envelope_id=%s | estado_documenso=%s",
+        consentimiento.id, envelope_id, nuevo,
+    )
+
+    if nuevo == "firmada":
+        consentimiento.estado = Consentimiento.Estado.FIRMADO
+        consentimiento.firmado_en = timezone.now()
+        consentimiento.save(update_fields=["estado", "firmado_en", "updated_at"])
+        if not consentimiento.pdf_archivo:
+            try:
+                recuperar_pdf_compromiso_pago(consentimiento)
+            except Exception:
+                logger.exception(
+                    "[verificar_firma_compromiso_pago] fallo al recuperar PDF | consentimiento_id=%s",
+                    consentimiento.id,
+                )
+
+    return consentimiento.estado
+
+
 def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento) -> bool:
     """
     Igual que recuperar_pdf_asistencia pero para Consentimiento.pdf_archivo.

@@ -109,7 +109,7 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action in {"iniciar_checkin", "verificar_otp", "checkin_foto"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "enviar_link_firma_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia"}:
+        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "enviar_link_firma_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia", "verificar_firma_asistencia"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action == "registro_asistencia_pdf":
             permission_classes = (RequirePermission("agenda.citas.ver"),)
@@ -781,6 +781,22 @@ class CitaViewSet(ModelViewSet):
             "[confirmar_firma_asistencia] estado actualizado eager | cita_id=%s | user=%s",
             cita.id, request.user.id,
         )
+        serializer = self.get_serializer(cita)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="verificar_firma_asistencia")
+    def verificar_firma_asistencia(self, request, pk=None):
+        """
+        Consulta el estado del documento directamente en Documenso y reconcilia
+        firma_asistencia_estado. Respaldo manual para cuando el webhook de
+        Documenso tarda o no llega (el paciente firmo desde su celular via el
+        link de WhatsApp).
+        """
+        from apps.consentimientos.services import verificar_firma_asistencia_en_documenso
+
+        cita = self.get_object()
+        verificar_firma_asistencia_en_documenso(cita)
+        cita.refresh_from_db()
         serializer = self.get_serializer(cita)
         return Response(serializer.data, status=status.HTTP_200_OK)
 

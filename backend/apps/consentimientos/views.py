@@ -19,6 +19,7 @@ from apps.consentimientos.services import (
     firmar_consentimiento,
     generar_consentimiento,
     iniciar_firma_compromiso_pago_documenso,
+    verificar_firma_compromiso_pago_en_documenso,
 )
 from apps.historia_clinica.services import DocumensoIntegrationError
 from apps.core.logging import registrar_accion
@@ -63,7 +64,7 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         "plantilla",
     ).all()
     def get_permissions(self):
-        if self.action in {"generar", "iniciar_firma_documenso", "confirmar_firma_documenso", "enviar_link_documenso"}:
+        if self.action in {"generar", "iniciar_firma_documenso", "confirmar_firma_documenso", "enviar_link_documenso", "verificar_firma_documenso"}:
             permission_classes = (RequirePermission("consentimientos.generar"),)
         elif self.action == "revocar":
             permission_classes = (RequirePermission("consentimientos.revocar"),)
@@ -121,6 +122,15 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
     def confirmar_firma_documenso(self, request, pk=None):
         consentimiento = self.get_object()
         consentimiento = confirmar_firma_compromiso_pago(consentimiento)
+        return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="verificar_firma_documenso")
+    def verificar_firma_documenso(self, request, pk=None):
+        """Consulta el estado directamente en Documenso y reconcilia el estado
+        del consentimiento. Respaldo manual cuando el webhook tarda o no llega."""
+        consentimiento = self.get_object()
+        verificar_firma_compromiso_pago_en_documenso(consentimiento)
+        consentimiento.refresh_from_db()
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="enviar_link_documenso")
