@@ -159,8 +159,27 @@ class ItemCotizacion(BaseModel):
     def citas_no_canceladas(self):
         return self.citas.exclude(estado="cancelada").count()
 
+    def num_sesiones_efectivas(self):
+        """Sesiones agendables reales del ítem.
+
+        Para ítems de tratamiento el total lo define la configuración vigente
+        del catálogo (suma de ``TipoSesion`` de compromiso), no la columna
+        ``num_citas`` —que para tratamientos queda en 1 porque solo representa
+        una línea cotizada/cobrada—. El endpoint ``/cotizaciones/{id}/sesiones/``
+        usa esta misma fórmula; mantenerlas alineadas evita que el selector de
+        "Nueva cita" ofrezca sesiones que luego el backend rechaza.
+        """
+        if self.tipo == self.Tipo.TRATAMIENTO and self.tratamiento_id:
+            total = sum(
+                ts.cantidad
+                for ts in self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
+            )
+            if total:
+                return total
+        return self.num_citas
+
     def citas_restantes(self):
-        return max(0, self.num_citas - self.citas_no_canceladas())
+        return max(0, self.num_sesiones_efectivas() - self.citas_no_canceladas())
 
 
 class FormaPagoCotizacion(BaseModel):

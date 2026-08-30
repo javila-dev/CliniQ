@@ -304,7 +304,7 @@ class CitaSerializer(serializers.ModelSerializer):
         return {
             "cotizacion_id": str(item.cotizacion_id),
             "descripcion": item.descripcion,
-            "num_citas": item.num_citas,
+            "num_citas": item.num_sesiones_efectivas(),
             "citas_agendadas": item.citas_no_canceladas(),
             "citas_restantes": item.citas_restantes(),
         }
@@ -392,7 +392,7 @@ class CitaSerializer(serializers.ModelSerializer):
             citas_usadas = item_cotizacion.citas_no_canceladas()
             if self.instance and self.instance.item_cotizacion_id == item_cotizacion.id and self.instance.estado != Cita.Estado.CANCELADA:
                 citas_usadas = max(0, citas_usadas - 1)
-            if citas_usadas >= item_cotizacion.num_citas:
+            if citas_usadas >= item_cotizacion.num_sesiones_efectivas():
                 raise serializers.ValidationError(
                     {"error": "Este item no tiene sesiones disponibles.", "code": "SIN_SESIONES_DISPONIBLES"}
                 )
