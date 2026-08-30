@@ -70,6 +70,12 @@ INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
 
 AUTH_USER_MODEL = "users.User"
 
+# El login usa el correo como identificador; debe ser case-insensitive.
+AUTHENTICATION_BACKENDS = [
+    "apps.users.auth_backends.CaseInsensitiveEmailBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 MIDDLEWARE = [
     "corsheaders.middleware.CorsMiddleware",
     "django.middleware.security.SecurityMiddleware",
