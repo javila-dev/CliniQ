@@ -234,10 +234,12 @@ class ClinicaViewSet(ModelViewSet):
         return self._save_or_delete_logo(request, clinica)
 
     def plan_usage(self, request):
+        from apps.users.services import contar_usuarios_que_ocupan_cupo
+
         clinica = self._get_request_clinica()
         plan = getattr(clinica, "plan", None)
 
-        activos = User.objects.filter(clinica=clinica, activo=True).count()
+        activos = contar_usuarios_que_ocupan_cupo(clinica)
         sedes_activas = Sede.objects.filter(clinica=clinica, activo=True).count()
 
         sin_limite_usuarios = plan is None or plan.max_usuarios == 0
@@ -294,7 +296,12 @@ class AdminTenantViewSet(ModelViewSet):
             Clinica.objects.select_related("plan")
             .annotate(
                 total_usuarios=Count("usuarios", distinct=True),
-                usuarios_activos=Count("usuarios", filter=Q(usuarios__activo=True), distinct=True),
+                # "Ocupan cupo": activados + invitaciones pendientes (colaborador activo).
+                usuarios_activos=Count(
+                    "usuarios",
+                    filter=Q(usuarios__activo=True) | Q(usuarios__colaborador__activo=True),
+                    distinct=True,
+                ),
                 total_sedes=Count("sedes", filter=Q(sedes__activo=True), distinct=True),
             )
             .order_by("nombre")

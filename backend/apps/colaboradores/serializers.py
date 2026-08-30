@@ -109,6 +109,7 @@ class ColaboradorSerializer(serializers.ModelSerializer):
     )
     sedes_detalle = serializers.SerializerMethodField()
     horarios = HorarioColaboradorSerializer(many=True, read_only=True)
+    invitacion_pendiente = serializers.SerializerMethodField()
 
     class Meta:
         model = Colaborador
@@ -139,6 +140,7 @@ class ColaboradorSerializer(serializers.ModelSerializer):
             "numero_documento",
             "horarios",
             "activo",
+            "invitacion_pendiente",
             "created_at",
             "updated_at",
         )
@@ -154,7 +156,12 @@ class ColaboradorSerializer(serializers.ModelSerializer):
             "sedes",
             "sedes_detalle",
             "horarios",
+            "invitacion_pendiente",
         )
+
+    def get_invitacion_pendiente(self, obj):
+        """El colaborador está activo pero su usuario aún no aceptó la invitación."""
+        return bool(obj.activo and not obj.user.activo)
 
     def get_clinica_id(self, obj):
         if obj.sede_principal_id:
@@ -272,6 +279,8 @@ class ColaboradorSerializer(serializers.ModelSerializer):
         user_data = {field: validated_data.pop(field) for field in user_fields if field in validated_data}
         sedes = validated_data.pop("sedes", None)
 
+        activo_cambio = "activo" in validated_data and validated_data["activo"] != instance.activo
+
         if user_data:
             self._save_user_updates(instance.user, user_data)
         if role:
@@ -279,7 +288,26 @@ class ColaboradorSerializer(serializers.ModelSerializer):
 
         instance = super().update(instance, validated_data)
         self._apply_sedes(instance, sedes)
+        if activo_cambio:
+            self._sync_user_activo(instance.user, instance.activo)
         return instance
+
+    def _sync_user_activo(self, user, colaborador_activo):
+        """Mantiene ``User.activo`` alineado con el estado del colaborador.
+
+        Al desactivar el colaborador también se desactiva el usuario. Al
+        reactivarlo solo se reactiva el usuario si ya completó el onboarding
+        (tiene contraseña); si sigue con invitación pendiente se deja como está.
+        """
+        if not colaborador_activo:
+            if user.activo or user.is_active:
+                user.activo = False
+                user.is_active = False
+                user.save(update_fields=["activo", "is_active"])
+        elif not user.activo and user.has_usable_password():
+            user.activo = True
+            user.is_active = True
+            user.save(update_fields=["activo", "is_active"])
 
 
 class ColaboradorCreateSerializer(ColaboradorSerializer):
@@ -371,6 +399,7 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     sede_principal_nombre = serializers.CharField(source="sede_principal.nombre", read_only=True)
     especialidades = serializers.SerializerMethodField()
+    invitacion_pendiente = serializers.SerializerMethodField()
 
     class Meta:
         model = Colaborador
@@ -392,10 +421,14 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
             "fecha_ingreso",
             "numero_documento",
             "activo",
+            "invitacion_pendiente",
             "created_at",
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_invitacion_pendiente(self, obj):
+        return bool(obj.activo and not obj.user.activo)
 
     def get_especialidades(self, obj):
         return [

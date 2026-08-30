@@ -7,6 +7,7 @@ from urllib.parse import urlencode
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
@@ -391,6 +392,20 @@ def get_valid_password_reset_token(token: str) -> PasswordResetToken:
     if reset_token.purpose != PasswordResetToken.Purpose.INVITE and not reset_token.user.activo:
         raise ValueError("El usuario no esta activo.")
     return reset_token
+
+
+# Un usuario ocupa un cupo del plan si ya está activado (activo=True) o si tiene
+# una invitación pendiente (su Colaborador sigue activo aunque aún no acepte).
+# Los usuarios explícitamente desactivados NO cuentan.
+OCUPA_CUPO_Q = Q(activo=True) | Q(colaborador__activo=True)
+
+
+def usuarios_que_ocupan_cupo(clinica):
+    return User.objects.filter(clinica=clinica).filter(OCUPA_CUPO_Q).distinct()
+
+
+def contar_usuarios_que_ocupan_cupo(clinica) -> int:
+    return usuarios_que_ocupan_cupo(clinica).count()
 
 
 @transaction.atomic

@@ -46,7 +46,7 @@ def _check_clinica_user_limit(clinica):
     plan = getattr(clinica, "plan", None)
     if plan is None or plan.max_usuarios == 0:
         return None
-    activos = clinica.usuarios.filter(activo=True).count()
+    activos = services.contar_usuarios_que_ocupan_cupo(clinica)
     if activos >= plan.max_usuarios:
         return (
             f"La clinica ha alcanzado el limite de {plan.max_usuarios} usuarios activos de su plan '{plan.nombre}'.",
@@ -631,7 +631,7 @@ class UserViewSet(GenericViewSet):
         clinica_raw = get_clinica_activa(request)
         clinica = Clinica.objects.select_related("plan").filter(id=clinica_raw.id).first() if clinica_raw else None
 
-        activos = clinica.usuarios.filter(activo=True).count() if clinica else 0
+        activos = services.contar_usuarios_que_ocupan_cupo(clinica) if clinica else 0
         plan = getattr(clinica, "plan", None) if clinica else None
 
         if plan is None or plan.max_usuarios == 0:
