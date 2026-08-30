@@ -104,6 +104,110 @@ def procedimientos_requeridos_sesion(sesion: SesionProcedimiento):
     return []
 
 
+def _sesion_vinculada_o_pendiente(cita):
+    """SesionProcedimiento asociada a una cita.
+
+    Prioriza la que está enganchada por FK (``cita.sesiones_protocolo``); si la
+    cita se agendó solo con ``item_cotizacion`` (sin ``sesion_ejecutada``), cae a
+    la primera sesión pendiente del tratamiento de ese ítem. Entre varias
+    enganchadas prefiere la que sigue pendiente.
+    """
+    # ``.all()`` para aprovechar el prefetch de ``sesiones_protocolo`` que hace
+    # el viewset de agenda y no disparar una consulta por cita en los listados.
+    vinculadas = list(cita.sesiones_protocolo.all())
+    if vinculadas:
+        return next(
+            (s for s in vinculadas if s.estado == SesionProcedimiento.Estado.PENDIENTE),
+            vinculadas[0],
+        )
+
+    item_id = getattr(cita, "item_cotizacion_id", None)
+    if not item_id:
+        return None
+    return (
+        SesionProcedimiento.objects.select_related(
+            "tipo_sesion",
+            "procedimiento",
+            "tratamiento",
+            "tratamiento__servicio",
+            "tratamiento__tratamiento_catalogo",
+        )
+        .filter(
+            tratamiento__cotizacion_item_id=item_id,
+            estado=SesionProcedimiento.Estado.PENDIENTE,
+        )
+        .order_by("tipo_sesion__orden", "numero")
+        .first()
+    )
+
+
+def contexto_sesion_para_cita(cita):
+    """Contexto de "sesión X/Y del tratamiento" para la pantalla de atención.
+
+    Devuelve ``None`` si la cita no corresponde a una sesión de tratamiento con
+    tipo de sesión. Incluye TODOS los procedimientos del tipo de sesión (no solo
+    el principal) y si alguno tiene zonas/diagramas configurados.
+    """
+    sesion = _sesion_vinculada_o_pendiente(cita)
+    if sesion is None or sesion.tipo_sesion_id is None:
+        return None
+
+    tipo = sesion.tipo_sesion
+    tratamiento = sesion.tratamiento
+
+    # Índice corrido dentro del tratamiento (ordenado por tipo.orden, numero).
+    sesiones_trat = list(tratamiento.sesiones.select_related("tipo_sesion").all())
+    sesiones_trat.sort(key=lambda s: (s.tipo_sesion.orden if s.tipo_sesion_id else 0, s.numero))
+    total = len(sesiones_trat)
+    numero = next((i for i, s in enumerate(sesiones_trat, start=1) if s.id == sesion.id), sesion.numero)
+
+    procedimientos = [
+        {
+            "id": str(tp.procedimiento_id),
+            "nombre": tp.procedimiento.nombre,
+            "duracion_min": tp.procedimiento.duracion_min,
+        }
+        for tp in tipo.procedimientos.filter(activo=True)
+        .select_related("procedimiento")
+        .order_by("orden")
+    ]
+    if not procedimientos and sesion.procedimiento_id:
+        procedimientos = [
+            {
+                "id": str(sesion.procedimiento_id),
+                "nombre": sesion.procedimiento.nombre,
+                "duracion_min": sesion.procedimiento.duracion_min,
+            }
+        ]
+
+    from apps.clinicas.models import ServicioGrupoZonas
+
+    proc_ids = [p["id"] for p in procedimientos]
+    tiene_zonas = bool(proc_ids) and ServicioGrupoZonas.objects.filter(
+        servicio_id__in=proc_ids, activo=True
+    ).exists()
+
+    if tratamiento.tratamiento_catalogo_id:
+        nombre_trat = tratamiento.tratamiento_catalogo.nombre
+    elif tratamiento.servicio_id:
+        nombre_trat = tratamiento.servicio.nombre
+    else:
+        nombre_trat = ""
+
+    return {
+        "sesion_id": str(sesion.id),
+        "tratamiento_id": str(tratamiento.id),
+        "tratamiento_nombre": nombre_trat,
+        "tipo_sesion_id": str(tipo.id),
+        "tipo_sesion_nombre": tipo.nombre,
+        "numero": numero,
+        "total": total,
+        "estado": sesion.estado,
+        "procedimientos": procedimientos,
+        "tiene_zonas": tiene_zonas,
+    }
+
+
 def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
     faltantes = []
     procedimientos = procedimientos_requeridos_sesion(sesion)
@@ -280,8 +384,12 @@ def marcar_sesion_completada(
 
     if procedimientos_ejecutados:
         sesion.procedimientos_ejecutados.set(procedimientos_ejecutados)
-    elif sesion.procedimiento_id:
-        sesion.procedimientos_ejecutados.set([sesion.procedimiento])
+    else:
+        requeridos = procedimientos_requeridos_sesion(sesion)
+        if requeridos:
+            sesion.procedimientos_ejecutados.set(requeridos)
+        elif sesion.procedimiento_id:
+            sesion.procedimientos_ejecutados.set([sesion.procedimiento])
 
     if not faltantes:
         procedimientos = procedimientos_requeridos_sesion(sesion)

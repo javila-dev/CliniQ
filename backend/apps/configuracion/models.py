@@ -121,6 +121,13 @@ class ConfiguracionWizard(BaseModel):
     paso_pago = models.BooleanField(default=True)
     paso_firma_asistencia = models.BooleanField(default=True)
     paso_verificacion_facial = models.BooleanField(default=False)
+    foto_control_obligatoria = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si True, al registrar un paciente la foto de control facial es "
+            "obligatoria y el recepcionista no puede omitir el paso."
+        ),
+    )
 
     class Meta:
         db_table = "configuracion_wizard"

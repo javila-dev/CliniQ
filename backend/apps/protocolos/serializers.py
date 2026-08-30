@@ -15,6 +15,7 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     checkin_verificado = serializers.SerializerMethodField()
     procedimientos_ejecutados = serializers.SerializerMethodField()
+    procedimientos_ejecutados_nombres = serializers.SerializerMethodField()
     consentimientos = serializers.SerializerMethodField()
     foto_presencia_url = serializers.SerializerMethodField()
 
@@ -39,6 +40,7 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
             "profesional_nombre",
             "observaciones",
             "procedimientos_ejecutados",
+            "procedimientos_ejecutados_nombres",
             "consentimientos",
             "forzado_sin_consentimiento",
             "motivo_forzado",
@@ -60,6 +62,7 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
             "checkin_metodo",
             "checkin_en",
             "foto_presencia_url",
+            "procedimientos_ejecutados_nombres",
             "created_at",
             "updated_at",
         )
@@ -94,6 +97,14 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
         return False
 
     def get_procedimientos_ejecutados(self, obj):
+        queryset = obj.procedimientos_ejecutados.all()
+        if queryset.exists():
+            return [str(procedimiento.id) for procedimiento in queryset]
+        if obj.procedimiento_id:
+            return [str(obj.procedimiento_id)]
+        return []
+
+    def get_procedimientos_ejecutados_nombres(self, obj):
         queryset = obj.procedimientos_ejecutados.all()
         if queryset.exists():
             return [procedimiento.nombre for procedimiento in queryset]

@@ -109,6 +109,7 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
             "grasa_corporal_pct",
             "masa_muscular_kg",
             "grasa_visceral",
+            "agua_corporal_pct",
             "presion_sistolica",
             "presion_diastolica",
             "frecuencia_cardiaca",

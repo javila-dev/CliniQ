@@ -217,6 +217,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 class UserSerializer(serializers.ModelSerializer):
     foto_perfil = serializers.SerializerMethodField()
     firma_digital_url = serializers.SerializerMethodField()
+    es_admin = serializers.BooleanField(read_only=True)
     rol = serializers.SerializerMethodField()
     role_id = serializers.SerializerMethodField()
     role_nombre = serializers.SerializerMethodField()
@@ -239,6 +240,7 @@ class UserSerializer(serializers.ModelSerializer):
             "role_nombre",
             "permissions",
             "es_profesional",
+            "es_admin",
             "clinica_id",
             "sede_id",
             "clinica",
@@ -296,8 +298,13 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         fields = ("telefono", "foto_perfil", "registro_profesional", "firma_digital")
 
     def validate(self, attrs):
-        is_profesional = getattr(self.instance, "es_profesional", False)
-        if not is_profesional:
+        # Los admins también atienden pacientes en algunas clínicas: pueden cargar
+        # firma y registro profesional aunque su rol no sea "profesional".
+        puede_datos_profesionales = (
+            getattr(self.instance, "es_profesional", False)
+            or getattr(self.instance, "es_admin", False)
+        )
+        if not puede_datos_profesionales:
             if "firma_digital" in attrs:
                 raise serializers.ValidationError({"firma_digital": "Solo los profesionales pueden subir una firma digital."})
             if "registro_profesional" in attrs and attrs["registro_profesional"]:
@@ -389,6 +396,7 @@ class LoginSerializer(TokenObtainPairSerializer):
             "role_nombre": user_role_name(self.user),
             "permissions": sorted(get_user_permission_keys(self.user)),
             "es_profesional": self.user.es_profesional,
+            "es_admin": self.user.es_admin,
             "clinica_id": str(self.user.clinica_id) if self.user.clinica_id else None,
             "sede_id": user_sede_id(self.user),
             "clinica_nombre": self.user.clinica.nombre if self.user.clinica_id else None,

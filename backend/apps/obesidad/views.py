@@ -84,13 +84,17 @@ class MedicionAntropometricaViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
     mixins.RetrieveModelMixin,
+    mixins.UpdateModelMixin,
+    mixins.DestroyModelMixin,
     viewsets.GenericViewSet,
 ):
     """
     Mediciones — filtrar por ?paciente=<uuid>
-    GET  /obesidad/mediciones/?paciente=<uuid>
-    POST /obesidad/mediciones/
-    GET  /obesidad/mediciones/{id}/
+    GET    /obesidad/mediciones/?paciente=<uuid>
+    POST   /obesidad/mediciones/
+    GET    /obesidad/mediciones/{id}/
+    PATCH  /obesidad/mediciones/{id}/   — editar la medición de la sesión
+    DELETE /obesidad/mediciones/{id}/   — borrado lógico (activo=False)
     """
 
     serializer_class = MedicionAntropometricaSerializer
@@ -101,7 +105,7 @@ class MedicionAntropometricaViewSet(
     def get_queryset(self):
         qs = MedicionAntropometrica.objects.select_related(
             "paciente", "tomado_por", "nota"
-        )
+        ).filter(activo=True)
         if self.request.user.rol != "superadmin":
             qs = qs.filter(paciente__clinica_id=_clinica_id(self.request))
         paciente_id = self.request.query_params.get("paciente")
@@ -111,6 +115,14 @@ class MedicionAntropometricaViewSet(
 
     def perform_create(self, serializer):
         serializer.save(tomado_por=self.request.user)
+
+    def perform_update(self, serializer):
+        # No se reasigna tomado_por: la medición sigue perteneciendo a quien la abrió.
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        instance.activo = False
+        instance.save(update_fields=["activo", "updated_at"])
 
     @action(detail=False, methods=["get"], url_path="progreso")
     def progreso(self, request):

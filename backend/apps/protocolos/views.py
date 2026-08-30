@@ -100,7 +100,7 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
         sesion = self.get_object()
         cita = None
         profesional = None
-        cita_id = request.data.get("cita_id")
+        cita_id = request.data.get("cita_id") or request.data.get("cita")
         profesional_id = request.data.get("profesional_id")
         if cita_id:
             cita_qs = Cita.objects.all()

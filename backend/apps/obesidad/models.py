@@ -125,6 +125,7 @@ class MedicionAntropometrica(BaseModel):
     grasa_corporal_pct = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
     masa_muscular_kg   = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     grasa_visceral     = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
+    agua_corporal_pct  = models.DecimalField(max_digits=4, decimal_places=1, null=True, blank=True)
     # Signos vitales
     presion_sistolica  = models.PositiveIntegerField(null=True, blank=True)
     presion_diastolica = models.PositiveIntegerField(null=True, blank=True)

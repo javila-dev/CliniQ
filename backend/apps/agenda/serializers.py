@@ -104,13 +104,13 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
 
 
 def build_consentimiento_info(cita):
-    # Si la cita tiene una sesión pendiente pre-vinculada, usar sus procedimientos.
-    sesion = (
-        cita.sesiones_protocolo.filter(estado=SesionProcedimiento.Estado.PENDIENTE)
-        .select_related("tipo_sesion", "procedimiento")
-        .first()
-    )
-    if sesion:
+    # Si la cita corresponde a una sesión de tratamiento (vinculada por FK, o
+    # resuelta vía item_cotizacion), exigir los consentimientos de TODOS sus
+    # procedimientos.
+    from apps.protocolos.services import _sesion_vinculada_o_pendiente
+
+    sesion = _sesion_vinculada_o_pendiente(cita)
+    if sesion is not None and (sesion.tipo_sesion_id or sesion.procedimiento_id):
         return _consentimientos_desde_sesion(sesion, cita.paciente_id)
 
     if not cita.servicio_id:
@@ -160,6 +160,7 @@ class CitaSerializer(serializers.ModelSerializer):
     cotizacion_resumen = serializers.SerializerMethodField()
     sesion_ejecutada = serializers.UUIDField(write_only=True, required=False, allow_null=True)
     sesion_ejecutada_id = serializers.SerializerMethodField()
+    sesion_tratamiento = serializers.SerializerMethodField()
     checkin_foto_url = serializers.SerializerMethodField()
     servicio_precio = serializers.SerializerMethodField()
     servicio_precio_base = serializers.SerializerMethodField()
@@ -200,6 +201,7 @@ class CitaSerializer(serializers.ModelSerializer):
             "cotizacion_resumen",
             "sesion_ejecutada",
             "sesion_ejecutada_id",
+            "sesion_tratamiento",
             "checkin_metodo",
             "checkin_en",
             "checkin_foto_url",
@@ -226,6 +228,7 @@ class CitaSerializer(serializers.ModelSerializer):
             "recordatorio_enviado",
             "item_cotizacion_id",
             "sesion_ejecutada_id",
+            "sesion_tratamiento",
             "checkin_metodo",
             "checkin_en",
             "checkin_foto_url",
@@ -288,6 +291,11 @@ class CitaSerializer(serializers.ModelSerializer):
     def get_sesion_ejecutada_id(self, obj):
         sesion = obj.sesiones_protocolo.filter(estado=SesionProcedimiento.Estado.PENDIENTE).values_list("id", flat=True).first()
         return str(sesion) if sesion else None
+
+    def get_sesion_tratamiento(self, obj):
+        from apps.protocolos.services import contexto_sesion_para_cita
+
+        return contexto_sesion_para_cita(obj)
 
     def get_cotizacion_resumen(self, obj):
         item = obj.item_cotizacion

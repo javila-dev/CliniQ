@@ -362,10 +362,22 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
                         "imagen_url": get_public_url(a.diagrama.imagen.name) if a.diagrama.imagen else None,
                     }
 
+            servicio_label = None
+            if nota.cita_id and nota.cita.servicio_id:
+                servicio_label = nota.cita.servicio.nombre
+            elif nota.cita_id:
+                from apps.protocolos.services import contexto_sesion_para_cita
+
+                contexto = contexto_sesion_para_cita(nota.cita)
+                if contexto:
+                    servicio_label = contexto["tipo_sesion_nombre"] or ", ".join(
+                        p["nombre"] for p in contexto["procedimientos"]
+                    )
+
             resultado.append({
                 "nota_id": str(nota.id),
                 "fecha": nota.created_at,
-                "servicio": nota.cita.servicio.nombre if nota.cita_id and nota.cita.servicio_id else None,
+                "servicio": servicio_label,
                 "diagramas": list(diagramas.values()),
                 "anotaciones": AnotacionZonaSerializer(anotaciones, many=True).data,
             })
@@ -445,12 +457,25 @@ class NotaClinicaViewSet(
         )
         anotaciones_data = AnotacionZonaSerializer(anotaciones, many=True).data
 
+        # Los diagramas salen del/los procedimiento(s) de la cita. Para citas de
+        # tratamiento (sin servicio propio) se agregan las zonas de TODOS los
+        # procedimientos del tipo de sesión, deduplicadas por diagrama.
+        servicio_ids = []
+        if nota.cita_id:
+            from apps.protocolos.services import contexto_sesion_para_cita
+
+            contexto = contexto_sesion_para_cita(nota.cita)
+            if contexto and contexto["procedimientos"]:
+                servicio_ids = [p["id"] for p in contexto["procedimientos"]]
+            elif nota.cita.servicio_id:
+                servicio_ids = [str(nota.cita.servicio_id)]
+
         diagramas = []
-        if nota.cita_id and nota.cita.servicio_id:
+        if servicio_ids:
             from apps.clinicas.models import ServicioGrupoZonas
             grupos_rels = (
                 ServicioGrupoZonas.objects
-                .filter(servicio_id=nota.cita.servicio_id, activo=True)
+                .filter(servicio_id__in=servicio_ids, activo=True)
                 .prefetch_related("grupo__diagramas__diagrama")
                 .order_by("orden")
             )

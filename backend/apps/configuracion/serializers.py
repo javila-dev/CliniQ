@@ -138,7 +138,14 @@ class ConfiguracionHistoriaSerializer(serializers.ModelSerializer):
 class ConfiguracionWizardSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConfiguracionWizard
-        fields = ("paso_checkin", "paso_pago", "paso_firma_asistencia", "paso_verificacion_facial", "updated_at")
+        fields = (
+            "paso_checkin",
+            "paso_pago",
+            "paso_firma_asistencia",
+            "paso_verificacion_facial",
+            "foto_control_obligatoria",
+            "updated_at",
+        )
         read_only_fields = ("updated_at",)
 
 

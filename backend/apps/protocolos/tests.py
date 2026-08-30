@@ -9,12 +9,27 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.clinicas.models import Clinica, Sede, Servicio, ServicioConsentimiento, TipoSesion, TipoSesionProcedimiento, TratamientoCatalogo
+from apps.agenda.serializers import build_consentimiento_info
+from apps.clinicas.models import (
+    Clinica,
+    DiagramaCorporal,
+    GrupoZonas,
+    GrupoZonasDiagrama,
+    Sede,
+    Servicio,
+    ServicioConsentimiento,
+    ServicioGrupoZonas,
+    TipoSesion,
+    TipoSesionProcedimiento,
+    TratamientoCatalogo,
+)
 from apps.agenda.models import Cita
 from apps.configuracion.models import DocumensoConsentimientoTemplate
+from apps.historia_clinica.models import HistoriaClinica, NotaClinica
 from apps.pacientes.models import Paciente
 from apps.protocolos.models import ConsentimientoPaciente, SesionProcedimiento, TratamientoPaciente
 from apps.protocolos.serializers import SesionProcedimientoSerializer
+from apps.protocolos.services import contexto_sesion_para_cita
 
 
 User = get_user_model()
@@ -292,3 +307,188 @@ class ProtocolosFlowTests(TestCase):
         sesion.refresh_from_db()
         self.assertIsNone(sesion.cita_id)
         self.assertIsNone(sesion.profesional_id)
+
+
+class TipoSesionMultiProcedimientoTests(TestCase):
+    """Un tipo de sesión con varios procedimientos: la atención debe agregar los
+    consentimientos y las zonas de TODOS ellos, y registrar todos como ejecutados."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            email="admin-multiproc@example.com",
+            password="Secret123!",
+            first_name="Admin",
+            last_name="MultiProc",
+            rol=User.Role.ADMIN,
+        )
+        self.clinica = Clinica.objects.create(nombre="Clinica MultiProc", nit="905000333")
+        self.admin.clinica = self.clinica
+        self.admin.save(update_fields=["clinica"])
+        self.client.force_authenticate(self.admin)
+
+        self.profesional = User.objects.create_user(
+            email="pro-multiproc@example.com",
+            password="Secret123!",
+            first_name="Pro",
+            last_name="MultiProc",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        self.sede = Sede.objects.create(
+            clinica=self.clinica, nombre="Central", ciudad="Bogota", direccion="Cra 1", telefono="3000000010"
+        )
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="111222333",
+            nombres="Lucia",
+            apellidos="Ramirez",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO,
+            direccion="Calle 3",
+            telefono="3000000011",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+
+        # Procedimiento A: consentimiento X, sin zonas
+        self.proc_a = Servicio.objects.create(
+            clinica=self.clinica, nombre="Contorno mandibular", duracion_min=30, precio="200000.00"
+        )
+        self.tpl_a = DocumensoConsentimientoTemplate.objects.create(
+            clinica=self.clinica, tipo="otros", template_token="consent-a"
+        )
+        ServicioConsentimiento.objects.create(servicio=self.proc_a, template=self.tpl_a, orden=1)
+
+        # Procedimiento B: consentimiento Y + zonas
+        self.proc_b = Servicio.objects.create(
+            clinica=self.clinica, nombre="Limpieza facial", duracion_min=30, precio="150000.00"
+        )
+        self.tpl_b = DocumensoConsentimientoTemplate.objects.create(
+            clinica=self.clinica, tipo="otros", template_token="consent-b"
+        )
+        ServicioConsentimiento.objects.create(servicio=self.proc_b, template=self.tpl_b, orden=1)
+
+        diagrama = DiagramaCorporal.objects.create(nombre="Rostro")
+        grupo = GrupoZonas.objects.create(nombre="Zonas faciales")
+        GrupoZonasDiagrama.objects.create(grupo=grupo, diagrama=diagrama, orden=1)
+        ServicioGrupoZonas.objects.create(servicio=self.proc_b, grupo=grupo, orden=1)
+
+        self.tratamiento_catalogo = TratamientoCatalogo.objects.create(
+            clinica=self.clinica, nombre="Plan Facial", precio_estimado="700000.00"
+        )
+        self.tipo_sesion = TipoSesion.objects.create(
+            tratamiento=self.tratamiento_catalogo,
+            nombre="Contorno + Limpieza",
+            cantidad=2,
+            orden=1,
+            es_compromiso=True,
+        )
+        TipoSesionProcedimiento.objects.create(tipo_sesion=self.tipo_sesion, procedimiento=self.proc_a, orden=1)
+        TipoSesionProcedimiento.objects.create(tipo_sesion=self.tipo_sesion, procedimiento=self.proc_b, orden=2)
+
+        self.tratamiento = TratamientoPaciente.objects.create(
+            paciente=self.paciente,
+            servicio=self.proc_a,
+            tratamiento_catalogo=self.tratamiento_catalogo,
+        )
+        self.sesion1 = SesionProcedimiento.objects.create(
+            tratamiento=self.tratamiento, tipo_sesion=self.tipo_sesion, numero=1, procedimiento=self.proc_a
+        )
+        self.sesion2 = SesionProcedimiento.objects.create(
+            tratamiento=self.tratamiento, tipo_sesion=self.tipo_sesion, numero=2, procedimiento=self.proc_a
+        )
+        self.cita = Cita.objects.create(
+            paciente=self.paciente,
+            sede=self.sede,
+            servicio=None,
+            profesional=self.profesional,
+            fecha_inicio=timezone.now(),
+            fecha_fin=timezone.now() + timedelta(minutes=60),
+            duracion_min=60,
+            servicio_nombre="Contorno + Limpieza",
+            canal_confirmacion=Cita.CanalConfirmacion.WHATSAPP,
+        )
+        self.sesion1.cita = self.cita
+        self.sesion1.save(update_fields=["cita"])
+
+    def _firmar(self, token):
+        """Consentimiento del paciente (usado por verificar_consentimientos_sesion)."""
+        ConsentimientoPaciente.objects.create(
+            paciente=self.paciente,
+            template_token=token,
+            template_nombre=token,
+            fecha_firma=timezone.localdate(),
+            vigencia_hasta=timezone.localdate() + timedelta(days=365),
+            metodo=ConsentimientoPaciente.Metodo.PRESENCIAL_CONFIRMADO,
+            registrado_por=self.admin,
+        )
+
+    def _firmar_informado(self, token):
+        """ConsentimientoInformado (usado por build_consentimiento_info / gate de agenda)."""
+        from apps.historia_clinica.models import ConsentimientoInformado
+
+        ConsentimientoInformado.objects.create(
+            paciente=self.paciente,
+            clinica=self.clinica,
+            tipo="otros",
+            documenso_template_token=token,
+            firmado=True,
+            fecha_firma=timezone.localdate(),
+        )
+
+    def test_contexto_sesion_incluye_todos_los_procedimientos_y_zonas(self):
+        ctx = contexto_sesion_para_cita(self.cita)
+        self.assertIsNotNone(ctx)
+        self.assertEqual(ctx["numero"], 1)
+        self.assertEqual(ctx["total"], 2)
+        self.assertEqual(ctx["tratamiento_nombre"], "Plan Facial")
+        nombres = sorted(p["nombre"] for p in ctx["procedimientos"])
+        self.assertEqual(nombres, ["Contorno mandibular", "Limpieza facial"])
+        self.assertTrue(ctx["tiene_zonas"])
+
+    def test_consentimiento_info_agrega_x_e_y(self):
+        info = build_consentimiento_info(self.cita)
+        tokens = sorted(c["template_token"] for c in info["consentimientos"])
+        self.assertEqual(tokens, ["consent-a", "consent-b"])
+        self.assertFalse(info["todos_firmados"])
+
+        self._firmar_informado("consent-a")
+        self._firmar_informado("consent-b")
+        info = build_consentimiento_info(self.cita)
+        self.assertTrue(info["todos_firmados"])
+
+    def test_zonas_endpoint_deduplica_diagramas_entre_procedimientos(self):
+        # A comparte el MISMO diagrama que B → no debe aparecer dos veces.
+        diagrama = DiagramaCorporal.objects.get(nombre="Rostro")
+        grupo_a = GrupoZonas.objects.create(nombre="Zonas contorno")
+        GrupoZonasDiagrama.objects.create(grupo=grupo_a, diagrama=diagrama, orden=1)
+        ServicioGrupoZonas.objects.create(servicio=self.proc_a, grupo=grupo_a, orden=1)
+
+        historia, _ = HistoriaClinica.objects.get_or_create(
+            paciente=self.paciente, defaults={"clinica": self.clinica}
+        )
+        nota = NotaClinica.objects.create(historia=historia, cita=self.cita)
+
+        resp = self.client.get(f"/api/v1/historia-clinica/notas/{nota.id}/zonas/")
+        self.assertEqual(resp.status_code, 200)
+        diagrama_ids = [d["id"] for d in resp.json()["diagramas"]]
+        self.assertEqual(diagrama_ids, [str(diagrama.id)])
+
+    def test_marcar_completada_sin_lista_registra_todos_los_procedimientos(self):
+        self._firmar("consent-a")
+        self._firmar("consent-b")
+
+        resp = self.client.post(
+            f"/api/v1/protocolos/sesiones/{self.sesion1.id}/marcar_completada/",
+            {"cita": str(self.cita.id)},
+            format="json",
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.sesion1.refresh_from_db()
+        self.assertEqual(self.sesion1.estado, SesionProcedimiento.Estado.COMPLETADO)
+        self.assertEqual(self.sesion1.cita_id, self.cita.id)
+        ejecutados = sorted(self.sesion1.procedimientos_ejecutados.values_list("nombre", flat=True))
+        self.assertEqual(ejecutados, ["Contorno mandibular", "Limpieza facial"])
