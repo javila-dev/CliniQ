@@ -112,6 +112,8 @@ export interface Cotizacion {
   items: ItemCotizacion[]
   formas_pago: FormaPagoCotizacion[]
   total: string                 // Calculado por el backend
+  total_pagado: string | null   // Abonado en cartera; null si aún no hay cartera (p. ej. borrador)
+  saldo_pendiente: string | null // Saldo por cobrar; null si aún no hay cartera
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
   created_at: string

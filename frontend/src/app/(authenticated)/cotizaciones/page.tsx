@@ -331,6 +331,8 @@ export default function CotizacionesPage() {
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Paciente</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Pagado</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Pendiente</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Sesiones</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Profesional</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Fecha</th>
@@ -353,6 +355,16 @@ export default function CotizacionesPage() {
                     </td>
                     <td className="px-4 py-3 font-semibold tabular-nums">
                       {formatCOP(c.total)}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums hidden sm:table-cell">
+                      {c.total_pagado == null
+                        ? <span className="text-muted-foreground">—</span>
+                        : <span className={Number(c.total_pagado) > 0 ? 'text-green-600 font-medium' : 'text-muted-foreground'}>{formatCOP(c.total_pagado)}</span>}
+                    </td>
+                    <td className="px-4 py-3 tabular-nums hidden sm:table-cell">
+                      {c.saldo_pendiente == null
+                        ? <span className="text-muted-foreground">—</span>
+                        : <span className={Number(c.saldo_pendiente) > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>{formatCOP(c.saldo_pendiente)}</span>}
                     </td>
                     <td className="px-4 py-3 hidden lg:table-cell">
                       <ProgresoSesiones cotizacion={c} />

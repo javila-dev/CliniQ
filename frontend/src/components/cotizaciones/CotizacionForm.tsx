@@ -24,6 +24,7 @@ import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
+import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { useAuthStore } from '@/store/authStore'
@@ -469,6 +470,30 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   })
 
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
+  const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
+
+  // Compromiso de pago firmado sin PDF cacheado (el webhook de Documenso no llegó):
+  // reconcilia contra Documenso, recupera el PDF y lo abre.
+  async function verCompromisoFirmado(cpId: string) {
+    setRecuperandoCompromiso(true)
+    try {
+      const actualizado = await consentimientosApi.verificarFirmaDocumenso(cpId)
+      if (cotizacion) {
+        queryClient.setQueryData<Cotizacion>(['cotizacion', cotizacion.id], (prev) =>
+          prev ? { ...prev, compromiso_pago: { ...prev.compromiso_pago, ...actualizado } } : prev,
+        )
+      }
+      if (actualizado.pdf_url) {
+        window.open(actualizado.pdf_url, '_blank', 'noopener,noreferrer')
+      } else {
+        toast.error('Documento no disponible', 'El PDF firmado aún no está listo en Documenso. Inténtalo de nuevo en unos segundos.')
+      }
+    } catch {
+      toast.error('No se pudo obtener el documento', 'Vuelve a intentarlo en un momento.')
+    } finally {
+      setRecuperandoCompromiso(false)
+    }
+  }
 
   const { mutate: cambiarEstado, isPending: cambiando } = useMutation({
     mutationFn: (estado: EstadoCotizacion) => cotizacionesApi.cambiarEstado(cotizacion!.id, estado),
@@ -703,8 +728,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         )}
 
         {/* ── Compromiso de pago (vive aquí, no en /consentimientos) ──────── */}
-        {cotizacion?.estado === 'aceptada' && cotizacion.compromiso_pago && (() => {
+        {cotizacion?.compromiso_pago && (cotizacion.estado === 'aceptada' || cotizacion.estado === 'borrador') && (() => {
           const cp = cotizacion.compromiso_pago
+          const enBorrador = cotizacion.estado === 'borrador'
           const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
           const tone = cp.estado === 'firmado'
             ? { badge: 'bg-green-50 text-green-700 ring-green-200/60', dot: 'bg-green-500' }
@@ -720,7 +746,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   <p className="text-xs text-muted-foreground">
                     {cp.estado === 'firmado'
                       ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
-                      : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente de firma'}
+                      : cp.estado === 'revocado'
+                        ? 'Revocado'
+                        : enBorrador
+                          ? 'Firma pendiente — al firmarlo, la cotización se acepta automáticamente'
+                          : 'Pendiente de firma'}
                   </p>
                 </div>
               </div>
@@ -729,14 +759,26 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
                   {label}
                 </span>
-                {cp.pdf_url && (
+                {cp.pdf_url ? (
                   <Button variant="outline" size="sm" asChild>
                     <a href={cp.pdf_url} target="_blank" rel="noopener noreferrer">
                       <FileText className="h-3.5 w-3.5 mr-1.5" />
                       Ver PDF
                     </a>
                   </Button>
-                )}
+                ) : cp.estado === 'firmado' ? (
+                  <Button variant="outline" size="sm" disabled={recuperandoCompromiso} onClick={() => verCompromisoFirmado(cp.id)}>
+                    {recuperandoCompromiso
+                      ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+                    Ver documento firmado
+                  </Button>
+                ) : cp.estado === 'pendiente' && canGestionar ? (
+                  <Button variant="outline" size="sm" onClick={() => setCompromisoPagoId(cp.id)}>
+                    <FileSignature className="h-3.5 w-3.5 mr-1.5" />
+                    Firmar
+                  </Button>
+                ) : null}
               </div>
             </div>
           )
@@ -1402,7 +1444,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           {compromisoPagoId && (
             <CompromisoPagoFirmaContent
               consentimientoId={compromisoPagoId}
-              onFirmado={() => setCompromisoPagoId(null)}
+              onFirmado={() => {
+                setCompromisoPagoId(null)
+                if (cotizacion) queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+              }}
               onCancel={() => setCompromisoPagoId(null)}
             />
           )}
