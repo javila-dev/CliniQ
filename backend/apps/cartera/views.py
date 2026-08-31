@@ -7,6 +7,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
@@ -24,10 +25,19 @@ from apps.core.logging import registrar_accion
 from apps.users.permissions import RequirePermission
 
 
+class CarteraPagination(PageNumberPagination):
+    # Permite que el listado pida más filas (p. ej. la vista de "cuotas
+    # vencidas", que necesita todas las carteras con saldo).
+    page_size_query_param = "page_size"
+    max_page_size = 500
+
+
 class CarteraViewSet(ReadOnlyModelViewSet):
     queryset = Cartera.objects.select_related("cotizacion", "paciente").prefetch_related("cuotas").all()
     serializer_class = CarteraListSerializer
-    pagination_class = None
+    pagination_class = CarteraPagination
+    # Búsqueda por nombre / documento del paciente (?search=).
+    search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
 
     def get_permissions(self):
         return [RequirePermission("cartera.ver")()]

@@ -145,6 +145,67 @@ class CarteraFlowTests(TestCase):
         self.assertEqual(resumen.status_code, 200)
         self.assertEqual(resumen.json()["total_cobrado"], "350000.00")
 
+    def test_listado_cartera_pagina_y_busca_por_nombre(self):
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+
+        otro_paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="111000222",
+            nombres="Bruno",
+            apellidos="Zapata",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.MASCULINO,
+            direccion="Calle 9",
+            telefono="3001112222",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+        otra_cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=otro_paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        otra_cotizacion.items.create(
+            descripcion="Peeling",
+            num_citas=1,
+            periodicidad="Única",
+            valor_unitario="200000.00",
+            descuento_porcentaje="0.00",
+        )
+        otra_cotizacion.formas_pago.create(tipo="efectivo", descripcion="Contado", valor="200000.00")
+        self.client.post(
+            f"/api/v1/cotizaciones/{otra_cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+
+        todas = self.client.get("/api/v1/cartera/").json()
+        self.assertIn("count", todas)
+        self.assertIn("results", todas)
+        self.assertEqual(todas["count"], 2)
+
+        por_nombre = self.client.get("/api/v1/cartera/", {"search": "kelly"}).json()
+        self.assertEqual(por_nombre["count"], 1)
+        self.assertIn("Kelly", por_nombre["results"][0]["paciente_nombre"])
+
+        por_apellido = self.client.get("/api/v1/cartera/", {"search": "zapata"}).json()
+        self.assertEqual(por_apellido["count"], 1)
+
+        por_documento = self.client.get("/api/v1/cartera/", {"search": "111000222"}).json()
+        self.assertEqual(por_documento["count"], 1)
+        self.assertIn("Bruno", por_documento["results"][0]["paciente_nombre"])
+
+        pagina = self.client.get("/api/v1/cartera/", {"page_size": 1}).json()
+        self.assertEqual(pagina["count"], 2)
+        self.assertEqual(len(pagina["results"]), 1)
+        self.assertIsNotNone(pagina["next"])
+
     def test_abono_parcial_deja_cuota_abierta_y_marca_mora(self):
         self.client.post(
             f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
