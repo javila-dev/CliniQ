@@ -1,6 +1,8 @@
 import { apiClient } from './client'
 import type {
   PlantillaConsentimiento,
+  PlantillaConsentimientoInput,
+  AmbitoPlantillaConsentimiento,
   Consentimiento,
   GenerarConsentimientoRequest,
 } from '@/types/consentimientos'
@@ -8,12 +10,20 @@ import type { Paginated } from '@/types/common'
 
 export const consentimientosApi = {
   plantillas: {
-    list: async (): Promise<Paginated<PlantillaConsentimiento>> => {
-      const res = await apiClient.get<Paginated<PlantillaConsentimiento>>('/consentimientos/plantillas/')
+    list: async (params?: { ambito?: AmbitoPlantillaConsentimiento; servicio?: string; activa?: boolean }): Promise<Paginated<PlantillaConsentimiento>> => {
+      const res = await apiClient.get<Paginated<PlantillaConsentimiento>>('/consentimientos/plantillas/', { params })
       return res.data
     },
     get: async (id: string): Promise<PlantillaConsentimiento> => {
       const res = await apiClient.get<PlantillaConsentimiento>(`/consentimientos/plantillas/${id}/`)
+      return res.data
+    },
+    create: async (data: PlantillaConsentimientoInput): Promise<PlantillaConsentimiento> => {
+      const res = await apiClient.post<PlantillaConsentimiento>('/consentimientos/plantillas/', data)
+      return res.data
+    },
+    update: async (id: string, data: Partial<PlantillaConsentimientoInput>): Promise<PlantillaConsentimiento> => {
+      const res = await apiClient.patch<PlantillaConsentimiento>(`/consentimientos/plantillas/${id}/`, data)
       return res.data
     },
   },
@@ -30,6 +40,26 @@ export const consentimientosApi = {
 
   generar: async (data: GenerarConsentimientoRequest): Promise<Consentimiento> => {
     const res = await apiClient.post<Consentimiento>('/consentimientos/generar/', data)
+    return res.data
+  },
+
+  iniciarFirmaDocumenso: async (id: string): Promise<{ signing_token: string; document_id: string }> => {
+    const res = await apiClient.post<{ signing_token: string; document_id: string }>(`/consentimientos/${id}/iniciar_firma_documenso/`)
+    return res.data
+  },
+
+  confirmarFirmaDocumenso: async (id: string): Promise<Consentimiento> => {
+    const res = await apiClient.post<Consentimiento>(`/consentimientos/${id}/confirmar_firma_documenso/`)
+    return res.data
+  },
+
+  verificarFirmaDocumenso: async (id: string): Promise<Consentimiento> => {
+    const res = await apiClient.post<Consentimiento>(`/consentimientos/${id}/verificar_firma_documenso/`)
+    return res.data
+  },
+
+  enviarLinkDocumenso: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
+    const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(`/consentimientos/${id}/enviar_link_documenso/`)
     return res.data
   },
 

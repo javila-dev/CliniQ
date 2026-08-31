@@ -5,7 +5,6 @@ import { Edit, Phone, Mail, FileText, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { formatDate } from '@/lib/utils'
-import { SignosVitalesWidget } from './SignosVitalesWidget'
 import type { Paciente } from '@/types/pacientes'
 import type { HistoriaClinica, AntecedentePaciente } from '@/types/historia'
 
@@ -207,9 +206,6 @@ export function TabDatosGenerales({ paciente, historia, antecedentes, totalNotas
           />
         </Section>
       )}
-
-      {/* Signos vitales */}
-      <SignosVitalesWidget pacienteId={paciente.id} />
 
       {/* Resumen historia */}
       <Section title="Resumen historia clínica">

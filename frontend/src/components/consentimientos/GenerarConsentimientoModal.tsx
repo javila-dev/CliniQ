@@ -44,8 +44,8 @@ export function GenerarConsentimientoModal({ open, onOpenChange }: GenerarConsen
   })
 
   const { data: plantillas } = useQuery({
-    queryKey: ['plantillas-consentimiento'],
-    queryFn: consentimientosApi.plantillas.list,
+    queryKey: ['plantillas-consentimiento', 'cita'],
+    queryFn: () => consentimientosApi.plantillas.list({ ambito: 'cita' }),
     enabled: open,
   })
 

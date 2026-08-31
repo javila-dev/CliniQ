@@ -1,14 +1,16 @@
 'use client'
 
-import { use, useTransition } from 'react'
+import { use, useTransition, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { ArrowLeft, FileText, User } from 'lucide-react'
+import { ArrowLeft, FileText, User, Download, Loader2, Image, ImageOff } from 'lucide-react'
 import Link from 'next/link'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { pacientesApi } from '@/lib/api/pacientes'
+import { clinicasApi } from '@/lib/api/clinicas'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { TabDatosGenerales } from '@/components/historia/TabDatosGenerales'
@@ -18,20 +20,27 @@ import { TabExamenes } from '@/components/historia/TabExamenes'
 import { TabPlanManejo } from '@/components/historia/TabPlanManejo'
 import { TabOrdenesMedicas } from '@/components/historia/TabOrdenesMedicas'
 import { TabFotos } from '@/components/historia/TabFotos'
+import { TabZonasHistorial } from '@/components/historia/TabZonasHistorial'
+import { TabMediciones } from '@/components/obesidad/TabMediciones'
+import { TabAntecedentesObesidad } from '@/components/obesidad/TabAntecedentesObesidad'
+import { TabProgresoObesidad } from '@/components/obesidad/TabProgresoObesidad'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { useHistoriaConfig } from '@/store/historiaConfigStore'
+import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 
-const ALL_TABS = [
+const ALL_TABS: { value: string; label: string }[] = [
   { value: 'datos-generales', label: 'Datos Generales' },
   { value: 'motivo-consulta', label: 'Motivo de Consulta' },
   { value: 'antecedentes',    label: 'Antecedentes' },
+  { value: 'mediciones',      label: 'Seguimiento' },
   { value: 'examenes',        label: 'Exámenes' },
   { value: 'plan-manejo',     label: 'Plan de Manejo' },
   { value: 'ordenes',         label: 'Órdenes Médicas' },
   { value: 'fotos',           label: 'Fotos' },
-] as const
+  { value: 'zonas',           label: 'Zonas' },
+]
 
 const SEXO_LABEL: Record<string, string> = { M: 'Masculino', F: 'Femenino', O: 'Otro' }
 const DOC_LABEL:  Record<string, string> = { CC: 'CC', CE: 'CE', PA: 'Pasaporte', TI: 'TI', NIT: 'NIT' }
@@ -57,9 +66,44 @@ function HistoriaContent({ params }: Props) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
+  const [pdfDialogOpen, setPdfDialogOpen] = useState(false)
+  const { user } = useAuthStore()
+
+  async function descargarPdf(includeFotos: boolean) {
+    if (!historia) return
+    setPdfDialogOpen(false)
+    setDownloadingPdf(true)
+    try {
+      const blob = await historiaClinicaApi.historias.pdf(historia.id, includeFotos)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `historia-${historia.numero}.pdf`
+      a.click()
+      URL.revokeObjectURL(url)
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
   const tabActivo = searchParams.get('tab') ?? 'datos-generales'
   const { tabsActivos } = useHistoriaConfig()
-  const TABS = ALL_TABS.filter((t) => tabsActivos[t.value] ?? true)
+
+  const { data: miClinica } = useQuery({
+    queryKey: ['mi-clinica', user?.clinica_id],
+    queryFn: () => clinicasApi.miClinica(user?.clinica_id),
+    enabled: Boolean(user?.clinica_id),
+    staleTime: 5 * 60_000,
+  })
+  const moduloObesidad = miClinica?.modulo_obesidad_habilitado ?? false
+
+  const TABS = [
+    ...ALL_TABS.filter((t) => (tabsActivos as Record<string, boolean>)[t.value] ?? true),
+    ...(moduloObesidad ? [
+      { value: 'antecedentes-obesidad', label: 'Antec. Obesidad' },
+      { value: 'progreso-obesidad',     label: 'Progreso'        },
+    ] : []),
+  ]
 
   const { data: paciente, isLoading: loadingPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
@@ -170,9 +214,45 @@ function HistoriaContent({ params }: Props) {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 shrink-0">
-            <User className="h-3.5 w-3.5 text-muted-foreground" />
-            <span className="text-xs text-muted-foreground">Historia clínica</span>
+          <div className="flex items-center gap-3 shrink-0">
+            <div className="flex items-center gap-1.5">
+              <User className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Historia clínica</span>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs gap-1.5"
+              onClick={() => setPdfDialogOpen(true)}
+              disabled={downloadingPdf}
+            >
+              {downloadingPdf
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Download className="h-3.5 w-3.5" />
+              }
+              {downloadingPdf ? 'Generando…' : 'Descargar PDF'}
+            </Button>
+
+            <Dialog open={pdfDialogOpen} onOpenChange={setPdfDialogOpen}>
+              <DialogContent className="max-w-sm">
+                <DialogHeader>
+                  <DialogTitle>Descargar historia clínica</DialogTitle>
+                  <DialogDescription>
+                    ¿Deseas incluir el registro fotográfico en el PDF?
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="flex flex-col gap-2 mt-2">
+                  <Button className="w-full gap-2" onClick={() => descargarPdf(true)}>
+                    <Image className="h-4 w-4" />
+                    Con fotos
+                  </Button>
+                  <Button variant="outline" className="w-full gap-2" onClick={() => descargarPdf(false)}>
+                    <ImageOff className="h-4 w-4" />
+                    Sin fotos
+                  </Button>
+                </div>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </div>
@@ -225,6 +305,10 @@ function HistoriaContent({ params }: Props) {
             <TabAntecedentes pacienteId={pacienteId} />
           </TabsContent>
 
+          <TabsContent value="mediciones" className="mt-0">
+            <TabMediciones pacienteId={pacienteId} />
+          </TabsContent>
+
           <TabsContent value="examenes" className="mt-0">
             <TabExamenes historia={historia} />
           </TabsContent>
@@ -240,6 +324,22 @@ function HistoriaContent({ params }: Props) {
           <TabsContent value="fotos" className="mt-0">
             <TabFotos historia={historia} notas={notas ?? []} />
           </TabsContent>
+
+          <TabsContent value="zonas" className="mt-0">
+            <TabZonasHistorial historiaId={historia.id} />
+          </TabsContent>
+
+          {moduloObesidad && (
+            <TabsContent value="antecedentes-obesidad" className="mt-0">
+              <TabAntecedentesObesidad historiaId={historia.id} />
+            </TabsContent>
+          )}
+
+          {moduloObesidad && (
+            <TabsContent value="progreso-obesidad" className="mt-0">
+              <TabProgresoObesidad pacienteId={pacienteId} />
+            </TabsContent>
+          )}
         </div>
       </Tabs>
     </div>

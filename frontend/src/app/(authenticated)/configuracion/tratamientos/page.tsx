@@ -20,6 +20,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
 import type { TratamientoCatalogo, TipoSesion, Procedimiento, CreateTipoSesionRequest } from '@/types/clinicas'
@@ -59,8 +60,8 @@ function buildDraftFromTipo(t: TipoSesion): TipoSesionDraft {
     procedimientos: t.procedimientos.map((p) => ({
       tipoProc_id: p.id,
       id: p.procedimiento,
-      nombre: p.procedimiento_nombre,
-      duracion_min: p.procedimiento_duracion_min,
+      nombre: p.nombre,
+      duracion_min: p.duracion_min,
     })),
   }
 }
@@ -229,26 +230,29 @@ function TipoSesionRow({
             </span>
           ))}
 
-          <div className="relative">
-            <button type="button"
-              onClick={() => setShowProc((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary border border-dashed border-gray-300 rounded-full px-2 py-0.5 transition-colors">
-              <Plus className="h-2.5 w-2.5" />procedimiento
-            </button>
-            {showProc && (
-              <div className="absolute z-20 top-7 left-0">
-                <ProcSelector
-                  servicios={servicios}
-                  excludeIds={tipo.procedimientos.map((p) => p.id)}
-                  onSelect={addProcedimiento}
-                  onCreateNew={() => {
-                    setShowProc(false)
-                    onCreateProcedimiento(addProcedimiento)
-                  }}
-                />
-              </div>
-            )}
-          </div>
+          <Popover open={showProc} onOpenChange={setShowProc}>
+            <PopoverTrigger asChild>
+              <button type="button"
+                className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-primary border border-dashed border-gray-300 rounded-full px-2 py-0.5 transition-colors">
+                <Plus className="h-2.5 w-2.5" />procedimiento
+              </button>
+            </PopoverTrigger>
+            <PopoverContent
+              align="start"
+              sideOffset={6}
+              className="w-auto border-0 bg-transparent p-0 shadow-none"
+            >
+              <ProcSelector
+                servicios={servicios}
+                excludeIds={tipo.procedimientos.map((p) => p.id)}
+                onSelect={addProcedimiento}
+                onCreateNew={() => {
+                  setShowProc(false)
+                  onCreateProcedimiento(addProcedimiento)
+                }}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
 
         {tipo.procedimientos.length === 0 && (
@@ -553,7 +557,7 @@ function TratamientosTable({
                 {/* Procedimientos únicos */}
                 {t.tipos_sesion.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-1">
-                    {Array.from(new Set(t.tipos_sesion.flatMap((ts) => ts.procedimientos.map((p) => p.procedimiento_nombre)))).map((nombre) => (
+                    {Array.from(new Set(t.tipos_sesion.flatMap((ts) => ts.procedimientos.map((p) => p.nombre)))).map((nombre) => (
                       <span key={nombre} className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700">
                         <Stethoscope className="h-2.5 w-2.5" />{nombre}
                       </span>

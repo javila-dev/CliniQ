@@ -4,6 +4,12 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  images: {
+    remotePatterns: [
+      { protocol: 'http',  hostname: '**' },
+      { protocol: 'https', hostname: '**' },
+    ],
+  },
   // Evita el 308 (slash final -> sin slash) en cada request. No cambia el
   // routing de las paginas, solo desactiva el redirect automatico. El slash
   // que Django exige se garantiza con el "/" forzado en el destino del rewrite.
@@ -29,6 +35,16 @@ const nextConfig: NextConfig = {
         aggregateTimeout: 300,
       }
     }
+
+    // SVGs como componentes React (necesario para MapaCorporal interactivo)
+    config.module.rules.push({
+      test: /\.svg$/,
+      use: ['@svgr/webpack'],
+    })
+
+    // react-pdf worker — evitar que webpack intente procesar el worker de pdfjs
+    config.resolve.alias['canvas'] = false
+
     return config
   },
 }

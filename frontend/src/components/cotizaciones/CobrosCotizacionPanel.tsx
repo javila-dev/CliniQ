@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { CheckCircle2, Clock, AlertCircle, XCircle, CreditCard } from 'lucide-react'
 import { cobrosApi } from '@/lib/api/cobros'
+import { formatFechaLocal } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
 import type { EstadoCobro, MedioPago, Cobro } from '@/types/cobros'
@@ -45,7 +46,7 @@ function CobroRow({ cobro }: { cobro: Cobro }) {
         <div className="flex items-center gap-2">
           <EstadoBadge estado={cobro.estado} />
           <span className="text-xs text-muted-foreground">
-            {new Date(cobro.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
+            {formatFechaLocal(cobro.fecha, { day: '2-digit', month: 'short', year: 'numeric' })}
           </span>
           {cobro.sede_nombre && (
             <span className="text-xs text-muted-foreground">· {cobro.sede_nombre}</span>

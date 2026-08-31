@@ -2,14 +2,14 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Send, Loader2, FileText, X, Info, AlertTriangle, CheckCircle2, Download } from 'lucide-react'
+import { Plus, Send, Loader2, FileText, X, Info, AlertTriangle, CheckCircle2, Download, ChevronDown } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { formatDate } from '@/lib/utils'
-import type { HistoriaClinica, PlantillaOrden } from '@/types/historia'
+import type { HistoriaClinica, OrdenMedica, PlantillaOrden } from '@/types/historia'
 
 interface TabOrdenesMedicasProps {
   historia: HistoriaClinica
@@ -24,6 +24,16 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
   const [enviandoId, setEnviandoId] = useState<string | null>(null)
   const [enviado, setEnviado] = useState<string | null>(null)
   const [descargandoId, setDescargandoId] = useState<string | null>(null)
+  const [anterioresAbiertas, setAnterioresAbiertas] = useState<Set<string>>(new Set())
+
+  function toggleAnterior(id: string) {
+    setAnterioresAbiertas((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
 
   const { data: ordenes, isLoading } = useQuery({
     queryKey: ['ordenes-medicas', historia.id],
@@ -90,6 +100,116 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
     plantillaSeleccionada !== null &&
     plantillaSeleccionada.permite_edicion_profesional &&
     contenido !== plantillaSeleccionada.contenido
+
+  // Más reciente primero. En modo atención, cada orden de una atención
+  // anterior se muestra colapsada en su propio acordeón.
+  const ordenesOrdenadas = [...(ordenes ?? [])].sort((a, b) =>
+    b.created_at.localeCompare(a.created_at),
+  )
+  const ordenesActuales = notaId
+    ? ordenesOrdenadas.filter((o) => o.nota === notaId)
+    : ordenesOrdenadas
+  const ordenesAnteriores = notaId
+    ? ordenesOrdenadas.filter((o) => o.nota !== notaId)
+    : []
+
+  function ordenMeta(orden: OrdenMedica) {
+    return (
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className="text-xs font-medium">{formatDate(orden.created_at)}</span>
+        <span className="text-xs text-muted-foreground">· {orden.profesional_nombre}</span>
+        {orden.plantilla_nombre && (
+          <Badge variant="secondary" className="text-[10px] h-4">
+            {orden.plantilla_nombre}
+          </Badge>
+        )}
+        {orden.fue_editada && (
+          <Badge variant="outline" className="text-[10px] h-4 text-amber-600 border-amber-300">
+            Editada
+          </Badge>
+        )}
+      </div>
+    )
+  }
+
+  function ordenAcciones(orden: OrdenMedica) {
+    return (
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          disabled={descargandoId === orden.id}
+          onClick={() => descargarPdf(orden.id, formatDate(orden.created_at))}
+        >
+          {descargandoId === orden.id
+            ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+            : <Download className="h-3 w-3 mr-1.5" />}
+          PDF
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-7 text-xs"
+          disabled={enviandoId === orden.id}
+          onClick={() => enviarWhatsapp(orden.id)}
+        >
+          {enviandoId === orden.id ? (
+            <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
+          ) : enviado === orden.id ? (
+            <CheckCircle2 className="h-3 w-3 mr-1.5 text-green-600" />
+          ) : (
+            <Send className="h-3 w-3 mr-1.5" />
+          )}
+          {enviado === orden.id ? 'Enviado' : 'WhatsApp'}
+        </Button>
+      </div>
+    )
+  }
+
+  function ordenContenido(orden: OrdenMedica) {
+    return (
+      <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed bg-muted/30 rounded-md p-3">
+        {orden.contenido}
+      </pre>
+    )
+  }
+
+  function renderOrden(orden: OrdenMedica) {
+    return (
+      <div key={orden.id} className="rounded-lg border p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          {ordenMeta(orden)}
+          {ordenAcciones(orden)}
+        </div>
+        {ordenContenido(orden)}
+      </div>
+    )
+  }
+
+  function renderOrdenAnterior(orden: OrdenMedica) {
+    const abierta = anterioresAbiertas.has(orden.id)
+    return (
+      <div key={orden.id} className="rounded-lg border">
+        <button
+          type="button"
+          onClick={() => toggleAnterior(orden.id)}
+          className="flex w-full items-center justify-between gap-2 px-4 py-3 text-left hover:bg-muted/30 transition-colors rounded-lg"
+        >
+          {ordenMeta(orden)}
+          <ChevronDown
+            className={`h-4 w-4 text-muted-foreground shrink-0 transition-transform ${abierta ? 'rotate-180' : ''}`}
+          />
+        </button>
+        {abierta && (
+          <div className="border-t p-4 space-y-3">
+            <div className="flex justify-end">{ordenAcciones(orden)}</div>
+            {ordenContenido(orden)}
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -201,61 +321,20 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
         </div>
       ) : (
         <div className="space-y-3">
-          {ordenes?.map((orden) => (
-            <div key={orden.id} className="rounded-lg border p-4 space-y-3">
-              <div className="flex items-start justify-between gap-2">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-xs font-medium">{formatDate(orden.created_at)}</span>
-                    <span className="text-xs text-muted-foreground">· {orden.profesional_nombre}</span>
-                    {orden.plantilla_nombre && (
-                      <Badge variant="secondary" className="text-[10px] h-4">
-                        {orden.plantilla_nombre}
-                      </Badge>
-                    )}
-                    {orden.fue_editada && (
-                      <Badge variant="outline" className="text-[10px] h-4 text-amber-600 border-amber-300">
-                        Editada
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    disabled={descargandoId === orden.id}
-                    onClick={() => descargarPdf(orden.id, formatDate(orden.created_at))}
-                  >
-                    {descargandoId === orden.id
-                      ? <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-                      : <Download className="h-3 w-3 mr-1.5" />}
-                    PDF
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    disabled={enviandoId === orden.id}
-                    onClick={() => enviarWhatsapp(orden.id)}
-                  >
-                    {enviandoId === orden.id ? (
-                      <Loader2 className="h-3 w-3 animate-spin mr-1.5" />
-                    ) : enviado === orden.id ? (
-                      <CheckCircle2 className="h-3 w-3 mr-1.5 text-green-600" />
-                    ) : (
-                      <Send className="h-3 w-3 mr-1.5" />
-                    )}
-                    {enviado === orden.id ? 'Enviado' : 'WhatsApp'}
-                  </Button>
-                </div>
-              </div>
-              <pre className="text-sm text-foreground whitespace-pre-wrap font-sans leading-relaxed bg-muted/30 rounded-md p-3">
-                {orden.contenido}
-              </pre>
+          {ordenesActuales.map(renderOrden)}
+
+          {notaId && ordenesActuales.length === 0 && ordenesAnteriores.length > 0 && !agregando && (
+            <p className="text-sm text-muted-foreground py-1">Sin órdenes en esta atención.</p>
+          )}
+
+          {ordenesAnteriores.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground px-0.5">
+                Órdenes de atenciones anteriores ({ordenesAnteriores.length})
+              </p>
+              {ordenesAnteriores.map(renderOrdenAnterior)}
             </div>
-          ))}
+          )}
 
           {ordenes?.length === 0 && !agregando && (
             <div className="rounded-lg border border-dashed py-10 text-center">

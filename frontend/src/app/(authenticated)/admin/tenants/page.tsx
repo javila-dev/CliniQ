@@ -1,13 +1,13 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Plus, Search, MoreHorizontal, Building2,
-  Users, MapPin, Crown, Mail, Copy, Check, AlertCircle,
+  Users, MapPin, Crown, Mail, Copy, Check, AlertCircle, Sparkles, LogIn,
 } from 'lucide-react'
 import { adminApi } from '@/lib/api/admin'
 import { usuariosApi } from '@/lib/api/usuarios'
@@ -32,7 +32,9 @@ import {
 } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { useRouter } from 'next/navigation'
 import type { AdminTenant } from '@/types/admin'
+import { useSuperadminClinicaStore } from '@/store/superadminClinicaStore'
 
 // ─── Schema ───────────────────────────────────────────────────
 
@@ -82,6 +84,16 @@ function TenantSheet({
 
   const planValue = watch('plan')
 
+  const [facialHabilitado, setFacialHabilitado]       = useState(tenant?.facial_verificacion_habilitada ?? false)
+  const [moduloEstetico, setModuloEstetico]           = useState(tenant?.modulo_estetico_habilitado ?? true)
+  const [moduloObesidad, setModuloObesidad]           = useState(tenant?.modulo_obesidad_habilitado ?? false)
+
+  useEffect(() => {
+    setFacialHabilitado(tenant?.facial_verificacion_habilitada ?? false)
+    setModuloEstetico(tenant?.modulo_estetico_habilitado ?? true)
+    setModuloObesidad(tenant?.modulo_obesidad_habilitado ?? false)
+  }, [tenant?.id])
+
   const mutation = useMutation({
     mutationFn: (data: TenantFormValues) => {
       const payload = {
@@ -90,6 +102,11 @@ function TenantSheet({
         email:    data.email || undefined,
         telefono: data.telefono || undefined,
         plan:     data.plan || undefined,
+        ...(isEdit ? {
+          facial_verificacion_habilitada: facialHabilitado,
+          modulo_estetico_habilitado: moduloEstetico,
+          modulo_obesidad_habilitado: moduloObesidad,
+        } : {}),
       }
       if (isEdit) return adminApi.tenants.update(tenant!.id, payload)
       return adminApi.tenants.create({
@@ -164,6 +181,55 @@ function TenantSheet({
               />
               {errors.admin_email && <p className="text-xs text-red-500">{errors.admin_email.message}</p>}
               <p className="text-xs text-muted-foreground">Si se ingresa, se crea un usuario admin y se envía invitación por email.</p>
+            </div>
+          )}
+
+          {isEdit && (
+            <div className="space-y-2 rounded-lg border border-violet-100 bg-violet-50/50 p-4">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 mb-3">
+                <Sparkles className="h-3.5 w-3.5" />
+                Add-ons
+              </div>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Verificación facial biométrica</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Permite comparar la identidad del paciente con su foto de control en cada cita.
+                  </p>
+                </div>
+                <Switch
+                  checked={facialHabilitado}
+                  onCheckedChange={setFacialHabilitado}
+                />
+              </div>
+
+              <div className="border-t border-violet-100 my-1" />
+
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Módulo estético</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Procedimientos, zonas corporales, diagramas y notas clínicas estéticas.
+                  </p>
+                </div>
+                <Switch
+                  checked={moduloEstetico}
+                  onCheckedChange={setModuloEstetico}
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Módulo obesidad</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Tratamientos, sesiones de seguimiento y control de peso.
+                  </p>
+                </div>
+                <Switch
+                  checked={moduloObesidad}
+                  onCheckedChange={setModuloObesidad}
+                />
+              </div>
             </div>
           )}
 
@@ -313,11 +379,13 @@ function TenantRow({
   onEdit,
   onToggle,
   onReenviar,
+  onEntrar,
 }: {
   tenant: AdminTenant
   onEdit: (t: AdminTenant) => void
   onToggle: (t: AdminTenant) => void
   onReenviar: (t: AdminTenant) => void
+  onEntrar: (t: AdminTenant) => void
 }) {
   return (
     <TableRow className={cn(!tenant.activo && 'opacity-60')}>
@@ -372,6 +440,17 @@ function TenantRow({
         </Badge>
       </TableCell>
 
+      <TableCell>
+        {tenant.facial_verificacion_habilitada ? (
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[11px] font-semibold text-violet-700">
+            <Sparkles className="h-2.5 w-2.5" />
+            Facial
+          </span>
+        ) : (
+          <span className="text-xs text-gray-300">—</span>
+        )}
+      </TableCell>
+
       <TableCell className="text-xs text-muted-foreground">
         {new Date(tenant.created_at).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })}
       </TableCell>
@@ -384,6 +463,11 @@ function TenantRow({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onEntrar(tenant)}>
+              <LogIn className="h-3.5 w-3.5 mr-2 text-muted-foreground" />
+              Entrar como clínica
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => onEdit(tenant)}>Editar</DropdownMenuItem>
             {tenant.admin_usuario_pendiente && (
               <DropdownMenuItem onClick={() => onReenviar(tenant)}>
@@ -418,6 +502,7 @@ function TableSkeleton() {
           <TableCell><div className="h-4 w-16 rounded bg-gray-100" /></TableCell>
           <TableCell><div className="h-4 w-12 rounded bg-gray-100" /></TableCell>
           <TableCell><div className="h-5 w-16 rounded-full bg-gray-100" /></TableCell>
+          <TableCell><div className="h-5 w-14 rounded-full bg-gray-100" /></TableCell>
           <TableCell><div className="h-4 w-24 rounded bg-gray-100" /></TableCell>
           <TableCell><div className="h-8 w-8 rounded bg-gray-100" /></TableCell>
         </TableRow>
@@ -436,6 +521,8 @@ const FILTROS: { key: FiltroActivo; label: string }[] = [
 
 export default function TenantsPage() {
   const qc = useQueryClient()
+  const router = useRouter()
+  const { entrarClinica } = useSuperadminClinicaStore()
   const [search, setSearch]         = useState('')
   const [filtro, setFiltro]             = useState<FiltroActivo>('todos')
   const [sheetOpen, setSheetOpen]       = useState(false)
@@ -462,6 +549,10 @@ export default function TenantsPage() {
   const handleClose         = () => { setSheetOpen(false); setEditando(null) }
   const handleReenviar      = (t: AdminTenant) => { setReenviarTenant(t); setInvitacionOpen(true) }
   const handleCloseInvitacion = () => { setInvitacionOpen(false); setReenviarTenant(null) }
+  const handleEntrar        = (t: AdminTenant) => {
+    entrarClinica({ id: t.id, nombre: t.nombre, logo: null })
+    router.push('/dashboard')
+  }
 
   const tenants = data?.results ?? []
 
@@ -522,6 +613,7 @@ export default function TenantsPage() {
               <TableHead>Usuarios</TableHead>
               <TableHead>Sedes</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead>Add-ons</TableHead>
               <TableHead>Creada</TableHead>
               <TableHead className="w-12" />
             </TableRow>
@@ -531,7 +623,7 @@ export default function TenantsPage() {
               <TableSkeleton />
             ) : tenants.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={8} className="py-16 text-center">
+                <TableCell colSpan={9} className="py-16 text-center">
                   <Building2 className="h-10 w-10 text-muted-foreground/20 mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">No hay clínicas{search ? ' que coincidan con la búsqueda' : ''}</p>
                 </TableCell>
@@ -544,6 +636,7 @@ export default function TenantsPage() {
                   onEdit={handleEdit}
                   onToggle={t => toggleMutation.mutate(t)}
                   onReenviar={handleReenviar}
+                  onEntrar={handleEntrar}
                 />
               ))
             )}

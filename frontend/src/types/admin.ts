@@ -18,6 +18,9 @@ export interface AdminTenant {
   telefono: string | null
   activo: boolean
   plan: Plan | null
+  facial_verificacion_habilitada: boolean
+  modulo_estetico_habilitado: boolean
+  modulo_obesidad_habilitado: boolean
   total_usuarios: number
   usuarios_activos: number
   total_sedes: number
@@ -39,6 +42,9 @@ export interface CreateTenantRequest {
 export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email'>> & {
   activo?: boolean
   plan?: string | null
+  facial_verificacion_habilitada?: boolean
+  modulo_estetico_habilitado?: boolean
+  modulo_obesidad_habilitado?: boolean
 }
 
 export interface CreatePlanRequest {
@@ -50,3 +56,28 @@ export interface CreatePlanRequest {
 }
 
 export type UpdatePlanRequest = Partial<CreatePlanRequest> & { activo?: boolean }
+
+export interface DiagramaCorporal {
+  id: string
+  nombre: string
+  imagen_url: string | null
+  orden: number
+  activo: boolean
+}
+
+export interface GrupoZonasDiagrama {
+  id: string
+  diagrama: string
+  diagrama_nombre: string
+  imagen_url: string | null
+  orden: number
+}
+
+export interface GrupoZonas {
+  id: string
+  nombre: string
+  activo: boolean
+  diagramas: GrupoZonasDiagrama[]
+  created_at: string
+  updated_at: string
+}

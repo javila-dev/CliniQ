@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import { Skeleton } from '@/components/ui/skeleton'
 import { isSuperAdmin } from '@/lib/permissions'
+import { toast } from '@/hooks/use-toast'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, logout, user } = useAuthStore()
@@ -20,6 +21,28 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
       router.replace(`/login?next=${encodeURIComponent(next)}`)
     }
   }, [hasCheckedAuth, isLoading, isAuthenticated, router])
+
+
+  // Escuchar el evento de sesión expirada del interceptor HTTP
+  useEffect(() => {
+    const onSessionExpired = () => {
+      logout()
+      // El useEffect anterior detectará isAuthenticated=false y redirigirá con ?next=
+    }
+    window.addEventListener('cliniq:session-expired', onSessionExpired)
+    return () => window.removeEventListener('cliniq:session-expired', onSessionExpired)
+  }, [logout])
+
+  // Sesión cerrada porque el usuario inició sesión en otro dispositivo
+  useEffect(() => {
+    const onSessionClosedElsewhere = (event: Event) => {
+      const message = (event as CustomEvent<string>).detail
+      toast.error('Sesión cerrada', message || 'Iniciaste sesión desde otro dispositivo.')
+      logout()
+    }
+    window.addEventListener('cliniq:session-closed-elsewhere', onSessionClosedElsewhere)
+    return () => window.removeEventListener('cliniq:session-closed-elsewhere', onSessionClosedElsewhere)
+  }, [logout])
 
   if (!hasCheckedAuth || isLoading) {
     return (

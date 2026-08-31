@@ -1,9 +1,22 @@
 import { apiClient } from './client'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotizacion, SesionesCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotizacion, HistorialSesionesCotizacion, SesionesCotizacion } from '@/types/cotizaciones'
+import type { Consentimiento } from '@/types/consentimientos'
 import type { Paginated } from '@/types/common'
 
+export interface CambiarEstadoResponse extends Cotizacion {
+  consentimientos_pendientes?: Array<{ procedimiento: string; template_token: string; template_nombre: string }>
+  compromiso_pago?: Consentimiento | null
+}
+
 export const cotizacionesApi = {
-  list: async (params?: { estado?: EstadoCotizacion; paciente?: string; search?: string }): Promise<Paginated<Cotizacion>> => {
+  list: async (params?: {
+    estado?: EstadoCotizacion
+    paciente?: string
+    search?: string
+    fecha_desde?: string
+    fecha_hasta?: string
+    page?: number
+  }): Promise<Paginated<Cotizacion>> => {
     const res = await apiClient.get<Paginated<Cotizacion>>('/cotizaciones/', { params })
     return res.data
   },
@@ -27,8 +40,8 @@ export const cotizacionesApi = {
     await apiClient.delete(`/cotizaciones/${id}/`)
   },
 
-  cambiarEstado: async (id: string, estado: EstadoCotizacion): Promise<Cotizacion> => {
-    const res = await apiClient.post<Cotizacion>(`/cotizaciones/${id}/cambiar_estado/`, { estado })
+  cambiarEstado: async (id: string, estado: EstadoCotizacion): Promise<CambiarEstadoResponse> => {
+    const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado })
     return res.data
   },
 
@@ -42,6 +55,16 @@ export const cotizacionesApi = {
   sesiones: async (id: string): Promise<SesionesCotizacion> => {
     const res = await apiClient.get<SesionesCotizacion>(`/cotizaciones/${id}/sesiones/`)
     return res.data
+  },
+
+  historialSesiones: async (id: string): Promise<HistorialSesionesCotizacion> => {
+    const res = await apiClient.get<HistorialSesionesCotizacion>(`/cotizaciones/${id}/historial_sesiones/`)
+    return res.data
+  },
+
+  descargarConsolidadoAsistencia: async (id: string): Promise<Blob> => {
+    const res = await apiClient.get(`/cotizaciones/${id}/consolidado_asistencia/`, { responseType: 'blob' })
+    return res.data as Blob
   },
 
   enviarWhatsapp: async (id: string): Promise<{ enviado: boolean; envio_id?: string }> => {
@@ -63,4 +86,5 @@ export const cotizacionesApi = {
     const res = await apiClient.get<CotizacionEnvio[]>(`/cotizaciones/${id}/envios/`)
     return res.data
   },
+
 }

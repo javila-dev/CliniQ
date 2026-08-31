@@ -57,9 +57,11 @@ function ConsentimientoRow({
           <ShieldCheck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
           <span className="text-sm font-medium">{item.template_nombre}</span>
         </div>
-        <p className="text-[10px] text-muted-foreground font-mono pl-5 mt-0.5">
-          {item.template_token.slice(0, 8)}…
-        </p>
+        {item.template_token && (
+          <p className="text-[10px] text-muted-foreground font-mono pl-5 mt-0.5">
+            {item.template_token.slice(0, 8)}…
+          </p>
+        )}
       </td>
       <td className="px-3 py-2.5 w-24">
         <Badge variant={item.activo ? 'default' : 'secondary'} className="text-[10px]">
@@ -92,12 +94,12 @@ function AgregarConsentimiento({
   const [open, setOpen] = useState(false)
 
   const { data: disponibles = [] } = useQuery({
-    queryKey: ['documenso-templates-disponibles'],
-    queryFn: () => configuracionApi.documensoTemplates.disponibles(),
+    queryKey: ['plantillas-consentimiento'],
+    queryFn: () => configuracionApi.plantillasConsentimiento.list(),
     enabled: open,
   })
 
-  const opciones = disponibles.filter((t) => !tokensBloqueados.includes(t.token))
+  const opciones = disponibles.filter((t) => t.tiene_pdf && !tokensBloqueados.includes(t.id))
 
   const addMut = useMutation({
     mutationFn: (templateId: string) => clinicasApi.procedimientos.consentimientos.add(servicioId, templateId),
@@ -132,13 +134,12 @@ function AgregarConsentimiento({
             ) : (
               opciones.map((t) => (
                 <button
-                  key={t.token}
-                  onClick={() => addMut.mutate(String(t.id))}
+                  key={t.id}
+                  onClick={() => addMut.mutate(t.id)}
                   disabled={addMut.isPending}
                   className="w-full text-left px-3 py-2.5 text-sm hover:bg-gray-50 transition-colors"
                 >
-                  <p className="font-medium">{t.nombre}</p>
-                  <p className="text-[10px] text-muted-foreground font-mono">{t.token.slice(0, 8)}…</p>
+                  <p className="font-medium">{t.label || t.nombre}</p>
                 </button>
               ))
             )}
@@ -193,7 +194,7 @@ export function ConsentimientosServicio({ servicioId }: ConsentimientosServicioP
     reordenarMut.mutate(reordenado.map((p, i) => ({ id: p.id, orden: i + 1 })))
   }
 
-  const tokensBloqueados = (localItems.length ? localItems : (items ?? [])).map((i) => i.template_token)
+  const tokensBloqueados = (localItems.length ? localItems : (items ?? [])).map((i) => i.template_id || i.id)
 
   return (
     <div className="rounded-xl border bg-white overflow-hidden">

@@ -1,16 +1,20 @@
 'use client'
 
 import { useState, useMemo, useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileCheck, Stethoscope, Clock } from 'lucide-react'
+import { FileCheck, Stethoscope, Clock, AlertTriangle } from 'lucide-react'
 import { agendaApi } from '@/lib/api/agenda'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { protocolosApi } from '@/lib/api/protocolos'
+import { carteraApi } from '@/lib/api/cartera'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
@@ -30,7 +34,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { cn } from '@/lib/utils'
+import { cn, todayISO } from '@/lib/utils'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
 type ModoCita = 'cotizacion' | 'servicio' | 'libre'
@@ -54,28 +58,54 @@ interface NuevaCitaModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   defaultFecha?: string
+  /** Pre-carga el modal para agendar una sesión concreta de una cotización. */
+  defaultPaciente?: BusquedaPaciente | null
+  defaultModo?: ModoCita
+  defaultItemCotizacion?: string | null
+  defaultItemCotizacionTipo?: TipoItemCotizacion | null
+  defaultSesionEjecutada?: string | null
+  /** Se dispara tras crear la cita con éxito (para invalidar queries del origen). */
+  onCreated?: () => void
 }
 
-export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaModalProps) {
+type DeudaError = { cuotas: number; total: string; cuotaIds: string[]; pacienteId: string }
+
+const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+
+export function NuevaCitaModal({
+  open,
+  onOpenChange,
+  defaultFecha,
+  defaultPaciente = null,
+  defaultModo = 'servicio',
+  defaultItemCotizacion = null,
+  defaultItemCotizacionTipo = null,
+  defaultSesionEjecutada = null,
+  onCreated,
+}: NuevaCitaModalProps) {
   const queryClient = useQueryClient()
+  const router = useRouter()
+  const { user } = useAuthStore()
+  const canAprobarExcepcion = hasPermission(user, PERM.CARTERA_APROBAR_EXCEPCION)
 
   // Estado del paciente
-  const [paciente, setPaciente] = useState<BusquedaPaciente | null>(null)
+  const [paciente, setPaciente] = useState<BusquedaPaciente | null>(defaultPaciente)
   const [pacienteError, setPacienteError] = useState(false)
 
   // Estado del modo
-  const [modo, setModo] = useState<ModoCita>('servicio')
+  const [modo, setModo] = useState<ModoCita>(defaultModo)
 
   // Estado específico por modo
-  const [itemCotizacion, setItemCotizacion] = useState<string | null>(null)
-  const [itemCotizacionTipo, setItemCotizacionTipo] = useState<TipoItemCotizacion | null>(null)
+  const [itemCotizacion, setItemCotizacion] = useState<string | null>(defaultItemCotizacion)
+  const [itemCotizacionTipo, setItemCotizacionTipo] = useState<TipoItemCotizacion | null>(defaultItemCotizacionTipo)
   const [itemCotizacionError, setItemCotizacionError] = useState(false)
-  const [sesionEjecutada, setSesionEjecutada] = useState<string | null>(null)
+  const [sesionEjecutada, setSesionEjecutada] = useState<string | null>(defaultSesionEjecutada)
   const [duracionLibre, setDuracionLibre] = useState(0)
   const [duracionError, setDuracionError] = useState(false)
 
   // Errores de servidor
   const [serverError, setServerError] = useState<string | null>(null)
+  const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
 
   // Creación de paciente inline
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
@@ -86,7 +116,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     useForm<FormValues>({
       resolver: zodResolver(schema),
       defaultValues: {
-        fecha: defaultFecha ?? new Date().toISOString().split('T')[0],
+        fecha: defaultFecha ?? todayISO(),
         canal_origen: 'telefono',
       },
     })
@@ -97,13 +127,20 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
   const fecha       = watch('fecha')
   const slot        = watch('slot')
 
-  // Sincroniza la fecha del calendario cada vez que el modal se abre
+  // Sincroniza la fecha y la pre-carga cada vez que el modal se abre
   useEffect(() => {
-    if (open && defaultFecha) {
-      setValue('fecha', defaultFecha)
-      setValue('slot', '')
-    }
-  }, [open, defaultFecha])
+    if (!open) return
+    setValue('fecha', defaultFecha ?? todayISO())
+    setValue('slot', '')
+    setPaciente(defaultPaciente)
+    setModo(defaultModo)
+    setItemCotizacion(defaultItemCotizacion)
+    setItemCotizacionTipo(defaultItemCotizacionTipo)
+    setSesionEjecutada(defaultSesionEjecutada)
+  }, [
+    open, defaultFecha, defaultPaciente, defaultModo, defaultItemCotizacion,
+    defaultItemCotizacionTipo, defaultSesionEjecutada, setValue,
+  ])
 
   const { data: sedesData } = useQuery({
     queryKey: ['sedes'],
@@ -170,6 +207,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     mutationFn: agendaApi.citas.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
+      onCreated?.()
       handleClose()
     },
   })
@@ -187,6 +225,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     setDuracionLibre(0)
     setDuracionError(false)
     setServerError(null)
+    setDeudaError(null)
   }
 
   const handleClose = () => {
@@ -201,6 +240,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     setDuracionLibre(0)
     setDuracionError(false)
     setServerError(null)
+    setDeudaError(null)
     onOpenChange(false)
   }
 
@@ -241,6 +281,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     setItemCotizacionError(false)
     setDuracionError(false)
     setServerError(null)
+    setDeudaError(null)
 
     const base = {
       paciente:       paciente.id,
@@ -270,6 +311,15 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
     } catch (err: any) {
       const data = err?.response?.data
       if (data) {
+        if (data.code === 'PACIENTE_CON_DEUDA') {
+          setDeudaError({
+            cuotas:     data.detalle?.cuotas_vencidas ?? 0,
+            total:      data.detalle?.monto_total ?? '0',
+            cuotaIds:   data.detalle?.cuota_ids ?? [],
+            pacienteId: paciente.id,
+          })
+          return
+        }
         if (data.error)  { setServerError(String(data.error));  return }
         if (data.detail) { setServerError(String(data.detail)); return }
         const fieldLabels: Record<string, string> = {
@@ -291,6 +341,19 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
       }
       setServerError('Error al crear la cita')
     }
+  }
+
+  const { mutate: ejecutarAprobarExcepcion, isPending: aprobandoExcepcion } = useMutation({
+    mutationFn: (cuotaIds: string[]) => Promise.all(cuotaIds.map((id) => carteraApi.aprobarExcepcion(id))),
+    onSuccess: () => setDeudaError(null),
+  })
+
+  function handleAprobarExcepcion() {
+    if (!deudaError?.cuotaIds.length) return
+    if (!window.confirm(
+      `¿Aprobar excepción de deuda para este paciente? Esto permitirá agendar la cita a pesar de las ${deudaError.cuotas} cuotas vencidas.`
+    )) return
+    ejecutarAprobarExcepcion(deudaError.cuotaIds)
   }
 
   // Props dinámicos para SlotPicker según el modo activo
@@ -600,7 +663,7 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
             <Input
               id="fecha"
               type="date"
-              min={new Date().toISOString().split('T')[0]}
+              min={todayISO()}
               {...register('fecha', { onChange: () => setValue('slot', '') })}
               className="max-w-xs"
             />
@@ -637,6 +700,44 @@ export function NuevaCitaModal({ open, onOpenChange, defaultFecha }: NuevaCitaMo
           {serverError && (
             <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
               <p className="text-sm text-destructive">{serverError}</p>
+            </div>
+          )}
+
+          {deudaError && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-sm font-medium text-amber-900">No se puede agendar</p>
+                  <p className="text-sm text-amber-800">
+                    El paciente tiene {deudaError.cuotas} {deudaError.cuotas === 1 ? 'cuota vencida' : 'cuotas vencidas'} por un total de {COP.format(parseFloat(deudaError.total))}.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    router.push(`/cartera?paciente=${deudaError.pacienteId}`)
+                    handleClose()
+                  }}
+                >
+                  Ver cartera del paciente
+                </Button>
+                {canAprobarExcepcion && deudaError.cuotaIds.length > 0 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={handleAprobarExcepcion}
+                    disabled={aprobandoExcepcion}
+                  >
+                    {aprobandoExcepcion ? 'Aprobando...' : 'Aprobar excepción'}
+                  </Button>
+                )}
+              </div>
             </div>
           )}
 

@@ -33,13 +33,19 @@ export function resolveMediaUrl(url: string | null | undefined): string | null {
     return `${origin}${url}`
   }
 
-  // URL presignada de MinIO (bucket privado) → usar proxy Next.js
-  // Detecta formato v4 (X-Amz-*) y formato v2 (AWSAccessKeyId + Signature)
-  if (url.includes('X-Amz-') || url.includes('x-amz-') || url.includes('AWSAccessKeyId')) {
+  // Cualquier URL de MinIO (presignada o pública) → proxy.
+  // El hostname interno de Docker (minio:9000) no es resoluble desde el browser,
+  // y localhost:9000 puede no estar expuesto en algunos entornos.
+  // El proxy hace el replace interno y fetcha desde el servidor Next.js.
+  const minioPublic = process.env.NEXT_PUBLIC_MINIO_PUBLIC_URL ?? 'http://localhost:9000'
+  if (
+    url.includes('X-Amz-') || url.includes('x-amz-') || url.includes('AWSAccessKeyId') ||
+    url.includes('minio:') || url.includes(minioPublic)
+  ) {
     return `/api/media-proxy?url=${encodeURIComponent(url)}`
   }
 
-  // URL pública (bucket público, CDN, etc.) → usar directamente
+  // URL pública de otro origen (CDN, etc.) → usar directamente
   return url
 }
 

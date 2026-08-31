@@ -1,13 +1,16 @@
 'use client'
 
-import { use, useState } from 'react'
+import { use, useRef, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, CheckCircle2, Clock, AlertCircle, CreditCard } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Clock, AlertCircle, CreditCard, Pencil } from 'lucide-react'
 import { carteraApi } from '@/lib/api/cartera'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
+import { toast } from '@/hooks/use-toast'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -24,7 +27,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { formatDate } from '@/lib/utils'
+import { formatDate, todayISO } from '@/lib/utils'
 import type { CuotaCartera } from '@/types/cartera'
 
 function formatCOP(value: string | number): string {
@@ -44,7 +47,9 @@ type PagoForm = z.infer<typeof pagoSchema>
 
 function estadoCuota(cuota: CuotaCartera): 'pagada' | 'vencida' | 'pendiente' {
   if (cuota.pagada) return 'pagada'
-  if (cuota.fecha_esperada && new Date(cuota.fecha_esperada) < new Date()) return 'vencida'
+  // Comparación por fecha "solo día" para no marcar como vencida una cuota
+  // que vence hoy (new Date("YYYY-MM-DD") es medianoche UTC).
+  if (cuota.fecha_esperada && cuota.fecha_esperada.slice(0, 10) < todayISO()) return 'vencida'
   return 'pendiente'
 }
 
@@ -55,6 +60,72 @@ function CuotaBadge({ cuota }: { cuota: CuotaCartera }) {
   if (estado === 'vencida')
     return <Badge variant="destructive" className="text-xs gap-1"><AlertCircle className="h-3 w-3" />Vencida</Badge>
   return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Pendiente</Badge>
+}
+
+function FechaVencimientoEditor({
+  cuota,
+  carteraId,
+}: {
+  cuota: CuotaCartera
+  carteraId: string
+}) {
+  const queryClient = useQueryClient()
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(cuota.fecha_esperada ?? '')
+
+  const { mutate, isPending } = useMutation({
+    mutationFn: (fecha: string) => carteraApi.patchCuota(cuota.id, { fecha_vencimiento: fecha }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cartera', carteraId] })
+      toast.success('Fecha actualizada')
+      setEditing(false)
+    },
+    onError: (err: any) => {
+      const msg = err?.response?.data?.detail ?? err?.response?.data?.error ?? 'No se pudo actualizar la fecha'
+      toast.error('Error', msg)
+      setEditing(false)
+      setDraft(cuota.fecha_esperada ?? '')
+    },
+  })
+
+  function commit() {
+    if (!draft || draft === cuota.fecha_esperada) { setEditing(false); return }
+    mutate(draft)
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="date"
+        value={draft}
+        disabled={isPending}
+        className="text-xs border border-primary rounded px-1.5 py-0.5 focus:outline-none focus:ring-1 focus:ring-primary w-32"
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+          if (e.key === 'Escape') { setEditing(false); setDraft(cuota.fecha_esperada ?? '') }
+        }}
+        autoFocus
+      />
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center gap-1 group/fecha">
+      {cuota.fecha_esperada ? formatDate(cuota.fecha_esperada) : '—'}
+      <button
+        type="button"
+        onClick={() => { setDraft(cuota.fecha_esperada ?? ''); setEditing(true) }}
+        className="opacity-0 group-hover/fecha:opacity-100 transition-opacity text-muted-foreground hover:text-primary"
+        title="Editar fecha de vencimiento"
+      >
+        <Pencil className="h-3 w-3" />
+      </button>
+    </span>
+  )
 }
 
 function RegistrarPagoModal({
@@ -75,7 +146,7 @@ function RegistrarPagoModal({
     resolver: zodResolver(pagoSchema),
     defaultValues: {
       valor_pagado: parseFloat(cuota.valor_esperado) || undefined,
-      fecha_pago: new Date().toISOString().split('T')[0],
+      fecha_pago: todayISO(),
       medio_pago: '',
       observaciones: '',
     },
@@ -184,6 +255,8 @@ function RegistrarPagoModal({
 
 export default function DetalleCarteraPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { user } = useAuthStore()
+  const canModificarPlazo = hasPermission(user, PERM.CARTERA_MODIFICAR_PLAZO)
   const [cuotaSeleccionada, setCuotaSeleccionada] = useState<CuotaCartera | null>(null)
 
   const { data: cartera, isLoading } = useQuery({
@@ -268,8 +341,15 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
                         <CuotaBadge cuota={cuota} />
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
-                        {cuota.fecha_esperada && (
-                          <p>Fecha esperada: {formatDate(cuota.fecha_esperada)}</p>
+                        {(cuota.fecha_esperada || (estado === 'pendiente' && canModificarPlazo)) && (
+                          <p>
+                            Vencimiento:{' '}
+                            {estado === 'pendiente' && canModificarPlazo ? (
+                              <FechaVencimientoEditor cuota={cuota} carteraId={id} />
+                            ) : (
+                              cuota.fecha_esperada ? formatDate(cuota.fecha_esperada) : '—'
+                            )}
+                          </p>
                         )}
                         {cuota.pagada && cuota.fecha_pago && (
                           <p className="text-emerald-600">

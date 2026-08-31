@@ -6,7 +6,15 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', {
+  // Una fecha "solo día" (YYYY-MM-DD, típica de un DateField de Django) se
+  // parsea como medianoche UTC y se corre al día anterior en zonas UTC-negativas.
+  // Para esos casos construimos la fecha en horario local; los ISO con hora
+  // mantienen el comportamiento normal.
+  const soloDia = /^\d{4}-\d{2}-\d{2}$/.test(iso)
+  const d = soloDia
+    ? (([y, m, dd]) => new Date(y, m - 1, dd))(iso.split('-').map(Number))
+    : new Date(iso)
+  return d.toLocaleDateString('es-CO', {
     year: 'numeric',
     month: 'short',
     day: 'numeric',
@@ -41,4 +49,32 @@ export function formatDuracion(minutos: number): string {
     return partes.join(' ')
   }
   return mins > 0 ? `${horas}h ${mins} min` : `${horas}h`
+}
+
+export function todayISO(): string {
+  return new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
+}
+
+/**
+ * Formatea una fecha "solo día" (YYYY-MM-DD, o el prefijo de un ISO) SIN
+ * corrimiento por zona horaria. `new Date("2026-08-27")` se interpreta como
+ * medianoche UTC y en zonas UTC-negativas (Colombia UTC-5) se renderiza como
+ * el día anterior. Este helper construye la fecha en horario local.
+ */
+export function formatFechaLocal(
+  fecha: string | null | undefined,
+  opts: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' },
+): string {
+  if (!fecha) return ''
+  const [y, m, d] = fecha.slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return ''
+  return new Date(y, m - 1, d).toLocaleDateString('es-CO', opts)
+}
+
+export function addDaysISO(iso: string, days: number): string {
+  // Parsear como fecha local, no UTC: `new Date("2026-08-28")` es medianoche UTC
+  // y en zonas UTC-negativas (Colombia UTC-5) cae en el día anterior, corriendo
+  // toda la aritmética un día. El constructor con componentes normaliza overflow.
+  const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
+  return new Date(y, m - 1, d + days).toLocaleDateString('en-CA')
 }

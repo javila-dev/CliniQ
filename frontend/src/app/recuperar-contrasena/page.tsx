@@ -8,6 +8,7 @@ import { z } from 'zod'
 import Image from 'next/image'
 import { Eye, EyeOff, Loader2, CheckCircle2, XCircle, Check } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
+import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -39,6 +40,7 @@ function RecuperarContrasenaContent() {
   const router = useRouter()
   const token = searchParams.get('token') ?? ''
 
+  const { loadUser } = useAuthStore()
   const [pageState, setPageState] = useState<PageState>('loading')
   const [serverError, setServerError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
@@ -73,7 +75,17 @@ function RecuperarContrasenaContent() {
   const onSubmit = async ({ nueva_password, confirmar_password }: ResetForm) => {
     setServerError(null)
     try {
-      await authApi.restablecerPassword(token, nueva_password, confirmar_password)
+      const res = await authApi.restablecerPassword(token, nueva_password, confirmar_password)
+
+      if (res.auto_login && res.access && res.refresh) {
+        localStorage.setItem('access_token', res.access)
+        localStorage.setItem('refresh_token', res.refresh)
+        if (res.clinica_id) localStorage.setItem('clinica_id', res.clinica_id)
+        await loadUser()
+        router.replace('/dashboard')
+        return
+      }
+
       setPageState('success')
     } catch (err: any) {
       const msg =

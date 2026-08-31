@@ -14,6 +14,7 @@ export interface AuthUser {
   clinica_nombre: string | null
   sede_id: string | null
   es_profesional: boolean
+  es_admin: boolean
   telefono: string | null
   foto_perfil: string | null
   firma_digital_url: string | null

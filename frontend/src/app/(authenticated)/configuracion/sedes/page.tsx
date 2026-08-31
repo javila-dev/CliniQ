@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, MapPin, Phone, Clock, MoreHorizontal, Building2, ArrowLeft } from 'lucide-react'
+import { Plus, Search, MapPin, Phone, Clock, MoreHorizontal, Building2, ArrowLeft, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -339,6 +339,18 @@ export default function SedesPage() {
     queryFn: () => clinicasApi.sedes.list(),
   })
 
+  const { data: limite } = useQuery({
+    queryKey: ['sedes-limite'],
+    queryFn: () => clinicasApi.getSedesLimite(),
+  })
+
+  // sedes_activas del endpoint puede no venir → contar desde la lista cargada
+  const sedesActivas = limite?.sedes_activas ?? (data?.results.filter(s => s.activo).length ?? 0)
+  const maxSedes = limite?.max_sedes ?? null
+  const sinLimite = limite?.sin_limite ?? maxSedes === null
+  const pct = maxSedes ? Math.min(100, Math.round((sedesActivas / maxSedes) * 100)) : 0
+  const enLimite = !sinLimite && sedesActivas >= (maxSedes ?? 0)
+
   const toggleMutation = useMutation({
     mutationFn: (s: Sede) => clinicasApi.sedes.update(s.id, { activo: !s.activo }),
     onMutate: async (s: Sede) => {
@@ -378,11 +390,44 @@ export default function SedesPage() {
             {isLoading ? 'Cargando…' : `${data?.count ?? 0} sede${(data?.count ?? 0) !== 1 ? 's' : ''} registradas`}
           </p>
         </div>
-        <Button onClick={() => { setEditando(null); setSheetOpen(true) }}>
+        <Button
+          onClick={() => { setEditando(null); setSheetOpen(true) }}
+          disabled={enLimite}
+          title={enLimite ? `Límite de ${maxSedes} sedes alcanzado` : undefined}
+        >
           <Plus className="h-4 w-4 mr-1.5" />
           Nueva sede
         </Button>
       </div>
+
+      {/* Cuota de sedes */}
+      {!sinLimite && maxSedes !== null && (
+        <div className={cn(
+          'rounded-lg border px-4 py-3 flex items-center gap-4',
+          enLimite ? 'border-amber-200 bg-amber-50' : 'border-border bg-white'
+        )}>
+          {enLimite && <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-muted-foreground">Sedes del plan</span>
+              <span className={cn('text-xs font-semibold tabular-nums', enLimite ? 'text-amber-600' : 'text-foreground')}>
+                {sedesActivas} / {maxSedes}
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
+              <div
+                className={cn('h-full rounded-full transition-all', enLimite ? 'bg-amber-400' : 'bg-rose-500')}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+          {enLimite && (
+            <p className="text-xs text-amber-700 shrink-0">
+              Límite alcanzado
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Búsqueda */}
       <div className="relative max-w-sm">

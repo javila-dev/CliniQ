@@ -17,7 +17,7 @@ const TABS_CONFIG: TabConfig[] = [
   {
     value: 'datos-generales',
     label: 'Datos Generales',
-    description: 'Identificación del paciente, datos complementarios y signos vitales.',
+    description: 'Identificación del paciente y datos complementarios.',
     obligatorio: true,
   },
   {
@@ -29,6 +29,11 @@ const TABS_CONFIG: TabConfig[] = [
     value: 'antecedentes',
     label: 'Antecedentes',
     description: 'Antecedentes personales, ginecoobstétricos y familiares.',
+  },
+  {
+    value: 'mediciones',
+    label: 'Seguimiento',
+    description: 'Signos vitales y medidas corporales registradas en cada control.',
   },
   {
     value: 'examenes',
@@ -49,6 +54,11 @@ const TABS_CONFIG: TabConfig[] = [
     value: 'fotos',
     label: 'Fotos',
     description: 'Galería fotográfica antes, durante y después de los procedimientos.',
+  },
+  {
+    value: 'zonas',
+    label: 'Zonas',
+    description: 'Historial de zonas corporales tratadas en cada visita.',
   },
 ]
 

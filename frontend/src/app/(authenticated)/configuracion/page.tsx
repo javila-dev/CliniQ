@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import {
   Settings2, Building2, Stethoscope, Users, ShieldCheck,
-  ClipboardList, ScrollText, Package2, ChevronRight, Bell,
+  ClipboardList, ScrollText, Package2, ChevronRight, FileSignature, ClipboardCheck, Receipt,
 } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
@@ -19,7 +19,7 @@ interface ConfigItem {
   icon: React.ElementType
   color: string     // color del ícono
   bg: string        // fondo del ícono
-  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver'
+  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log'
 }
 
 interface ConfigSection {
@@ -36,7 +36,7 @@ const SECTIONS: ConfigSection[] = [
       {
         href: '/configuracion/clinica',
         label: 'General',
-        description: 'Logo, nombre, NIT, teléfono y frecuencia de turnos.',
+        description: 'Logo, nombre, NIT, teléfono, frecuencia de turnos y recordatorios.',
         icon: Settings2,
         color: 'text-rose-500',
         bg: 'bg-rose-50',
@@ -49,15 +49,6 @@ const SECTIONS: ConfigSection[] = [
         icon: Building2,
         color: 'text-violet-500',
         bg: 'bg-violet-50',
-        perm: 'clinicas_editar',
-      },
-      {
-        href: '/configuracion/recordatorios',
-        label: 'Recordatorios',
-        description: 'Activa recordatorios automáticos y configura con cuánta anticipación se envían.',
-        icon: Bell,
-        color: 'text-amber-500',
-        bg: 'bg-amber-50',
         perm: 'clinicas_editar',
       },
     ],
@@ -82,6 +73,30 @@ const SECTIONS: ConfigSection[] = [
         icon: Package2,
         color: 'text-cyan-600',
         bg: 'bg-cyan-50',
+        perm: 'clinicas_editar',
+      },
+    ],
+  },
+  {
+    title: 'Consentimientos y documentos',
+    description: 'Firmas electrónicas de pacientes',
+    items: [
+      {
+        href: '/configuracion/consentimientos',
+        label: 'Consentimientos informados',
+        description: 'Sube PDFs, mapea campos de firma y asócialos a procedimientos.',
+        icon: FileSignature,
+        color: 'text-indigo-500',
+        bg: 'bg-indigo-50',
+        perm: 'clinicas_editar',
+      },
+      {
+        href: '/configuracion/cartera',
+        label: 'Compromiso de pago',
+        description: 'Consentimiento firmable de abono/saldo y compra promocional al aceptar una cotización.',
+        icon: Receipt,
+        color: 'text-rose-500',
+        bg: 'bg-rose-50',
         perm: 'clinicas_editar',
       },
     ],
@@ -140,6 +155,15 @@ const SECTIONS: ConfigSection[] = [
         color: 'text-sky-500',
         bg: 'bg-sky-50',
         perm: 'roles_ver',
+      },
+      {
+        href: '/configuracion/log-acciones',
+        label: 'Log de acciones',
+        description: 'Historial auditable de quién hizo qué y cuándo en el sistema.',
+        icon: ClipboardCheck,
+        color: 'text-slate-500',
+        bg: 'bg-slate-50',
+        perm: 'core_ver_log',
       },
     ],
   },
@@ -200,8 +224,9 @@ export default function ConfiguracionPage() {
 
   const visibleHrefs = new Set(
     SECTIONS.flatMap((s) => s.items).filter((item) => {
-      if (item.perm === 'usuarios_ver') return hasPermission(user, PERM.USUARIOS_VER)
-      if (item.perm === 'roles_ver')    return hasPermission(user, PERM.ROLES_VER)
+      if (item.perm === 'usuarios_ver')  return hasPermission(user, PERM.USUARIOS_VER)
+      if (item.perm === 'roles_ver')     return hasPermission(user, PERM.ROLES_VER)
+      if (item.perm === 'core_ver_log')  return hasPermission(user, PERM.CORE_VER_LOG_ACCIONES)
       return hasPermission(user, PERM.CLINICAS_EDITAR)
     }).map((item) => item.href)
   )

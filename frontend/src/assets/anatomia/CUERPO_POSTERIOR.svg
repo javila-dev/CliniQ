@@ -1,0 +1,107 @@
+<svg viewBox="0 0 400 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .zona-anatomica { cursor: pointer; transition: fill 0.15s; }
+      .zona-anatomica:hover { fill: rgba(99,102,241,0.15); }
+      .contorno { fill: none; pointer-events: none; }
+    </style>
+  </defs>
+
+  <!-- ── Silueta base (decorativa) ──────────────────────────────────── -->
+  <!-- Cabeza -->
+  <ellipse class="contorno" stroke="#94a3b8" stroke-width="2" cx="200" cy="48" rx="38" ry="44"/>
+  <!-- Cuello -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.8"
+    d="M 178 90 L 176 116 Q 200 122 224 116 L 222 90"/>
+  <!-- Hombros y torso -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="2"
+    d="M 100 116 Q 140 110 178 116 Q 200 120 222 116 Q 260 110 300 116
+       C 318 122 338 138 348 162 C 355 182 350 205 338 218
+       C 330 228 315 232 305 228
+       L 300 340 C 300 360 295 375 290 390
+       L 270 400 L 265 340 L 135 340 L 130 400 L 110 390
+       C 105 375 100 360 100 340 L 95 228
+       C 85 232 70 228 62 218 C 50 205 45 182 52 162
+       C 62 138 82 122 100 116 Z"/>
+  <!-- Brazos posteriores -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.5"
+    d="M 62 218 C 52 235 46 260 50 285 C 54 310 65 330 78 340 L 95 335"/>
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.5"
+    d="M 338 218 C 348 235 354 260 350 285 C 346 310 335 330 322 340 L 305 335"/>
+  <!-- Glúteos y piernas -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.8"
+    d="M 110 390 L 135 400 L 140 480 L 136 550 L 128 620 L 122 665
+       M 265 400 L 290 390 L 278 665
+       M 135 400 L 152 480 L 156 550 L 160 620 L 162 665
+       M 248 480 L 244 550 L 240 620 L 238 665
+       M 265 400 L 248 480"/>
+
+  <!-- ── ZONAS CLICKEABLES ──────────────────────────────────────────── -->
+
+  <!-- ESPALDA SUPERIOR (trapecios / zona cervical-dorsal) -->
+  <path id="espalda_sup" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 108 116 Q 155 110 200 116 Q 245 110 292 116
+       L 290 185 Q 200 196 110 185 Z"/>
+
+  <!-- ESPALDA MEDIA (omóplatos) -->
+  <path id="espalda_med" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 110 185 Q 200 196 290 185
+       L 288 255 Q 200 265 112 255 Z"/>
+
+  <!-- ESPALDA INFERIOR -->
+  <path id="espalda_inf" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 112 255 Q 200 265 288 255
+       L 285 330 Q 200 340 115 330 Z"/>
+
+  <!-- LUMBAR -->
+  <path id="lumbar" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 130 330 Q 200 340 270 330
+       L 268 395 Q 200 405 132 395 Z"/>
+
+  <!-- GLÚTEOS -->
+  <path id="gluteo_izq" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 110 395 C 122 392 140 390 165 395
+       C 170 410 172 435 165 460
+       C 155 480 135 492 115 488
+       C 100 480 92 460 95 440
+       C 97 420 104 405 110 395 Z"/>
+
+  <path id="gluteo_der" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 235 395 C 260 390 278 392 290 395
+       C 296 405 303 420 305 440
+       C 308 460 300 480 285 488
+       C 265 492 245 480 235 460
+       C 228 435 230 410 235 395 Z"/>
+
+  <!-- MUSLOS POSTERIORES -->
+  <path id="muslo_post_izq" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 115 488 C 135 492 155 485 165 465
+       C 168 478 168 510 164 538
+       C 160 562 148 580 132 582
+       C 115 580 104 562 102 540
+       C 100 516 104 498 115 488 Z"/>
+
+  <path id="muslo_post_der" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 235 465 C 245 485 265 492 285 488
+       C 296 498 300 516 298 540
+       C 296 562 285 580 268 582
+       C 252 580 240 562 236 538
+       C 232 510 232 478 235 465 Z"/>
+
+  <!-- PIERNAS POSTERIORES (gemelos) -->
+  <path id="pierna_post_izq" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 130 582 C 148 585 162 575 166 558
+       C 168 580 168 610 162 638
+       C 158 655 148 665 134 666
+       C 120 665 110 655 107 638
+       C 103 610 104 582 115 578
+       C 120 580 126 582 130 582 Z"/>
+
+  <path id="pierna_post_der" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 234 558 C 238 575 252 585 270 582
+       C 274 582 280 580 285 578
+       C 296 582 297 610 293 638
+       C 290 655 280 665 266 666
+       C 252 665 242 655 238 638
+       C 232 610 232 580 234 558 Z"/>
+</svg>

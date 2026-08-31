@@ -1,0 +1,109 @@
+<svg viewBox="0 0 400 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .zona-anatomica { cursor: pointer; transition: fill 0.15s; }
+      .zona-anatomica:hover { fill: rgba(99,102,241,0.15); }
+      .contorno { fill: none; pointer-events: none; }
+    </style>
+  </defs>
+
+  <!-- ── Silueta base (decorativa) ──────────────────────────────────── -->
+  <!-- Barbilla / mentón inferior -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="2"
+    d="M 145 38 C 162 28 180 24 200 24 C 220 24 238 28 255 38
+       C 265 48 270 60 268 72 C 265 85 252 95 235 100
+       C 222 105 210 108 200 108 C 190 108 178 105 165 100
+       C 148 95 135 85 132 72 C 130 60 135 48 145 38 Z"/>
+  <!-- Cuello -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="2"
+    d="M 165 100 C 160 120 158 145 162 168
+       C 155 175 142 182 128 188
+       C 110 195 88 198 68 195
+       M 235 100 C 240 120 242 145 238 168
+       C 245 175 258 182 272 188
+       C 290 195 312 198 332 195"/>
+  <!-- Hombros y escote -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="2"
+    d="M 28 230 C 40 200 58 182 88 175
+       C 108 168 132 168 162 168
+       C 170 195 178 222 185 248
+       C 188 262 192 278 200 290
+       C 208 278 212 262 215 248
+       C 222 222 230 195 238 168
+       C 268 168 292 168 312 175
+       C 342 182 360 200 372 230
+       L 380 290 C 372 320 355 348 330 368
+       C 305 388 268 400 200 400
+       C 132 400 95 388 70 368
+       C 45 348 28 320 20 290 Z"/>
+  <!-- Clavículas -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.3"
+    d="M 68 195 C 90 200 120 208 162 210"/>
+  <path class="contorno" stroke="#94a3b8" stroke-width="1.3"
+    d="M 332 195 C 310 200 280 208 238 210"/>
+  <!-- Línea central pecho -->
+  <path class="contorno" stroke="#94a3b8" stroke-width="1"
+    d="M 200 108 L 200 400"/>
+
+  <!-- ── ZONAS CLICKEABLES ──────────────────────────────────────────── -->
+
+  <!-- PAPADA (submentoniana) -->
+  <path id="papada" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 155 75 C 165 68 182 64 200 64 C 218 64 235 68 245 75
+       C 248 85 248 98 242 108
+       C 230 115 215 118 200 118
+       C 185 118 170 115 158 108
+       C 152 98 152 85 155 75 Z"/>
+
+  <!-- CUELLO ANTERIOR (laringe / tráquea) -->
+  <path id="cuello_anterior" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 170 112 C 180 108 220 108 230 112
+       C 235 132 238 155 236 172
+       C 224 178 212 182 200 182
+       C 188 182 176 178 164 172
+       C 162 155 165 132 170 112 Z"/>
+
+  <!-- CUELLO LATERAL IZQUIERDO -->
+  <path id="cuello_izq" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 145 82 C 155 75 170 72 178 78
+       C 175 98 172 120 168 142
+       C 162 158 152 168 140 172
+       C 125 168 112 155 108 138
+       C 104 120 110 100 125 88
+       C 132 84 138 82 145 82 Z"/>
+
+  <!-- CUELLO LATERAL DERECHO -->
+  <path id="cuello_der" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 255 82 C 262 82 268 84 275 88
+       C 290 100 296 120 292 138
+       C 288 155 275 168 260 172
+       C 248 168 238 158 232 142
+       C 228 120 225 98 222 78
+       C 230 72 245 75 255 82 Z"/>
+
+  <!-- ESCOTE CENTRAL (zona esternal) -->
+  <path id="escote_central" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 168 175 C 180 170 220 170 232 175
+       C 236 192 238 215 235 238
+       C 225 252 212 260 200 260
+       C 188 260 175 252 165 238
+       C 162 215 164 192 168 175 Z"/>
+
+  <!-- ESCOTE IZQUIERDO -->
+  <path id="escote_izq" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 68 195 C 98 185 132 178 162 178
+       C 165 198 170 222 178 248
+       C 182 268 185 288 188 308
+       C 162 318 128 320 98 308
+       C 72 295 52 270 42 242
+       C 38 220 48 202 68 195 Z"/>
+
+  <!-- ESCOTE DERECHO -->
+  <path id="escote_der" class="zona-anatomica" fill="transparent" stroke="#cbd5e1" stroke-width="1.5"
+    d="M 238 178 C 268 178 302 185 332 195
+       C 352 202 362 220 358 242
+       C 348 270 328 295 302 308
+       C 272 320 238 318 212 308
+       C 215 288 218 268 222 248
+       C 230 222 235 198 238 178 Z"/>
+</svg>

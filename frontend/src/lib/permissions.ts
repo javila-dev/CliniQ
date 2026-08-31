@@ -5,6 +5,9 @@ import type { AuthUser } from '@/types/auth'
 // Los nombres exactos los confirma GET /usuarios/permisos/.
 
 export const PERM = {
+  // Core / auditoría
+  CORE_VER_LOG_ACCIONES:     'core.ver_log_acciones',
+
   // Reportes / dashboard
   REPORTES_VER:              'reportes.ver',
 
@@ -13,6 +16,8 @@ export const PERM = {
   AGENDA_CREAR:              'agenda.citas.crear',
   AGENDA_EDITAR:             'agenda.citas.editar',
   AGENDA_CANCELAR:           'agenda.citas.cancelar',
+  AGENDA_CREAR_BLOQUEO:      'agenda.crear_bloqueo',
+  AGENDA_APROBAR_BLOQUEO:    'agenda.aprobar_bloqueo',
 
   // Pacientes
   PACIENTES_VER:             'pacientes.ver',
@@ -23,14 +28,21 @@ export const PERM = {
   HISTORIA_VER:              'historia.ver',
   HISTORIA_ESCRIBIR:         'historia.escribir',
 
+  // Antecedentes del paciente (claves reales del catálogo backend)
+  PACIENTES_ANTECEDENTES_VER:    'pacientes.antecedentes.ver',
+  PACIENTES_ANTECEDENTES_EDITAR: 'pacientes.antecedentes.editar',
+
   // Cobros
   COBROS_VER:                'cobros.ver',
   COBROS_CREAR:              'cobros.crear',
   COBROS_ANULAR:             'cobros.anular',
+  COBROS_CAMBIAR_PRECIO:     'cobros.cambiar_precio',
 
   // Consentimientos
   CONSENTIMIENTOS_VER:       'consentimientos.ver',
   CONSENTIMIENTOS_GESTIONAR: 'consentimientos.gestionar',
+  CONSENTIMIENTOS_GENERAR:   'consentimientos.generar',
+  CONSENTIMIENTOS_REVOCAR:   'consentimientos.revocar',
 
   // Inventario
   INVENTARIO_VER:            'inventario.ver',
@@ -56,9 +68,17 @@ export const PERM = {
   CLINICAS_VER:              'clinicas.ver',
   CLINICAS_EDITAR:           'clinicas.editar',
 
+  // Campañas
+  CAMPANAS_GESTIONAR:        'campanas.gestionar',
+
+  // Cartera
+  CARTERA_APROBAR_EXCEPCION: 'cartera.aprobar_excepcion',
+  CARTERA_MODIFICAR_PLAZO:   'cartera.modificar_plazo',
+
   // Cotizaciones
   COTIZACIONES_VER:          'cotizaciones.ver',
   COTIZACIONES_GESTIONAR:    'cotizaciones.gestionar',
+  COTIZACIONES_CAMBIAR_PRECIO: 'cotizaciones.cambiar_precio',
 } as const
 
 export type PermKey = typeof PERM[keyof typeof PERM]
@@ -115,11 +135,10 @@ export const canAccess = {
   admin: (u: AuthUser | null | undefined) =>
     isSuperAdmin(u),
 
-  dashboard: (u: AuthUser | null | undefined) =>
-    isAdminOrSuperAdmin(u) || hasPermission(u, PERM.REPORTES_VER),
+  dashboard: (_u: AuthUser | null | undefined) => true,
 
   atenciones: (u: AuthUser | null | undefined) =>
-    isProfesional(u) || hasPermission(u, PERM.HISTORIA_ESCRIBIR),
+    isProfesional(u) || isAdminOrSuperAdmin(u) || hasPermission(u, PERM.HISTORIA_ESCRIBIR),
 
   agenda: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.AGENDA_VER),
@@ -163,9 +182,5 @@ export const canAccess = {
 
 export function defaultRoute(user: AuthUser): string {
   if (isSuperAdmin(user)) return '/admin'
-  if (isAdminOrSuperAdmin(user) || hasPermission(user, PERM.REPORTES_VER)) return '/dashboard'
-  if (isProfesional(user) || hasPermission(user, PERM.HISTORIA_ESCRIBIR)) return '/atenciones'
-  if (hasPermission(user, PERM.AGENDA_VER)) return '/agenda'
-  if (hasPermission(user, PERM.PACIENTES_VER)) return '/pacientes'
-  return '/perfil'
+  return '/dashboard'
 }

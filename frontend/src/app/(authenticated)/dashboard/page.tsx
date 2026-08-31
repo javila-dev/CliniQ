@@ -321,19 +321,25 @@ function DashboardContent() {
   const { allDone: checklistDone } = useSetupChecklist()
   const esSoloProfesional = user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.REPORTES_VER)
   const canVerCotizaciones = hasPermission(user, PERM.COTIZACIONES_VER)
-  const sede = sedeId ?? undefined
-
-  const { sedes } = useUserSedes()
+  // KPIs financieros/comerciales de dueño: cartera agregada, P&L 30 días,
+  // ingresos por servicio, conversión de cotizaciones, tasa de completado por
+  // profesional. Recepción / profesional ven un dashboard operativo sin esto.
+  const canVerFinanzas = isAdminOrSuperAdmin(user)
+  const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
+  // `sedeId` = elección explícita del usuario. Sin elección, cae en la sede por
+  // defecto de su scope: acotado a una sola sede -> esa sede; all-sedes -> null
+  // (= todas). Así un usuario de una sede nunca recibe métricas de toda la clínica.
+  const sede = (sedeId ?? defaultSedeId) ?? undefined
 
   const { data: kpis, isLoading: kpisLoading } = useQuery({
-    queryKey: ['reportes', 'dashboard', sedeId],
+    queryKey: ['reportes', 'dashboard', sede],
     queryFn: () => reportesApi.getDashboard({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
   })
 
   const { data: ingresos, isLoading: ingresosLoading } = useQuery({
-    queryKey: ['reportes', 'ingresos', '30d', sedeId],
+    queryKey: ['reportes', 'ingresos', '30d', sede],
     queryFn: () => {
       const fin = todayISO()
       const ini = addDaysISO(fin, -29)
@@ -341,24 +347,26 @@ function DashboardContent() {
     },
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: canVerFinanzas,
   })
 
   const { data: servicios, isLoading: serviciosLoading } = useQuery({
-    queryKey: ['reportes', 'servicios', sedeId],
+    queryKey: ['reportes', 'servicios', sede],
     queryFn: () => reportesApi.getServicios({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: canVerFinanzas,
   })
 
   const { data: ocupacionMes, isLoading: ocupacionMesLoading } = useQuery({
-    queryKey: ['reportes', 'ocupacion', 'mes', sedeId],
+    queryKey: ['reportes', 'ocupacion', 'mes', sede],
     queryFn: () => reportesApi.getOcupacion({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
   })
 
   const { data: ocupacionHoy, isLoading: ocupacionHoyLoading } = useQuery({
-    queryKey: ['reportes', 'ocupacion', 'hoy', sedeId],
+    queryKey: ['reportes', 'ocupacion', 'hoy', sede],
     queryFn: () => {
       const hoy = todayISO()
       return reportesApi.getOcupacion({ fecha_inicio: hoy, fecha_fin: hoy, sede_id: sede })
@@ -369,12 +377,12 @@ function DashboardContent() {
   })
 
   const { data: citasHoyData, isLoading: citasLoading } = useQuery({
-    queryKey: ['citas', 'hoy', sedeId, esSoloProfesional ? user?.id : null],
+    queryKey: ['citas', 'hoy', sede, esSoloProfesional ? user?.id : null],
     queryFn: () => {
       const hoy = todayISO()
       return agendaApi.citas.list({
         fecha_inicio__date: hoy,
-        sede: sedeId ?? undefined,
+        sede,
         page_size: 100,
         ...(esSoloProfesional && user?.id ? { profesional: user.id } : {}),
       })
@@ -385,7 +393,7 @@ function DashboardContent() {
   const citasHoy = citasHoyData?.results
 
   const { data: cotizacionesMes, isLoading: cotizacionesMesLoading } = useQuery({
-    queryKey: ['reportes', 'cotizaciones', 'mes', sedeId],
+    queryKey: ['reportes', 'cotizaciones', 'mes', sede],
     queryFn: () => {
       const { ini, fin } = mesActual()
       return reportesApi.getCotizacionesMes({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede })
@@ -396,14 +404,15 @@ function DashboardContent() {
   })
 
   const { data: resumenCartera, isLoading: carteraLoading } = useQuery({
-    queryKey: ['cartera', 'resumen', sedeId],
+    queryKey: ['cartera', 'resumen', sede],
     queryFn: () => carteraApi.resumen({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: canVerFinanzas,
   })
 
   const { data: citasSinCerrarData } = useQuery({
-    queryKey: ['citas', 'sin-cerrar-mes', sedeId],
+    queryKey: ['citas', 'sin-cerrar-mes', sede],
     queryFn: () => {
       const ayer = addDaysISO(todayISO(), -1)
       const { ini } = mesActual()
@@ -411,7 +420,7 @@ function DashboardContent() {
         fecha_inicio__date__gte: ini,
         fecha_inicio__date__lte: ayer,
         page_size: 200,
-        ...(sedeId && { sede: sedeId }),
+        ...(sede && { sede }),
       })
     },
     staleTime: STALE,
@@ -419,7 +428,7 @@ function DashboardContent() {
   })
 
   const { data: pacientesSinReagendar, isLoading: pacientesLoading } = useQuery({
-    queryKey: ['reportes', 'pacientes-sin-reagendar', sedeId],
+    queryKey: ['reportes', 'pacientes-sin-reagendar', sede],
     queryFn: () => reportesApi.getPacientesSinReagendar({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
@@ -454,7 +463,12 @@ function DashboardContent() {
   const totalNoAsistioMes = (ocupacionMes ?? []).reduce((s, o) => s + o.no_asistio, 0)
   const totalCitasMes = (ocupacionMes ?? []).reduce((s, o) => s + o.total_citas, 0)
   const totalNoAtendidas = totalNoAsistioMes + citasSinCerrarMes.length
-  const pctNoAtendidas = totalCitasMes > 0 ? (totalNoAtendidas / totalCitasMes) * 100 : 0
+  // % de inasistencia del mes: numerador y denominador con el MISMO alcance
+  // (citas del mes). Antes se mezclaba `citasSinCerrar` (de cualquier mes) con
+  // `totalCitasMes` y salían valores absurdos (p.ej. 300%).
+  const pctNoAsistioMes = totalCitasMes > 0
+    ? Math.min((totalNoAsistioMes / totalCitasMes) * 100, 100)
+    : 0
 
   if (esSoloProfesional) {
     return (
@@ -663,8 +677,8 @@ function DashboardContent() {
               value={ocupacionMesLoading ? '—' : totalNoAtendidas}
               sub={
                 totalCitasMes > 0
-                  ? `${pctNoAtendidas.toFixed(1)}% · ${totalNoAsistioMes} no asistieron, ${citasSinCerrarMes.length} sin cerrar`
-                  : undefined
+                  ? `${totalNoAsistioMes} no asistieron (${pctNoAsistioMes.toFixed(0)}%) · ${citasSinCerrarMes.length} sin cerrar`
+                  : `${citasSinCerrarMes.length} sin cerrar`
               }
               icon={UserX}
               iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
@@ -707,8 +721,8 @@ function DashboardContent() {
             value={ocupacionMesLoading ? '—' : totalNoAtendidas}
             sub={
               totalCitasMes > 0
-                ? `${pctNoAtendidas.toFixed(1)}% · ${totalNoAsistioMes} no asistieron, ${citasSinCerrarMes.length} sin cerrar`
-                : undefined
+                ? `${totalNoAsistioMes} no asistieron (${pctNoAsistioMes.toFixed(0)}%) · ${citasSinCerrarMes.length} sin cerrar`
+                : `${citasSinCerrarMes.length} sin cerrar`
             }
             icon={UserX}
             iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
@@ -718,27 +732,31 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Filtro por sede */}
+      {/* Filtro por sede. "Todas las sedes" solo para quien realmente ve todas
+          (admin/superadmin); un usuario acotado nunca puede desagregar fuera de
+          sus sedes. */}
       {sedes.length > 1 && (
         <div className="w-full flex flex-wrap gap-2">
-          <button
-            onClick={() => setSedeId(null)}
-            className={cn(
-              'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-              sedeId === null
-                ? 'bg-primary text-white border-primary'
-                : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
-            )}
-          >
-            Todas las sedes
-          </button>
+          {isAllSedes && (
+            <button
+              onClick={() => setSedeId(null)}
+              className={cn(
+                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                sede === undefined
+                  ? 'bg-primary text-white border-primary'
+                  : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
+              )}
+            >
+              Todas las sedes
+            </button>
+          )}
           {sedes.map(s => (
             <button
               key={s.id}
               onClick={() => setSedeId(s.id)}
               className={cn(
                 'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-                sedeId === s.id
+                sede === s.id
                   ? 'bg-primary text-white border-primary'
                   : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
               )}
@@ -750,7 +768,7 @@ function DashboardContent() {
       )}
 
       {/* Cotizaciones del mes + Cartera */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-2')}>
         {canVerCotizaciones && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center justify-between px-5 py-3 border-b">
@@ -775,55 +793,59 @@ function DashboardContent() {
                 color="text-emerald-600"
                 loading={cotizacionesMesLoading}
               />
-              <MetricaCotizacion
-                label="Conversión"
-                value={cotizacionesMes ? `${Number(cotizacionesMes.tasa_conversion_pct).toFixed(0)}%` : '—'}
-                sub={cotizacionesMes && Number(cotizacionesMes.tasa_conversion_pct) >= 50 ? 'buen ritmo' : cotizacionesMes ? 'por mejorar' : undefined}
-                color={cotizacionesMes
-                  ? Number(cotizacionesMes.tasa_conversion_pct) >= 50
-                    ? 'text-emerald-600'
-                    : Number(cotizacionesMes.tasa_conversion_pct) >= 25
-                      ? 'text-amber-600'
-                      : 'text-red-500'
-                  : 'text-muted-foreground'
-                }
-                loading={cotizacionesMesLoading}
-              />
+              {canVerFinanzas && (
+                <MetricaCotizacion
+                  label="Conversión"
+                  value={cotizacionesMes ? `${Number(cotizacionesMes.tasa_conversion_pct).toFixed(0)}%` : '—'}
+                  sub={cotizacionesMes && Number(cotizacionesMes.tasa_conversion_pct) >= 50 ? 'buen ritmo' : cotizacionesMes ? 'por mejorar' : undefined}
+                  color={cotizacionesMes
+                    ? Number(cotizacionesMes.tasa_conversion_pct) >= 50
+                      ? 'text-emerald-600'
+                      : Number(cotizacionesMes.tasa_conversion_pct) >= 25
+                        ? 'text-amber-600'
+                        : 'text-red-500'
+                    : 'text-muted-foreground'
+                  }
+                  loading={cotizacionesMesLoading}
+                />
+              )}
             </div>
           </div>
         )}
 
-        <div className={cn(
-          'bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
-          (resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'border-red-200' : 'border-gray-100'
-        )}>
-          <div className="flex items-center justify-between px-5 py-3 border-b">
-            <div className="flex items-center gap-2">
-              <Wallet className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-sm">Cartera</h2>
+        {canVerFinanzas && (
+          <div className={cn(
+            'bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
+            (resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'border-red-200' : 'border-gray-100'
+          )}>
+            <div className="flex items-center justify-between px-5 py-3 border-b">
+              <div className="flex items-center gap-2">
+                <Wallet className="h-4 w-4 text-primary" />
+                <h2 className="font-semibold text-sm">Cartera</h2>
+              </div>
+              <Link href="/cartera" className="text-xs text-primary hover:underline flex items-center gap-1">
+                Ver cartera <ArrowRight className="h-3 w-3" />
+              </Link>
             </div>
-            <Link href="/cartera" className="text-xs text-primary hover:underline flex items-center gap-1">
-              Ver cartera <ArrowRight className="h-3 w-3" />
-            </Link>
+            <div className="flex divide-x">
+              <MetricaCotizacion
+                label="Saldo pendiente"
+                value={resumenCartera ? abrevCOP(Number(resumenCartera.saldo_pendiente)) : '—'}
+                color="text-foreground"
+                loading={carteraLoading}
+              />
+              <MetricaCotizacion
+                label="Cuotas vencidas"
+                value={resumenCartera?.cuotas_vencidas ?? 0}
+                sub={resumenCartera && resumenCartera.cuotas_vencidas > 0
+                  ? abrevCOP(Number(resumenCartera.cuotas_vencidas_valor))
+                  : 'sin vencimientos'}
+                color={(resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'text-red-600' : 'text-muted-foreground'}
+                loading={carteraLoading}
+              />
+            </div>
           </div>
-          <div className="flex divide-x">
-            <MetricaCotizacion
-              label="Saldo pendiente"
-              value={resumenCartera ? abrevCOP(Number(resumenCartera.saldo_pendiente)) : '—'}
-              color="text-foreground"
-              loading={carteraLoading}
-            />
-            <MetricaCotizacion
-              label="Cuotas vencidas"
-              value={resumenCartera?.cuotas_vencidas ?? 0}
-              sub={resumenCartera && resumenCartera.cuotas_vencidas > 0
-                ? abrevCOP(Number(resumenCartera.cuotas_vencidas_valor))
-                : 'sin vencimientos'}
-              color={(resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'text-red-600' : 'text-muted-foreground'}
-              loading={carteraLoading}
-            />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Pacientes sin reagendar */}
@@ -869,17 +891,19 @@ function DashboardContent() {
       )}
 
       {/* Gráfica + Cobros por medio de pago */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-semibold text-sm">Ingresos últimos 30 días</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">Cobros vs gastos por día</p>
+      <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-3')}>
+        {canVerFinanzas && (
+          <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h2 className="font-semibold text-sm">Ingresos últimos 30 días</h2>
+                <p className="text-xs text-muted-foreground mt-0.5">Cobros vs gastos por día</p>
+              </div>
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </div>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            <GraficaIngresos data={ingresos ?? []} loading={ingresosLoading} />
           </div>
-          <GraficaIngresos data={ingresos ?? []} loading={ingresosLoading} />
-        </div>
+        )}
 
         <div className="bg-white rounded-xl border shadow-sm p-5 space-y-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <h2 className="font-semibold text-sm">Cobros de hoy por medio</h2>
@@ -907,9 +931,10 @@ function DashboardContent() {
       </div>
 
       {/* Tablas: servicios + ocupación */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-2')}>
 
         {/* Servicios del mes */}
+        {canVerFinanzas && (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between px-5 py-4 border-b">
             <h2 className="font-semibold text-sm">Servicios del mes</h2>
@@ -950,6 +975,7 @@ function DashboardContent() {
             </div>
           )}
         </div>
+        )}
 
         {/* Ocupación por profesional — con tabs Hoy / Mes */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
@@ -972,22 +998,24 @@ function DashboardContent() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              <div className="grid grid-cols-4 px-5 py-2 bg-gray-50/60">
-                {['Profesional', 'Citas', 'Compl.', 'Tasa'].map(h => (
+              <div className={cn('grid px-5 py-2 bg-gray-50/60', canVerFinanzas ? 'grid-cols-4' : 'grid-cols-3')}>
+                {['Profesional', 'Citas', 'Compl.', ...(canVerFinanzas ? ['Tasa'] : [])].map(h => (
                   <span key={h} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{h}</span>
                 ))}
               </div>
               {ocupacionActiva.slice(0, 6).map(o => (
-                <div key={o.profesional_id} className="grid grid-cols-4 px-5 py-2.5 items-center hover:bg-gray-50/50">
+                <div key={o.profesional_id} className={cn('grid px-5 py-2.5 items-center hover:bg-gray-50/50', canVerFinanzas ? 'grid-cols-4' : 'grid-cols-3')}>
                   <span className="text-sm truncate pr-2">{o.profesional_nombre}</span>
                   <span className="text-sm text-muted-foreground">{o.total_citas}</span>
                   <span className="text-sm text-muted-foreground">{o.completadas}</span>
-                  <span className={cn(
-                    'text-sm font-semibold',
-                    Number(o.tasa_completadas_pct) >= 80 ? 'text-emerald-600' : Number(o.tasa_completadas_pct) >= 50 ? 'text-amber-600' : 'text-red-500'
-                  )}>
-                    {Number(o.tasa_completadas_pct).toFixed(0)}%
-                  </span>
+                  {canVerFinanzas && (
+                    <span className={cn(
+                      'text-sm font-semibold',
+                      Number(o.tasa_completadas_pct) >= 80 ? 'text-emerald-600' : Number(o.tasa_completadas_pct) >= 50 ? 'text-amber-600' : 'text-red-500'
+                    )}>
+                      {Number(o.tasa_completadas_pct).toFixed(0)}%
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

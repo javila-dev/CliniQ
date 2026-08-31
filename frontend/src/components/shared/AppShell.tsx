@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
@@ -19,15 +19,19 @@ import {
   ClipboardList,
   Wallet,
   ShieldCheck,
+  Zap,
+  Building2,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
+import { useSuperadminClinicaStore } from '@/store/superadminClinicaStore'
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { NavigationProgress } from './NavigationProgress'
 import { ImpersonationBanner } from './ImpersonationBanner'
+import { TrialBanner } from './TrialBanner'
 import { ThemeApplier } from './ThemeApplier'
-import { hasPermission, isProfesional, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
+import { hasPermission, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
 
@@ -38,20 +42,21 @@ type NavEntry = NavItem | NavGroup
 // Definición de todos los items de nav con su clave de permiso requerida.
 // items sin permission se muestran siempre (ej: perfil, no aplica aquí).
 const NAV = {
-  dashboard:      { href: '/dashboard',      label: 'Dashboard',       icon: LayoutDashboard, perm: PERM.REPORTES_VER       },
-  atenciones:     { href: '/atenciones',     label: 'Mis atenciones',  icon: Stethoscope,     perm: PERM.HISTORIA_ESCRIBIR  },
-  agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER         },
-  pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER      },
-  cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER   },
-  cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.COBROS_VER         },
-  consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER},
-  cobros:         { href: '/ingresos',        label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER         },
-  configuracion:  { href: '/configuracion',  label: 'Configuración',   icon: Settings2,       perm: PERM.CLINICAS_EDITAR    },
+  dashboard:      { href: '/dashboard',      label: 'Dashboard',       icon: LayoutDashboard, perm: PERM.REPORTES_VER          },
+  atenciones:     { href: '/atenciones',     label: 'Atenciones',      icon: Stethoscope,     perm: PERM.HISTORIA_ESCRIBIR     },
+  agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER            },
+  pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
+  cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER      },
+  cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.COBROS_VER            },
+  consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER   },
+  cobros:         { href: '/ingresos',       label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER            },
+  campanas:       { href: '/configuracion/campanas', label: 'Campañas', icon: Zap,            perm: PERM.CAMPANAS_GESTIONAR    },
+  configuracion:  { href: '/configuracion',  label: 'Configuración',   icon: Settings2,       perm: PERM.CLINICAS_EDITAR       },
 }
 
 function allow(user: AuthUser | null, item: typeof NAV[keyof typeof NAV]): boolean {
   if (item.href === '/dashboard')     return canAccess.dashboard(user)
-  if (item.href === '/atenciones')    return isProfesional(user) || hasPermission(user, item.perm)
+  if (item.href === '/atenciones')    return canAccess.atenciones(user)
   if (item.href === '/configuracion') return canAccess.configuracion(user)
   return hasPermission(user, item.perm)
 }
@@ -60,8 +65,8 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const n = NAV
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
-  // Items de sección "Atención"
-  const atencionItems: NavItem[] = [n.agenda, n.pacientes, n.cotizaciones, n.cartera, n.cobros].filter(vis)
+  const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes, n.cobros].filter(vis)
+  const ventasItems: NavItem[]   = [n.cotizaciones, n.campanas, n.cartera].filter(vis)
 
   const entries: NavEntry[] = []
 
@@ -70,8 +75,8 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   }
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
-  if (vis(n.atenciones)) entries.push(n.atenciones)
   if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems })
+  if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems   })
   if (vis(n.configuracion)) entries.push(n.configuracion)
 
   return entries
@@ -105,6 +110,7 @@ function NavLink({ href, label, icon: Icon, onClose }: NavItem & { onClose?: () 
 
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const { user, logout } = useAuthStore()
+  const { clinicaActiva, _hydrated: clinicaHydrated } = useSuperadminClinicaStore()
   const router = useRouter()
 
   const allEntries = buildNav(user)
@@ -141,11 +147,13 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
       </div>
 
       {/* ── Clínica pill ── */}
-      {user?.clinica_nombre && (
+      {(isSuperAdmin(user) ? (clinicaHydrated && clinicaActiva?.nombre) : user?.clinica_nombre) && (
         <div className="px-4 pb-4 shrink-0">
           <div className="flex items-center gap-2 rounded-lg bg-white/[0.05] border border-white/[0.06] px-3 py-2">
             <div className="h-1.5 w-1.5 rounded-full bg-rose-400/70 shrink-0" />
-            <p className="text-xs text-white/50 truncate font-medium">{user.clinica_nombre}</p>
+            <p className="text-xs text-white/50 truncate font-medium">
+              {isSuperAdmin(user) ? clinicaActiva?.nombre : user?.clinica_nombre}
+            </p>
           </div>
         </div>
       )}
@@ -209,8 +217,59 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
 
 const SIDEBAR_BG = 'bg-[#1a1118]'
 
+function SuperadminClinicaGuard({ children }: { children: React.ReactNode }) {
+  const { user } = useAuthStore()
+  const { clinicaActiva, _hydrated } = useSuperadminClinicaStore()
+  const pathname = usePathname()
+  const router = useRouter()
+
+  // Wait for Zustand persist to hydrate from localStorage before deciding to redirect
+  const shouldRedirect = _hydrated && isSuperAdmin(user) && clinicaActiva === null && !pathname.startsWith('/admin')
+
+  useEffect(() => {
+    if (shouldRedirect) router.replace('/admin')
+  }, [shouldRedirect, router])
+
+  if (shouldRedirect) return null
+
+  return <>{children}</>
+}
+
+function SuperadminClinicaBanner() {
+  const { user } = useAuthStore()
+  const { clinicaActiva, _hydrated, salirClinica } = useSuperadminClinicaStore()
+  const router = useRouter()
+
+  if (!isSuperAdmin(user) || !_hydrated || !clinicaActiva) return null
+
+  function handleSalir() {
+    salirClinica()
+    router.replace('/admin')
+  }
+
+  return (
+    <div className="bg-violet-600 text-white px-4 py-2 flex items-center justify-between gap-4 text-sm shrink-0">
+      <div className="flex items-center gap-2">
+        <Building2 className="h-4 w-4 opacity-70" />
+        <span className="opacity-80">Operando como:</span>
+        <span className="font-semibold">{clinicaActiva.nombre}</span>
+      </div>
+      <button
+        onClick={handleSalir}
+        className="text-white/70 hover:text-white underline text-xs transition-colors"
+      >
+        Salir
+      </button>
+    </div>
+  )
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  useEffect(() => {
+    useSuperadminClinicaStore.persist.rehydrate()
+  }, [])
 
   return (
     <div className="flex min-h-screen bg-gray-50 overflow-x-hidden">
@@ -233,14 +292,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button onClick={() => setMobileOpen(true)} className="text-muted-foreground hover:text-foreground">
             <Menu className="h-5 w-5" />
           </button>
-          <Image src="/logo cliniq.png" alt="CliniQ" width={90} height={32} className="object-contain" />
+          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={100} height={45} className="object-contain" />
         </header>
 
         <NavigationProgress />
         <ImpersonationBanner />
-        <main className="min-w-0 flex-1 flex flex-col overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
-          {children}
-        </main>
+        <SuperadminClinicaBanner />
+        <TrialBanner />
+        <SuperadminClinicaGuard>
+          <main className="min-w-0 flex-1 flex flex-col overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
+            {children}
+          </main>
+        </SuperadminClinicaGuard>
       </div>
     </div>
   )

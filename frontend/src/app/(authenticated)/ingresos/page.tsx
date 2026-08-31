@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search, Receipt, CreditCard, ChevronLeft, ChevronRight,
   CheckCircle2, Clock, AlertCircle, XCircle, Banknote,
-  CalendarDays, ClipboardList, PlusCircle, TrendingUp, CalendarRange, X,
+  CalendarDays, ClipboardList, PlusCircle, CalendarRange, X,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -277,37 +277,37 @@ function IngresoRow({ cobro, onClick }: { cobro: Cobro; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
-      className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
+      className="flex items-center gap-3 px-4 py-2 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
     >
       <div className={cn(
-        'flex items-center justify-center h-9 w-9 rounded-lg shrink-0',
+        'flex items-center justify-center h-7 w-7 rounded-md shrink-0',
         origenCfg ? origenCfg.className.replace('ring-', 'ring-1 ring-').split(' ')[0] + ' bg-opacity-20' : 'bg-indigo-50'
       )}>
         {origenCfg
-          ? <origenCfg.icon className={cn('h-4 w-4', origenCfg.className.split(' ')[1])} />
-          : <Receipt className="h-4 w-4 text-indigo-600" />
+          ? <origenCfg.icon className={cn('h-3.5 w-3.5', origenCfg.className.split(' ')[1])} />
+          : <Receipt className="h-3.5 w-3.5 text-indigo-600" />
         }
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-semibold text-foreground truncate">{cobro.paciente_nombre ?? '—'}</p>
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-semibold text-foreground truncate">{cobro.paciente_nombre ?? '—'}</p>
           {cobro.cotizacion_numero && (
-            <span className="text-xs text-muted-foreground shrink-0">#{cobro.cotizacion_numero}</span>
+            <span className="text-[11px] text-muted-foreground shrink-0">#{cobro.cotizacion_numero}</span>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">{fmtDateTime(cobro.fecha)}</p>
+        <p className="text-[11px] text-muted-foreground">{fmtDateTime(cobro.fecha)}</p>
       </div>
 
-      <div className="hidden sm:block w-32 shrink-0 text-right">
-        <p className="text-sm font-bold text-foreground">{COP.format(Number(cobro.total))}</p>
+      <div className="hidden sm:block w-28 shrink-0 text-right">
+        <p className="text-xs font-bold text-foreground">{COP.format(Number(cobro.total))}</p>
         {cobro.estado !== 'pagado' && cobro.estado !== 'anulado' && (
-          <p className="text-xs text-primary">Saldo: {COP.format(Number(cobro.saldo_pendiente))}</p>
+          <p className="text-[11px] text-primary">Saldo: {COP.format(Number(cobro.saldo_pendiente))}</p>
         )}
       </div>
 
-      <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1 shrink-0', cfg.className)}>
-        <Icon className="h-3 w-3" />
+      <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ring-1 shrink-0', cfg.className)}>
+        <Icon className="h-2.5 w-2.5" />
         {cfg.label}
       </span>
     </div>
@@ -316,14 +316,14 @@ function IngresoRow({ cobro, onClick }: { cobro: Cobro; onClick: () => void }) {
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 animate-pulse">
-      <div className="h-9 w-9 rounded-lg bg-gray-100 shrink-0" />
-      <div className="flex-1 space-y-1.5">
-        <div className="h-3.5 w-40 rounded bg-gray-100" />
-        <div className="h-3 w-28 rounded bg-gray-100" />
+    <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-100 animate-pulse">
+      <div className="h-7 w-7 rounded-md bg-gray-100 shrink-0" />
+      <div className="flex-1 space-y-1">
+        <div className="h-3 w-36 rounded bg-gray-100" />
+        <div className="h-2.5 w-24 rounded bg-gray-100" />
       </div>
-      <div className="hidden sm:block h-8 w-24 rounded bg-gray-100" />
-      <div className="h-6 w-24 rounded bg-gray-100" />
+      <div className="hidden sm:block h-6 w-20 rounded bg-gray-100" />
+      <div className="h-5 w-20 rounded bg-gray-100" />
     </div>
   )
 }
@@ -434,100 +434,49 @@ function IngresosContent() {
     queryFn: () => cobrosApi.list(params),
   })
 
+  const resumenParams = {
+    estado:      filtroEstado !== 'todos' ? filtroEstado : undefined,
+    origen:      filtroOrigen !== 'todos' ? filtroOrigen : undefined,
+    search:      debouncedSearch || undefined,
+    fecha_desde: fechaDesde || undefined,
+    fecha_hasta: fechaHasta || undefined,
+  }
   const { data: resumen } = useQuery({
-    queryKey: ['ingresos-resumen', {
-      origen:      filtroOrigen !== 'todos' ? filtroOrigen : undefined,
-      fecha_desde: fechaDesde || undefined,
-      fecha_hasta: fechaHasta || undefined,
-    }],
-    queryFn: () => cobrosApi.resumen({
-      origen:      filtroOrigen !== 'todos' ? filtroOrigen : undefined,
-      fecha_desde: fechaDesde || undefined,
-      fecha_hasta: fechaHasta || undefined,
-    }),
+    queryKey: ['ingresos-resumen', resumenParams],
+    queryFn: () => cobrosApi.resumen(resumenParams),
   })
 
   const total = data?.count ?? 0
 
-  const totalRecaudado = resumen ? Number(resumen.total_recaudado) : null
-  const totalPendiente = resumen ? Number(resumen.total_pendiente) : null
-
   return (
     <div className="space-y-5">
 
-      <div className="flex items-start justify-between gap-4 flex-wrap">
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="text-xl font-bold text-foreground">Ingresos</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isLoading ? 'Cargando…' : `${total} registro${total !== 1 ? 's' : ''}`}
           </p>
         </div>
-      </div>
-
-      {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl border border-gray-100 bg-gray-50 px-4 py-3 flex items-center gap-3">
-          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-            <Receipt className="h-4 w-4 text-foreground" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Registros</p>
-            <p className="text-base font-bold text-foreground">{total}</p>
-          </div>
-        </div>
-        <div className="rounded-xl border border-gray-100 bg-emerald-50 px-4 py-3 flex items-center gap-3">
-          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-            <TrendingUp className="h-4 w-4 text-emerald-600" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Recaudado</p>
-            <p className="text-sm font-bold text-emerald-700">
-              {totalRecaudado !== null ? COP.format(totalRecaudado) : '—'}
+        <div className="flex items-center gap-4">
+          {resumen?.total_pendiente !== undefined && Number(resumen.total_pendiente) > 0 && (
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">Por cobrar</p>
+              <p className="text-sm font-semibold text-amber-600">{COP.format(Number(resumen.total_pendiente))}</p>
+            </div>
+          )}
+          <div className="text-right">
+            <p className="text-[11px] text-muted-foreground">Total recaudado</p>
+            <p className="text-base font-bold text-emerald-700">
+              {resumen ? COP.format(Number(resumen.total_recaudado)) : '—'}
             </p>
           </div>
         </div>
-        <div className="rounded-xl border border-gray-100 bg-amber-50 px-4 py-3 flex items-center gap-3">
-          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-            <CreditCard className="h-4 w-4 text-amber-600" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Por cobrar</p>
-            <p className="text-sm font-bold text-amber-600">
-              {totalPendiente !== null ? COP.format(totalPendiente) : '—'}
-            </p>
-          </div>
-        </div>
-        <div className="rounded-xl border border-gray-100 bg-green-50 px-4 py-3 flex items-center gap-3">
-          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">Pagados</p>
-            <p className="text-base font-bold text-green-700">{resumen?.total_pagados ?? '—'}</p>
-          </div>
-        </div>
       </div>
 
-      {/* Origin tabs */}
-      <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
-        {ORIGEN_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => { setFiltroOrigen(tab.value); setPage(1) }}
-            className={cn(
-              'px-3 py-1.5 rounded-md text-sm font-medium transition-all',
-              filtroOrigen === tab.value
-                ? 'bg-white text-foreground shadow-sm'
-                : 'text-muted-foreground hover:text-foreground'
-            )}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </div>
-
-      {/* Date filters */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Date filters + origin tabs */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
         <CalendarRange className="h-4 w-4 text-muted-foreground shrink-0" />
         {DATE_SHORTCUTS.map((s) => (
           <button
@@ -562,6 +511,23 @@ function IngresosContent() {
               <X className="h-3.5 w-3.5" />
             </button>
           )}
+        </div>
+        </div>
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 shrink-0">
+          {ORIGEN_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => { setFiltroOrigen(tab.value); setPage(1) }}
+              className={cn(
+                'px-3 py-1 rounded-md text-xs font-medium transition-all',
+                filtroOrigen === tab.value
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 

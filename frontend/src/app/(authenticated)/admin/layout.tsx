@@ -7,8 +7,10 @@ import { canAccess } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 
 const TABS = [
-  { href: '/admin/tenants', label: 'Clínicas' },
-  { href: '/admin/planes',  label: 'Planes'   },
+  { href: '/admin/tenants',      label: 'Clínicas'      },
+  { href: '/admin/planes',       label: 'Planes'        },
+  { href: '/admin/diagramas',    label: 'Diagramas'     },
+  { href: '/admin/grupos-zonas', label: 'Grupos Zonas'  },
 ]
 
 function AdminNav() {

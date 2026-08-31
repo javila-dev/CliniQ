@@ -1,8 +1,8 @@
 import { apiClient } from './client'
-import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
+import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
 import type { Paginated } from '@/types/common'
 
-type SlotsBase = { profesional_id: string; sede_id: string; fecha: string }
+type SlotsBase = { profesional_id: string; sede_id: string; fecha: string; cita_id?: string }
 export type SlotsParams =
   | (SlotsBase & { servicio_id: string })
   | (SlotsBase & { item_cotizacion_id: string })
@@ -10,6 +10,7 @@ export type SlotsParams =
 
 export interface CitasFilter {
   estado?: string
+  estado__in?: string
   estado_confirmacion?: string
   profesional?: string
   sede?: string
@@ -17,8 +18,11 @@ export interface CitasFilter {
   fecha_inicio__date?: string
   fecha_inicio__date__gte?: string
   fecha_inicio__date__lte?: string
+  fecha_inicio__date__lt?: string
   canal_origen?: string
+  firma_asistencia_estado?: string
   search?: string
+  ordering?: string
   page?: number
   page_size?: number
 }
@@ -80,6 +84,30 @@ export const agendaApi = {
       const res = await apiClient.post<Cita>(`/agenda/citas/${id}/marcar_recordatorio_enviado/`)
       return res.data
     },
+    enviarFirmaAsistencia: async (id: string, data: { template_id: string }): Promise<{ documento_id: string; documento_url: string }> => {
+      const res = await apiClient.post<{ documento_id: string; documento_url: string }>(`/agenda/citas/${id}/enviar_firma_asistencia/`, data)
+      return res.data
+    },
+    iniciarRegistroAsistencia: async (id: string): Promise<{ signing_token: string; document_id: string }> => {
+      const res = await apiClient.post<{ signing_token: string; document_id: string }>(`/agenda/citas/${id}/iniciar_registro_asistencia/`)
+      return res.data
+    },
+    enviarLinkFirmaAsistencia: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
+      const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(`/agenda/citas/${id}/enviar_link_firma_asistencia/`)
+      return res.data
+    },
+    confirmarFirmaAsistencia: async (id: string): Promise<Cita> => {
+      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/confirmar_firma_asistencia/`)
+      return res.data
+    },
+    verificarFirmaAsistencia: async (id: string): Promise<Cita> => {
+      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/verificar_firma_asistencia/`)
+      return res.data
+    },
+    recuperarPdfAsistencia: async (id: string): Promise<Cita> => {
+      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/recuperar_pdf_asistencia/`)
+      return res.data
+    },
     iniciarCheckin: async (id: string): Promise<{ otp_enviado: boolean; otp_activo?: boolean; expira_en?: string; telefono_enmascarado?: string }> => {
       const res = await apiClient.post<{ otp_enviado: boolean; otp_activo?: boolean; expira_en?: string; telefono_enmascarado?: string }>(`/agenda/citas/${id}/iniciar_checkin/`)
       return res.data
@@ -99,16 +127,34 @@ export const agendaApi = {
   },
 
   bloqueos: {
-    list: async (): Promise<Paginated<Bloqueo>> => {
-      const res = await apiClient.get<Paginated<Bloqueo>>('/agenda/bloqueos/')
+    list: async (params?: {
+      sede?: string
+      profesional?: string
+      estado?: string
+      fecha_inicio__gte?: string
+      fecha_fin__lte?: string
+    }): Promise<BloqueoAgenda[]> => {
+      const res = await apiClient.get<Paginated<BloqueoAgenda>>('/agenda/bloqueos/', { params })
+      return res.data.results
+    },
+    create: async (data: CreateBloqueoRequest): Promise<BloqueoAgenda> => {
+      const res = await apiClient.post<BloqueoAgenda>('/agenda/bloqueos/', data)
       return res.data
     },
-    create: async (data: Omit<Bloqueo, 'id'>): Promise<Bloqueo> => {
-      const res = await apiClient.post<Bloqueo>('/agenda/bloqueos/', data)
+    update: async (id: string, data: Partial<CreateBloqueoRequest>): Promise<BloqueoAgenda> => {
+      const res = await apiClient.patch<BloqueoAgenda>(`/agenda/bloqueos/${id}/`, data)
       return res.data
     },
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/agenda/bloqueos/${id}/`)
+    },
+    aprobar: async (id: string): Promise<BloqueoAgenda> => {
+      const res = await apiClient.post<BloqueoAgenda>(`/agenda/bloqueos/${id}/aprobar/`)
+      return res.data
+    },
+    rechazar: async (id: string, motivo?: string): Promise<BloqueoAgenda> => {
+      const res = await apiClient.post<BloqueoAgenda>(`/agenda/bloqueos/${id}/rechazar/`, { motivo })
+      return res.data
     },
   },
 }

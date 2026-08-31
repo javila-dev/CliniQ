@@ -16,7 +16,7 @@ const TABS_CONFIG: TabConfig[] = [
   {
     value: 'datos-generales',
     label: 'Datos Generales',
-    description: 'Identificación del paciente, datos complementarios y signos vitales.',
+    description: 'Identificación del paciente y datos complementarios.',
     obligatorio: true,
   },
   {
@@ -48,6 +48,11 @@ const TABS_CONFIG: TabConfig[] = [
     value: 'fotos',
     label: 'Fotos',
     description: 'Galería fotográfica antes, durante y después de los procedimientos.',
+  },
+  {
+    value: 'mediciones',
+    label: 'Seguimiento',
+    description: 'Signos vitales y medidas corporales registradas en cada control.',
   },
 ]
 

@@ -84,7 +84,7 @@ export default function LoginPage() {
   const onSubmit = async ({ email, password }: LoginForm) => {
     setServerError(null)
     try {
-      await login(email, password)
+      await login(email.trim(), password)
       const freshUser = useAuthStore.getState().user
       setIsNavigating(true)
       router.replace(freshUser ? getPostLoginRoute(freshUser) : getSafeNextPath() ?? '/agenda')
@@ -100,7 +100,7 @@ export default function LoginPage() {
   const onRecoverySubmit = async ({ email }: RecoveryForm) => {
     setRecoveryError(null)
     try {
-      await authApi.recuperarPassword(email)
+      await authApi.recuperarPassword(email.trim())
       setRecoverySent(true)
     } catch {
       setRecoveryError('No pudimos procesar la solicitud. Verifica el correo e intenta de nuevo.')

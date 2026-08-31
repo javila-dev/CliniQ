@@ -1,4 +1,6 @@
-export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida'
+import type { Consentimiento } from './consentimientos'
+
+export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida' | 'descartada'
 export type TipoFormaPago = 'efectivo' | 'transferencia' | 'tarjeta_credito'
 export type CanalEnvio = 'whatsapp' | 'email' | 'pdf'
 export type TipoItemCotizacion = 'tratamiento' | 'procedimiento' | 'libre'
@@ -26,6 +28,10 @@ export interface ItemCotizacion {
   valor_unitario: string        // Decimal como string (DRF)
   descuento_porcentaje: string  // Decimal como string (DRF)
   subtotal: string              // Calculado por el backend
+  precio_bloqueado?: boolean            // H31: precio fijo del catálogo
+  precio_campana_disponible?: string | null  // H32: precio de campaña activa
+  campana_id?: string | null            // H32: UUID de la campaña activa
+  campana_nombre?: string | null        // H32: nombre de la campaña activa
   // Contadores de sesiones (H20)
   citas_agendadas?: number
   citas_completadas?: number
@@ -58,6 +64,30 @@ export interface SesionesCotizacion {
   items: ItemSesiones[]
 }
 
+export interface HistorialSesionEvento {
+  tipo: string          // agendada | reagendada | confirmada | en_espera | en_curso | checkin | atendida | cancelada | no_asistio
+  fecha: string
+  usuario: string
+  detalle: string
+}
+
+export interface HistorialSesion {
+  item_id: string
+  item_descripcion: string
+  cita_id: string
+  sesion_numero: number
+  fecha_inicio: string
+  estado_actual: string
+  profesional_nombre: string
+  sede_nombre: string
+  eventos: HistorialSesionEvento[]
+}
+
+export interface HistorialSesionesCotizacion {
+  cotizacion_id: string
+  sesiones: HistorialSesion[]
+}
+
 export interface FormaPagoCotizacion {
   id: string
   tipo: TipoFormaPago
@@ -83,6 +113,7 @@ export interface Cotizacion {
   formas_pago: FormaPagoCotizacion[]
   total: string                 // Calculado por el backend
   envios?: CotizacionEnvio[]
+  compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
   created_at: string
   updated_at: string
 }

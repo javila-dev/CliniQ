@@ -2,7 +2,8 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { FileText, Plus, ExternalLink, XCircle, Clock } from 'lucide-react'
+import { FileText, Plus, ExternalLink, XCircle, Clock, MessageCircle, Copy, Check, Loader2 } from 'lucide-react'
+import { toast } from '@/hooks/use-toast'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
@@ -15,7 +16,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { GenerarConsentimientoModal } from '@/components/consentimientos/GenerarConsentimientoModal'
 import { formatDateTime, formatDate } from '@/lib/utils'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess } from '@/lib/permissions'
+import { canAccess, hasPermission, PERM } from '@/lib/permissions'
+import { useAuthStore } from '@/store/authStore'
 
 export default function ConsentimientosPage() {
   return <RoleGuard check={canAccess.consentimientos}><ConsentimientosContent /></RoleGuard>
@@ -23,6 +25,9 @@ export default function ConsentimientosPage() {
 
 function ConsentimientosContent() {
   const queryClient = useQueryClient()
+  const { user } = useAuthStore()
+  const puedeGenerar = hasPermission(user, PERM.CONSENTIMIENTOS_GENERAR)
+  const puedeRevocar = hasPermission(user, PERM.CONSENTIMIENTOS_REVOCAR)
   const [showGenerar, setShowGenerar] = useState(false)
 
   const { data, isLoading, isError, refetch } = useQuery({
@@ -32,7 +37,7 @@ function ConsentimientosContent() {
 
   const { data: plantillasData } = useQuery({
     queryKey: ['plantillas-consentimiento'],
-    queryFn: consentimientosApi.plantillas.list,
+    queryFn: () => consentimientosApi.plantillas.list(),
   })
 
   const { mutate: revocar } = useMutation({
@@ -51,10 +56,12 @@ function ConsentimientosContent() {
         title="Consentimientos"
         description={`${consentimientos.length} consentimiento${consentimientos.length !== 1 ? 's' : ''} en total`}
         action={
-          <Button onClick={() => setShowGenerar(true)}>
-            <Plus className="h-4 w-4 mr-2" />
-            Generar consentimiento
-          </Button>
+          puedeGenerar ? (
+            <Button onClick={() => setShowGenerar(true)}>
+              <Plus className="h-4 w-4 mr-2" />
+              Generar consentimiento
+            </Button>
+          ) : undefined
         }
       />
 
@@ -84,9 +91,9 @@ function ConsentimientosContent() {
             <ConsentimientoList
               items={pendientes}
               emptyText="Sin consentimientos pendientes de firma"
-              onRevocar={(id) => {
+              onRevocar={puedeRevocar ? (id) => {
                 if (confirm('¿Revocar este consentimiento?')) revocar(id)
-              }}
+              } : undefined}
             />
           </TabsContent>
 
@@ -94,9 +101,9 @@ function ConsentimientosContent() {
             <ConsentimientoList
               items={firmados}
               emptyText="Sin consentimientos firmados"
-              onRevocar={(id) => {
+              onRevocar={puedeRevocar ? (id) => {
                 if (confirm('¿Revocar este consentimiento firmado?')) revocar(id)
-              }}
+              } : undefined}
             />
           </TabsContent>
 
@@ -168,6 +175,7 @@ function ConsentimientoList({
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
+                {c.estado === 'pendiente' && <EnviarLinkFirma consentimientoId={c.id} />}
                 {c.pdf_url && (
                   <Button variant="outline" size="sm" asChild>
                     <a href={c.pdf_url} target="_blank" rel="noopener noreferrer">
@@ -193,5 +201,45 @@ function ConsentimientoList({
         </Card>
       ))}
     </div>
+  )
+}
+
+function EnviarLinkFirma({ consentimientoId }: { consentimientoId: string }) {
+  const [copiado, setCopiado] = useState(false)
+
+  const { mutate, isPending, data } = useMutation({
+    mutationFn: () => consentimientosApi.enviarLinkDocumenso(consentimientoId),
+    onSuccess: (info) => {
+      if (info.enviado) toast.success('Link enviado', `Se envió por WhatsApp a ${info.telefono}.`)
+      else toast.success('Enlace generado', 'El paciente no tiene teléfono. Copia el link.')
+    },
+    onError: (err: any) => {
+      toast.error('No se pudo enviar', err?.response?.data?.error ?? 'Intenta de nuevo.')
+    },
+  })
+
+  async function copiar() {
+    if (!data?.signing_url) return
+    await navigator.clipboard.writeText(data.signing_url)
+    setCopiado(true)
+    setTimeout(() => setCopiado(false), 2000)
+  }
+
+  if (data?.signing_url) {
+    return (
+      <Button variant="outline" size="sm" onClick={copiar} title={data.enviado ? 'Link enviado por WhatsApp' : undefined}>
+        {copiado ? <Check className="h-3.5 w-3.5 mr-1.5 text-green-600" /> : <Copy className="h-3.5 w-3.5 mr-1.5" />}
+        {copiado ? 'Copiado' : 'Copiar link'}
+      </Button>
+    )
+  }
+
+  return (
+    <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isPending}>
+      {isPending
+        ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+        : <MessageCircle className="h-3.5 w-3.5 mr-1.5" />}
+      Enviar link
+    </Button>
   )
 }

@@ -1,0 +1,184 @@
+<svg viewBox="0 0 280 680" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .zona { cursor: pointer; fill: transparent; transition: fill 0.18s; }
+      .zona:hover { fill: rgba(109,99,240,0.22); }
+    </style>
+  </defs>
+
+  <!-- ═══════════════════════════════════════════════
+       SILUETA BASE — figura femenina con tono de piel
+       ═══════════════════════════════════════════════ -->
+
+  <!-- Cabello moño (detrás de la cabeza) -->
+  <ellipse cx="140" cy="14" rx="20" ry="18" fill="#7A4E2D"/>
+  <path d="M 120 14 Q 108 20 105 32 Q 120 36 140 32 Q 160 36 175 32 Q 172 20 160 14" fill="#8B5E3C"/>
+
+  <!-- Orejas -->
+  <ellipse cx="99"  cy="66" rx="7" ry="10" fill="#F5C5A3" stroke="#D4957A" stroke-width="0.8"/>
+  <ellipse cx="181" cy="66" rx="7" ry="10" fill="#F5C5A3" stroke="#D4957A" stroke-width="0.8"/>
+
+  <!-- Cabeza -->
+  <ellipse cx="140" cy="60" rx="40" ry="48" fill="#FDDBB4"/>
+
+  <!-- Cuello -->
+  <path d="M 120 102 Q 120 112 118 132 Q 140 140 162 132 Q 160 112 160 102 Z" fill="#FDDBB4"/>
+
+  <!-- TORSO / TRONCO -->
+  <path fill="#FDDBB4"
+    d="M 58 142
+       Q 78 150 78 165
+       C 74 183 68 202 66 216
+       C 74 244 90 260 96 270
+       C 80 288 64 312 62 328
+       L 120 342 Q 140 348 160 342
+       L 218 328 C 216 312 200 288 184 270
+       C 190 260 206 244 214 216
+       C 212 202 206 183 202 165
+       Q 202 150 222 142
+       Q 204 132 184 126 Q 165 120 140 120
+       Q 115 120 96 126 Q 76 132 58 142 Z"/>
+
+  <!-- BRAZO SUPERIOR IZQUIERDO -->
+  <path fill="#FDDBB4"
+    d="M 58 142 C 44 155 32 175 26 200 C 20 224 18 250 20 275
+       L 26 310 L 58 315 C 58 288 60 262 62 236
+       C 64 210 66 182 68 155 Z"/>
+
+  <!-- ANTEBRAZO + MANO IZQUIERDA -->
+  <path fill="#FDDBB4"
+    d="M 26 310 C 22 335 16 360 12 386 C 8 410 6 434 8 455
+       Q 10 472 18 482 Q 26 492 38 490 Q 50 488 52 478
+       L 52 455 C 54 432 56 408 56 384
+       C 56 360 56 334 58 315 Z"/>
+
+  <!-- BRAZO SUPERIOR DERECHO -->
+  <path fill="#FDDBB4"
+    d="M 222 142 C 236 155 248 175 254 200 C 260 224 262 250 260 275
+       L 254 310 L 222 315 C 222 288 220 262 218 236
+       C 216 210 214 182 212 155 Z"/>
+
+  <!-- ANTEBRAZO + MANO DERECHA -->
+  <path fill="#FDDBB4"
+    d="M 254 310 C 258 335 264 360 268 386 C 272 410 274 434 272 455
+       Q 270 472 262 482 Q 254 492 242 490 Q 230 488 228 478
+       L 228 455 C 226 432 224 408 224 384
+       C 224 360 224 334 222 315 Z"/>
+
+  <!-- PIERNA IZQUIERDA -->
+  <path fill="#FDDBB4"
+    d="M 62 328 L 118 342 C 118 360 120 382 120 402
+       C 118 428 116 452 114 470 L 114 590
+       L 78 590 C 76 572 74 552 72 530
+       C 70 508 68 486 68 464 C 66 444 62 422 60 402
+       C 58 382 58 360 62 328 Z"/>
+
+  <!-- PIERNA DERECHA -->
+  <path fill="#FDDBB4"
+    d="M 218 328 L 162 342 C 162 360 160 382 160 402
+       C 162 428 164 452 166 470 L 166 590
+       L 202 590 C 204 572 206 552 208 530
+       C 210 508 212 486 212 464 C 214 444 218 422 220 402
+       C 222 382 222 360 218 328 Z"/>
+
+  <!-- PIE IZQUIERDO -->
+  <path fill="#FDDBB4"
+    d="M 78 590 Q 76 608 74 622 Q 72 638 74 652
+       Q 76 662 88 665 Q 100 667 108 660
+       Q 118 662 126 656 Q 129 648 126 638 Q 116 634 110 630
+       L 114 590 Z"/>
+
+  <!-- PIE DERECHO -->
+  <path fill="#FDDBB4"
+    d="M 202 590 Q 204 608 206 622 Q 208 638 206 652
+       Q 204 662 192 665 Q 180 667 172 660
+       Q 162 662 154 656 Q 151 648 154 638 Q 164 634 170 630
+       L 166 590 Z"/>
+
+  <!-- Líneas anatómicas decorativas -->
+  <path fill="none" stroke="#D4957A" stroke-width="0.7" opacity="0.4"
+    d="M 66 216 C 80 248 90 262 96 270 C 82 290 64 315 62 328"/>
+  <path fill="none" stroke="#D4957A" stroke-width="0.7" opacity="0.4"
+    d="M 214 216 C 200 248 190 262 184 270 C 198 290 216 315 218 328"/>
+  <path fill="none" stroke="#D4957A" stroke-width="0.8" opacity="0.35"
+    d="M 96 126 Q 108 138 118 148 M 184 126 Q 172 138 162 148"/>
+  <path fill="none" stroke="#D4957A" stroke-width="0.6" opacity="0.3"
+    d="M 140 148 L 140 330"/>
+  <ellipse cx="140" cy="265" rx="4" ry="3" fill="none" stroke="#D4957A" stroke-width="0.8" opacity="0.4"/>
+
+  <!-- CARA -->
+  <path fill="#8B5E3C"
+    d="M 100 32 C 96 42 95 55 98 70 Q 100 80 100 90
+       L 106 88 C 105 74 104 60 105 45 Q 104 36 100 32 Z"/>
+  <path fill="#8B5E3C"
+    d="M 180 32 C 184 42 185 55 182 70 Q 180 80 180 90
+       L 174 88 C 175 74 176 60 175 45 Q 176 36 180 32 Z"/>
+  <path fill="none" stroke="#5C3D1E" stroke-width="1.5" stroke-linecap="round"
+    d="M 120 68 Q 128 63 136 68 M 144 68 Q 152 63 160 68"/>
+  <path fill="none" stroke="#D4957A" stroke-width="1" stroke-linecap="round"
+    d="M 134 80 Q 136 90 134 94 Q 140 97 146 94 Q 144 90 146 80"/>
+  <path fill="none" stroke="#D4857A" stroke-width="1.3" stroke-linecap="round"
+    d="M 128 104 Q 140 112 152 104"/>
+  <path fill="#F0A090" opacity="0.35"
+    d="M 128 104 Q 134 110 140 111 Q 146 110 152 104 Q 148 108 140 109 Q 132 108 128 104 Z"/>
+  <ellipse cx="117" cy="82" rx="8" ry="5" fill="#F0A090" opacity="0.22"/>
+  <ellipse cx="163" cy="82" rx="8" ry="5" fill="#F0A090" opacity="0.22"/>
+
+  <!-- ═══════════════════════════════════
+       ZONAS CLICKEABLES
+       ═══════════════════════════════════ -->
+
+  <path id="hombro_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 58 142 C 44 150 34 162 28 178 C 42 178 58 172 70 164 Q 78 155 78 148 Z"/>
+  <path id="hombro_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 222 142 C 236 150 246 162 252 178 C 238 178 222 172 210 164 Q 202 155 202 148 Z"/>
+
+  <path id="pecho_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 78 165 C 72 182 66 200 66 216 C 80 220 100 218 116 210
+       C 118 196 116 180 112 168 Q 96 158 78 165 Z"/>
+  <path id="pecho_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 202 165 C 208 182 214 200 214 216 C 200 220 180 218 164 210
+       C 162 196 164 180 168 168 Q 184 158 202 165 Z"/>
+
+  <path id="abdomen_sup" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 100 218 C 90 234 90 252 96 270 L 140 272 L 184 270
+       C 190 252 190 234 180 218
+       C 165 222 155 228 140 228 C 125 228 115 222 100 218 Z"/>
+
+  <path id="abdomen_inf" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 96 270 C 82 285 68 305 64 322
+       L 120 338 Q 140 344 160 338 L 216 322
+       C 212 305 198 285 184 270 L 140 272 Z"/>
+
+  <path id="brazo_sup_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 58 142 C 44 155 32 175 26 200 L 26 270 L 58 278 L 68 155 Z"/>
+  <path id="brazo_sup_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 222 142 C 236 155 248 175 254 200 L 254 270 L 222 278 L 212 155 Z"/>
+
+  <path id="brazo_inf_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 26 310 C 20 336 12 362 10 390 L 12 455 L 52 455 L 56 390 L 58 315 Z"/>
+  <path id="brazo_inf_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 254 310 C 260 336 268 362 270 390 L 268 455 L 228 455 L 224 390 L 222 315 Z"/>
+
+  <path id="axila_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 68 155 C 66 162 66 170 68 178 C 80 170 90 160 96 148 Q 82 144 68 155 Z"/>
+  <path id="axila_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 212 155 C 214 162 214 170 212 178 C 200 170 190 160 184 148 Q 198 144 212 155 Z"/>
+
+  <path id="muslo_ant_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 62 328 L 118 342 C 118 365 118 392 116 420
+       C 100 424 82 418 68 406 C 60 388 58 365 62 328 Z"/>
+  <path id="muslo_ant_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 218 328 L 162 342 C 162 365 162 392 164 420
+       C 180 424 198 418 212 406 C 220 388 222 365 218 328 Z"/>
+
+  <path id="rodilla_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 68 420 C 80 430 96 436 114 433 L 114 470 C 96 474 78 470 68 458 Z"/>
+  <path id="rodilla_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 212 420 C 200 430 184 436 166 433 L 166 470 C 184 474 202 470 212 458 Z"/>
+
+  <path id="pierna_ant_izq" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 68 458 C 72 480 74 505 76 528 L 78 565 L 114 565 L 114 458 Z"/>
+  <path id="pierna_ant_der" class="zona" stroke="#8B87E0" stroke-width="1"
+    d="M 212 458 C 208 480 206 505 204 528 L 202 565 L 166 565 L 166 458 Z"/>
+</svg>

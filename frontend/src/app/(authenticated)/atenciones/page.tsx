@@ -6,15 +6,16 @@ import { agendaApi } from '@/lib/api/agenda'
 import { PacienteActivo } from '@/components/atenciones/PacienteActivo'
 import { ColaEspera } from '@/components/atenciones/ColaEspera'
 import { ResumenDia } from '@/components/atenciones/ResumenDia'
+import { HistorialCitas } from '@/components/atenciones/HistorialCitas'
+import { TodasLasAtenciones } from '@/components/atenciones/TodasLasAtenciones'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess } from '@/lib/permissions'
+import { canAccess, isAdminOrSuperAdmin } from '@/lib/permissions'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Card, CardContent } from '@/components/ui/card'
 import { Stethoscope, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
-import { formatDate, formatTime } from '@/lib/utils'
-
-const hoy = new Date().toISOString().split('T')[0]
+import { formatDate, formatTime, todayISO } from '@/lib/utils'
 
 export default function AtencionesPage() {
   return <RoleGuard check={canAccess.atenciones}><AtencionesContent /></RoleGuard>
@@ -22,6 +23,8 @@ export default function AtencionesPage() {
 
 function AtencionesContent() {
   const { user } = useAuthStore()
+  const hoy = todayISO()
+  const esAdmin = isAdminOrSuperAdmin(user)
 
   // Citas de hoy — polling cada 30s
   const { data: citasData, isLoading: loadingCitas } = useQuery({
@@ -52,17 +55,13 @@ function AtencionesContent() {
   const citasEnCursoHoy = citas.filter(c => c.estado === 'en_curso')
   const citasAbiertasAnteriores = (enCursoData?.results ?? [])
     .filter(c => c.fecha_inicio.split('T')[0] < hoy)
-  const citasActivas = [
-    ...citasEnCursoHoy,
-    ...citasAbiertasAnteriores.filter(c => !citasEnCursoHoy.find(h => h.id === c.id)),
-  ]
   const cola = citas
     .filter(c => ['pendiente', 'confirmada', 'en_espera'].includes(c.estado))
     .sort((a, b) => a.fecha_inicio.localeCompare(b.fecha_inicio))
 
-  if (loadingCitas) return <LoadingState rows={4} />
+  if (loadingCitas && (user?.es_profesional || !esAdmin)) return <LoadingState rows={4} />
 
-  if (!user?.es_profesional) {
+  if (!user?.es_profesional && !esAdmin) {
     return (
       <Card>
         <CardContent className="py-16 text-center">
@@ -76,11 +75,26 @@ function AtencionesContent() {
     )
   }
 
+  // Admin sin perfil profesional: solo tiene sentido la vista de toda la clínica.
+  if (!user?.es_profesional && esAdmin) {
+    return (
+      <div className="space-y-6">
+        <div>
+          <h1 className="text-2xl font-semibold">Atenciones</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Todas las atenciones en curso o sin cerrar de la clínica.
+          </p>
+        </div>
+        <TodasLasAtenciones />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Mis atenciones</h1>
+          <h1 className="text-2xl font-semibold">Atenciones</h1>
           <p className="text-sm text-muted-foreground mt-0.5 capitalize">
             {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
@@ -91,68 +105,88 @@ function AtencionesContent() {
         </div>
       </div>
 
-      <ResumenDia citas={citas} enCursoAnteriores={citasAbiertasAnteriores.length} />
+      <Tabs defaultValue="hoy">
+        <TabsList>
+          <TabsTrigger value="hoy">Hoy</TabsTrigger>
+          {esAdmin && <TabsTrigger value="clinica">Toda la clínica</TabsTrigger>}
+          <TabsTrigger value="historial">Historial</TabsTrigger>
+        </TabsList>
 
-      {/* Atenciones sin cerrar de días anteriores */}
-      {citasAbiertasAnteriores.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex items-center gap-2">
-            <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
-            <p className="text-sm font-medium text-foreground">
-              {citasAbiertasAnteriores.length} atención{citasAbiertasAnteriores.length !== 1 ? 'es' : ''} pendiente{citasAbiertasAnteriores.length !== 1 ? 's' : ''} de cerrar
-            </p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {citasAbiertasAnteriores.map(cita => {
-              const initials = cita.paciente_nombre.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
-              return (
-                <Link
-                  key={cita.id}
-                  href={`/atenciones/${cita.id}`}
-                  className="group relative rounded-xl border border-amber-200 bg-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 overflow-hidden"
-                >
-                  <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-400 to-orange-400" />
-                  <div className="flex items-center gap-3 p-4">
-                    <div className="flex items-center justify-center h-10 w-10 rounded-full bg-amber-100 text-amber-700 font-semibold text-sm shrink-0">
-                      {initials}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-foreground truncate">{cita.paciente_nombre}</p>
-                      <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
-                      <p className="text-xs text-amber-600 font-medium mt-0.5">{formatDate(cita.fecha_inicio)} · {formatTime(cita.fecha_inicio)}</p>
-                    </div>
-                    <span className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 shrink-0 group-hover:bg-amber-100 transition-colors">
-                      Completar
-                    </span>
-                  </div>
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-      )}
+        <TabsContent value="hoy" className="mt-4 space-y-6">
+          <ResumenDia citas={citas} enCursoAnteriores={citasAbiertasAnteriores.length} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
-        {/* Paciente activo hoy */}
-        <div>
-          {citasEnCursoHoy.length > 0 ? (
+          {/* Atenciones sin cerrar de días anteriores */}
+          {citasAbiertasAnteriores.length > 0 && (
             <div className="space-y-3">
-              {citasEnCursoHoy.map(cita => <PacienteActivo key={cita.id} cita={cita} />)}
-            </div>
-          ) : (
-            <Card className="border-dashed">
-              <CardContent className="py-10 text-center">
-                <Stethoscope className="h-8 w-8 text-muted-foreground/25 mx-auto mb-3" />
-                <p className="text-sm text-muted-foreground">
-                  Sin paciente activo — recepción activará al siguiente cuando llegue
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
+                <p className="text-sm font-medium text-foreground">
+                  {citasAbiertasAnteriores.length} atención{citasAbiertasAnteriores.length !== 1 ? 'es' : ''} pendiente{citasAbiertasAnteriores.length !== 1 ? 's' : ''} de cerrar
                 </p>
-              </CardContent>
-            </Card>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {citasAbiertasAnteriores.map(cita => {
+                  const initials = cita.paciente_nombre.split(' ').slice(0, 2).map((n: string) => n[0]).join('').toUpperCase()
+                  return (
+                    <Link
+                      key={cita.id}
+                      href={`/atenciones/${cita.id}`}
+                      className="group relative rounded-xl border border-amber-200 bg-white shadow-sm hover:shadow-md hover:-translate-y-0.5 transition-all duration-200 overflow-hidden"
+                    >
+                      <div className="absolute inset-x-0 top-0 h-0.5 bg-gradient-to-r from-amber-400 to-orange-400" />
+                      <div className="flex items-center gap-3 p-4">
+                        <div className="flex items-center justify-center h-10 w-10 rounded-full bg-amber-100 text-amber-700 font-semibold text-sm shrink-0">
+                          {initials}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-foreground truncate">{cita.paciente_nombre}</p>
+                          <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
+                          <p className="text-xs text-amber-600 font-medium mt-0.5">{formatDate(cita.fecha_inicio)} · {formatTime(cita.fecha_inicio)}</p>
+                        </div>
+                        <span className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 shrink-0 group-hover:bg-amber-100 transition-colors">
+                          Completar
+                        </span>
+                      </div>
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
           )}
-        </div>
 
-        <ColaEspera citas={cola} citaActiva={citasEnCursoHoy[0]} />
-      </div>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-start">
+            {/* Paciente activo hoy */}
+            <div>
+              {citasEnCursoHoy.length > 0 ? (
+                <div className="space-y-3">
+                  {citasEnCursoHoy.map(cita => <PacienteActivo key={cita.id} cita={cita} />)}
+                </div>
+              ) : (
+                <Card className="border-dashed">
+                  <CardContent className="py-10 text-center">
+                    <Stethoscope className="h-8 w-8 text-muted-foreground/25 mx-auto mb-3" />
+                    <p className="text-sm text-muted-foreground">
+                      Sin paciente activo — recepción activará al siguiente cuando llegue
+                    </p>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
+
+            <ColaEspera citas={cola} citaActiva={citasEnCursoHoy[0]} />
+          </div>
+        </TabsContent>
+
+        {esAdmin && (
+          <TabsContent value="clinica" className="mt-4">
+            <TodasLasAtenciones />
+          </TabsContent>
+        )}
+
+        <TabsContent value="historial" className="mt-4">
+          <HistorialCitas />
+        </TabsContent>
+      </Tabs>
     </div>
   )
 }

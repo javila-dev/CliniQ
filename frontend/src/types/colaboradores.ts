@@ -56,6 +56,7 @@ export interface Colaborador {
   sedes_detalle?: ColaboradorSede[]      // nested sede objects
   fecha_ingreso: string | null
   activo: boolean
+  invitacion_pendiente?: boolean          // colaborador activo cuyo usuario aún no acepta la invitación
   especialidades: string[]               // array of IDs
   especialidades_detalle: ColaboradorEspecialidad[]
   numero_documento?: string | null
@@ -93,8 +94,8 @@ export interface UpdateColaboradorRequest {
 }
 
 export interface ColaboradorProfesional {
-  id: string                       // user.id del profesional
-  colaborador_id: string           // UUID del perfil laboral (Colaborador), usado en citas
+  id: string                       // user.id del profesional — usado en citas (campo profesional) y slots
+  colaborador_id: string           // UUID del perfil laboral (Colaborador) — usado en horarios y bloqueos
   nombre_completo: string
   first_name?: string
   last_name?: string

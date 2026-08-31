@@ -12,6 +12,7 @@ export type TabAtencion =
   | 'plan-manejo'
   | 'ordenes'
   | 'fotos'
+  | 'mediciones'
 
 interface AtencionConfigState {
   tabsActivos: Record<TabAtencion, boolean>
@@ -27,6 +28,7 @@ const DEFAULT_TABS: Record<TabAtencion, boolean> = {
   'plan-manejo':     true,
   ordenes:           true,
   fotos:             true,
+  mediciones:        true,
 }
 
 export const useAtencionConfig = create<AtencionConfigState>()(

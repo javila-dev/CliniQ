@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, Loader2, Clock, DollarSign, ListOrdered, Settings2 } from 'lucide-react'
+import { ArrowLeft, Loader2, Clock, DollarSign, LayoutTemplate, Settings2 } from 'lucide-react'
 import Link from 'next/link'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
@@ -16,8 +16,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { LoadingState } from '@/components/shared/LoadingState'
-import { ProtocoloPasos } from '@/components/configuracion/ProtocoloPasos'
-import { ConsentimientosServicio } from '@/components/configuracion/ConsentimientosServicio'
+import { DiagramasProcedimiento } from '@/components/configuracion/DiagramasProcedimiento'
 
 const schema = z.object({
   nombre:         z.string().min(1, 'Requerido'),
@@ -178,21 +177,20 @@ export default function ProcedimientoDetailPage({ params }: { params: Promise<{ 
         }
       />
 
-      <Tabs defaultValue="protocolo">
+      <Tabs defaultValue="general">
         <TabsList>
           <TabsTrigger value="general" className="gap-1.5">
             <Settings2 className="h-3.5 w-3.5" />General
           </TabsTrigger>
-          <TabsTrigger value="protocolo" className="gap-1.5">
-            <ListOrdered className="h-3.5 w-3.5" />Protocolo
+          <TabsTrigger value="diagramas" className="gap-1.5">
+            <LayoutTemplate className="h-3.5 w-3.5" />Diagramas
           </TabsTrigger>
         </TabsList>
         <TabsContent value="general" className="mt-6">
           <TabGeneral servicioId={id} />
         </TabsContent>
-        <TabsContent value="protocolo" className="mt-6 space-y-4">
-          <ProtocoloPasos servicioId={id} />
-          <ConsentimientosServicio servicioId={id} />
+        <TabsContent value="diagramas" className="mt-6">
+          <DiagramasProcedimiento servicioId={id} />
         </TabsContent>
       </Tabs>
     </div>

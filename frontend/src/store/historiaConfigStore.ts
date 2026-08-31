@@ -7,10 +7,12 @@ export type TabHistoria =
   | 'datos-generales'
   | 'motivo-consulta'
   | 'antecedentes'
+  | 'mediciones'
   | 'examenes'
   | 'plan-manejo'
   | 'ordenes'
   | 'fotos'
+  | 'zonas'
 
 interface HistoriaConfigState {
   tabsActivos: Record<TabHistoria, boolean>
@@ -22,10 +24,12 @@ const DEFAULT_TABS: Record<TabHistoria, boolean> = {
   'datos-generales': true,
   'motivo-consulta': true,
   antecedentes: true,
+  mediciones: true,
   examenes: true,
   'plan-manejo': true,
   ordenes: true,
   fotos: true,
+  zonas: true,
 }
 
 export const useHistoriaConfig = create<HistoriaConfigState>()(

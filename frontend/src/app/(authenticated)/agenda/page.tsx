@@ -3,21 +3,25 @@
 import { useState, useEffect, useRef, Suspense } from 'react'
 import { useQuery, useQueries } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Plus, AlertTriangle, ChevronRight as ChevronRightIcon } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Plus, AlertTriangle, ChevronRight as ChevronRightIcon, CalendarOff, UserPlus, Copy, Check, QrCode, X } from 'lucide-react'
 import { agendaApi } from '@/lib/api/agenda'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
+import { useUserSedes } from '@/hooks/useUserSedes'
 import { Button } from '@/components/ui/button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { NuevaCitaModal } from '@/components/agenda/NuevaCitaModal'
 import { CitaDetailSheet } from '@/components/agenda/CitaDetailSheet'
+import { BloqueosPanel } from '@/components/agenda/BloqueosPanel'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
-import { cn, formatTime } from '@/lib/utils'
+import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG } from '@/lib/constants'
-import type { Cita, EstadoCita } from '@/types/agenda'
+import type { Cita, EstadoCita, BloqueoAgenda } from '@/types/agenda'
 import type { BusquedaPaciente } from '@/types/pacientes'
 
 // ─── constants ────────────────────────────────────────────────
@@ -103,27 +107,21 @@ function resolveOverlaps(citas: Cita[]): CitaWithLayout[] {
 }
 
 // ─── helpers ──────────────────────────────────────────────────
-function todayISO() { return new Date().toISOString().split('T')[0] }
-
 function addDays(d: string, n: number) {
-  const date = new Date(d + 'T12:00:00')
-  date.setDate(date.getDate() + n)
-  return date.toISOString().split('T')[0]
+  return addDaysISO(d, n)
 }
 
 function addMonths(d: string, n: number) {
-  const date = new Date(d + 'T12:00:00')
-  date.setMonth(date.getMonth() + n)
-  date.setDate(1)
-  return date.toISOString().split('T')[0]
+  const [year, month] = d.split("-").map(Number)
+  const date = new Date(Date.UTC(year, month - 1 + n, 1))
+  return date.toISOString().split("T")[0]
 }
 
 function startOfWeek(d: string) {
   const date = new Date(d + 'T12:00:00')
   const day = date.getDay()
   const diff = day === 0 ? -6 : 1 - day
-  date.setDate(date.getDate() + diff)
-  return date.toISOString().split('T')[0]
+  return addDaysISO(d, diff)
 }
 
 function weekDays(weekStart: string) {
@@ -242,6 +240,47 @@ function CitaBlock({ cita, onClick, selected }: { cita: CitaWithLayout; onClick:
   )
 }
 
+// ─── Bloqueo block (calendar overlay) ────────────────────────
+function BloqueoBlock({ bloqueo, fecha }: { bloqueo: BloqueoAgenda; fecha: string }) {
+  const dayStart = new Date(`${fecha}T${String(START_HOUR).padStart(2, '0')}:00:00`)
+  const dayEnd   = new Date(`${fecha}T${String(END_HOUR).padStart(2, '0')}:00:00`)
+  const bStart   = new Date(bloqueo.fecha_inicio)
+  const bEnd     = new Date(bloqueo.fecha_fin)
+  if (bEnd <= dayStart || bStart >= dayEnd) return null
+  const visStart = bStart < dayStart ? dayStart : bStart
+  const visEnd   = bEnd   > dayEnd   ? dayEnd   : bEnd
+  const top    = topPx(visStart.toISOString())
+  const height = Math.max(heightPx(visStart.toISOString(), visEnd.toISOString()), 8)
+
+  return (
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            style={{ top, height, left: 0, right: 0 }}
+            className="absolute z-5 bg-gray-200/70 border-l-[3px] border-l-gray-400 pointer-events-auto"
+          >
+            <p className="text-[10px] text-gray-500 font-medium px-1.5 pt-0.5 truncate">
+              {bloqueo.motivo || 'Bloqueado'}
+            </p>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" avoidCollisions collisionPadding={12} className="space-y-1 max-w-[200px]">
+          <p className="font-semibold text-sm">Bloqueado</p>
+          {bloqueo.motivo && <p className="text-muted-foreground text-xs">{bloqueo.motivo}</p>}
+          {bloqueo.profesional_nombre && (
+            <p className="text-xs"><span className="text-muted-foreground">Profesional:</span> {bloqueo.profesional_nombre}</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            {new Date(bloqueo.fecha_inicio).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })} –{' '}
+            {new Date(bloqueo.fecha_fin).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+          </p>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
 // ─── Time column (hours) ──────────────────────────────────────
 function HourLabels() {
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
@@ -260,13 +299,19 @@ function HourLabels() {
 
 // ─── Single day column ────────────────────────────────────────
 function DayColumn({
-  citas, fecha, selectedId, onSelectCita, onClickSlot, showNowLine,
+  citas, fecha, selectedId, onSelectCita, onClickSlot, showNowLine, bloqueos,
 }: {
   citas: Cita[]; fecha: string; selectedId: string | null
   onSelectCita: (id: string) => void; onClickSlot: (iso: string) => void; showNowLine: boolean
+  bloqueos?: BloqueoAgenda[]
 }) {
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const totalH = (END_HOUR - START_HOUR) * HOUR_PX
+
+  const hoy = todayISO()
+  const diaPasado = fecha < hoy
+  const horaActual = new Date().getHours()
+  const horaPasada = (h: number) => diaPasado || (fecha === hoy && h < horaActual)
 
   const nowTop = (() => {
     const now = new Date()
@@ -275,6 +320,9 @@ function DayColumn({
 
   return (
     <div className="flex-1 relative border-l border-gray-100" style={{ height: totalH, minWidth: 0 }}>
+      {/* Día pasado: sin afordancia de creación */}
+      {diaPasado && <div className="absolute inset-0 bg-gray-50/60 pointer-events-none" />}
+
       {/* Grid lines */}
       {hours.map((h) => (
         <div key={h} style={{ top: (h - START_HOUR) * HOUR_PX }}
@@ -294,20 +342,33 @@ function DayColumn({
       )}
 
       {/* Click zones */}
-      {hours.map((h) => (
-        <div key={h}
-          style={{ top: (h - START_HOUR) * HOUR_PX, height: HOUR_PX }}
-          className="absolute left-0 right-0 cursor-pointer hover:bg-primary/[0.03] transition-colors group"
-          onClick={() => {
-            const d = new Date(fecha + 'T12:00:00')
-            d.setHours(h, 0, 0, 0)
-            onClickSlot(d.toISOString())
-          }}
-        >
-          <span className="absolute left-2 top-1 text-[9px] text-primary/0 group-hover:text-primary/40 transition-colors select-none">
-            {h.toString().padStart(2, '0')}:00
-          </span>
-        </div>
+      {hours.map((h) => {
+        const pasada = horaPasada(h)
+        return (
+          <div key={h}
+            style={{ top: (h - START_HOUR) * HOUR_PX, height: HOUR_PX }}
+            className={cn(
+              'absolute left-0 right-0 transition-colors group',
+              pasada ? 'cursor-default' : 'cursor-pointer hover:bg-primary/[0.03]'
+            )}
+            onClick={pasada ? undefined : () => {
+              const d = new Date(fecha + 'T12:00:00')
+              d.setHours(h, 0, 0, 0)
+              onClickSlot(d.toISOString())
+            }}
+          >
+            {!pasada && (
+              <span className="absolute left-2 top-1 text-[9px] text-primary/0 group-hover:text-primary/40 transition-colors select-none">
+                {h.toString().padStart(2, '0')}:00
+              </span>
+            )}
+          </div>
+        )
+      })}
+
+      {/* Bloqueos aprobados */}
+      {bloqueos?.map((b) => (
+        <BloqueoBlock key={b.id} bloqueo={b} fecha={fecha} />
       ))}
 
       {/* Appointments */}
@@ -347,6 +408,19 @@ function DayView({ fecha, selectedId, onSelectCita, onClickSlot, filterSede, fil
   })
   const citas = data?.results ?? []
 
+  const { data: bloqueos } = useQuery({
+    queryKey: ['bloqueos', 'dia', fecha, filterSede],
+    queryFn: () => agendaApi.bloqueos.list({
+      estado: 'aprobado',
+      ...(filterSede && { sede: filterSede }),
+    }),
+    select: (list) => list.filter((b) => {
+      const dayEnd = new Date(`${fecha}T${String(END_HOUR).padStart(2, '0')}:00:00`)
+      const dayStart = new Date(`${fecha}T${String(START_HOUR).padStart(2, '0')}:00:00`)
+      return new Date(b.fecha_fin) > dayStart && new Date(b.fecha_inicio) < dayEnd
+    }),
+  })
+
   return (
     <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
       <div className="flex" style={{ minHeight: (END_HOUR - START_HOUR) * HOUR_PX }}>
@@ -359,7 +433,7 @@ function DayView({ fecha, selectedId, onSelectCita, onClickSlot, filterSede, fil
           <DayColumn
             citas={citas} fecha={fecha} selectedId={selectedId}
             onSelectCita={onSelectCita} onClickSlot={onClickSlot}
-            showNowLine={isToday}
+            showNowLine={isToday} bloqueos={bloqueos}
           />
         )}
       </div>
@@ -395,6 +469,20 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
         ...(filterPaciente && { paciente: filterPaciente }),
       }),
     })),
+  })
+
+  const weekEnd = addDays(weekStart, 6)
+  const { data: bloqueosWeek } = useQuery({
+    queryKey: ['bloqueos', 'semana', weekStart, filterSede],
+    queryFn: () => agendaApi.bloqueos.list({
+      estado: 'aprobado',
+      ...(filterSede && { sede: filterSede }),
+    }),
+    select: (list) => list.filter((b) => {
+      const wStart = new Date(`${weekStart}T${String(START_HOUR).padStart(2, '0')}:00:00`)
+      const wEnd   = new Date(`${weekEnd}T${String(END_HOUR).padStart(2, '0')}:00:00`)
+      return new Date(b.fecha_fin) > wStart && new Date(b.fecha_inicio) < wEnd
+    }),
   })
 
   const isLoading = queries.some((q) => q.isLoading)
@@ -447,6 +535,11 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
                 onSelectCita={onSelectCita}
                 onClickSlot={onClickSlot}
                 showNowLine={d === today}
+                bloqueos={bloqueosWeek?.filter((b) => {
+                  const dStart = new Date(`${d}T${String(START_HOUR).padStart(2, '0')}:00:00`)
+                  const dEnd   = new Date(`${d}T${String(END_HOUR).padStart(2, '0')}:00:00`)
+                  return new Date(b.fecha_fin) > dStart && new Date(b.fecha_inicio) < dEnd
+                })}
               />
             ))
           )}
@@ -566,7 +659,7 @@ function MonthView({ monthDate, onSelectDay, filterSede, filterProfesional, filt
 function AgendaContent() {
   const searchParams = useSearchParams()
   const user = useAuthStore((s) => s.user)
-  const [view, setView] = useState<ViewMode>('dia')
+  const [view, setView] = useState<ViewMode>('semana')
   const [fecha, setFecha] = useState(todayISO)
   const [showNuevaCita, setShowNuevaCita] = useState(false)
   const [defaultSlot, setDefaultSlot] = useState<string | undefined>()
@@ -575,50 +668,85 @@ function AgendaContent() {
   const [filterProfesional, setFilterProfesional] = useState('')
   const [filterPaciente, setFilterPaciente] = useState<BusquedaPaciente | null>(null)
   const [sheetNoCerradas, setSheetNoCerradas] = useState(false)
+  const [showBloqueos, setShowBloqueos] = useState(false)
+  const canBloqueos = hasPermission(user, PERM.AGENDA_CREAR_BLOQUEO) || hasPermission(user, PERM.AGENDA_APROBAR_BLOQUEO)
+  const canCrearCita = hasPermission(user, PERM.AGENDA_CREAR)
 
-  const { data: sedes } = useQuery({
-    queryKey: ['sedes'],
-    queryFn: () => clinicasApi.sedes.list({ activa: true }),
+  const isAdmin = user?.rol === 'admin' || user?.rol === 'superadmin'
+  const esSoloProfesional = !!user?.es_profesional && !isAdmin
+
+  const [linkCopiado, setLinkCopiado] = useState(false)
+  const [showQr, setShowQr] = useState(false)
+  const [popoverOpen, setPopoverOpen] = useState(false)
+
+  const { sedes: sedesDisponibles, isAllSedes, defaultSedeId } = useUserSedes()
+
+  const { data: miClinica } = useQuery({
+    queryKey: ['mi-clinica', user?.clinica_id],
+    queryFn: () => clinicasApi.miClinica(user?.clinica_id),
+    enabled: !!user?.clinica_id,
+    staleTime: 5 * 60 * 1000,
   })
+
+  const registroUrl = miClinica?.registro_publico_token
+    ? (typeof window !== 'undefined' ? `${window.location.origin}/registro/${miClinica.registro_publico_token}` : '')
+    : null
+
+  function copiarLink() {
+    if (!registroUrl) return
+    navigator.clipboard.writeText(registroUrl).then(() => {
+      setLinkCopiado(true)
+      setTimeout(() => setLinkCopiado(false), 2000)
+    })
+  }
 
   const ESTADOS_NO_CERRADOS: EstadoCita[] = ['pendiente', 'confirmada', 'en_espera', 'en_curso']
 
   const { data: noCerradasData } = useQuery({
-    queryKey: ['citas', 'no-cerradas', filterSede],
+    queryKey: ['citas', 'no-cerradas', filterSede, esSoloProfesional ? user?.id : null],
     queryFn: () => {
-      const ayer = new Date(Date.now() - 86400000).toISOString().split('T')[0]
-      const hace90 = new Date(Date.now() - 90 * 86400000).toISOString().split('T')[0]
+      const hoy = todayISO()
+      const d90 = new Date(); d90.setDate(d90.getDate() - 90)
+      const hace90 = `${d90.getFullYear()}-${String(d90.getMonth() + 1).padStart(2, '0')}-${String(d90.getDate()).padStart(2, '0')}`
       return agendaApi.citas.list({
         fecha_inicio__date__gte: hace90,
-        fecha_inicio__date__lte: ayer,
+        fecha_inicio__date__lt: hoy,   // estrictamente antes de hoy (fecha local)
         page_size: 100,
         ...(filterSede && { sede: filterSede }),
+        // Un profesional puro solo ve sus propias citas sin cerrar, no las de toda la clínica.
+        ...(esSoloProfesional && user?.id ? { profesional: user.id } : {}),
       })
     },
     staleTime: 5 * 60 * 1000,
   })
 
-  const citasNoCerradas = (noCerradasData?.results ?? []).filter(
-    (c) => ESTADOS_NO_CERRADOS.includes(c.estado as EstadoCita)
-  )
+  const citasNoCerradas = (noCerradasData?.results ?? []).filter((c) => {
+    if (!ESTADOS_NO_CERRADOS.includes(c.estado as EstadoCita)) return false
+    const fechaCita = c.fecha_inicio?.slice(0, 10)
+    return fechaCita != null && fechaCita < todayISO()
+  })
 
-  const sedesVisibles = user?.sede_id
-    ? (sedes?.results ?? []).filter((s) => s.id === user.sede_id)
-    : (sedes?.results ?? [])
+  // Un usuario acotado a sedes solo ve y filtra por las suyas; nunca "todas".
+  const sedesVisibles = sedesDisponibles
+
+  // Al resolverse el scope, si el usuario está acotado y aún no hay filtro,
+  // fijarlo en su sede por defecto para no arrancar mostrando todas.
+  useEffect(() => {
+    if (!isAllSedes && !filterSede && defaultSedeId) {
+      setFilterSede(defaultSedeId)
+    }
+  }, [isAllSedes, filterSede, defaultSedeId])
 
   const { data: profesionales } = useQuery({
     queryKey: ['profesionales', filterSede],
     queryFn: () => colaboradoresApi.profesionales(filterSede || undefined),
   })
 
-  const isAdmin = user?.rol === 'admin' || user?.rol === 'superadmin'
-  const esSoloProfesional = !!user?.es_profesional && !isAdmin
-
   // Auto-filtrar por profesional solo si es un profesional puro (no admin)
   useEffect(() => {
     if (!esSoloProfesional || !profesionales) return
     const miPerfil = profesionales.find((p) => p.id === user?.id)
-    if (miPerfil) setFilterProfesional(miPerfil.colaborador_id)
+    if (miPerfil) setFilterProfesional(miPerfil.id)
   }, [esSoloProfesional, profesionales, user?.id])
 
   const handleSedeChange = (val: string) => {
@@ -633,7 +761,7 @@ function AgendaContent() {
 
   // Navigation labels & prev/next logic per view
   const navLabel = view === 'dia' ? dayLabel(fecha)
-    : view === 'semana' ? weekLabel(startOfWeek(fecha))
+    : view === 'semana' ? weekLabel(fecha)
     : monthLabel(fecha)
 
   const goBack = () => {
@@ -649,7 +777,10 @@ function AgendaContent() {
   }
 
   const handleClickSlot = (iso: string) => {
-    setDefaultSlot(iso.split('T')[0])
+    if (!canCrearCita) return
+    const dia = iso.split('T')[0]
+    if (dia < todayISO()) return
+    setDefaultSlot(dia)
     setShowNuevaCita(true)
   }
 
@@ -659,97 +790,152 @@ function AgendaContent() {
   }
 
   return (
-    <div className="flex flex-col rounded-xl border border-gray-200 shadow-sm overflow-hidden bg-white" style={{ height: 'calc(100vh - 7rem)' }}>
+    <div className="flex flex-col rounded-xl border border-gray-200 shadow-sm overflow-hidden bg-white" style={{ height: 'calc(100vh - 4.5rem)' }}>
 
       {/* ── Toolbar ── */}
-      <div className="flex items-center justify-between gap-2 px-4 py-2.5 bg-white border-b shrink-0 flex-wrap gap-y-2">
-        {/* View switcher */}
-        <div className="flex items-center bg-muted rounded-lg p-0.5">
-          {(['dia', 'semana', 'mes'] as ViewMode[]).map((v) => (
-            <button
-              key={v}
-              onClick={() => setView(v)}
-              className={cn(
-                'px-3 py-1.5 rounded-md text-sm font-medium transition-all capitalize',
-                view === v
-                  ? 'bg-white text-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              )}
-            >
-              {v === 'dia' ? 'Día' : v === 'semana' ? 'Semana' : 'Mes'}
-            </button>
-          ))}
-        </div>
-
-        {/* Navigation */}
-        <div className="flex items-center gap-1">
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goBack}>
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <button
-            onClick={() => setFecha(todayISO())}
-            className="text-sm font-medium px-2.5 py-1 rounded-md hover:bg-muted transition-colors whitespace-nowrap"
-          >
-            Hoy
-          </button>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goForward}>
-            <ChevronRight className="h-4 w-4" />
-          </Button>
-          <span className="text-sm font-medium text-foreground ml-1 capitalize hidden sm:block">
-            {navLabel}
-          </span>
-        </div>
-
-        {/* Filters */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="w-56">
-            <PacienteSearchInput
-              selected={filterPaciente}
-              onSelect={setFilterPaciente}
-              onClear={() => setFilterPaciente(null)}
-              placeholder="Buscar paciente..."
-            />
+      <div className="flex flex-col px-4 py-2.5 bg-white border-b shrink-0 gap-2">
+        {/* Row 1: View switcher + Navigation */}
+        <div className="flex items-center gap-2">
+          {/* View switcher */}
+          <div className="flex items-center bg-muted rounded-lg p-0.5">
+            {(['dia', 'semana', 'mes'] as ViewMode[]).map((v) => (
+              <button
+                key={v}
+                onClick={() => setView(v)}
+                className={cn(
+                  'px-3 py-1.5 rounded-md text-sm font-medium transition-all capitalize',
+                  view === v
+                    ? 'bg-white text-foreground shadow-sm'
+                    : 'text-muted-foreground hover:text-foreground'
+                )}
+              >
+                {v === 'dia' ? 'Día' : v === 'semana' ? 'Semana' : 'Mes'}
+              </button>
+            ))}
           </div>
 
-          <Select
-            value={filterSede || 'all'}
-            onValueChange={handleSedeChange}
-            disabled={!!user?.sede_id}
-          >
-            <SelectTrigger className="h-8 text-xs w-36">
-              <SelectValue placeholder="Todas las sedes" />
-            </SelectTrigger>
-            <SelectContent>
-              {!user?.sede_id && <SelectItem value="all">Todas las sedes</SelectItem>}
-              {sedesVisibles.map((s) => (
-                <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          {!esSoloProfesional && (
-            <Select
-              value={filterProfesional || 'all'}
-              onValueChange={(v) => setFilterProfesional(v === 'all' ? '' : v)}
+          {/* Navigation */}
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goBack}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <button
+              onClick={() => setFecha(todayISO())}
+              className="text-sm font-medium px-2.5 py-1 rounded-md hover:bg-muted transition-colors whitespace-nowrap"
             >
-              <SelectTrigger className="h-8 text-xs w-40">
-                <SelectValue placeholder="Todos los profesionales" />
+              Hoy
+            </button>
+            <Button variant="ghost" size="icon" className="h-8 w-8" onClick={goForward}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-medium text-foreground ml-1 capitalize hidden sm:block">
+              {navLabel}
+            </span>
+          </div>
+        </div>
+
+        {/* Row 2: Filters (left) + Actions (right) */}
+        <div className="flex items-center gap-2">
+          {/* Filters */}
+          <div className="flex items-center gap-2 flex-wrap flex-1">
+            <div className="w-72">
+              <PacienteSearchInput
+                selected={filterPaciente}
+                onSelect={setFilterPaciente}
+                onClear={() => setFilterPaciente(null)}
+                placeholder="Buscar paciente..."
+              />
+            </div>
+
+            <Select
+              value={filterSede || 'all'}
+              onValueChange={handleSedeChange}
+              disabled={!isAllSedes && sedesVisibles.length <= 1}
+            >
+              <SelectTrigger className="h-8 text-xs w-36">
+                <SelectValue placeholder="Todas las sedes" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos los profesionales</SelectItem>
-                {profesionales?.map((p) => (
-                  <SelectItem key={p.id} value={p.colaborador_id}>{p.nombre_completo}</SelectItem>
+                {isAllSedes && <SelectItem value="all">Todas las sedes</SelectItem>}
+                {sedesVisibles.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
-          )}
-        </div>
 
-        {/* Nueva cita */}
-        <Button size="sm" onClick={() => setShowNuevaCita(true)}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          Nueva cita
-        </Button>
+            {!esSoloProfesional && (
+              <Select
+                value={filterProfesional || 'all'}
+                onValueChange={(v) => setFilterProfesional(v === 'all' ? '' : v)}
+              >
+                <SelectTrigger className="h-8 text-xs w-40">
+                  <SelectValue placeholder="Todos los profesionales" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos los profesionales</SelectItem>
+                  {profesionales?.map((p) => (
+                    <SelectItem key={p.id} value={p.id}>{p.nombre_completo}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-2 ml-auto shrink-0">
+            {registroUrl && (
+              <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button size="sm" variant="outline" className="gap-1.5">
+                    <UserPlus className="h-4 w-4" />
+                    <span className="hidden sm:inline">Autoregistro</span>
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="space-y-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-800">Link de autoregistro</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Comparte este link con el paciente para que se registre por su cuenta.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 min-w-0 rounded-md border bg-gray-50 px-2.5 py-1.5">
+                      <p className="text-[11px] text-muted-foreground truncate font-mono">{registroUrl}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={copiarLink}
+                      className="shrink-0 flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 transition-colors"
+                    >
+                      {linkCopiado
+                        ? <><Check className="h-3.5 w-3.5 text-emerald-600" /><span className="text-emerald-600">Copiado</span></>
+                        : <><Copy className="h-3.5 w-3.5" />Copiar</>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setPopoverOpen(false); setShowQr(true) }}
+                      className="shrink-0 flex items-center gap-1.5 rounded-md border bg-white px-2.5 py-1.5 text-xs font-medium hover:bg-gray-50 transition-colors"
+                    >
+                      <QrCode className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+            {canBloqueos && (
+              <Button size="sm" variant="outline" onClick={() => setShowBloqueos(true)}>
+                <CalendarOff className="h-4 w-4 mr-1.5" />
+                Bloqueos
+              </Button>
+            )}
+            {canCrearCita && (
+              <Button size="sm" onClick={() => setShowNuevaCita(true)}>
+                <Plus className="h-4 w-4 mr-1.5" />
+                Nueva cita
+              </Button>
+            )}
+          </div>
+        </div>
       </div>
 
       {/* ── Alerta citas no cerradas ── */}
@@ -868,7 +1054,7 @@ function AgendaContent() {
       )}
       {view === 'semana' && (
         <WeekView
-          weekStart={startOfWeek(fecha)}
+          weekStart={fecha}
           selectedId={selectedCitaId}
           onSelectCita={setSelectedCitaId}
           onClickSlot={handleClickSlot}
@@ -888,15 +1074,49 @@ function AgendaContent() {
       )}
 
       {/* Modals */}
+      <BloqueosPanel
+        open={showBloqueos}
+        onOpenChange={setShowBloqueos}
+        defaultSedeId={filterSede || undefined}
+      />
       <NuevaCitaModal
         open={showNuevaCita}
         onOpenChange={(o) => { setShowNuevaCita(o); if (!o) setDefaultSlot(undefined) }}
-        defaultFecha={defaultSlot ?? fecha}
+        defaultFecha={defaultSlot ?? (fecha < todayISO() ? todayISO() : fecha)}
       />
       <CitaDetailSheet
         citaId={selectedCitaId}
         onClose={() => setSelectedCitaId(null)}
       />
+
+      {showQr && registroUrl && <QrOverlay url={registroUrl} onClose={() => setShowQr(false)} />}
+    </div>
+  )
+}
+
+function QrOverlay({ url, onClose }: { url: string; onClose: () => void }) {
+  const { QRCodeCanvas } = require('qrcode.react') as typeof import('qrcode.react')
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80"
+      onClick={onClose}
+    >
+      <button
+        onClick={onClose}
+        className="absolute top-5 right-5 flex items-center justify-center h-9 w-9 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white"
+      >
+        <X className="h-5 w-5" />
+      </button>
+      <div onClick={(e) => e.stopPropagation()} className="rounded-2xl bg-white p-6 shadow-2xl">
+        <QRCodeCanvas value={url} size={260} />
+      </div>
     </div>
   )
 }

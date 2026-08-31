@@ -1,16 +1,60 @@
+import axios from 'axios'
 import { apiClient } from './client'
+
+const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
+
+export interface RegistroClinicaRequest {
+  nombre_clinica: string
+  nit: string
+  nombre_admin: string
+  apellido_admin: string
+  email: string
+  telefono?: string
+}
+
+export const registroPublicoApi = {
+  registrarClinica: async (data: RegistroClinicaRequest): Promise<{ mensaje: string; email: string }> => {
+    const res = await axios.post(`${BASE_URL}/registro-clinica/`, data)
+    return res.data
+  },
+
+  verificarRegistro: async (token: string): Promise<{ ok: boolean; invite_token?: string; error?: string }> => {
+    const res = await axios.get(`${BASE_URL}/registro-clinica/verificar/${token}/`)
+    return res.data
+  },
+}
 import type {
   Clinica, UpdateClinicaRequest, SlotIntervalResponse,
   Sede, CreateSedeRequest, UpdateSedeRequest,
   Servicio, CreateServicioRequest, UpdateServicioRequest,
   Procedimiento, CreateProcedimientoRequest, UpdateProcedimientoRequest,
-  PasoProtocolo, ServicioConsentimientoRequerido,
+  PasoProtocolo, ServicioConsentimientoRequerido, ServicioDiagrama, ServicioGrupoZonas,
   TratamientoCatalogo, CreateTratamientoCatalogoRequest, TipoSesion, CreateTipoSesionRequest,
   RecordatorioConfig, UpdateRecordatorioConfigRequest,
+  ConfiguracionFacial, UpdateConfiguracionFacialRequest,
+  PlantillaAsistencia, CreatePlantillaAsistenciaRequest,
+  SedesLimite, WizardConfig, ConfiguracionCartera,
 } from '@/types/clinicas'
+import type { DiagramaCorporal, GrupoZonas } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
+export interface SetupChecklistItem {
+  key: string
+  label: string
+  completado: boolean
+  href: string
+}
+
+export interface SetupChecklist {
+  items: SetupChecklistItem[]
+}
+
 export const clinicasApi = {
+  setupChecklist: async (): Promise<SetupChecklist> => {
+    const res = await apiClient.get<SetupChecklist>('/clinicas/mi-clinica/setup-checklist/')
+    return res.data
+  },
+
   list: async (): Promise<Clinica[]> => {
     const res = await apiClient.get<Paginated<Clinica>>('/clinicas/clinicas/')
     return res.data.results
@@ -18,6 +62,17 @@ export const clinicasApi = {
 
   get: async (id: string): Promise<Clinica> => {
     const res = await apiClient.get<Clinica>(`/clinicas/clinicas/${id}/`)
+    return res.data
+  },
+
+  miClinica: async (clinicaId?: string): Promise<Clinica> => {
+    const params = clinicaId ? { clinica_id: clinicaId } : undefined
+    const res = await apiClient.get<Clinica>('/clinicas/mi-clinica/', { params })
+    return res.data
+  },
+
+  miClinicaUpdate: async (data: UpdateClinicaRequest): Promise<Clinica> => {
+    const res = await apiClient.patch<Clinica>('/clinicas/mi-clinica/', data)
     return res.data
   },
 
@@ -130,6 +185,19 @@ export const clinicasApi = {
         await apiClient.post(`/clinicas/procedimientos/${id}/consentimientos/reordenar/`, orden)
       },
     },
+    grupos: {
+      list: async (id: string): Promise<ServicioGrupoZonas[]> => {
+        const res = await apiClient.get<ServicioGrupoZonas[]>(`/clinicas/procedimientos/${id}/grupos/`)
+        return res.data
+      },
+      add: async (id: string, grupoId: string): Promise<ServicioGrupoZonas> => {
+        const res = await apiClient.post<ServicioGrupoZonas>(`/clinicas/procedimientos/${id}/grupos/`, { grupo: grupoId })
+        return res.data
+      },
+      remove: async (id: string, grupoId: string): Promise<void> => {
+        await apiClient.delete(`/clinicas/procedimientos/${id}/grupos/${grupoId}/`)
+      },
+    },
   },
 
   /** @deprecated Usar clinicasApi.procedimientos para la UI de configuración */
@@ -212,6 +280,57 @@ export const clinicasApi = {
     }
   },
 
+  getSedesLimite: async (): Promise<SedesLimite> => {
+    const res = await apiClient.get<{
+      plan: { max_sedes?: number } | null
+      sedes_activas?: number
+      puede_agregar_sede?: boolean
+      sin_limite_sedes?: boolean
+      slots_disponibles_sedes?: number | null
+    }>('/clinicas/mi-clinica/plan/')
+    const maxSedes = res.data.plan?.max_sedes ?? null
+    const sedesActivas = res.data.sedes_activas
+    return {
+      max_sedes: maxSedes,
+      sedes_activas: sedesActivas,
+      puede_agregar: res.data.puede_agregar_sede ?? (maxSedes === null || (sedesActivas ?? 0) < maxSedes),
+      sin_limite: res.data.sin_limite_sedes ?? maxSedes === null,
+    }
+  },
+
+  wizardConfig: {
+    get: async (): Promise<WizardConfig> => {
+      const res = await apiClient.get<WizardConfig>('/configuracion/wizard/')
+      return res.data
+    },
+    update: async (data: Partial<WizardConfig>): Promise<WizardConfig> => {
+      const res = await apiClient.patch<WizardConfig>('/configuracion/wizard/', data)
+      return res.data
+    },
+  },
+
+  carteraConfig: {
+    get: async (): Promise<ConfiguracionCartera> => {
+      const res = await apiClient.get<ConfiguracionCartera>('/configuracion/cartera/')
+      return res.data
+    },
+    update: async (data: Partial<Pick<ConfiguracionCartera, 'requiere_consentimiento_promocional'>>): Promise<ConfiguracionCartera> => {
+      const res = await apiClient.patch<ConfiguracionCartera>('/configuracion/cartera/', data)
+      return res.data
+    },
+  },
+
+  facialConfig: {
+    get: async (): Promise<ConfiguracionFacial> => {
+      const res = await apiClient.get<ConfiguracionFacial>('/configuracion/facial/')
+      return res.data
+    },
+    update: async (data: UpdateConfiguracionFacialRequest): Promise<ConfiguracionFacial> => {
+      const res = await apiClient.patch<ConfiguracionFacial>('/configuracion/facial/', data)
+      return res.data
+    },
+  },
+
   recordatorioConfig: {
     get: async (clinicaId: string): Promise<RecordatorioConfig> => {
       const res = await apiClient.get<RecordatorioConfig>(`/clinicas/${clinicaId}/recordatorio_config/`)
@@ -265,6 +384,71 @@ export const clinicasApi = {
 
     removeTipo: async (id: string, tipoId: string): Promise<void> => {
       await apiClient.delete(`/clinicas/tratamientos/${id}/tipos/${tipoId}/`)
+    },
+  },
+
+  plantillasAsistencia: {
+    list: async (): Promise<PlantillaAsistencia[]> => {
+      const res = await apiClient.get<PlantillaAsistencia[]>('/clinicas/plantillas-asistencia/')
+      return res.data
+    },
+    create: async (data: CreatePlantillaAsistenciaRequest): Promise<PlantillaAsistencia> => {
+      const res = await apiClient.post<PlantillaAsistencia>('/clinicas/plantillas-asistencia/', data)
+      return res.data
+    },
+    update: async (id: string, data: Partial<CreatePlantillaAsistenciaRequest>): Promise<PlantillaAsistencia> => {
+      const res = await apiClient.patch<PlantillaAsistencia>(`/clinicas/plantillas-asistencia/${id}/`, data)
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/plantillas-asistencia/${id}/`)
+    },
+  },
+
+  diagramasCorporales: {
+    list: async (): Promise<DiagramaCorporal[]> => {
+      const res = await apiClient.get<DiagramaCorporal[]>('/clinicas/diagramas-corporales/')
+      return res.data
+    },
+    create: async (data: FormData): Promise<DiagramaCorporal> => {
+      const res = await apiClient.post<DiagramaCorporal>('/clinicas/diagramas-corporales/', data, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return res.data
+    },
+    update: async (id: string, data: FormData | Partial<{ nombre: string; orden: number; activo: boolean }>): Promise<DiagramaCorporal> => {
+      const res = await apiClient.patch<DiagramaCorporal>(`/clinicas/diagramas-corporales/${id}/`, data,
+        data instanceof FormData ? { headers: { 'Content-Type': 'multipart/form-data' } } : undefined,
+      )
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/diagramas-corporales/${id}/`)
+    },
+  },
+
+  gruposZonas: {
+    list: async (): Promise<GrupoZonas[]> => {
+      const res = await apiClient.get<GrupoZonas[] | { results: GrupoZonas[] }>('/clinicas/grupos-zonas/')
+      return Array.isArray(res.data) ? res.data : (res.data as { results: GrupoZonas[] }).results
+    },
+    create: async (data: { nombre: string }): Promise<GrupoZonas> => {
+      const res = await apiClient.post<GrupoZonas>('/clinicas/grupos-zonas/', data)
+      return res.data
+    },
+    update: async (id: string, data: Partial<{ nombre: string; activo: boolean }>): Promise<GrupoZonas> => {
+      const res = await apiClient.patch<GrupoZonas>(`/clinicas/grupos-zonas/${id}/`, data)
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/grupos-zonas/${id}/`)
+    },
+    agregarDiagrama: async (id: string, diagramaId: string, orden?: number): Promise<GrupoZonas> => {
+      const res = await apiClient.post<GrupoZonas>(`/clinicas/grupos-zonas/${id}/diagramas/`, { diagrama: diagramaId, orden: orden ?? 1 })
+      return res.data
+    },
+    eliminarDiagrama: async (id: string, diagramaId: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/grupos-zonas/${id}/diagramas/${diagramaId}/`)
     },
   },
 }

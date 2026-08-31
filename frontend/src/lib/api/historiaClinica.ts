@@ -11,6 +11,9 @@ import type {
   ResultadoExamen,
   PlantillaOrden,
   OrdenMedica,
+  AnotacionZona,
+  ZonasNota,
+  ZonasVisita,
 } from '@/types/historia'
 import type { Paginated } from '@/types/common'
 
@@ -36,6 +39,17 @@ export const historiaClinicaApi = {
       const res = await apiClient.get<GaleriaResponse>(`/historia-clinica/historias/${id}/galeria/`, { params })
       return res.data
     },
+    pdf: async (id: string, includeFotos = true): Promise<Blob> => {
+      const res = await apiClient.get(`/historia-clinica/historias/${id}/pdf/`, {
+        params: { include_fotos: includeFotos },
+        responseType: 'blob',
+      })
+      return res.data as Blob
+    },
+    zonas: async (id: string): Promise<ZonasVisita[]> => {
+      const res = await apiClient.get<ZonasVisita[]>(`/historia-clinica/historias/${id}/zonas/`)
+      return res.data
+    },
   },
 
   notas: {
@@ -59,6 +73,10 @@ export const historiaClinicaApi = {
       })
       return res.data
     },
+    get: async (id: string): Promise<NotaClinica> => {
+      const res = await apiClient.get<NotaClinica>(`/historia-clinica/notas/${id}/`)
+      return res.data
+    },
     // H26: auto-save parcial de campos de la nota
     patch: async (
       id: string,
@@ -71,6 +89,24 @@ export const historiaClinicaApi = {
     completar: async (id: string): Promise<NotaClinica> => {
       const res = await apiClient.post<NotaClinica>(`/historia-clinica/notas/${id}/completar/`, {})
       return res.data
+    },
+  },
+
+  zonas: {
+    get: async (notaId: string): Promise<ZonasNota> => {
+      const res = await apiClient.get<ZonasNota>(`/historia-clinica/notas/${notaId}/zonas/`)
+      return res.data
+    },
+    create: async (data: { nota: string; diagrama: string; x: number; y: number; radio: number; texto: string; tipo_aplicacion?: string; parametros?: Record<string, string> }): Promise<AnotacionZona> => {
+      const res = await apiClient.post<AnotacionZona>('/historia-clinica/anotaciones-zona/', data)
+      return res.data
+    },
+    update: async (id: string, data: Partial<{ x: number; y: number; radio: number; texto: string; tipo_aplicacion: string; parametros: Record<string, string> }>): Promise<AnotacionZona> => {
+      const res = await apiClient.patch<AnotacionZona>(`/historia-clinica/anotaciones-zona/${id}/`, data)
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/historia-clinica/anotaciones-zona/${id}/`)
     },
   },
 
@@ -134,6 +170,13 @@ export const historiaClinicaApi = {
     iniciarFirma: async (id: string): Promise<{ signing_token: string; documenso_document_id: string }> => {
       const res = await apiClient.post<{ signing_token: string; documenso_document_id: string }>(
         `/historia-clinica/consentimientos/${id}/iniciar_firma/`,
+        {}
+      )
+      return res.data
+    },
+    enviarLinkFirma: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
+      const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(
+        `/historia-clinica/consentimientos/${id}/enviar_link_firma/`,
         {}
       )
       return res.data

@@ -14,6 +14,18 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
     if (token) config.headers.Authorization = `Bearer ${token}`
     const clinicaId = localStorage.getItem('clinica_id')
     if (clinicaId) config.headers['X-Clinica-Id'] = clinicaId
+
+    // Superadmin clinic impersonation: send active clinic via X-Active-Clinica
+    try {
+      const raw = localStorage.getItem('superadmin-clinica-activa')
+      if (raw) {
+        const parsed = JSON.parse(raw) as { state?: { clinicaActiva?: { id: string } } }
+        const activeId = parsed?.state?.clinicaActiva?.id
+        if (activeId) config.headers['X-Active-Clinica'] = activeId
+      }
+    } catch {
+      // ignore malformed state
+    }
   }
   return config
 })
@@ -36,6 +48,20 @@ apiClient.interceptors.response.use(
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
     if (error.response?.status !== 401 || original._retry) {
+      return Promise.reject(error)
+    }
+
+    // Sesion cerrada porque el usuario inicio sesion en otro dispositivo: no
+    // tiene sentido intentar refrescar (el refresh token ya quedo invalidado
+    // y de todas formas cargaria el mismo 'sid' viejo). Cerrar sesion directo
+    // y avisar con el motivo especifico.
+    const body = error.response?.data as { code?: string; error?: string } | undefined
+    if (body?.code === 'SESION_CERRADA_OTRO_DISPOSITIVO') {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        window.dispatchEvent(new CustomEvent('cliniq:session-closed-elsewhere', { detail: body.error }))
+      }
       return Promise.reject(error)
     }
 
@@ -72,7 +98,10 @@ apiClient.interceptors.response.use(
       processQueue(refreshError, null)
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
-      window.location.href = '/login'
+      // Soft logout: notify app instead of hard-navigating (preserves React state and next param)
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('cliniq:session-expired'))
+      }
       return Promise.reject(refreshError)
     } finally {
       isRefreshing = false

@@ -1,17 +1,18 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import { protocolosApi } from '@/lib/api/protocolos'
-import { AlertTriangle, Clock, Play, FileSignature, ShieldX, ShieldCheck, ReceiptText } from 'lucide-react'
+import { clinicasApi } from '@/lib/api/clinicas'
+import { AlertTriangle, Clock, Play, ShieldX, ShieldCheck, Loader2 } from 'lucide-react'
 import Link from 'next/link'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
-import { ConsentimientoFirmaSheet } from './ConsentimientoFirmaSheet'
-import { IniciarPagoSheet } from './IniciarPagoSheet'
+import { agendaApi } from '@/lib/api/agenda'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion } from '@/lib/permissions'
 import { formatTime } from '@/lib/utils'
@@ -31,38 +32,51 @@ function ConsentimientoBadge({ cita, todosFirmadosOverride }: { cita: Cita; todo
     : <span title="Consentimiento(s) pendiente(s)"><ShieldX className="h-3.5 w-3.5 text-amber-500 shrink-0" /></span>
 }
 
-function primerConsentimientoPendiente(cita: Cita) {
-  return cita.consentimiento_info?.consentimientos?.find((c) => !c.vigente) ?? null
-}
-
 export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
-  const queryClient = useQueryClient()
   const { user } = useAuthStore()
+  const router = useRouter()
   const puedeIniciarAtencion = canIniciarAtencion(user)
 
-  const [bloqueoPorActiva, setBloqueoPorActiva] = useState<Cita | null>(null)
-  const [firmaOpen, setFirmaOpen] = useState(false)
-  const [citaParaFirma, setCitaParaFirma] = useState<Cita | null>(null)
-  const [citaParaPago, setCitaParaPago] = useState<Cita | null>(null)
+  const { data: wizardConfig } = useQuery({
+    queryKey: ['wizard-config'],
+    queryFn: () => clinicasApi.wizardConfig.get(),
+  })
 
-  function handleIniciar(cita: Cita) {
-    if (puedeIniciarAtencion && citaActiva) {
+  const [bloqueoPorActiva, setBloqueoPorActiva] = useState<Cita | null>(null)
+  const [iniciandoCitaId, setIniciandoCitaId] = useState<string | null>(null)
+
+  function isWizardDone(cita: Cita): boolean {
+    const consentimientoAplica = (cita.consentimiento_info?.consentimientos?.length ?? 0) > 0
+    const doneMap = {
+      llegada:        cita.estado !== 'confirmada',
+      consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
+      pago:           cita.item_cotizacion_id != null || cita.cobro_id != null || cita.estado === 'en_curso' || cita.estado === 'completada',
+      firma:          cita.firma_asistencia_estado === 'firmada',
+    }
+    const activeSteps = (['llegada', 'consentimiento', 'pago', 'firma'] as const).filter((step) => {
+      if (!wizardConfig) return true
+      if (step === 'llegada') return wizardConfig.paso_checkin
+      if (step === 'pago')    return wizardConfig.paso_pago
+      if (step === 'firma')   return wizardConfig.paso_firma_asistencia
+      return true
+    })
+    return activeSteps.length > 0 && activeSteps.every((s) => doneMap[s])
+  }
+
+  async function handleIniciar(cita: Cita) {
+    if (citaActiva) {
       setBloqueoPorActiva(cita)
       return
     }
-    setCitaParaPago(cita)
-  }
-
-  function handleFirmar(cita: Cita) {
-    setCitaParaFirma(cita)
-    setFirmaOpen(true)
-  }
-
-  function handleFirmaCompleted() {
-    setFirmaOpen(false)
-    setCitaParaFirma(null)
-    // No auto-iniciamos: ConsentimientoFirmaSheet ya invalida ['citas'] en onSuccess.
-    // La UI re-evalúa: si quedan más pendientes muestra "Firmar", si no muestra "Iniciar".
+    setIniciandoCitaId(cita.id)
+    try {
+      if (cita.estado === 'en_espera') {
+        await agendaApi.citas.cambiarEstado(cita.id, { estado: 'en_curso' })
+      }
+      router.push(`/atenciones/${cita.id}`)
+    } catch {
+      setIniciandoCitaId(null)
+    }
   }
 
   if (!citas.length) {
@@ -77,10 +91,6 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
       </Card>
     )
   }
-
-  const pendiente = citaParaFirma ? primerConsentimientoPendiente(citaParaFirma) : null
-  const consentimientoToken = pendiente?.template_token ?? null
-  const consentimientoNombre = pendiente?.template_nombre ?? null
 
   // H30 workaround: cuando la primera cita en espera tiene sesión pre-vinculada,
   // consultamos sus consentimientos específicos en lugar de confiar solo en consentimiento_info
@@ -109,13 +119,10 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
             // Si la cita tiene sesión pre-vinculada (H30) y tenemos datos de esa sesión,
             // usamos puede_ejecutar como fuente de verdad; si no, usamos consentimiento_info
             const usaSesionConsent = Boolean(cita.sesion_ejecutada_id && cita.id === siguienteCitaEnEspera?.id && sesionConsentData)
-            const consentimientoPendiente = enEspera && (
-              usaSesionConsent
-                ? !sesionConsentData!.puede_ejecutar
-                : ((cita.consentimiento_info?.consentimientos?.length ?? 0) > 0 && !cita.consentimiento_info?.todos_firmados)
-            )
             const todosFirmadosOverride = usaSesionConsent ? sesionConsentData!.puede_ejecutar : undefined
-            const puedeIniciar = enEspera && !consentimientoPendiente && esElSiguiente
+            const puedeContinuar = enEspera && esElSiguiente
+            const listaPara = puedeIniciarAtencion && isWizardDone(cita)
+            const iniciando = iniciandoCitaId === cita.id
 
             return (
               <div
@@ -147,17 +154,18 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
                   <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
                 </div>
 
-                {puedeIniciar ? (
-                  <Button size="sm" className="shrink-0 h-7 text-xs" onClick={() => handleIniciar(cita)}>
-                    {puedeIniciarAtencion
-                      ? <><Play className="h-3 w-3 mr-1" />Iniciar</>
-                      : <><ReceiptText className="h-3 w-3 mr-1" />Cobro</>
+                {puedeContinuar && puedeIniciarAtencion ? (
+                  <Button
+                    size="sm"
+                    className="shrink-0 h-7 text-xs"
+                    disabled={iniciando || !listaPara}
+                    title={!listaPara ? 'Recepción debe completar los pasos previos' : undefined}
+                    onClick={() => handleIniciar(cita)}
+                  >
+                    {iniciando
+                      ? <Loader2 className="h-3 w-3 animate-spin" />
+                      : <><Play className="h-3 w-3 mr-1" />Iniciar</>
                     }
-                  </Button>
-                ) : consentimientoPendiente && esElSiguiente ? (
-                  <Button size="sm" variant="outline" className="shrink-0 h-7 text-xs border-amber-300 text-amber-700" onClick={() => handleFirmar(cita)}>
-                    <FileSignature className="h-3 w-3 mr-1" />
-                    Firmar
                   </Button>
                 ) : (
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -195,31 +203,6 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Sheet: firma de consentimiento */}
-      {citaParaFirma && consentimientoToken && consentimientoNombre && (
-        <ConsentimientoFirmaSheet
-          open={firmaOpen}
-          onOpenChange={(open) => { setFirmaOpen(open); if (!open) setCitaParaFirma(null) }}
-          pacienteId={citaParaFirma.paciente}
-          pacienteNombre={citaParaFirma.paciente_nombre}
-          token={consentimientoToken}
-          templateNombre={consentimientoNombre}
-          consentimientoId={pendiente?.consentimiento_id}
-          vigenciaMeses={undefined}
-          onCompleted={handleFirmaCompleted}
-        />
-      )}
-
-      {/* Dialog: registro de pago / iniciar atención */}
-      {citaParaPago && (
-        <IniciarPagoSheet
-          open={!!citaParaPago}
-          onOpenChange={(open) => { if (!open) setCitaParaPago(null) }}
-          cita={citaParaPago}
-          soloRegistrar={!puedeIniciarAtencion}
-        />
-      )}
     </>
   )
 }

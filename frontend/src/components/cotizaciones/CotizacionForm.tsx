@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Search, Receipt } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Search, Receipt, Lock, Zap, FileSignature } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,12 +14,14 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
 import { CotizacionEstadoBadge } from './CotizacionEstadoBadge'
 import { EnviarCotizacionModal } from './EnviarCotizacionModal'
 import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
+import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -27,6 +29,9 @@ import { pacientesApi } from '@/lib/api/pacientes'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
+import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
+import { cobrosApi } from '@/lib/api/cobros'
+import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
 import type { Cotizacion, EstadoCotizacion, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento } from '@/types/clinicas'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
@@ -43,6 +48,11 @@ const itemSchema = z.object({
   periodicidad: z.string(),
   valor_unitario: z.number().min(0),
   descuento_porcentaje: z.number().min(0).max(100),
+  precio_bloqueado: z.boolean().optional(),
+  // Campos de campaña: sólo lectura (no se envían al backend)
+  _id: z.string().optional(),
+  precio_campana_disponible: z.string().nullable().optional(),
+  campana_nombre: z.string().nullable().optional(),
 })
 
 const pagoSchema = z.object({
@@ -239,7 +249,29 @@ function fechaVencimiento(dias: number): string {
 }
 
 function hoy(): string {
-  return new Date().toISOString().slice(0, 10)
+  return new Date().toLocaleDateString('en-CA') // YYYY-MM-DD en horario local
+}
+
+function getPrecioMinimoItem(
+  tipo: string | undefined,
+  procedimientoId: string | null | undefined,
+  tratamientoId: string | null | undefined,
+  precioCampana: string | null | undefined,
+  procedimientos: Procedimiento[],
+  tratamientos: TratamientoCatalogo[],
+): number | null {
+  if (tipo === 'libre') return null
+  if (precioCampana) return parseFloat(precioCampana)
+  if (tipo === 'procedimiento' && procedimientoId) {
+    const p = procedimientos.find((x) => x.id === procedimientoId)
+    const raw = p?.precio_base ?? p?.precio_referencia
+    return raw ? parseFloat(raw) : null
+  }
+  if (tipo === 'tratamiento' && tratamientoId) {
+    const t = tratamientos.find((x) => x.id === tratamientoId)
+    return t?.precio_estimado ? parseFloat(t.precio_estimado) : null
+  }
+  return null
 }
 
 // ── Props ──────────────────────────────────────────────────────────────────────
@@ -256,7 +288,13 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const esNueva = !cotizacion
-  const soloLectura = !!(cotizacion && cotizacion.estado !== 'borrador')
+  const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
+  const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  const isAdmin = isAdminOrSuperAdmin(user)
+  // Sin cotizaciones.gestionar el formulario es de solo lectura (p. ej. recepción,
+  // que tiene cotizaciones.ver pero no puede crear/editar). El backend responde 403
+  // a create/patch/cambiar_estado, así que aquí evitamos la UI editable + submit fallido.
+  const soloLectura = !!(cotizacion && cotizacion.estado !== 'borrador') || !canGestionar
   const [descModal, setDescModal] = useState<{ idx: number; texto: string } | null>(null)
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
   const [crearPacienteNombre, setCrearPacienteNombre] = useState('')
@@ -279,6 +317,15 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   })
 
   const { sedes } = useUserSedes()
+
+  const { data: cobrosData } = useQuery({
+    queryKey: ['cobros-cotizacion', cotizacion?.id],
+    queryFn: () => cobrosApi.list({ cotizacion: cotizacion!.id }),
+    enabled: !!cotizacion?.id && cotizacion?.estado === 'aceptada' && isAdmin,
+  })
+  const tieneCobrosActivos = (cobrosData?.results ?? []).some((c) => c.estado !== 'anulado')
+  const totalCitasAgendadas = cotizacion?.items.reduce((s, i) => s + (i.citas_agendadas ?? 0), 0) ?? 0
+  const puedeRevertirABorrador = isAdmin && !tieneCobrosActivos && totalCitasAgendadas === 0
 
   const pagosRef = useRef<HTMLDivElement>(null)
   const { register, control, handleSubmit, reset, setValue, getValues, setError, formState: { errors } } = useForm<FormValues>({
@@ -321,6 +368,10 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
           periodicidad: i.periodicidad ?? '',
           valor_unitario: parseFloat(i.valor_unitario),
           descuento_porcentaje: parseFloat(i.descuento_porcentaje),
+          precio_bloqueado: i.precio_bloqueado ?? false,
+          _id:              i.id,
+          precio_campana_disponible: i.precio_campana_disponible ?? null,
+          campana_nombre:   i.campana_nombre ?? null,
         })),
         formas_pago: cotizacion.formas_pago.map((p) => ({
           fecha: p.fecha ? p.fecha.slice(0, 10) : null,
@@ -347,7 +398,8 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     setValue(`items.${idx}.procedimiento`, p.id)
     setValue(`items.${idx}.tratamiento`, null)
     setValue(`items.${idx}.descripcion`, p.nombre)
-    if (p.precio_referencia) setValue(`items.${idx}.valor_unitario`, parseFloat(p.precio_referencia))
+    const precio = p.precio_base ?? p.precio_referencia
+    if (precio) setValue(`items.${idx}.valor_unitario`, parseFloat(precio))
   }
 
 async function handleCrearPaciente(data: CreatePacienteRequest) {
@@ -407,23 +459,48 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       toast.success('Cotización guardada')
     },
-    onError: () => {
-      toast.error('No se pudo guardar', 'Revisa los datos e intenta de nuevo.')
+    onError: (error: any) => {
+      if (error?.response?.status === 403) {
+        toast.error('Sin permiso', 'No puedes modificar el precio de un ítem con precio fijo del catálogo.')
+      } else {
+        toast.error('No se pudo guardar', 'Revisa los datos e intenta de nuevo.')
+      }
     },
   })
+
+  const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
 
   const { mutate: cambiarEstado, isPending: cambiando } = useMutation({
     mutationFn: (estado: EstadoCotizacion) => cotizacionesApi.cambiarEstado(cotizacion!.id, estado),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
+      if (data.compromiso_pago?.estado === 'pendiente' && data.compromiso_pago.id) {
+        setCompromisoPagoId(data.compromiso_pago.id)
+      }
       router.refresh()
     },
   })
 
+  function aplicarPrecioCampana({ idx, precio }: { idx: number; itemId?: string; precio: number }) {
+    setValue(`items.${idx}.valor_unitario`, precio, { shouldDirty: true })
+    toast.success('Precio de campaña aplicado', 'Guarda la cotización para confirmar el cambio.')
+  }
+  const aplicandoCampana = false
+
   async function handleAceptar() {
     const values = getValues()
     const { formas_pago, items } = values
+
+    const itemBajoMin = items.find((item) => {
+      const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+      return min !== null && item.valor_unitario < min
+    })
+    if (itemBajoMin) {
+      toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
+      return
+    }
+
     const totalItems = items.reduce((acc, i) => acc + (i.valor_unitario || 0) * (i.num_citas || 1) * (1 - (i.descuento_porcentaje || 0) / 100), 0)
     const sumPagos = formas_pago.reduce((acc, p) => acc + (p.valor || 0), 0)
 
@@ -456,6 +533,35 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   }
 
   const guardando = creando || actualizando
+
+  // Crear una cotización requiere cotizaciones.gestionar. Sin ese permiso no
+  // mostramos el formulario vacío (terminaría en un 403 silencioso al enviar).
+  if (esNueva && !canGestionar) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="sticky top-0 z-20 bg-white border-b shadow-sm">
+          <div className="max-w-5xl mx-auto px-4 h-14 flex items-center gap-3">
+            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
+              <Link href="/cotizaciones"><ArrowLeft className="h-4 w-4" /></Link>
+            </Button>
+            <p className="text-sm font-semibold">Nueva cotización</p>
+          </div>
+        </div>
+        <div className="max-w-5xl mx-auto px-4 py-16">
+          <div className="mx-auto max-w-md rounded-xl border bg-white p-8 text-center space-y-3">
+            <Lock className="h-8 w-8 text-muted-foreground/40 mx-auto" />
+            <p className="text-sm font-medium">No tienes permiso para crear cotizaciones</p>
+            <p className="text-xs text-muted-foreground">
+              Tu rol puede consultar cotizaciones existentes, pero no crearlas ni editarlas.
+            </p>
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/cotizaciones">Volver a cotizaciones</Link>
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -499,7 +605,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Cobros
               </Button>
             )}
-            {cotizacion && (
+            {cotizacion && canGestionar && (
               <Button
                 size="sm"
                 variant="outline"
@@ -509,7 +615,18 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Enviar
               </Button>
             )}
-            {cotizacion?.estado === 'borrador' && (
+            {cotizacion?.estado === 'borrador' && canGestionar && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                disabled={cambiando}
+                onClick={() => cambiarEstado('descartada')}
+              >
+                {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Descartar'}
+              </Button>
+            )}
+            {cotizacion?.estado === 'borrador' && canGestionar && (
               <Button
                 size="sm"
                 className="bg-green-600 hover:bg-green-700"
@@ -519,6 +636,34 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Aceptar'}
               </Button>
             )}
+            {cotizacion?.estado === 'aceptada' && isAdmin && (
+              <TooltipProvider>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700 disabled:pointer-events-none"
+                        disabled={!puedeRevertirABorrador || cambiando}
+                        onClick={() => cambiarEstado('borrador')}
+                      >
+                        {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Devolver a borrador'}
+                      </Button>
+                    </span>
+                  </TooltipTrigger>
+                  {!puedeRevertirABorrador && (
+                    <TooltipContent side="bottom" className="max-w-xs text-xs">
+                      {totalCitasAgendadas > 0
+                        ? `Tiene ${totalCitasAgendadas} cita${totalCitasAgendadas > 1 ? 's' : ''} agendada${totalCitasAgendadas > 1 ? 's' : ''}. Cancélalas primero.`
+                        : tieneCobrosActivos
+                          ? 'Tiene cobros registrados activos. Anúlalos primero.'
+                          : 'No se puede devolver a borrador.'}
+                    </TooltipContent>
+                  )}
+                </Tooltip>
+              </TooltipProvider>
+            )}
             {!soloLectura && (
               <Button
                 size="sm"
@@ -526,6 +671,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 onClick={handleSubmit((v) => {
                   if (esNueva && !v.paciente) {
                     setError('paciente', { type: 'required', message: 'Selecciona un cliente para continuar' })
+                    return
+                  }
+                  const itemBajoMin = v.items.find((item) => {
+                    const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+                    return min !== null && item.valor_unitario < min
+                  })
+                  if (itemBajoMin) {
+                    toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
                     return
                   }
                   esNueva ? crear(v) : actualizar(v)
@@ -548,6 +701,46 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         {cotizacion?.estado === 'aceptada' && (
           <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
         )}
+
+        {/* ── Compromiso de pago (vive aquí, no en /consentimientos) ──────── */}
+        {cotizacion?.estado === 'aceptada' && cotizacion.compromiso_pago && (() => {
+          const cp = cotizacion.compromiso_pago
+          const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
+          const tone = cp.estado === 'firmado'
+            ? { badge: 'bg-green-50 text-green-700 ring-green-200/60', dot: 'bg-green-500' }
+            : cp.estado === 'revocado'
+              ? { badge: 'bg-gray-100 text-gray-500 ring-gray-200/60', dot: 'bg-gray-400' }
+              : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
+          return (
+            <div className="bg-white rounded-xl border p-4 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <FileSignature className="h-4 w-4 text-primary shrink-0" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium">Compromiso de pago</p>
+                  <p className="text-xs text-muted-foreground">
+                    {cp.estado === 'firmado'
+                      ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
+                      : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente de firma'}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1', tone.badge)}>
+                  <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
+                  {label}
+                </span>
+                {cp.pdf_url && (
+                  <Button variant="outline" size="sm" asChild>
+                    <a href={cp.pdf_url} target="_blank" rel="noopener noreferrer">
+                      <FileText className="h-3.5 w-3.5 mr-1.5" />
+                      Ver PDF
+                    </a>
+                  </Button>
+                )}
+              </div>
+            </div>
+          )
+        })()}
 
         {/* ── Fila 1: Cliente + Meta ──────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -636,7 +829,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 <span className="text-muted-foreground">Vence el</span>
                 <span className="font-medium">
                   {cotizacion?.fecha_vencimiento
-                    ? new Date(cotizacion.fecha_vencimiento).toLocaleDateString('es-CO', { day: '2-digit', month: 'long', year: 'numeric' })
+                    ? formatFechaLocal(cotizacion.fecha_vencimiento, { day: '2-digit', month: 'long', year: 'numeric' })
                     : fechaVencimiento(validez || 30)}
                 </span>
               </div>
@@ -725,6 +918,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                         periodicidad: '',
                         valor_unitario: 0,
                         descuento_porcentaje: 0,
+                        precio_bloqueado: false,
+                        _id:              undefined,
+                        precio_campana_disponible: null,
+                        campana_nombre:   null,
                       })}
                     >
                       <Plus className="h-3.5 w-3.5 mr-1" />
@@ -753,25 +950,97 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     const desc = items[idx]?.descuento_porcentaje ?? 0
                     const sub = calcSubtotal(val, citas, desc)
 
+                    const itemPrecioLocked = items[idx]?.precio_bloqueado ?? false
+                    const isLocked = itemPrecioLocked && !canEditPrice
+
+                    const precioCampana = items[idx]?.precio_campana_disponible
+                    const precioMinimo = soloLectura ? null : getPrecioMinimoItem(
+                      items[idx]?.tipo, items[idx]?.procedimiento, items[idx]?.tratamiento,
+                      precioCampana, procedimientos ?? [], tratamientos ?? [],
+                    )
+                    const bajoPrecioMin = !soloLectura && precioMinimo !== null && val < precioMinimo
+                    const campanaDisponible = !!precioCampana && !soloLectura
+                    const campanaAplicada = !!precioCampana &&
+                      parseFloat(precioCampana) === (items[idx]?.valor_unitario ?? -1)
+
+                    const campaignBanner = campanaDisponible && !campanaAplicada && (
+                      <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs mt-1">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                          <span className="text-amber-800 font-medium truncate">
+                            Campaña {items[idx]?.campana_nombre && `"${items[idx].campana_nombre}"`} —&nbsp;
+                            precio especial: {cop(parseFloat(precioCampana))}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={aplicandoCampana}
+                          onClick={() => aplicarPrecioCampana({
+                            idx,
+                            itemId: items[idx]?._id,
+                            precio: parseFloat(precioCampana),
+                          })}
+                          className="shrink-0 text-amber-700 font-semibold hover:underline whitespace-nowrap"
+                        >
+                          Aplicar
+                        </button>
+                      </div>
+                    )
+
                     const precioField = (label: string) => (
                       <div>
                         <p className="text-xs text-muted-foreground md:hidden mb-1">{label}</p>
                         <Controller
                           control={control}
                           name={`items.${idx}.valor_unitario`}
-                          render={({ field: f }) => (
-                            <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none select-none">$</span>
-                              <Input
-                                inputMode="numeric"
-                                className="h-8 text-sm text-right pl-6"
-                                disabled={soloLectura}
-                                value={f.value ? new Intl.NumberFormat('es-CO').format(f.value) : ''}
-                                onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); f.onChange(raw ? Number(raw) : 0) }}
-                                placeholder="0"
-                              />
-                            </div>
-                          )}
+                          render={({ field: f }) => {
+                            const inputEl = (
+                              <div className="relative">
+                                <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground pointer-events-none select-none">$</span>
+                                <Input
+                                  inputMode="numeric"
+                                  className={cn(
+                                    'h-8 text-sm text-right pl-6',
+                                    itemPrecioLocked && 'pr-7',
+                                    bajoPrecioMin && 'border-destructive focus-visible:ring-destructive',
+                                  )}
+                                  disabled={soloLectura || isLocked}
+                                  value={f.value ? new Intl.NumberFormat('es-CO').format(f.value) : ''}
+                                  onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); f.onChange(raw ? Number(raw) : 0) }}
+                                  placeholder="0"
+                                />
+                                {itemPrecioLocked && (
+                                  <Lock className={cn(
+                                    'absolute right-2 top-1/2 -translate-y-1/2 h-3 w-3 pointer-events-none',
+                                    isLocked ? 'text-amber-500' : 'text-muted-foreground/40'
+                                  )} />
+                                )}
+                              </div>
+                            )
+                            const withTooltip = (content: string) => (
+                              <TooltipProvider delayDuration={300}>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>{inputEl}</TooltipTrigger>
+                                  <TooltipContent side="top">{content}</TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            )
+                            return (
+                              <div>
+                                {itemPrecioLocked
+                                  ? withTooltip('Precio fijo del catálogo')
+                                  : bajoPrecioMin
+                                  ? withTooltip(`Mínimo permitido: ${cop(precioMinimo!)}`)
+                                  : inputEl
+                                }
+                                {bajoPrecioMin && (
+                                  <p className="text-[10px] text-destructive mt-0.5 text-right">
+                                    Mín: {cop(precioMinimo!)}
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          }}
                         />
                       </div>
                     )
@@ -792,6 +1061,12 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                       <div className="text-right">
                         <p className="text-xs text-muted-foreground md:hidden mb-1">Subtotal</p>
                         <span className="text-sm font-semibold tabular-nums">{cop(sub)}</span>
+                        {campanaAplicada && (
+                          <div className="flex items-center justify-end gap-1 mt-0.5">
+                            <Zap className="h-3 w-3 text-amber-500" />
+                            <span className="text-[10px] text-amber-600 font-medium">Campaña aplicada</span>
+                          </div>
+                        )}
                       </div>
                     )
 
@@ -840,6 +1115,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           {descField}
                           {subtotalField}
                           {deleteBtn}
+                          {campaignBanner && <div className="col-span-full -mt-1">{campaignBanner}</div>}
                         </>}
 
                         {/* ── PROCEDIMIENTO ── selector | citas | precio | desc% | periodicidad | subtotal | del */}
@@ -870,6 +1146,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           </div>
                           {subtotalField}
                           {deleteBtn}
+                          {campaignBanner && <div className="col-span-full -mt-1">{campaignBanner}</div>}
                         </>}
 
                         {/* ── LIBRE ── descripción | citas | precio | desc% | periodicidad | subtotal | del */}
@@ -1113,6 +1390,25 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         />
       )}
 
+{/* ── Modal firma compromiso de pago (Documenso) ────────────────── */}
+      <Dialog open={Boolean(compromisoPagoId)} onOpenChange={(v) => !v && setCompromisoPagoId(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSignature className="h-4.5 w-4.5 text-primary" />
+              Compromiso de pago
+            </DialogTitle>
+          </DialogHeader>
+          {compromisoPagoId && (
+            <CompromisoPagoFirmaContent
+              consentimientoId={compromisoPagoId}
+              onFirmado={() => setCompromisoPagoId(null)}
+              onCancel={() => setCompromisoPagoId(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
 {/* ── Modal crear paciente ───────────────────────────────────────── */}
       <Dialog open={crearPacienteOpen} onOpenChange={setCrearPacienteOpen}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
@@ -1161,3 +1457,4 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     </div>
   )
 }
+

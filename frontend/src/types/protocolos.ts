@@ -118,11 +118,11 @@ export interface ConsentimientoPaciente {
   template_nombre:      string
   procedimiento:        string | null   // UUID
   procedimiento_nombre: string | null
-  fecha_firma:          string
-  vigencia_hasta:       string
+  fecha_firma:          string | null
+  vigencia_hasta:       string | null
   metodo:               MetodoConsentimiento
   archivo_url:          string | null
-  registrado_por_nombre: string
+  registrado_por_nombre?: string
   created_at:           string
 }
 

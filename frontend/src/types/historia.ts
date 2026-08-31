@@ -1,4 +1,42 @@
 export type TipoFoto = 'antes' | 'durante' | 'despues'
+
+export type TipoAplicacion = 'equipo' | 'inyectable' | 'topico' | 'laser' | 'otro' | ''
+
+export interface AnotacionZona {
+  id: string
+  nota: string
+  diagrama: string
+  diagrama_nombre: string
+  x: number
+  y: number
+  radio: number
+  texto: string
+  tipo_aplicacion: TipoAplicacion
+  parametros: Record<string, string>
+  activo: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface DiagramaConAnotaciones {
+  id: string
+  nombre: string
+  imagen_url: string | null
+  orden: number
+}
+
+export interface ZonasNota {
+  diagramas: DiagramaConAnotaciones[]
+  anotaciones: AnotacionZona[]
+}
+
+export interface ZonasVisita {
+  nota_id: string
+  fecha: string
+  servicio: string | null
+  diagramas: DiagramaConAnotaciones[]
+  anotaciones: AnotacionZona[]
+}
 export type TipoFitzpatrick = 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI'
 
 export interface HistoriaClinica {

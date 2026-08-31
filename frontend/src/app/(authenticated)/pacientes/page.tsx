@@ -4,12 +4,13 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import {
-  Plus, Search, ChevronLeft, ChevronRight,
+  Plus, Search, ChevronLeft, ChevronRight, Upload,
   Phone, Mail, MessageCircle, PhoneCall, MessageSquare,
   ChevronRight as ArrowRight, Users, UserCheck, UserX, Loader2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { pacientesApi } from '@/lib/api/pacientes'
+import { CargaMasivaPacientesModal } from '@/components/pacientes/CargaMasivaPacientesModal'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -253,6 +254,7 @@ export default function PacientesPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [filtroActivo, setFiltroActivo] = useState<string>('todos')
+  const [cargaMasivaOpen, setCargaMasivaOpen] = useState(false)
   const debouncedSearch = useDebounce(search, 400)
 
   const params = {
@@ -284,13 +286,21 @@ export default function PacientesPage() {
             {isLoading ? 'Cargando...' : `${total} paciente${total !== 1 ? 's' : ''} registrados`}
           </p>
         </div>
-        <Button asChild>
-          <Link href="/pacientes/nuevo">
-            <Plus className="h-4 w-4 mr-1.5" />
-            Nuevo paciente
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => setCargaMasivaOpen(true)}>
+            <Upload className="h-4 w-4 mr-1.5" />
+            Cargar masivo
+          </Button>
+          <Button asChild>
+            <Link href="/pacientes/nuevo">
+              <Plus className="h-4 w-4 mr-1.5" />
+              Nuevo paciente
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      <CargaMasivaPacientesModal open={cargaMasivaOpen} onOpenChange={setCargaMasivaOpen} />
 
       {/* ── Quick stats ── */}
       {!isLoading && data && (

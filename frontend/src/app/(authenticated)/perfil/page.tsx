@@ -5,12 +5,10 @@ import { useMutation } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Shield, Phone, Mail, Building2, CalendarDays, KeyRound, Check, Stethoscope, Upload, X, UserPen, Palette } from 'lucide-react'
+import { Shield, Phone, Mail, Building2, CalendarDays, KeyRound, Check, Stethoscope, Upload, X, UserPen } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
 import { usuariosApi } from '@/lib/api/usuarios'
 import { useAuthStore } from '@/store/authStore'
-import { useThemeStore } from '@/store/themeStore'
-import { PALETTES } from '@/lib/themes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -42,7 +40,6 @@ const passwordSchema = z.object({
 
 export default function PerfilPage() {
   const { user, setUser } = useAuthStore()
-  const { paletteId, setPalette } = useThemeStore()
   const [passwordOpen, setPasswordOpen] = useState(false)
   const [firmaPreview, setFirmaPreview] = useState<string | null>(user?.firma_digital_url ?? null)
   const [firmaFile, setFirmaFile] = useState<File | null>(null)
@@ -296,50 +293,8 @@ export default function PerfilPage() {
         </div>
       </div>
 
-      {/* ── Apariencia ── */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-5">
-        <div className="flex items-center gap-2.5 mb-1">
-          <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-            <Palette className="h-3.5 w-3.5 text-primary" />
-          </div>
-          <h3 className="text-sm font-semibold">Apariencia</h3>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4 ml-10">Elige el color de acento de la interfaz. Se guarda solo en este navegador.</p>
-        <div className="flex flex-wrap gap-4 ml-10">
-          {PALETTES.map(p => (
-            <button
-              key={p.id}
-              title={p.label}
-              onClick={() => setPalette(p.id)}
-              className="flex flex-col items-center gap-1.5 group"
-            >
-              <span
-                className="h-9 w-9 rounded-full block transition-transform group-hover:scale-110"
-                style={{
-                  backgroundColor: p.swatch,
-                  outline: paletteId === p.id ? `3px solid ${p.swatch}` : '3px solid transparent',
-                  outlineOffset: '2px',
-                }}
-              >
-                {paletteId === p.id && (
-                  <span className="flex h-full items-center justify-center">
-                    <Check className="h-4 w-4 text-white" strokeWidth={3} />
-                  </span>
-                )}
-              </span>
-              <span className={cn(
-                'text-[10px] transition-colors',
-                paletteId === p.id ? 'font-semibold text-foreground' : 'text-muted-foreground',
-              )}>
-                {p.label}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-
       {/* ── Datos profesionales ── */}
-      {user.es_profesional && (
+      {(user.es_profesional || user.es_admin) && (
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
           <div className="px-6 py-4 border-b border-gray-100 flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">

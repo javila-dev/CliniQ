@@ -1,8 +1,8 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle, XCircle, Clock, ExternalLink, User, Stethoscope } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, CheckCircle, XCircle, Clock, ExternalLink, User, Stethoscope, Loader2 } from 'lucide-react'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import Link from 'next/link'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
@@ -50,6 +50,12 @@ function ConsentimientoIcon({ item }: { item: ResumenConsentimiento }) {
 }
 
 export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) {
+  const queryClient = useQueryClient()
+
+  const { mutate: recuperarPdf, isPending: recuperandoPdf } = useMutation({
+    mutationFn: () => agendaApi.citas.recuperarPdfAsistencia(cita.id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['citas', cita.id] }),
+  })
 
   const { data: antecedentes } = useQuery({
     queryKey: ['antecedentes', paciente.id],
@@ -273,6 +279,37 @@ export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) 
                   </div>
                 )
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Comprobante de asistencia firmado (P21) */}
+        {cita.firma_asistencia_estado === 'firmada' && (
+          <div className="space-y-1.5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Asistencia</p>
+            <div className="flex items-center gap-2 rounded px-1.5 py-1 -mx-1.5">
+              <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+              <span className="text-xs flex-1">Firma de asistencia</span>
+              {cita.firma_asistencia_archivo_url ? (
+                <a
+                  href={cita.firma_asistencia_archivo_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Ver comprobante firmado"
+                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                </a>
+              ) : (
+                <button
+                  onClick={() => recuperarPdf()}
+                  disabled={recuperandoPdf}
+                  className="text-[10px] text-primary hover:underline disabled:opacity-50"
+                  title="Recuperar PDF firmado"
+                >
+                  {recuperandoPdf ? <Loader2 className="h-3 w-3 animate-spin" /> : 'PDF'}
+                </button>
+              )}
             </div>
           </div>
         )}

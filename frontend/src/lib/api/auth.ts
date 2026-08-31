@@ -50,8 +50,13 @@ export const authApi = {
     return res.data
   },
 
-  restablecerPassword: async (token: string, nueva_password: string, confirmar_password: string): Promise<void> => {
-    await apiClient.post('/auth/restablecer-password/', { token, nueva_password, confirmar_password })
+  restablecerPassword: async (
+    token: string,
+    nueva_password: string,
+    confirmar_password: string,
+  ): Promise<{ ok: boolean; auto_login: boolean; access?: string; refresh?: string; clinica_id?: string | null }> => {
+    const res = await apiClient.post('/auth/restablecer-password/', { token, nueva_password, confirmar_password })
+    return res.data
   },
 
   invitar: async (email: string): Promise<void> => {

@@ -22,6 +22,15 @@ export const carteraApi = {
     return res.data
   },
 
+  aprobarExcepcion: async (cuotaId: string): Promise<void> => {
+    await apiClient.post(`/cartera/cuotas/${cuotaId}/aprobar_excepcion/`)
+  },
+
+  patchCuota: async (cuotaId: string, data: { fecha_vencimiento?: string; monto?: number }): Promise<CuotaCartera> => {
+    const res = await apiClient.patch<CuotaCartera>(`/cartera/cuotas/${cuotaId}/`, data)
+    return res.data
+  },
+
   cuotasVencidas: async (): Promise<CuotaVencida[]> => {
     const lista = await carteraApi.list()
     const pendientes = lista.filter((c) => c.cuotas_pagadas < c.cuotas_total)

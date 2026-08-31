@@ -5,14 +5,17 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Loader2, Plus, Trash2 } from 'lucide-react'
+import { AlertCircle, Check, ChevronsUpDown, Loader2, Plus, Search, Trash2, X } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
+import { usuariosApi } from '@/lib/api/usuarios'
 import { rolesApi } from '@/lib/api/roles'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { authApi } from '@/lib/api/auth'
 import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { cn } from '@/lib/utils'
@@ -46,6 +49,7 @@ const createSchema = z.object({
   tipo_contrato: z.enum(['empleado', 'contratista', 'socio']),
   fecha_ingreso: z.string().min(1, 'Requerido'),
   especialidades: z.array(z.string()),
+  es_profesional: z.boolean().optional(),
 })
 
 const editSchema = createSchema.omit({ email: true, sede_principal: true }).extend({
@@ -58,9 +62,9 @@ type CreateForm = z.infer<typeof createSchema>
 type EditForm = z.infer<typeof editSchema>
 
 
-// ─── Checkbox group para especialidades ───────────────────────
+// ─── Multi-select buscable para especialidades ────────────────
 
-function EspecialidadesCheckboxes({
+function EspecialidadesSelect({
   value = [],
   onChange,
 }: {
@@ -71,39 +75,77 @@ function EspecialidadesCheckboxes({
     queryKey: ['servicios', 'activos'],
     queryFn: () => clinicasApi.servicios.activos(),
   })
+  const [open, setOpen] = useState(false)
+  const [q, setQ] = useState('')
 
-  const toggle = (id: string) => {
+  const opciones = servicios ?? []
+  const toggle = (id: string) =>
     onChange(value.includes(id) ? value.filter((v) => v !== id) : [...value, id])
-  }
 
-  if (!servicios?.length) return (
+  const termino = q.trim().toLowerCase()
+  const filtradas = termino
+    ? opciones.filter((s) => s.nombre.toLowerCase().includes(termino))
+    : opciones
+  const seleccionadas = opciones.filter((s) => value.includes(s.id))
+
+  if (servicios && !servicios.length) return (
     <p className="text-xs text-muted-foreground">No hay servicios activos</p>
   )
 
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {servicios.map((s) => {
-        const checked = value.includes(s.id)
-        return (
-          <label
-            key={s.id}
-            className={cn(
-              'flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer text-sm transition-colors',
-              checked
-                ? 'border-primary/40 bg-primary/5 text-primary font-medium'
-                : 'border-gray-200 hover:border-gray-300 text-muted-foreground'
-            )}
-          >
-            <input
-              type="checkbox"
-              className="accent-primary"
-              checked={checked}
-              onChange={() => toggle(s.id)}
-            />
-            <span className="truncate">{s.nombre}</span>
-          </label>
-        )
-      })}
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQ('') }}>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" role="combobox"
+            className="w-full justify-between font-normal">
+            <span className={cn(!seleccionadas.length && 'text-muted-foreground')}>
+              {seleccionadas.length
+                ? `${seleccionadas.length} servicio${seleccionadas.length > 1 ? 's' : ''}`
+                : 'Seleccionar servicios…'}
+            </span>
+            <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+          <div className="flex items-center border-b px-3">
+            <Search className="h-4 w-4 shrink-0 opacity-50" />
+            <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
+              placeholder="Buscar servicio…"
+              className="flex h-9 w-full bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground" />
+          </div>
+          <div className="max-h-60 overflow-y-auto p-1">
+            {filtradas.length === 0 ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground text-center">Sin resultados</p>
+            ) : filtradas.map((s) => {
+              const checked = value.includes(s.id)
+              return (
+                <button key={s.id} type="button" onClick={() => toggle(s.id)}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent',
+                    checked && 'font-medium',
+                  )}>
+                  <Check className={cn('h-4 w-4 shrink-0', checked ? 'opacity-100 text-primary' : 'opacity-0')} />
+                  <span className="truncate">{s.nombre}</span>
+                </button>
+              )
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+
+      {seleccionadas.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {seleccionadas.map((s) => (
+            <Badge key={s.id} variant="secondary" className="gap-1 pr-1">
+              {s.nombre}
+              <button type="button" onClick={() => toggle(s.id)}
+                className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${s.nombre}`}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -378,6 +420,14 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     enabled: open && !!colaborador?.id,
   })
 
+  // Fetch user-level fields (first_name, last_name, telefono) from the usuarios
+  // endpoint, since the colaboradores serializer may not expose them.
+  const { data: usuarioDetail, isLoading: isLoadingUsuario } = useQuery({
+    queryKey: ['usuario-detail-colab', colaborador?.user],
+    queryFn: () => usuariosApi.get(colaborador!.user),
+    enabled: open && !!colaborador?.user,
+  })
+
   // Roles dinámicos — excluye superadmin
   const { data: rolesData = [] } = useQuery<Rol[]>({
     queryKey: ['roles'],
@@ -395,20 +445,23 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
   })
   const sedes = sedesData?.results ?? []
 
-  // Build edit values from the best available source (detail preferred over list item)
+  // Colaborador-model fields come from the detail (or fall back to the list item).
+  // User-model fields (first_name, last_name, telefono) come from /usuarios/{id}/
+  // because the colaboradores serializer may not expose them individually.
   const editSrc = colaboradorDetail ?? (isEdit ? colaborador : null)
   const editValues: EditForm | undefined = editSrc ? {
-    first_name:       editSrc.first_name       ?? '',
-    last_name:        editSrc.last_name        ?? '',
+    first_name:       usuarioDetail?.first_name       || editSrc.first_name       || '',
+    last_name:        usuarioDetail?.last_name        || editSrc.last_name        || '',
+    telefono:         usuarioDetail?.telefono         ?? editSrc.telefono         ?? '',
     numero_documento: editSrc.numero_documento ?? '',
-    telefono:         editSrc.telefono         ?? '',
-    role_id:          editSrc.role_id          ?? '',
+    role_id:          editSrc.role_id          ?? usuarioDetail?.role_id ?? '',
     sede_principal:   editSrc.sede_principal   ?? '',
     sedes_ids:        editSrc.sedes            ?? [],
     tipo_contrato:    editSrc.tipo_contrato    ?? 'empleado',
     fecha_ingreso:    editSrc.fecha_ingreso    ?? '',
     especialidades:   editSrc.especialidades_detalle?.map((e) => e.id) ?? editSrc.especialidades ?? [],
     activo:           editSrc.activo           ?? true,
+    es_profesional:   editSrc.es_profesional   ?? false,
   } : undefined
 
   // Create form
@@ -421,6 +474,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
       especialidades: [],
       sedes_ids: [],
       fecha_ingreso: new Date().toISOString().split('T')[0],
+      es_profesional: false,
     },
   })
 
@@ -439,6 +493,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
         especialidades: [],
         sedes_ids: [],
         fecha_ingreso: new Date().toISOString().split('T')[0],
+        es_profesional: false,
       })
     }
   }, [open, colaborador])
@@ -447,7 +502,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     mutationFn: colaboradoresApi.create,
     onSuccess: (_data, variables) => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
-      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
+      qc.invalidateQueries({ queryKey: ['mi-plan'] })
       authApi.invitar(variables.email).catch(() => {})
       onOpenChange(false)
     },
@@ -462,7 +517,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
       console.log('PATCH colaborador response:', JSON.stringify(res, null, 2))
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
       qc.invalidateQueries({ queryKey: ['colaborador-detail', colaborador?.id] })
-      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
+      qc.invalidateQueries({ queryKey: ['mi-plan'] })
       onOpenChange(false)
     },
     onError: (err: any) => {
@@ -491,13 +546,16 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     watchRoleId: string,
     watchSedePrincipal: string,
     watchSedesIds: string[],
+    watchEsProfesional?: boolean,
   ) => {
-    // Determinar si el rol seleccionado tiene perfil profesional.
-    // Usa es_profesional del backend cuando esté disponible; fallback al slug 'profesional'.
+    // El rol puede tener es_profesional inherente (ej. rol "Profesional").
+    // Para roles que no lo tienen (ej. Admin, Recepción) se muestra el checkbox manual.
     const selectedRol = roles.find(r => r.id === watchRoleId)
-    const esProfesional = selectedRol
+    const rolInherenteProfesional = selectedRol
       ? (selectedRol.es_profesional ?? selectedRol.slug === 'profesional')
       : false
+    const esProfesional = rolInherenteProfesional || !!watchEsProfesional
+    const mostrarCheckbox = !!selectedRol && !rolInherenteProfesional
 
     return (
     <>
@@ -640,7 +698,26 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
         {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso.message}</p>}
       </div>
 
-      {/* Especialidades — solo si el rol tiene perfil profesional */}
+      {/* Checkbox "también atiende pacientes" — solo para roles sin perfil profesional inherente */}
+      {mostrarCheckbox && (
+        <Controller
+          name="es_profesional"
+          control={control}
+          render={({ field }) => (
+            <label className="flex items-center gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                className="accent-primary h-4 w-4"
+                checked={!!field.value}
+                onChange={(e) => field.onChange(e.target.checked)}
+              />
+              <span className="text-sm">También atiende pacientes</span>
+            </label>
+          )}
+        />
+      )}
+
+      {/* Especialidades — si el rol es profesional o se activó el checkbox */}
       {esProfesional && (
         <div className="space-y-2">
           <Label>Especialidades / Servicios que realiza</Label>
@@ -648,7 +725,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
             name="especialidades"
             control={control}
             render={({ field }) => (
-              <EspecialidadesCheckboxes value={field.value} onChange={field.onChange} />
+              <EspecialidadesSelect value={field.value} onChange={field.onChange} />
             )}
           />
         </div>
@@ -667,7 +744,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
         <div className="flex-1 overflow-y-auto px-6 py-5">
           {isEdit ? (
             // ── EDIT FORM ──
-            isLoadingDetail ? (
+            (isLoadingDetail || isLoadingUsuario) ? (
               <div className="flex items-center justify-center py-16">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
@@ -680,6 +757,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
                 editForm.watch('role_id'),
                 editForm.watch('sede_principal'),
                 editForm.watch('sedes_ids'),
+                editForm.watch('es_profesional'),
               )}
 
               {/* Estado activo/inactivo */}
@@ -750,6 +828,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
                 createForm.watch('role_id'),
                 createForm.watch('sede_principal'),
                 createForm.watch('sedes_ids'),
+                createForm.watch('es_profesional'),
               )}
             </form>
           )}
@@ -790,7 +869,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
             type="submit"
             disabled={
               isPending ||
-              (isEdit && isLoadingDetail) ||
+              (isEdit && (isLoadingDetail || isLoadingUsuario)) ||
               (!isEdit && !puedeAgregar) ||
               (isEdit && !colaborador?.activo && !puedeAgregar && editForm.watch('activo') === true)
             }

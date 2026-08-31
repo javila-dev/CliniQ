@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Search, Users, Stethoscope, PhoneCall,
+  Plus, Search, Users, Stethoscope, PhoneCall, ShieldCheck, UserCog,
   Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
@@ -53,8 +53,19 @@ const CONTRATO_CONFIG: Record<string, { label: string; className: string }> = {
 }
 
 const ROL_CONFIG: Record<string, { label: string; icon: React.ElementType; className: string }> = {
-  profesional: { label: 'Profesional', icon: Stethoscope, className: 'bg-rose-50 text-rose-700 ring-rose-200/60' },
-  recepcion:   { label: 'Recepción',   icon: PhoneCall,   className: 'bg-sky-50 text-sky-700 ring-sky-200/60'    },
+  admin:       { label: 'Administrador', icon: ShieldCheck, className: 'bg-violet-50 text-violet-700 ring-violet-200/60' },
+  profesional: { label: 'Profesional',  icon: Stethoscope, className: 'bg-rose-50 text-rose-700 ring-rose-200/60' },
+  recepcion:   { label: 'Recepción',    icon: PhoneCall,   className: 'bg-sky-50 text-sky-700 ring-sky-200/60'    },
+}
+
+// Rol a mostrar en la fila: usa el config por slug conocido; si es un rol
+// dinámico/custom, cae al nombre del rol devuelto por el backend.
+function resolverRol(colaborador: Colaborador) {
+  const conocido = ROL_CONFIG[colaborador.rol ?? '']
+  if (conocido) return conocido
+  const nombre = colaborador.role_nombre?.trim()
+  if (nombre) return { label: nombre, icon: UserCog, className: 'bg-gray-100 text-gray-600 ring-gray-200/60' }
+  return null
 }
 
 // ─── PlanLimitBanner ──────────────────────────────────────────
@@ -83,7 +94,7 @@ function PlanLimitBanner({ limite }: { limite: PlanLimite }) {
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-2 mb-1.5">
           <span className="text-xs font-medium text-foreground">
-            {usuarios_activos} de {max_usuarios} usuarios activos en el plan
+            {usuarios_activos} de {max_usuarios} usuarios en el plan
           </span>
           {isFull ? (
             <span className="text-xs font-semibold text-red-600">Límite alcanzado</span>
@@ -122,7 +133,7 @@ function ColaboradorRow({
   onImpersonate?: () => void
   canActivate: boolean
 }) {
-  const rol = ROL_CONFIG[colaborador.rol]
+  const rol = resolverRol(colaborador)
   const contrato = CONTRATO_CONFIG[colaborador.tipo_contrato]
   const RolIcon = rol?.icon ?? Stethoscope
 
@@ -193,15 +204,23 @@ function ColaboradorRow({
       </div>
 
       <div className="shrink-0">
-        <span className={cn(
-          'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1',
-          colaborador.activo
-            ? 'bg-green-50 text-green-700 ring-green-200/60'
-            : 'bg-gray-100 text-gray-500 ring-gray-200/60'
-        )}>
-          <span className={cn('h-1.5 w-1.5 rounded-full', colaborador.activo ? 'bg-green-500' : 'bg-gray-400')} />
-          {colaborador.activo ? 'Activo' : 'Inactivo'}
-        </span>
+        {colaborador.invitacion_pendiente ? (
+          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1 bg-amber-50 text-amber-700 ring-amber-200/60"
+            title="El colaborador fue invitado pero aún no activa su cuenta. Ocupa un cupo del plan.">
+            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+            Pendiente
+          </span>
+        ) : (
+          <span className={cn(
+            'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1',
+            colaborador.activo
+              ? 'bg-green-50 text-green-700 ring-green-200/60'
+              : 'bg-gray-100 text-gray-500 ring-gray-200/60'
+          )}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', colaborador.activo ? 'bg-green-500' : 'bg-gray-400')} />
+            {colaborador.activo ? 'Activo' : 'Inactivo'}
+          </span>
+        )}
       </div>
 
       <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -323,7 +342,7 @@ export default function PersonalPage() {
   const debouncedSearch = useDebounce(search, 350)
 
   const handleImpersonate = async (colaborador: Colaborador) => {
-    await impersonate(colaborador.id)
+    await impersonate(colaborador.user)
     router.push('/dashboard')
   }
 
@@ -338,38 +357,14 @@ export default function PersonalPage() {
     queryFn: () => colaboradoresApi.list(params),
   })
 
-  // Plan: solo max_usuarios y sin_limite — raramente cambia
-  const { data: planInfo } = useQuery({
+  // Uso del plan (activados + invitaciones pendientes). El backend ya calcula
+  // usuarios_activos / puede_agregar / slots; se invalida en cada toggle/create.
+  const { data: limite } = useQuery({
     queryKey: ['mi-plan'],
     queryFn: () => clinicasApi.getMiPlan(),
-    staleTime: 5 * 60_000,
+    staleTime: 60_000,
     enabled: isAdmin,
   })
-
-  // Conteo real de activos — query ligera que se invalida en cada toggle/create
-  const { data: activosPage } = useQuery({
-    queryKey: ['colaboradores-activos-count'],
-    queryFn: () => colaboradoresApi.list({ activo: true, page_size: 1 }),
-    staleTime: 0,
-    enabled: isAdmin,
-  })
-
-  // Construir PlanLimite combinando ambas fuentes
-  const limite: import('@/types/usuarios').PlanLimite | undefined = planInfo
-    ? (() => {
-        const sinLimite   = planInfo.sin_limite
-        const maxUsuarios = planInfo.max_usuarios
-        const activos     = activosPage?.count ?? planInfo.usuarios_activos
-        const slots       = sinLimite || maxUsuarios === null ? null : Math.max(0, maxUsuarios - activos)
-        return {
-          max_usuarios:     maxUsuarios,
-          usuarios_activos: activos,
-          puede_agregar:    sinLimite || (maxUsuarios !== null && activos < maxUsuarios),
-          slots_disponibles: slots,
-          sin_limite:       sinLimite,
-        }
-      })()
-    : undefined
 
   const puedeAgregar = limite?.puede_agregar ?? true
 
@@ -378,7 +373,7 @@ export default function PersonalPage() {
       colaboradoresApi.update(id, { activo }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
-      qc.invalidateQueries({ queryKey: ['colaboradores-activos-count'] })
+      qc.invalidateQueries({ queryKey: ['mi-plan'] })
     },
   })
 

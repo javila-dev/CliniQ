@@ -1,12 +1,18 @@
 'use client'
 
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle } from 'lucide-react'
 import { agendaApi } from '@/lib/api/agenda'
 import { clinicasApi } from '@/lib/api/clinicas'
+import { carteraApi } from '@/lib/api/cartera'
 import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
+import { todayISO } from '@/lib/utils'
 import { ProfesionalSelect } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
@@ -36,9 +42,16 @@ interface EditarCitaFormProps {
   onSuccess: () => void
 }
 
+type DeudaError = { cuotas: number; total: string; cuotaIds: string[] }
+
+const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
+
 export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProps) {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const { user } = useAuthStore()
+  const canAprobarExcepcion = hasPermission(user, PERM.CARTERA_APROBAR_EXCEPCION)
+  const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
 
   const { control, register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -80,12 +93,23 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
       queryClient.invalidateQueries({ queryKey: ['slots'] })
       onSuccess()
     },
+    onError: (err: any) => {
+      const data = err?.response?.data
+      if (data?.code === 'PACIENTE_CON_DEUDA') {
+        setDeudaError({
+          cuotas:   data.detalle?.cuotas_vencidas ?? 0,
+          total:    data.detalle?.monto_total ?? '0',
+          cuotaIds: data.detalle?.cuota_ids ?? [],
+        })
+      }
+    },
   })
 
   const serverError = (() => {
     if (!error) return null
     const data = (error as any)?.response?.data
     if (!data) return 'Error al guardar los cambios'
+    if (data.code === 'PACIENTE_CON_DEUDA') return null
     if (data.error) return String(data.error)
     if (data.detail) return String(data.detail)
     const entries = Object.entries(data)
@@ -98,6 +122,19 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
     }
     return 'Error al guardar los cambios'
   })()
+
+  const { mutate: ejecutarAprobarExcepcion, isPending: aprobandoExcepcion } = useMutation({
+    mutationFn: (cuotaIds: string[]) => Promise.all(cuotaIds.map((id) => carteraApi.aprobarExcepcion(id))),
+    onSuccess: () => setDeudaError(null),
+  })
+
+  function handleAprobarExcepcion() {
+    if (!deudaError?.cuotaIds.length) return
+    if (!window.confirm(
+      `¿Aprobar excepción de deuda para este paciente? Esto permitirá reagendar la cita a pesar de las ${deudaError.cuotas} cuotas vencidas.`
+    )) return
+    ejecutarAprobarExcepcion(deudaError.cuotaIds)
+  }
 
   return (
     <form onSubmit={handleSubmit((v) => mutate(v))} className="space-y-4">
@@ -161,7 +198,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
           <Label>Fecha *</Label>
           <Input
             type="date"
-            min={new Date().toISOString().split('T')[0]}
+            min={todayISO()}
             {...register('fecha', { onChange: () => setValue('slot', '') })}
           />
           {errors.fecha && <p className="text-xs text-destructive">{errors.fecha.message}</p>}
@@ -197,6 +234,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
             fecha={fecha}
             value={slot}
             onSelect={(s) => setValue('slot', s)}
+            citaId={cita.id}
           />
         </div>
         {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
@@ -210,6 +248,44 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
       {serverError && (
         <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
           <p className="text-sm text-destructive">{serverError}</p>
+        </div>
+      )}
+
+      {deudaError && (
+        <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-sm font-medium text-amber-900">No se puede reagendar</p>
+              <p className="text-sm text-amber-800">
+                El paciente tiene {deudaError.cuotas} {deudaError.cuotas === 1 ? 'cuota vencida' : 'cuotas vencidas'} por un total de {COP.format(parseFloat(deudaError.total))}.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => {
+                router.push(`/cartera?paciente=${cita.paciente}`)
+                onCancel()
+              }}
+            >
+              Ver cartera del paciente
+            </Button>
+            {canAprobarExcepcion && deudaError.cuotaIds.length > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleAprobarExcepcion}
+                disabled={aprobandoExcepcion}
+              >
+                {aprobandoExcepcion ? 'Aprobando...' : 'Aprobar excepción'}
+              </Button>
+            )}
+          </div>
         </div>
       )}
 

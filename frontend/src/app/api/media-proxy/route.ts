@@ -29,18 +29,16 @@ export async function GET(request: NextRequest) {
     return new NextResponse('Missing url parameter', { status: 400 })
   }
 
-  // Validar que sea una URL presignada (v4: X-Amz-*, v2: AWSAccessKeyId)
   const isPresigned = rawUrl.includes('X-Amz-') || rawUrl.includes('x-amz-') || rawUrl.includes('AWSAccessKeyId')
-  if (!isPresigned) {
-    return new NextResponse('Not a presigned URL — use direct access for public assets', { status: 400 })
+  const isMinioUrl  = rawUrl.includes(MINIO_PUBLIC_FACING) || rawUrl.includes(MINIO_INTERNAL)
+
+  if (!isPresigned && !isMinioUrl) {
+    return new NextResponse('URL not allowed', { status: 400 })
   }
 
-  // Reemplazar el hostname público por el interno para que Next.js pueda resolverlo
-  // El browser envía la URL con el hostname que él ve; el servidor necesita el interno
+  // Normalizar al hostname interno para que Next.js pueda resolverlo desde Docker
   let targetUrl = rawUrl
-  if (MINIO_PUBLIC_FACING !== MINIO_INTERNAL) {
-    targetUrl = rawUrl.replace(MINIO_PUBLIC_FACING, MINIO_INTERNAL)
-  }
+    .replace(MINIO_PUBLIC_FACING, MINIO_INTERNAL)
 
   // Validar que sea una URL válida
   try {

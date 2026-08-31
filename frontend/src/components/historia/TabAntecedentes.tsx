@@ -13,6 +13,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { useToast } from '@/hooks/use-toast'
 import { formatDate } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import type { AntecedentePaciente, AntecedentePacienteUpdate, TipoFitzpatrick } from '@/types/historia'
 
 const FITZPATRICK_OPTIONS: { value: TipoFitzpatrick; label: string }[] = [
@@ -115,14 +117,21 @@ type SubTabPersonal = 'patologicos' | 'farmacologicos' | 'quirurgicos' | 'trauma
 export function TabAntecedentes({ pacienteId, modoAtencion = false }: TabAntecedentesProps) {
   const queryClient = useQueryClient()
   const { toast } = useToast()
+  const { user } = useAuthStore()
   const populated = useRef(false)
 
-  const { data: antecedentes, isLoading: loadingAntecedentes, isError: errorAntecedentes } = useQuery({
+  const puedeEditar = hasPermission(user, PERM.PACIENTES_ANTECEDENTES_EDITAR)
+  const puedeVer = puedeEditar || hasPermission(user, PERM.PACIENTES_ANTECEDENTES_VER)
+
+  const { data: antecedentes, isLoading: loadingAntecedentes, isError: errorAntecedentes, error: errorAnt } = useQuery({
     queryKey: ['antecedentes', pacienteId],
     queryFn: () => historiaClinicaApi.antecedentes.get(pacienteId),
-    enabled: Boolean(pacienteId),
+    enabled: Boolean(pacienteId) && puedeVer,
     staleTime: 30_000,
+    retry: (count, err: any) => err?.response?.status !== 403 && count < 2,
   })
+
+  const sinPermisoVer = (errorAnt as any)?.response?.status === 403
 
   const { register, control, handleSubmit, reset, getValues, formState: { isDirty } } = useForm<FormValues>({
     defaultValues: EMPTY_FORM,
@@ -144,12 +153,26 @@ export function TabAntecedentes({ pacienteId, modoAtencion = false }: TabAnteced
       reset(getValues())
       toast({ title: 'Antecedentes guardados', description: 'Los cambios quedaron registrados.' })
     },
-    onError: () => {
-      toast({ title: 'Error al guardar', description: 'No se pudieron guardar los antecedentes. Verifica tu conexión e intenta de nuevo.', variant: 'destructive' })
+    onError: (err: any) => {
+      const description = err?.response?.status === 403
+        ? 'Tu rol no tiene permiso para editar los antecedentes de este paciente.'
+        : 'No se pudieron guardar los antecedentes. Verifica tu conexión e intenta de nuevo.'
+      toast({ title: 'Error al guardar', description, variant: 'destructive' })
     },
   })
 
   const tieneAlertas = antecedentes?.personales?.alergicos?.trim() || antecedentes?.personales?.contraindicaciones?.trim()
+
+  if (!puedeVer || sinPermisoVer) {
+    return (
+      <div className="max-w-2xl flex items-start gap-2 rounded-md bg-muted/60 border px-3 py-2.5">
+        <AlertTriangle className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+        <p className="text-xs text-muted-foreground font-medium">
+          No tienes permiso para consultar los antecedentes clínicos de este paciente.
+        </p>
+      </div>
+    )
+  }
 
   if (loadingAntecedentes) {
     return (
@@ -198,7 +221,14 @@ export function TabAntecedentes({ pacienteId, modoAtencion = false }: TabAnteced
         </p>
       )}
 
+      {!puedeEditar && (
+        <p className="text-xs text-muted-foreground italic">
+          Solo lectura — tu rol no puede modificar los antecedentes.
+        </p>
+      )}
+
       <form onSubmit={handleSubmit((data) => mutate(data))} className={modoAtencion ? 'rounded-lg border p-4' : undefined}>
+        <fieldset disabled={!puedeEditar} className="contents">
         <Tabs defaultValue="personales">
           <TabsList className="w-full">
             <TabsTrigger value="personales" className="flex-1 text-xs">Personales</TabsTrigger>
@@ -400,13 +430,16 @@ export function TabAntecedentes({ pacienteId, modoAtencion = false }: TabAnteced
             </div>
           </TabsContent>
         </Tabs>
+        </fieldset>
 
-        <div className="flex justify-end pt-4">
-          <Button type="submit" size="sm" disabled={isPending || !isDirty}>
-            {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
-            Guardar cambios
-          </Button>
-        </div>
+        {puedeEditar && (
+          <div className="flex justify-end pt-4">
+            <Button type="submit" size="sm" disabled={isPending || !isDirty}>
+              {isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Save className="h-3.5 w-3.5 mr-1.5" />}
+              Guardar cambios
+            </Button>
+          </div>
+        )}
       </form>
     </div>
   )

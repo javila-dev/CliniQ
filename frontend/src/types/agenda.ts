@@ -1,4 +1,5 @@
 export type EstadoCita = 'pendiente' | 'confirmada' | 'en_espera' | 'en_curso' | 'completada' | 'cancelada' | 'no_asistio'
+export type FirmaAsistenciaEstado = 'sin_firma' | 'enviada' | 'firmada' | 'rechazada'
 export type EstadoConfirmacion = 'sin_enviar' | 'enviado' | 'confirmado' | 'sin_respuesta'
 export type CanalOrigen = 'presencial' | 'telefono' | 'web' | 'redes'
 
@@ -21,6 +22,25 @@ export interface CotizacionResumenCita {
   num_citas: number
   citas_agendadas: number
   citas_restantes: number
+}
+
+export interface SesionTratamientoProc {
+  id: string
+  nombre: string
+  duracion_min: number
+}
+
+export interface SesionTratamientoContexto {
+  sesion_id: string
+  tratamiento_id: string
+  tratamiento_nombre: string
+  tipo_sesion_id: string
+  tipo_sesion_nombre: string
+  numero: number
+  total: number
+  estado: 'pendiente' | 'completado' | 'inasistencia'
+  procedimientos: SesionTratamientoProc[]
+  tiene_zonas: boolean
 }
 
 export interface Cita {
@@ -47,11 +67,18 @@ export interface Cita {
   consentimiento_info?: ConsentimientoInfo
   item_cotizacion_id?: string | null
   sesion_ejecutada_id?: string | null
+  sesion_tratamiento?: SesionTratamientoContexto | null
   cotizacion_resumen?: CotizacionResumenCita | null
   servicio_precio?: string | null
+  servicio_precio_base?: string | null
   checkin_metodo?: 'otp_whatsapp' | 'foto_presencial' | null
   checkin_en?: string | null
   checkin_foto_url?: string | null
+  firma_asistencia_estado?: FirmaAsistenciaEstado
+  firma_asistencia_documento_id?: string | null
+  firma_asistencia_signing_token?: string | null
+  firma_asistencia_archivo_url?: string | null
+  cobro_id?: string | null
   created_at: string
 }
 
@@ -117,4 +144,28 @@ export interface Bloqueo {
   fecha_inicio: string
   fecha_fin: string
   motivo: string | null
+}
+
+export type EstadoBloqueo = 'pendiente' | 'aprobado' | 'rechazado'
+
+export interface BloqueoAgenda {
+  id: string
+  sede: string | null
+  profesional: string | null
+  profesional_nombre: string | null
+  fecha_inicio: string
+  fecha_fin: string
+  motivo: string
+  estado: EstadoBloqueo
+  creado_por_nombre: string
+  aprobado_por_nombre: string | null
+  aprobado_en: string | null
+}
+
+export interface CreateBloqueoRequest {
+  sede?: string | null
+  profesional?: string | null
+  fecha_inicio: string
+  fecha_fin: string
+  motivo?: string
 }
