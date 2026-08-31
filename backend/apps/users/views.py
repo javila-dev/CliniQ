@@ -1,5 +1,6 @@
 import logging
 
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.utils.encoding import force_str
 from django.db import transaction
@@ -35,6 +36,7 @@ from apps.users.serializers import (
     UserCreateSerializer,
     UserSerializer,
     UserUpdateSerializer,
+    issue_login_tokens,
 )
 
 User = get_user_model()
@@ -78,6 +80,13 @@ class LoginThrottle(SimpleRateThrottle):
         return f"login_{self.get_ident(request)}"
 
 
+class GoogleLoginThrottle(SimpleRateThrottle):
+    rate = "10/min"
+
+    def get_cache_key(self, request, view):
+        return f"google_login_{self.get_ident(request)}"
+
+
 class TokenRefreshThrottle(SimpleRateThrottle):
     rate = "30/min"
 
@@ -114,6 +123,19 @@ def _protected_relations_message(exc: ProtectedError) -> str:
     return "No se puede eliminar el usuario porque tiene registros asociados."
 
 
+def _clinica_inactiva_response(user):
+    """Devuelve un error_response si la clinica del usuario esta desactivada, o None."""
+    if getattr(user, "clinica_id", None):
+        clinica = Clinica.objects.filter(id=user.clinica_id).values("activo").first()
+        if clinica and not clinica["activo"]:
+            return error_response(
+                "La clinica no esta activa. Contacta al administrador.",
+                "CLINICA_INACTIVA",
+                status.HTTP_403_FORBIDDEN,
+            )
+    return None
+
+
 class LoginView(APIView):
     authentication_classes = ()
     permission_classes = ()
@@ -127,16 +149,81 @@ class LoginView(APIView):
             return error_response("Credenciales invalidas.", "INVALID_CREDENTIALS", status.HTTP_401_UNAUTHORIZED)
 
         user = serializer.user
-        if getattr(user, "clinica_id", None):
-            clinica = Clinica.objects.filter(id=user.clinica_id).values("activo").first()
-            if clinica and not clinica["activo"]:
-                return error_response(
-                    "La clinica no esta activa. Contacta al administrador.",
-                    "CLINICA_INACTIVA",
-                    status.HTTP_403_FORBIDDEN,
-                )
+        inactiva = _clinica_inactiva_response(user)
+        if inactiva is not None:
+            return inactiva
 
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+
+class GoogleLoginView(APIView):
+    """Inicia sesion con una cuenta de Google que YA existe en el sistema.
+
+    Recibe el ID token de Google Identity Services en ``credential``, lo verifica
+    y busca el usuario por correo. No crea usuarios: si el correo no esta dado de
+    alta responde 403. Emite el mismo par de tokens que ``/auth/login/``.
+    """
+
+    authentication_classes = ()
+    permission_classes = ()
+    throttle_classes = (GoogleLoginThrottle,)
+
+    def post(self, request, *args, **kwargs):
+        if not settings.GOOGLE_OAUTH_CLIENT_ID:
+            return error_response(
+                "El inicio de sesion con Google no esta disponible.",
+                "GOOGLE_LOGIN_NOT_CONFIGURED",
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        credential = force_str(request.data.get("credential") or "").strip()
+        if not credential:
+            return error_response(
+                "Falta el token de Google.",
+                "GOOGLE_CREDENTIAL_MISSING",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            from google.auth.transport import requests as google_requests
+            from google.oauth2 import id_token
+
+            idinfo = id_token.verify_oauth2_token(
+                credential,
+                google_requests.Request(),
+                settings.GOOGLE_OAUTH_CLIENT_ID,
+            )
+        except ValueError:
+            return error_response(
+                "No pudimos verificar tu cuenta de Google.",
+                "GOOGLE_TOKEN_INVALID",
+                status.HTTP_401_UNAUTHORIZED,
+            )
+
+        email = force_str(idinfo.get("email") or "").strip()
+        if not email or idinfo.get("email_verified") not in (True, "true"):
+            return error_response(
+                "Tu cuenta de Google no tiene un correo verificado.",
+                "GOOGLE_EMAIL_UNVERIFIED",
+                status.HTTP_401_UNAUTHORIZED,
+            )
+
+        user = User.objects.filter(email__iexact=email).order_by("-is_active", "date_joined").first()
+        if user is None or not user.is_active or not user.activo:
+            return error_response(
+                "No hay una cuenta con ese correo. Pidele a tu administrador que te de acceso.",
+                "USER_NOT_FOUND",
+                status.HTTP_403_FORBIDDEN,
+            )
+
+        inactiva = _clinica_inactiva_response(user)
+        if inactiva is not None:
+            return inactiva
+
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        data = issue_login_tokens(user, user_agent=user_agent)
+        logger.info("Login con Google | user=%s", user.pk)
+        return Response(data, status=status.HTTP_200_OK)
 
 
 class RefreshView(TokenRefreshView):

@@ -371,37 +371,55 @@ class LoginSerializer(TokenObtainPairSerializer):
         return token
 
     def validate(self, attrs):
-        from apps.users.services import iniciar_sesion_unica
-
         data = super().validate(attrs)
 
-        # Sesion unica: cierra cualquier otra sesion activa de este usuario y
-        # re-emite el token con el nuevo identificador de sesion (get_token ya
-        # corrio una vez arriba, pero con el sid todavia viejo).
+        # Sesion unica + re-emision del token con el nuevo 'sid' (get_token ya
+        # corrio una vez arriba, pero con el sid todavia viejo). Camino
+        # compartido con el login de Google, ver issue_login_tokens.
         request = self.context.get("request")
         user_agent = request.META.get("HTTP_USER_AGENT", "") if request else ""
-        iniciar_sesion_unica(self.user, user_agent=user_agent)
-        refresh = self.get_token(self.user)
-        data["refresh"] = str(refresh)
-        data["access"] = str(refresh.access_token)
-
-        data["user"] = {
-            "id": str(self.user.id),
-            "email": self.user.email,
-            "first_name": self.user.first_name,
-            "last_name": self.user.last_name,
-            "nombre_completo": self.user.nombre_completo,
-            "rol": user_role_slug(self.user),
-            "role_id": user_role_id(self.user),
-            "role_nombre": user_role_name(self.user),
-            "permissions": sorted(get_user_permission_keys(self.user)),
-            "es_profesional": self.user.es_profesional,
-            "es_admin": self.user.es_admin,
-            "clinica_id": str(self.user.clinica_id) if self.user.clinica_id else None,
-            "sede_id": user_sede_id(self.user),
-            "clinica_nombre": self.user.clinica.nombre if self.user.clinica_id else None,
-        }
+        data.update(issue_login_tokens(self.user, user_agent=user_agent))
         return data
+
+
+def build_auth_user_payload(user) -> dict:
+    """Datos del usuario que el frontend guarda tras iniciar sesion.
+
+    Formato unico para el login por contrasena y el login con Google.
+    """
+    return {
+        "id": str(user.id),
+        "email": user.email,
+        "first_name": user.first_name,
+        "last_name": user.last_name,
+        "nombre_completo": user.nombre_completo,
+        "rol": user_role_slug(user),
+        "role_id": user_role_id(user),
+        "role_nombre": user_role_name(user),
+        "permissions": sorted(get_user_permission_keys(user)),
+        "es_profesional": user.es_profesional,
+        "es_admin": user.es_admin,
+        "clinica_id": str(user.clinica_id) if user.clinica_id else None,
+        "sede_id": user_sede_id(user),
+        "clinica_nombre": user.clinica.nombre if user.clinica_id else None,
+    }
+
+
+def issue_login_tokens(user, *, user_agent: str = "") -> dict:
+    """Rota la sesion unica y emite el par de tokens JWT + payload de usuario.
+
+    Devuelve un dict con las claves ``access``, ``refresh`` y ``user``, la misma
+    forma que la respuesta de ``POST /auth/login/``.
+    """
+    from apps.users.services import iniciar_sesion_unica
+
+    iniciar_sesion_unica(user, user_agent=user_agent)
+    refresh = LoginSerializer.get_token(user)
+    return {
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "user": build_auth_user_payload(user),
+    }
 
 
 class PermisoSerializer(serializers.ModelSerializer):

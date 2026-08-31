@@ -1,6 +1,7 @@
 from django.urls import path
 
 from apps.users.views import (
+    GoogleLoginView,
     ImpersonateUserView,
     InvitationRequestView,
     LoginView,
@@ -15,6 +16,7 @@ from apps.users.views import (
 
 urlpatterns = [
     path("login/", LoginView.as_view(), name="auth-login"),
+    path("google/", GoogleLoginView.as_view(), name="auth-google"),
     path("refresh/", RefreshView.as_view(), name="auth-refresh"),
     path("logout/", LogoutView.as_view(), name="auth-logout"),
     path("me/", MeView.as_view(), name="auth-me"),

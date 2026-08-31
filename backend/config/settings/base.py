@@ -149,6 +149,11 @@ SIMPLE_JWT = {
     "UPDATE_LAST_LOGIN": True,
 }
 
+# OAuth ID del cliente web de Google. Vacio = el endpoint /auth/google/ responde
+# 503. El login con Google solo autentica usuarios que ya existen (creados desde
+# el panel); nunca da de alta cuentas nuevas.
+GOOGLE_OAUTH_CLIENT_ID = config("GOOGLE_OAUTH_CLIENT_ID", default="")
+
 CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
 CORS_ALLOW_HEADERS = list(default_headers) + [
