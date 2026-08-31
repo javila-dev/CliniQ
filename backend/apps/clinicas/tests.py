@@ -412,6 +412,7 @@ class CampanaStatsTests(TestCase):
             duracion_min=45,
             precio="350000.00",
             precio_base="350000.00",
+            descuento_maximo_pct="30.00",
         )
         self.paciente = Paciente.objects.create(
             clinica=self.clinica,

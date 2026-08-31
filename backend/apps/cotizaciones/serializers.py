@@ -74,6 +74,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
     precio_campana_disponible = serializers.SerializerMethodField()
     campana_id = serializers.SerializerMethodField()
     campana_nombre = serializers.SerializerMethodField()
+    descuento_maximo_pct = serializers.SerializerMethodField()
+    precio_lista = serializers.SerializerMethodField()
 
     class Meta:
         model = ItemCotizacion
@@ -91,6 +93,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             "periodicidad",
             "valor_unitario",
             "descuento_porcentaje",
+            "descuento_maximo_pct",
+            "precio_lista",
             "precio_bloqueado",
             "subtotal",
             "citas_agendadas",
@@ -211,6 +215,56 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             valor_unitario=valor_unitario,
         )
 
+        # Tope de descuento del catálogo: el precio efectivo del ítem
+        # (valor_unitario ya con el descuento aplicado) no puede bajar de
+        # precio_lista * (1 - descuento_maximo_pct/100). Es un tope DURO: no lo
+        # levanta ningún permiso; para descontar más hay que subir el tope en el
+        # catálogo o usar una campaña activa.
+        precio_lista = None
+        desc_max = Decimal("0")
+        if tratamiento is not None and tratamiento.precio_estimado is not None:
+            precio_lista = tratamiento.precio_estimado
+            desc_max = tratamiento.descuento_maximo_pct or Decimal("0")
+        elif procedimiento is not None and getattr(procedimiento, "precio_base", None) is not None:
+            precio_lista = procedimiento.precio_base
+            desc_max = getattr(procedimiento, "descuento_maximo_pct", None) or Decimal("0")
+
+        if precio_lista is not None and valor_unitario not in (None, ""):
+            descuento_pct = attrs.get(
+                "descuento_porcentaje",
+                getattr(self.instance, "descuento_porcentaje", Decimal("0")),
+            ) or Decimal("0")
+            valor_unit_dec = Decimal(valor_unitario)
+            descuento_dec = Decimal(descuento_pct)
+            precio_efectivo = valor_unit_dec * (Decimal("1") - descuento_dec / Decimal("100"))
+            piso = Decimal(precio_lista) * (Decimal("1") - Decimal(desc_max) / Decimal("100"))
+            precio_campana = lookup_precio_campana(
+                clinica=clinica, sede=sede, procedimiento=procedimiento, tratamiento=tratamiento,
+            )
+            # Excepción: el ítem está a precio exacto de campaña activa y sin
+            # descuento adicional encima (así funciona "aplicar precio de campaña").
+            permite_por_campana = (
+                precio_campana is not None
+                and descuento_dec == 0
+                and valor_unit_dec.quantize(Decimal("0.01")) == Decimal(precio_campana).quantize(Decimal("0.01"))
+            )
+            # tolerancia de 1 centavo por redondeo
+            if not permite_por_campana and precio_efectivo < piso - Decimal("0.01"):
+                if desc_max <= 0:
+                    msg = (
+                        "Este ítem no admite descuento. El precio no puede bajar del "
+                        f"precio de lista (${float(precio_lista):,.0f})."
+                    )
+                else:
+                    msg = (
+                        f"El descuento supera el máximo permitido ({float(desc_max):g}%). "
+                        f"El precio del ítem no puede bajar de ${float(piso):,.0f}."
+                    )
+                raise serializers.ValidationError({
+                    "descuento_porcentaje": msg,
+                    "code": "DESCUENTO_EXCEDE_MAXIMO",
+                })
+
         return attrs
 
     def _resolve_clinica_sede(self):
@@ -258,6 +312,23 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
         cache[obj_key] = result
         return result
+
+    def _catalogo_precio_descmax(self, obj):
+        """(precio_lista, descuento_maximo_pct) del catálogo del ítem, o (None, None)."""
+        if obj.tratamiento_id and obj.tratamiento and obj.tratamiento.precio_estimado is not None:
+            return obj.tratamiento.precio_estimado, obj.tratamiento.descuento_maximo_pct
+        proc = obj.procedimiento or obj.servicio
+        if proc and getattr(proc, "precio_base", None) is not None:
+            return proc.precio_base, getattr(proc, "descuento_maximo_pct", Decimal("0"))
+        return None, None
+
+    def get_descuento_maximo_pct(self, obj):
+        _, desc_max = self._catalogo_precio_descmax(obj)
+        return str(desc_max) if desc_max is not None else None
+
+    def get_precio_lista(self, obj):
+        precio_lista, _ = self._catalogo_precio_descmax(obj)
+        return str(precio_lista) if precio_lista is not None else None
 
     def get_precio_campana_disponible(self, obj):
         item = self._get_campana_item(obj)

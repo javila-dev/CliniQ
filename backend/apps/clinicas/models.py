@@ -170,6 +170,16 @@ class Servicio(BaseModel):
         blank=True,
         help_text="Precio fijo de catalogo para cotizaciones. Si se configura, bloquea el precio en los items de cotizacion.",
     )
+    descuento_maximo_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text=(
+            "Descuento maximo permitido en cotizaciones sobre el precio de lista "
+            "(precio_base). El precio efectivo del item nunca puede bajar de "
+            "precio_base * (1 - descuento_maximo_pct/100). 0 = no se permite descuento."
+        ),
+    )
     vigencia_meses = models.PositiveIntegerField(default=12)
     tiene_protocolo = models.BooleanField(default=False)
     consentimientos_requeridos = models.ManyToManyField(
@@ -238,6 +248,16 @@ class TratamientoCatalogo(BaseModel):
     nombre = models.CharField(max_length=255)
     descripcion = models.TextField(blank=True)
     precio_estimado = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    descuento_maximo_pct = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=0,
+        help_text=(
+            "Descuento maximo permitido en cotizaciones sobre el precio de lista "
+            "(precio_estimado). El precio efectivo del item nunca puede bajar de "
+            "precio_estimado * (1 - descuento_maximo_pct/100). 0 = no se permite descuento."
+        ),
+    )
 
     class Meta:
         db_table = "clinicas_tratamiento_catalogo"

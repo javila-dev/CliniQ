@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 import tempfile
 import uuid
 from unittest.mock import patch
@@ -962,3 +963,86 @@ class CotizacionPrecioCampanaTests(TestCase):
 
         self.assertEqual(patch.status_code, 200)
         self.assertEqual(patch.json()["items"][0]["valor_unitario"], "430000.00")
+
+    # ── Tope de descuento por catálogo ────────────────────────────────────
+
+    def _crear_borrador(self, item):
+        return self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [item],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "1.00"}],
+            },
+            format="json",
+        )
+
+    def test_descuento_dentro_del_tope_del_catalogo_se_acepta(self):
+        Servicio.objects.filter(pk=self.procedimiento.pk).update(descuento_maximo_pct=Decimal("20"))
+        # 350000 con 15% -> 297500, piso = 350000 * 0.8 = 280000
+        r = self._crear_borrador({
+            "tipo": "procedimiento",
+            "procedimiento": str(self.procedimiento.id),
+            "valor_unitario": "350000.00",
+            "descuento_porcentaje": "15.00",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        item = r.json()["items"][0]
+        self.assertEqual(item["descuento_maximo_pct"], "20.00")
+        self.assertEqual(item["precio_lista"], "350000.00")
+
+    def test_descuento_supera_el_tope_del_catalogo_se_rechaza(self):
+        Servicio.objects.filter(pk=self.procedimiento.pk).update(descuento_maximo_pct=Decimal("10"))
+        # 350000 con 20% -> 280000, piso = 315000 -> rechazo
+        r = self._crear_borrador({
+            "tipo": "procedimiento",
+            "procedimiento": str(self.procedimiento.id),
+            "valor_unitario": "350000.00",
+            "descuento_porcentaje": "20.00",
+        })
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
+
+    def test_sin_tope_configurado_no_admite_ningun_descuento(self):
+        # descuento_maximo_pct por defecto = 0
+        r = self._crear_borrador({
+            "tipo": "tratamiento",
+            "tratamiento": str(self.tratamiento.id),
+            "valor_unitario": "500000.00",
+            "descuento_porcentaje": "5.00",
+        })
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
+
+    def test_tope_es_duro_aunque_el_usuario_tenga_cambiar_precio(self):
+        # self.admin tiene cotizaciones.cambiar_precio; el tope igual aplica.
+        Servicio.objects.filter(pk=self.procedimiento.pk).update(descuento_maximo_pct=Decimal("10"))
+        r = self._crear_borrador({
+            "tipo": "procedimiento",
+            "procedimiento": str(self.procedimiento.id),
+            "valor_unitario": "350000.00",
+            "descuento_porcentaje": "30.00",
+        })
+        self.assertEqual(r.status_code, 400)
+        self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
+
+    def test_precio_de_campana_pasa_el_tope(self):
+        # sin tope, pero el valor coincide con la campaña activa (280000) -> se acepta
+        r = self._crear_borrador({
+            "tipo": "procedimiento",
+            "procedimiento": str(self.procedimiento.id),
+            "valor_unitario": "280000.00",
+            "descuento_porcentaje": "0.00",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+
+    def test_item_libre_con_descuento_no_tiene_tope(self):
+        r = self._crear_borrador({
+            "tipo": "libre",
+            "descripcion": "Asesoría",
+            "valor_unitario": "200000.00",
+            "descuento_porcentaje": "40.00",
+        })
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertIsNone(r.json()["items"][0]["descuento_maximo_pct"])

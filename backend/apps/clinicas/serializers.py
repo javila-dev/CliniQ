@@ -273,6 +273,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "precio",
             "precio_referencia",
             "precio_base",
+            "descuento_maximo_pct",
             "vigencia_meses",
             "tiene_protocolo",
             "pasos_protocolo",
@@ -287,6 +288,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "clinica": {"required": False},
             "precio": {"required": False, "allow_null": True},
             "precio_base": {"required": False, "allow_null": True},
+            "descuento_maximo_pct": {"required": False},
         }
 
     def validate_clinica(self, value):
@@ -308,6 +310,13 @@ class ServicioSerializer(serializers.ModelSerializer):
             return None
         if value <= 0:
             raise serializers.ValidationError("El precio base debe ser mayor a 0.")
+        return value
+
+    def validate_descuento_maximo_pct(self, value):
+        if value is None:
+            return 0
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("El descuento máximo debe estar entre 0 y 100.")
         return value
 
     def validate_duracion_min(self, value):
@@ -386,6 +395,7 @@ class ProcedimientoSerializer(ServicioSerializer):
             "precio",
             "precio_referencia",
             "precio_base",
+            "descuento_maximo_pct",
             "vigencia_meses",
             "tiene_protocolo",
             "pasos_protocolo",
@@ -628,6 +638,7 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
             "nombre",
             "descripcion",
             "precio_estimado",
+            "descuento_maximo_pct",
             "activo",
             "total_sesiones",
             "tipos_sesion",
@@ -637,7 +648,15 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "created_at", "updated_at", "nombre_clinica", "total_sesiones")
         extra_kwargs = {
             "clinica": {"required": False},
+            "descuento_maximo_pct": {"required": False},
         }
+
+    def validate_descuento_maximo_pct(self, value):
+        if value is None:
+            return 0
+        if value < 0 or value > 100:
+            raise serializers.ValidationError("El descuento máximo debe estar entre 0 y 100.")
+        return value
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
