@@ -93,6 +93,13 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(cita_id=cita)
         if cotizacion:
             queryset = queryset.filter(cotizacion_id=cotizacion)
+        elif self.action == "list":
+            # El compromiso de pago (consentimiento sin plantilla atado a una
+            # cotizacion) se gestiona desde el detalle de la cotizacion; no debe
+            # aparecer en el listado global de consentimientos. El detalle
+            # (retrieve) y las acciones de firma siguen accesibles por id, y un
+            # filtro ?cotizacion=... explicito tambien lo devuelve.
+            queryset = queryset.exclude(plantilla__isnull=True, cotizacion__isnull=False)
         return queryset
 
     @action(detail=False, methods=["post"], url_path="generar")

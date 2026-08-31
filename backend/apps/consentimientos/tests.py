@@ -177,3 +177,70 @@ class ConsentimientoInmutableTrasFirmaTests(TestCase):
         self.consentimiento.save()
         self.consentimiento.refresh_from_db()
         self.assertEqual(self.consentimiento.firma_ip, "10.0.0.1")
+
+
+class CompromisoPagoNoAparecEnListadoGlobalTests(TestCase):
+    """El compromiso de pago (consentimiento sin plantilla atado a una cotizacion)
+    se gestiona desde el detalle de la cotizacion, no en /consentimientos."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.superadmin = User.objects.create_user(
+            email="root-compromiso-list@example.com", password="secret123",
+            first_name="Root", last_name="List", rol=User.Role.SUPERADMIN,
+        )
+        self.client.force_authenticate(self.superadmin)
+        self.clinica = Clinica.objects.create(nombre="Clinica List", nit="901000111")
+        self.sede = Sede.objects.create(
+            clinica=self.clinica, nombre="Principal", ciudad="Bogota", direccion="Calle 1", telefono="3000000000"
+        )
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica, tipo_documento=Paciente.TipoDocumento.CC, numero_documento="777888999",
+            nombres="Ana", apellidos="Ruiz", fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO, direccion="Calle 5", telefono="3000000001",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP, autoriza_datos=True,
+        )
+        self.cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin,
+            sede=self.sede, estado=Cotizacion.Estado.ACEPTADA,
+        )
+        self.plantilla = PlantillaConsentimiento.objects.create(
+            clinica=self.clinica, ambito=PlantillaConsentimiento.Ambito.COTIZACION,
+            nombre="Consentimiento tratamiento", contenido_html="<p>Tratamiento</p>",
+        )
+        # Compromiso de pago: SIN plantilla
+        self.compromiso = Consentimiento.objects.create(
+            cotizacion=self.cotizacion, paciente=self.paciente, plantilla=None,
+            contenido_snapshot="<p>Compromiso de pago</p>", hash_contenido="a" * 64,
+        )
+        # Consentimiento normal: CON plantilla
+        self.con_plantilla = Consentimiento.objects.create(
+            cotizacion=self.cotizacion, paciente=self.paciente, plantilla=self.plantilla,
+            contenido_snapshot="<p>Tratamiento</p>", hash_contenido="b" * 64,
+        )
+
+    def test_el_listado_global_excluye_el_compromiso_de_pago(self):
+        response = self.client.get("/api/v1/consentimientos/")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()["results"]}
+        self.assertIn(str(self.con_plantilla.id), ids)
+        self.assertNotIn(str(self.compromiso.id), ids)
+
+    def test_el_detalle_por_id_del_compromiso_sigue_accesible(self):
+        response = self.client.get(f"/api/v1/consentimientos/{self.compromiso.id}/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["id"], str(self.compromiso.id))
+
+    def test_filtro_explicito_por_cotizacion_si_devuelve_el_compromiso(self):
+        response = self.client.get(f"/api/v1/consentimientos/?cotizacion={self.cotizacion.id}")
+        self.assertEqual(response.status_code, 200)
+        ids = {row["id"] for row in response.json()["results"]}
+        self.assertIn(str(self.compromiso.id), ids)
+
+    def test_el_detalle_de_la_cotizacion_expone_compromiso_pago(self):
+        response = self.client.get(f"/api/v1/cotizaciones/{self.cotizacion.id}/")
+        self.assertEqual(response.status_code, 200)
+        compromiso_pago = response.json().get("compromiso_pago")
+        self.assertIsNotNone(compromiso_pago)
+        self.assertEqual(compromiso_pago["id"], str(self.compromiso.id))
+        self.assertEqual(compromiso_pago["estado"], Consentimiento.Estado.PENDIENTE)

@@ -95,6 +95,24 @@ class CotizacionViewSet(ModelViewSet):
             queryset = queryset.filter(created_at__date__lte=parse(fecha_hasta))
         return queryset
 
+    def retrieve(self, request, *args, **kwargs):
+        response = super().retrieve(request, *args, **kwargs)
+        response.data["compromiso_pago"] = self._serializar_compromiso_pago(
+            self._compromiso_pago_existente(self.get_object())
+        )
+        return response
+
+    def _compromiso_pago_existente(self, cotizacion):
+        """Compromiso de pago vigente de la cotizacion (consentimiento sin plantilla)."""
+        from apps.consentimientos.models import Consentimiento
+
+        return (
+            Consentimiento.objects.filter(cotizacion=cotizacion, plantilla__isnull=True)
+            .exclude(estado=Consentimiento.Estado.REVOCADO)
+            .order_by("-created_at")
+            .first()
+        )
+
     def perform_destroy(self, instance):
         if instance.estado != Cotizacion.Estado.BORRADOR:
             raise ValidationError(
