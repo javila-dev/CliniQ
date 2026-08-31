@@ -51,12 +51,27 @@ class DashboardView(APIView):
         sede_id = request.query_params.get("sede_id")
         fecha = _parse_date(request.query_params.get("fecha"), date.today())
 
+        # Rango opcional: si llega `fecha_inicio`/`fecha_fin`, los agregados de
+        # citas y cobros abarcan ese periodo en vez de un solo día. Las claves de
+        # la respuesta (`citas_hoy`, `cobros_hoy`) se conservan por compatibilidad.
+        rango_ini_raw = request.query_params.get("fecha_inicio")
+        rango_fin_raw = request.query_params.get("fecha_fin")
+        usar_rango = bool(rango_ini_raw or rango_fin_raw)
+        rango_ini = _parse_date(rango_ini_raw, date.today())
+        rango_fin = _parse_date(rango_fin_raw, date.today())
+
         cita_qs = Cita.objects.filter(**_cita_clinica_scope(user))
         if sede_id:
             cita_qs = cita_qs.filter(sede_id=sede_id)
 
-        # Citas del día
-        citas_hoy_qs = cita_qs.filter(fecha_inicio__date=fecha)
+        # Citas del día (o del rango solicitado)
+        if usar_rango:
+            citas_hoy_qs = cita_qs.filter(
+                fecha_inicio__date__gte=rango_ini,
+                fecha_inicio__date__lte=rango_fin,
+            )
+        else:
+            citas_hoy_qs = cita_qs.filter(fecha_inicio__date=fecha)
         estados = citas_hoy_qs.aggregate(
             total=Count("id"),
             pendientes=Count("id", filter=Q(estado="pendiente")),
@@ -84,7 +99,13 @@ class DashboardView(APIView):
             if sede_id:
                 cobro_qs = cobro_qs.filter(sede_id=sede_id)
 
-            cobros_hoy_qs = cobro_qs.filter(fecha__date=fecha).exclude(estado="anulado")
+            if usar_rango:
+                cobros_hoy_qs = cobro_qs.filter(
+                    fecha__date__gte=rango_ini,
+                    fecha__date__lte=rango_fin,
+                ).exclude(estado="anulado")
+            else:
+                cobros_hoy_qs = cobro_qs.filter(fecha__date=fecha).exclude(estado="anulado")
             cobros_agg = cobros_hoy_qs.aggregate(
                 total_cop=Sum("total"),
                 pagados=Count("id", filter=Q(estado="pagado")),
