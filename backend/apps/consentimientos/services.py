@@ -262,7 +262,22 @@ def confirmar_firma_compromiso_pago(consentimiento: Consentimiento) -> Consentim
                 "[confirmar_firma_compromiso_pago] fallo al recuperar PDF | consentimiento_id=%s",
                 consentimiento.id,
             )
+    _auto_aceptar_cotizacion(consentimiento)
     return consentimiento
+
+
+def _auto_aceptar_cotizacion(consentimiento: Consentimiento) -> None:
+    """Si el compromiso de pago quedo firmado, deja que cotizaciones decida si
+    su cotizacion debe pasar a aceptada automaticamente."""
+    try:
+        from apps.cotizaciones.services import aceptar_cotizacion_por_firma_compromiso
+
+        aceptar_cotizacion_por_firma_compromiso(consentimiento)
+    except Exception:
+        logger.exception(
+            "[_auto_aceptar_cotizacion] fallo al aceptar cotizacion por firma | consentimiento_id=%s",
+            consentimiento.id,
+        )
 
 
 def asegurar_bucket_consentimientos():
@@ -907,6 +922,7 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
                     "[verificar_firma_compromiso_pago] fallo al recuperar PDF | consentimiento_id=%s",
                     consentimiento.id,
                 )
+        _auto_aceptar_cotizacion(consentimiento)
 
     return consentimiento.estado
 

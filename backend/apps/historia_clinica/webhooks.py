@@ -107,6 +107,17 @@ def _handle_compromiso_pago(external_id: str, event: str, document_id: str | Non
         consentimiento.firmado_en = _timezone.now()
         consentimiento.save(update_fields=["estado", "firmado_en", "updated_at"])
         logger.info("Webhook Documenso compromiso_pago: estado actualizado a firmado | id=%s", consentimiento_id)
+        # La cotizacion asociada pasa a aceptada automaticamente si la clinica
+        # exige el compromiso de pago y aun estaba en borrador.
+        try:
+            from apps.cotizaciones.services import aceptar_cotizacion_por_firma_compromiso
+
+            aceptar_cotizacion_por_firma_compromiso(consentimiento)
+        except Exception:
+            logger.exception(
+                "Webhook Documenso compromiso_pago: fallo al aceptar cotizacion | id=%s",
+                consentimiento_id,
+            )
 
     # Reintento de un webhook ya procesado: no volver a descargar/guardar el
     # PDF, o cada reintento deja un archivo huerfano nuevo en storage

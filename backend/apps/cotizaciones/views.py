@@ -2,8 +2,11 @@ import logging
 from collections import defaultdict
 from datetime import date, datetime
 
+from decimal import Decimal
+
 from django.http import HttpResponse
-from django.db.models import Prefetch
+from django.db.models import DecimalField, Prefetch, Q, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 import requests
 from rest_framework import status
@@ -14,7 +17,6 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.agenda.models import Cita, RegistroConfirmacion
 from apps.core.models import LogAccion
-from apps.cartera.models import Cartera, CuotaCartera
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_cotizacion_pdf
 from apps.cotizaciones.serializers import (
@@ -25,7 +27,6 @@ from apps.cotizaciones.serializers import (
     RegistrarEnvioCotizacionSerializer,
 )
 from apps.notificaciones.services import email_provider_config, enviar_documento_whatsapp_webhook, enviar_email
-from apps.protocolos.services import consentimientos_pendientes_cotizacion
 from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import RequirePermission
 
@@ -54,9 +55,20 @@ def normalize_error_response(detail):
 
 class CotizacionViewSet(ModelViewSet):
     serializer_class = CotizacionSerializer
-    queryset = Cotizacion.objects.select_related("clinica", "paciente", "profesional", "sede").prefetch_related(
+    queryset = Cotizacion.objects.select_related(
+        "clinica", "paciente", "profesional", "sede"
+    ).prefetch_related(
         "items", "formas_pago", "envios__enviado_por"
-    )
+    ).annotate(
+        _total_pagado=Coalesce(
+            Sum(
+                "cobros__pagos__valor",
+                filter=~Q(cobros__estado="anulado"),
+            ),
+            Decimal("0"),
+            output_field=DecimalField(max_digits=14, decimal_places=2),
+        )
+    ).order_by("-created_at")
     filterset_fields = ("estado", "paciente", "profesional", "activo")
     search_fields = ("paciente__nombres", "paciente__apellidos", "notas")
     ordering_fields = ("created_at", "updated_at")
@@ -102,9 +114,14 @@ class CotizacionViewSet(ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
-        response.data["compromiso_pago"] = self._serializar_compromiso_pago(
-            self._compromiso_pago_existente(self.get_object())
-        )
+        cotizacion = self.get_object()
+        compromiso = self._compromiso_pago_existente(cotizacion)
+        if compromiso is None and cotizacion.estado == Cotizacion.Estado.ACEPTADA:
+            # Genera el compromiso de pago pendiente si la clinica lo exige y aun
+            # no existe. Cubre cotizaciones aceptadas antes de que existiera esta
+            # generacion automatica: el panel aparece al abrir el detalle.
+            compromiso = self._generar_compromiso_pago_si_aplica(cotizacion)
+        response.data["compromiso_pago"] = self._serializar_compromiso_pago(compromiso)
         return response
 
     def _compromiso_pago_existente(self, cotizacion):
@@ -176,36 +193,34 @@ class CotizacionViewSet(ModelViewSet):
             if tiene_citas:
                 raise ValidationError({"error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS"})
 
-        cotizacion.estado = nuevo_estado
-        cotizacion.save(update_fields=["estado", "updated_at"])
-        consentimientos_pendientes = []
         if nuevo_estado == Cotizacion.Estado.ACEPTADA:
-            cartera, created = Cartera.objects.get_or_create(
-                cotizacion=cotizacion,
-                defaults={
-                    "paciente": cotizacion.paciente,
-                    "total": cotizacion.total,
-                },
-            )
-            if not created:
-                cartera.total = cotizacion.total
-                cartera.save(update_fields=["total", "updated_at"])
-            if not cartera.cuotas.exists():
-                for forma_pago in cotizacion.formas_pago.filter(activo=True):
-                    CuotaCartera.objects.create(
-                        cartera=cartera,
-                        tipo=forma_pago.tipo,
-                        descripcion=forma_pago.descripcion,
-                        valor_esperado=forma_pago.valor,
-                        fecha_esperada=forma_pago.fecha,
-                    )
-            consentimientos_pendientes = consentimientos_pendientes_cotizacion(cotizacion)
+            from apps.consentimientos.models import Consentimiento
+            from apps.cotizaciones.services import aceptar_cotizacion
+
             compromiso_pago = self._generar_compromiso_pago_si_aplica(cotizacion)
-        payload = self.get_serializer(cotizacion).data
-        if nuevo_estado == Cotizacion.Estado.ACEPTADA:
+            requiere_firma = (
+                compromiso_pago is not None
+                and compromiso_pago.estado != Consentimiento.Estado.FIRMADO
+            )
+            if requiere_firma:
+                # La cotizacion NO pasa a aceptada hasta que el cliente firme el
+                # compromiso de pago. Al recibirse la firma (webhook de Documenso
+                # o confirmacion manual) la transicion ocurre automaticamente.
+                payload = self.get_serializer(cotizacion).data
+                payload["compromiso_pago"] = self._serializar_compromiso_pago(compromiso_pago)
+                payload["requiere_firma_compromiso"] = True
+                return Response(payload, status=status.HTTP_200_OK)
+
+            consentimientos_pendientes = aceptar_cotizacion(cotizacion, actor=request.user)
+            payload = self.get_serializer(cotizacion).data
             payload["consentimientos_pendientes"] = consentimientos_pendientes
             payload["compromiso_pago"] = self._serializar_compromiso_pago(compromiso_pago)
-        return Response(payload, status=status.HTTP_200_OK)
+            payload["requiere_firma_compromiso"] = False
+            return Response(payload, status=status.HTTP_200_OK)
+
+        cotizacion.estado = nuevo_estado
+        cotizacion.save(update_fields=["estado", "updated_at"])
+        return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
 
     def _serializar_compromiso_pago(self, compromiso_pago):
         if not compromiso_pago:

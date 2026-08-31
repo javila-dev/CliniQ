@@ -1,4 +1,6 @@
-from django.db import transaction
+from decimal import Decimal
+
+from django.db import models, transaction
 from django.db.models import Q
 from rest_framework import serializers
 
@@ -365,6 +367,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     fecha_vencimiento = serializers.DateField(read_only=True)
     total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+    total_pagado = serializers.SerializerMethodField()
+    saldo_pendiente = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -383,11 +387,52 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "formas_pago",
             "envios",
             "total",
+            "total_pagado",
+            "saldo_pendiente",
             "activo",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "fecha_vencimiento", "total", "created_at", "updated_at")
+        read_only_fields = (
+            "id",
+            "fecha_vencimiento",
+            "total",
+            "total_pagado",
+            "saldo_pendiente",
+            "created_at",
+            "updated_at",
+        )
+
+    def _total_pagado_valor(self, obj):
+        """Suma de pagos recibidos de los cobros no anulados de la cotizacion.
+
+        Se lee de la anotacion ``_total_pagado`` del queryset del viewset; si no
+        viene anotado (p. ej. respuesta de create) se calcula al vuelo.
+        """
+        anotado = getattr(obj, "_total_pagado", None)
+        if anotado is not None:
+            return Decimal(anotado)
+        from apps.cobros.models import Cobro, PagoRecibido
+
+        total = (
+            PagoRecibido.objects.filter(cobro__cotizacion=obj)
+            .exclude(cobro__estado=Cobro.Estado.ANULADO)
+            .aggregate(s=models.Sum("valor"))["s"]
+        )
+        return Decimal(total or 0)
+
+    def get_total_pagado(self, obj):
+        """Total abonado (string 2 decimales). None mientras la cotizacion no este aceptada."""
+        if obj.estado != Cotizacion.Estado.ACEPTADA:
+            return None
+        return str(self._total_pagado_valor(obj).quantize(Decimal("0.01")))
+
+    def get_saldo_pendiente(self, obj):
+        """Saldo por cobrar = total - pagado (string 2 decimales). None si no esta aceptada."""
+        if obj.estado != Cotizacion.Estado.ACEPTADA:
+            return None
+        saldo = Decimal(obj.total) - self._total_pagado_valor(obj)
+        return str(saldo.quantize(Decimal("0.01")))
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)

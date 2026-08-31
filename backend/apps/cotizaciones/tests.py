@@ -524,6 +524,165 @@ class CotizacionFlowTests(TestCase):
         )
         self.assertEqual(str(segundo.id), str(Consentimiento.objects.get(cotizacion_id=cotizacion_id).id))
 
+    def test_retrieve_genera_compromiso_pago_retroactivo_si_falta(self):
+        """Cotizacion aceptada antes de que existiera la generacion automatica:
+        al abrir el detalle se crea el compromiso de pago pendiente y viaja en
+        la respuesta."""
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.ACEPTADA,
+        )
+        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
+
+        # Sin el requisito activo: no se genera nada.
+        detalle = self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
+        self.assertEqual(detalle.status_code, 200)
+        self.assertIsNone(detalle.json()["compromiso_pago"])
+        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
+
+        # Con el requisito activo: el GET del detalle lo genera (una sola vez).
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        detalle = self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
+        self.assertEqual(detalle.status_code, 200)
+        compromiso = detalle.json()["compromiso_pago"]
+        self.assertIsNotNone(compromiso)
+        self.assertEqual(compromiso["estado"], Consentimiento.Estado.PENDIENTE)
+
+        self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
+        self.assertEqual(
+            Consentimiento.objects.filter(cotizacion=cotizacion, plantilla__isnull=True).count(),
+            1,
+        )
+
+    def test_no_pasa_a_aceptada_sin_firma_del_compromiso_si_la_clinica_lo_exige(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        create = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+        cotizacion_id = create.json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["requiere_firma_compromiso"])
+        # No se acepta: sigue en borrador y sin cartera.
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.BORRADOR)
+        self.assertFalse(hasattr(cotizacion, "cartera") and cotizacion.cartera is not None)
+        # Se generó el compromiso de pago pendiente de firma.
+        compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id, plantilla__isnull=True)
+        self.assertEqual(compromiso.estado, Consentimiento.Estado.PENDIENTE)
+
+    def test_se_acepta_automaticamente_al_firmar_el_compromiso(self):
+        from apps.cartera.models import Cartera
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+        from apps.consentimientos.services import confirmar_firma_compromiso_pago
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        create = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+        cotizacion_id = create.json()["id"]
+        self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/",
+            {"estado": "aceptada"}, format="json",
+        )
+        compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id, plantilla__isnull=True)
+
+        confirmar_firma_compromiso_pago(compromiso)
+
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.ACEPTADA)
+        self.assertTrue(Cartera.objects.filter(cotizacion=cotizacion).exists())
+
+    def test_acepta_directo_si_la_clinica_no_exige_compromiso(self):
+        create = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+        cotizacion_id = create.json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/",
+            {"estado": "aceptada"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(response.json()["requiere_firma_compromiso"])
+        self.assertEqual(Cotizacion.objects.get(id=cotizacion_id).estado, Cotizacion.Estado.ACEPTADA)
+
+    def test_retrieve_no_genera_compromiso_pago_si_no_esta_aceptada(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+
+        detalle = self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
+
+        self.assertEqual(detalle.status_code, 200)
+        self.assertIsNone(detalle.json()["compromiso_pago"])
+        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
+
+    def test_listado_expone_total_pagado_y_saldo_pendiente(self):
+        from apps.cobros.models import Cobro, PagoRecibido
+
+        # Borrador: sin pagos -> ambos campos en None.
+        borrador = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        # Aceptada con un cobro parcialmente pagado.
+        aceptada = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin,
+            estado=Cotizacion.Estado.ACEPTADA,
+        )
+        aceptada.items.create(descripcion="Plan", num_citas=1, valor_unitario="500000.00")
+        cobro = Cobro.objects.create(
+            origen=Cobro.Origen.COTIZACION, cotizacion=aceptada, paciente=self.paciente,
+            sede=self.sede, total="500000.00", estado=Cobro.Estado.PAGADO_PARCIAL,
+            created_by=self.superadmin,
+        )
+        PagoRecibido.objects.create(
+            cobro=cobro, medio_pago="efectivo", valor="200000.00", recibido_por=self.superadmin,
+        )
+        # Un cobro anulado no cuenta.
+        cobro_anulado = Cobro.objects.create(
+            origen=Cobro.Origen.COTIZACION, cotizacion=aceptada, paciente=self.paciente,
+            sede=self.sede, total="99000.00", estado=Cobro.Estado.ANULADO, created_by=self.superadmin,
+        )
+        PagoRecibido.objects.create(
+            cobro=cobro_anulado, medio_pago="efectivo", valor="99000.00", recibido_por=self.superadmin,
+        )
+
+        response = self.client.get("/api/v1/cotizaciones/")
+        self.assertEqual(response.status_code, 200)
+        por_id = {row["id"]: row for row in response.json()["results"]}
+
+        self.assertIsNone(por_id[str(borrador.id)]["total_pagado"])
+        self.assertIsNone(por_id[str(borrador.id)]["saldo_pendiente"])
+        self.assertEqual(por_id[str(aceptada.id)]["total_pagado"], "200000.00")
+        self.assertEqual(por_id[str(aceptada.id)]["saldo_pendiente"], "300000.00")
+
     def test_profesional_solo_lista_sus_propias_cotizaciones(self):
         profesional = User.objects.create_user(
             email=f"prof-listado-{uuid.uuid4().hex[:8]}@test.com",
