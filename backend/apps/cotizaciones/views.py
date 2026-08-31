@@ -71,6 +71,11 @@ class CotizacionViewSet(ModelViewSet):
         user = self.request.user
         if user.rol != "superadmin":
             queryset = queryset.filter(clinica=user.clinica)
+        # Un profesional solo ve en el listado las cotizaciones que creó,
+        # no las de toda la clínica. El detalle sigue accesible por id para
+        # los flujos que abren una cotización puntual (paciente, cartera…).
+        if self.action == "list" and user.rol == "profesional":
+            queryset = queryset.filter(profesional=user)
         activo = self.request.query_params.get("activo")
         if activo is None:
             queryset = queryset.filter(activo=True)

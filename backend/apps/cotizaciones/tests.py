@@ -524,6 +524,83 @@ class CotizacionFlowTests(TestCase):
         )
         self.assertEqual(str(segundo.id), str(Consentimiento.objects.get(cotizacion_id=cotizacion_id).id))
 
+    def test_profesional_solo_lista_sus_propias_cotizaciones(self):
+        profesional = User.objects.create_user(
+            email=f"prof-listado-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Prof",
+            last_name="Listado",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        otro_profesional = User.objects.create_user(
+            email=f"prof-otro-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Otra",
+            last_name="Persona",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        propia = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=profesional,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        ajena = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=otro_profesional,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+
+        self.client.force_authenticate(profesional)
+        listado = self.client.get("/api/v1/cotizaciones/")
+
+        self.assertEqual(listado.status_code, 200)
+        ids = {row["id"] for row in listado.json()["results"]}
+        self.assertEqual(ids, {str(propia.id)})
+
+        # El detalle de una cotización ajena sigue accesible por id.
+        detalle = self.client.get(f"/api/v1/cotizaciones/{ajena.id}/")
+        self.assertEqual(detalle.status_code, 200)
+
+    def test_no_profesional_ve_todas_las_cotizaciones_de_la_clinica(self):
+        recepcion = User.objects.create_user(
+            email=f"recepcion-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Recep",
+            last_name="Cion",
+            rol=User.Role.RECEPCION,
+            clinica=self.clinica,
+        )
+        profesional = User.objects.create_user(
+            email=f"prof-mix-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Prof",
+            last_name="Mix",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        c1 = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=profesional,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        c2 = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=recepcion,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+
+        self.client.force_authenticate(recepcion)
+        listado = self.client.get("/api/v1/cotizaciones/")
+
+        self.assertEqual(listado.status_code, 200)
+        ids = {row["id"] for row in listado.json()["results"]}
+        self.assertEqual(ids, {str(c1.id), str(c2.id)})
+
 
 class CotizacionPrecioCampanaTests(TestCase):
     def setUp(self):
