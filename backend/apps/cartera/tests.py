@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -144,6 +145,91 @@ class CarteraFlowTests(TestCase):
         self.assertEqual(resumen.status_code, 200)
         self.assertEqual(resumen.json()["total_cobrado"], "350000.00")
 
+    def test_abono_parcial_deja_cuota_abierta_y_marca_mora(self):
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        cartera = Cartera.objects.get(cotizacion=self.cotizacion)
+        cuota = cartera.cuotas.first()
+        cuota.fecha_esperada = timezone.localdate() - timedelta(days=3)
+        cuota.save(update_fields=["fecha_esperada"])
+
+        abono = self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "100000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": "efectivo",
+            },
+            format="json",
+        )
+        self.assertEqual(abono.status_code, 200, abono.content)
+        cuota.refresh_from_db()
+        self.assertFalse(cuota.pagada)
+        self.assertEqual(str(cuota.valor_pagado), "100000.00")
+        self.assertEqual(cuota.saldo_pendiente, Decimal("250000.00"))
+
+        detalle = self.client.get(f"/api/v1/cartera/{cartera.id}/").json()
+        self.assertTrue(detalle["en_mora"])
+        self.assertGreaterEqual(detalle["mora_dias"], 3)
+        self.assertEqual(detalle["mora_valor"], "250000.00")
+        self.assertEqual(detalle["proxima_cuota_valor"], "250000.00")
+        cuota_payload = next(c for c in detalle["cuotas"] if c["id"] == str(cuota.id))
+        self.assertEqual(cuota_payload["saldo_pendiente"], "250000.00")
+        self.assertTrue(cuota_payload["vencida"])
+
+        resumen = self.client.get("/api/v1/cartera/resumen/").json()
+        self.assertGreaterEqual(resumen["cuotas_vencidas"], 1)
+        self.assertEqual(resumen["total_cobrado"], "100000.00")
+
+        saldo = self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "250000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": "efectivo",
+            },
+            format="json",
+        )
+        self.assertEqual(saldo.status_code, 200, saldo.content)
+        cuota.refresh_from_db()
+        self.assertTrue(cuota.pagada)
+        self.assertEqual(str(cuota.valor_pagado), "350000.00")
+
+        detalle = self.client.get(f"/api/v1/cartera/{cartera.id}/").json()
+        self.assertFalse(detalle["en_mora"])
+
+    def test_registrar_pago_rechaza_monto_mayor_al_saldo(self):
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        cartera = Cartera.objects.get(cotizacion=self.cotizacion)
+        cuota = cartera.cuotas.first()
+        self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "300000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": "efectivo",
+            },
+            format="json",
+        )
+        excede = self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "100000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": "efectivo",
+            },
+            format="json",
+        )
+        self.assertEqual(excede.status_code, 400)
+        self.assertIn("PAGO_EXCEDE_CUOTA", str(excede.json()))
+
     def test_cita_puede_vincular_item_de_cotizacion_aceptada(self):
         self.client.post(
             f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
@@ -152,7 +238,7 @@ class CarteraFlowTests(TestCase):
         )
         response = self.client.post("/api/v1/agenda/citas/", self._crear_cita_payload(), format="json")
 
-        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.status_code, 201, response.content)
         cita = Cita.objects.get()
         self.assertEqual(cita.item_cotizacion_id, self.item.id)
         self.assertEqual(response.json()["cotizacion_resumen"]["citas_restantes"], 3)

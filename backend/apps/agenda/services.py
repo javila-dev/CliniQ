@@ -232,7 +232,7 @@ def _validar_deuda_paciente(paciente, clinica):
     from datetime import date, timedelta
     from decimal import Decimal
     from django.db.models import Sum
-    from apps.cartera.models import CuotaCartera
+    from apps.cartera.models import CUOTA_PENDIENTE_EXPR, CuotaCartera
 
     if not clinica.bloquear_agenda_por_deuda:
         return
@@ -240,17 +240,20 @@ def _validar_deuda_paciente(paciente, clinica):
     dias_gracia = clinica.dias_gracia_deuda or 0
     fecha_limite = date.today() - timedelta(days=dias_gracia)
 
-    cuotas_vencidas = CuotaCartera.objects.filter(
-        cartera__paciente=paciente,
-        cartera__paciente__clinica=clinica,
-        pagada=False,
-        excepcion_aprobada=False,
-        fecha_esperada__lt=fecha_limite,
+    cuotas_vencidas = (
+        CuotaCartera.objects.filter(
+            cartera__paciente=paciente,
+            cartera__paciente__clinica=clinica,
+            excepcion_aprobada=False,
+            fecha_esperada__lt=fecha_limite,
+        )
+        .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+        .filter(pendiente__gt=0)
     )
 
     if cuotas_vencidas.exists():
         count = cuotas_vencidas.count()
-        monto = cuotas_vencidas.aggregate(s=Sum("valor_esperado"))["s"] or Decimal("0")
+        monto = cuotas_vencidas.aggregate(s=Sum("pendiente"))["s"] or Decimal("0")
         raise ValidationError({
             "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
             "code": "PACIENTE_CON_DEUDA",

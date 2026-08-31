@@ -10,6 +10,10 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
     aprobada_por_nombre = serializers.CharField(
         source="aprobada_por.nombre_completo", read_only=True, allow_null=True
     )
+    saldo_pendiente = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True
+    )
+    vencida = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = CuotaCartera
@@ -21,6 +25,8 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
             "fecha_esperada",
             "pagada",
             "valor_pagado",
+            "saldo_pendiente",
+            "vencida",
             "fecha_pago",
             "medio_pago",
             "observaciones",
@@ -41,6 +47,9 @@ class CarteraListSerializer(serializers.ModelSerializer):
     cuotas_pagadas = serializers.SerializerMethodField()
     proxima_cuota_fecha = serializers.SerializerMethodField()
     proxima_cuota_valor = serializers.SerializerMethodField()
+    en_mora = serializers.SerializerMethodField()
+    mora_dias = serializers.SerializerMethodField()
+    mora_valor = serializers.SerializerMethodField()
 
     class Meta:
         model = Cartera
@@ -56,6 +65,9 @@ class CarteraListSerializer(serializers.ModelSerializer):
             "cuotas_pagadas",
             "proxima_cuota_fecha",
             "proxima_cuota_valor",
+            "en_mora",
+            "mora_dias",
+            "mora_valor",
             "created_at",
         )
 
@@ -63,18 +75,54 @@ class CarteraListSerializer(serializers.ModelSerializer):
         return obj.cuotas.count()
 
     def get_cuotas_pagadas(self, obj):
-        return obj.cuotas.filter(pagada=True).count()
+        # "Pagada" = cubierta por completo (un abono parcial no cuenta).
+        return sum(1 for c in obj.cuotas.all() if c.saldo_pendiente <= 0)
 
-    def _get_proxima_cuota(self, obj):
-        return obj.cuotas.filter(pagada=False).order_by("fecha_esperada", "created_at").first()
+    def _resumen_cuotas(self, obj):
+        """Calcula una sola vez por cartera: próxima cuota con saldo y mora."""
+        cached = getattr(obj, "_resumen_cuotas_cache", None)
+        if cached is not None:
+            return cached
+        hoy = timezone.localdate()
+        proxima = None
+        mora_dias = 0
+        mora_valor = Decimal("0")
+        # obj.cuotas.all() respeta el orden del modelo: fecha_esperada, created_at
+        # (las cuotas sin fecha quedan al final).
+        for c in obj.cuotas.all():
+            pendiente = c.saldo_pendiente
+            if pendiente <= 0:
+                continue
+            if proxima is None:
+                proxima = c
+            if c.fecha_esperada and c.fecha_esperada < hoy:
+                mora_dias = max(mora_dias, (hoy - c.fecha_esperada).days)
+                mora_valor += pendiente
+        cached = {
+            "proxima": proxima,
+            "mora_dias": mora_dias,
+            "mora_valor": mora_valor,
+            "en_mora": mora_dias > 0,
+        }
+        obj._resumen_cuotas_cache = cached
+        return cached
 
     def get_proxima_cuota_fecha(self, obj):
-        cuota = self._get_proxima_cuota(obj)
-        return cuota.fecha_esperada if cuota else None
+        proxima = self._resumen_cuotas(obj)["proxima"]
+        return proxima.fecha_esperada if proxima else None
 
     def get_proxima_cuota_valor(self, obj):
-        cuota = self._get_proxima_cuota(obj)
-        return cuota.valor_esperado if cuota else None
+        proxima = self._resumen_cuotas(obj)["proxima"]
+        return f"{proxima.saldo_pendiente:.2f}" if proxima else None
+
+    def get_en_mora(self, obj):
+        return self._resumen_cuotas(obj)["en_mora"]
+
+    def get_mora_dias(self, obj):
+        return self._resumen_cuotas(obj)["mora_dias"]
+
+    def get_mora_valor(self, obj):
+        return f"{self._resumen_cuotas(obj)['mora_valor']:.2f}"
 
 
 class CarteraDetailSerializer(CarteraListSerializer):
@@ -103,9 +151,14 @@ class RegistrarPagoCuotaSerializer(serializers.Serializer):
 
     def validate(self, attrs):
         cuota = self.context["cuota"]
-        if attrs["valor_pagado"] > cuota.valor_esperado:
+        # Se compara contra el saldo pendiente (permite abonos parciales y varios
+        # pagos sobre la misma cuota hasta cubrirla).
+        if attrs["valor_pagado"] > cuota.saldo_pendiente:
             raise serializers.ValidationError(
-                {"error": "El valor pagado supera el valor esperado de la cuota.", "code": "PAGO_EXCEDE_CUOTA"}
+                {
+                    "error": "El valor pagado supera el saldo pendiente de la cuota.",
+                    "code": "PAGO_EXCEDE_CUOTA",
+                }
             )
         if attrs["fecha_pago"] > timezone.localdate():
             raise serializers.ValidationError({"fecha_pago": "La fecha de pago no puede ser futura."})

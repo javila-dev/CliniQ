@@ -10,7 +10,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.cartera.models import Cartera, CuotaCartera, CuotaCarteraLog
+from apps.cartera.models import CUOTA_PENDIENTE_EXPR, Cartera, CuotaCartera, CuotaCarteraLog
 from apps.cartera.serializers import (
     CarteraDetailSerializer,
     CarteraListSerializer,
@@ -54,7 +54,11 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         matched_ids = []
         for cartera in queryset:
             is_pagada = cartera.saldo_pendiente <= 0
-            is_vencida = cartera.cuotas.filter(pagada=False, fecha_esperada__lt=today).exists()
+            is_vencida = (
+                cartera.cuotas.annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+                .filter(pendiente__gt=0, fecha_esperada__lt=today)
+                .exists()
+            )
             is_pendiente = not is_pagada and not is_vencida
             if (estado == "pagada" and is_pagada) or (estado == "vencida" and is_vencida) or (
                 estado == "pendiente" and is_pendiente
@@ -76,13 +80,16 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         total_cartera = queryset.aggregate(s=Sum("total"))["s"] or Decimal("0")
         total_cobrado = sum((item.total_pagado for item in queryset), Decimal("0"))
         saldo_pendiente = total_cartera - total_cobrado
-        cuotas_vencidas_qs = CuotaCartera.objects.filter(
-            cartera__in=queryset,
-            pagada=False,
-            fecha_esperada__lt=timezone.localdate(),
+        cuotas_vencidas_qs = (
+            CuotaCartera.objects.filter(
+                cartera__in=queryset,
+                fecha_esperada__lt=timezone.localdate(),
+            )
+            .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+            .filter(pendiente__gt=0)
         )
         cuotas_vencidas = cuotas_vencidas_qs.count()
-        cuotas_vencidas_valor = cuotas_vencidas_qs.aggregate(s=Sum("valor_esperado"))["s"] or Decimal("0")
+        cuotas_vencidas_valor = cuotas_vencidas_qs.aggregate(s=Sum("pendiente"))["s"] or Decimal("0")
         return Response(
             {
                 "total_cartera": self._money(total_cartera),
@@ -154,15 +161,22 @@ class CuotaCarteraViewSet(GenericViewSet):
     @transaction.atomic
     def registrar_pago(self, request, pk=None):
         cuota = self.get_object()
-        if cuota.pagada:
-            raise ValidationError({"error": "La cuota ya fue pagada.", "code": "CUOTA_YA_PAGADA"})
+        if cuota.saldo_pendiente <= 0:
+            raise ValidationError({"error": "La cuota ya fue cobrada por completo.", "code": "CUOTA_YA_PAGADA"})
         serializer = RegistrarPagoCuotaSerializer(data=request.data, context={"cuota": cuota})
         serializer.is_valid(raise_exception=True)
-        cuota.valor_pagado = serializer.validated_data["valor_pagado"]
+        # Los pagos se acumulan: un abono parcial no cierra la cuota, solo baja
+        # su saldo. La cuota queda `pagada` cuando lo acumulado cubre lo esperado.
+        abono = serializer.validated_data["valor_pagado"]
+        cuota.valor_pagado = Decimal(cuota.valor_pagado or 0) + abono
         cuota.fecha_pago = serializer.validated_data["fecha_pago"]
         cuota.medio_pago = serializer.validated_data["medio_pago"]
-        cuota.observaciones = serializer.validated_data.get("observaciones", "")
-        cuota.pagada = True
+        nueva_obs = serializer.validated_data.get("observaciones", "")
+        if nueva_obs:
+            cuota.observaciones = (
+                f"{cuota.observaciones}\n{nueva_obs}".strip() if cuota.observaciones else nueva_obs
+            )
+        cuota.pagada = cuota.saldo_pendiente <= 0
         cuota.registrado_por = request.user
         cuota.save(
             update_fields=[

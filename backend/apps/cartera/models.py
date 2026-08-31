@@ -2,10 +2,18 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
-from django.db.models import Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from apps.core.models import BaseModel
+
+# Saldo pendiente de una cuota = valor esperado - lo abonado (aunque `pagada`
+# siga en False por tratarse de un abono parcial).
+CUOTA_PENDIENTE_EXPR = ExpressionWrapper(
+    F("valor_esperado") - Coalesce("valor_pagado", Value(Decimal("0"))),
+    output_field=DecimalField(max_digits=14, decimal_places=2),
+)
 
 
 class Cartera(BaseModel):
@@ -27,7 +35,11 @@ class Cartera(BaseModel):
 
     @property
     def total_pagado(self):
-        return self.cuotas.filter(pagada=True).aggregate(s=Sum("valor_pagado"))["s"] or Decimal("0")
+        # Suma todo lo abonado, incluidos abonos parciales sobre cuotas que
+        # todavía no están cerradas (pagada=False).
+        return self.cuotas.aggregate(
+            s=Sum(Coalesce("valor_pagado", Value(Decimal("0"))))
+        )["s"] or Decimal("0")
 
     @property
     def saldo_pendiente(self):
@@ -82,8 +94,22 @@ class CuotaCartera(BaseModel):
         ordering = ["fecha_esperada", "created_at"]
 
     @property
+    def saldo_pendiente(self):
+        """Lo que falta por cobrar de esta cuota (descontando abonos)."""
+        return Decimal(self.valor_esperado) - Decimal(self.valor_pagado or 0)
+
+    @property
+    def cubierta(self):
+        """True si ya se cobró el total esperado (con o sin la bandera `pagada`)."""
+        return self.saldo_pendiente <= 0
+
+    @property
     def vencida(self):
-        return not self.pagada and self.fecha_esperada and self.fecha_esperada < timezone.localdate()
+        return (
+            self.saldo_pendiente > 0
+            and self.fecha_esperada is not None
+            and self.fecha_esperada < timezone.localdate()
+        )
 
     def __str__(self) -> str:
         return f"Cuota {self.id} - {self.cartera_id}"
