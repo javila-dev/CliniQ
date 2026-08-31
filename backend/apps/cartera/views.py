@@ -1,4 +1,4 @@
-from datetime import datetime, time
+from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.db import transaction
@@ -87,6 +87,16 @@ class CarteraViewSet(ReadOnlyModelViewSet):
     @action(detail=False, methods=["get"], url_path="resumen", pagination_class=None)
     def resumen(self, request, *args, **kwargs):
         queryset = self.get_queryset()
+        # Acota las KPI a las carteras generadas desde una fecha (aceptación de
+        # la cotización). Solo aplica al resumen, no al listado.
+        desde_raw = request.query_params.get("desde")
+        if desde_raw:
+            try:
+                desde = date.fromisoformat(desde_raw)
+            except ValueError:
+                desde = None
+            if desde:
+                queryset = queryset.filter(created_at__date__gte=desde)
         total_cartera = queryset.aggregate(s=Sum("total"))["s"] or Decimal("0")
         total_cobrado = sum((item.total_pagado for item in queryset), Decimal("0"))
         saldo_pendiente = total_cartera - total_cobrado

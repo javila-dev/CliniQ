@@ -206,6 +206,30 @@ class CarteraFlowTests(TestCase):
         self.assertEqual(len(pagina["results"]), 1)
         self.assertIsNotNone(pagina["next"])
 
+    def test_resumen_acotado_por_fecha_desde(self):
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        cartera = Cartera.objects.get(cotizacion=self.cotizacion)
+
+        # Sin filtro: la cartera cuenta.
+        base = self.client.get("/api/v1/cartera/resumen/").json()
+        self.assertEqual(Decimal(base["total_cartera"]), cartera.total)
+        self.assertGreater(cartera.total, 0)
+
+        # desde en el futuro: no hay carteras creadas después -> todo en cero.
+        futuro = (timezone.localdate() + timedelta(days=1)).isoformat()
+        acotado = self.client.get("/api/v1/cartera/resumen/", {"desde": futuro}).json()
+        self.assertEqual(acotado["total_cartera"], "0.00")
+        self.assertEqual(acotado["cuotas_vencidas"], 0)
+
+        # desde en el pasado: igual que sin filtro.
+        pasado = (timezone.localdate() - timedelta(days=30)).isoformat()
+        amplio = self.client.get("/api/v1/cartera/resumen/", {"desde": pasado}).json()
+        self.assertEqual(amplio["total_cartera"], base["total_cartera"])
+
     def test_abono_parcial_deja_cuota_abierta_y_marca_mora(self):
         self.client.post(
             f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
