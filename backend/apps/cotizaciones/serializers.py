@@ -355,7 +355,10 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         if not attrs.get("num_citas"):
             attrs["num_citas"] = tratamiento.total_sesiones or 1
         if tratamiento.precio_estimado is not None:
-            attrs["precio_bloqueado"] = True
+            # 100% de descuento máximo = precio libre: se pre-carga pero no se
+            # bloquea ni exige permiso para cambiarlo.
+            desc_max = tratamiento.descuento_maximo_pct or Decimal("0")
+            attrs["precio_bloqueado"] = Decimal(desc_max) < Decimal("100")
             if attrs.get("valor_unitario") in (None, ""):
                 attrs["valor_unitario"] = tratamiento.precio_estimado
         return attrs
@@ -372,7 +375,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             attrs["duracion_estimada"] = f"{procedimiento.duracion_min} min"
         precio_base = getattr(procedimiento, "precio_base", None)
         if precio_base is not None:
-            attrs["precio_bloqueado"] = True
+            desc_max = getattr(procedimiento, "descuento_maximo_pct", None) or Decimal("0")
+            attrs["precio_bloqueado"] = Decimal(desc_max) < Decimal("100")
             if attrs.get("valor_unitario") in (None, ""):
                 attrs["valor_unitario"] = precio_base
         elif procedimiento.precio is not None:

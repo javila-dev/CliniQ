@@ -320,6 +320,21 @@ class ServicioSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El descuento máximo debe estar entre 0 y 100.")
         return value
 
+    def validate(self, attrs):
+        # Un solo precio: `precio_base` es EL precio del catálogo y `precio`
+        # (alias legacy `precio_referencia`) queda espejado para los lectores
+        # antiguos (cita.servicio_precio, reportes, campañas…). La flexibilidad
+        # la controla `descuento_maximo_pct`: 0 = firme, 100 = libre.
+        if "precio_base" in attrs:
+            unico = attrs["precio_base"]
+        elif "precio" in attrs:
+            unico = attrs["precio"]
+        else:
+            return attrs
+        attrs["precio_base"] = unico
+        attrs["precio"] = unico
+        return attrs
+
     def validate_duracion_min(self, value):
         if value < 15 or value > 480:
             raise serializers.ValidationError("La duracion debe estar entre 15 y 480 minutos.")
