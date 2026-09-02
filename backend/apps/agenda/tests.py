@@ -193,6 +193,45 @@ class CitaEnEsperaFlowTests(TestCase):
         self.assertEqual(self.cita.estado, Cita.Estado.EN_CURSO)
         self.assertIsNotNone(self.cita.fecha_inicio_real)
 
+    def test_listado_filtra_por_rango_de_fecha_de_la_cita(self):
+        def _cita(dias, estado=Cita.Estado.PENDIENTE):
+            ini = timezone.now() + timedelta(days=dias)
+            return Cita.objects.create(
+                paciente=self.paciente,
+                sede=self.sede,
+                servicio=self.servicio,
+                profesional=self.profesional,
+                fecha_inicio=ini,
+                fecha_fin=ini + timedelta(minutes=30),
+                estado=estado,
+                canal_origen=Cita.CanalOrigen.PRESENCIAL,
+                created_by=self.superadmin,
+            )
+
+        vieja = _cita(-40)
+        dentro = _cita(-10)
+        _cita(-10, estado=Cita.Estado.CANCELADA)
+        futura = _cita(5)
+
+        hoy = timezone.localdate()
+        r = self.client.get("/api/v1/agenda/citas/", {
+            "fecha_inicio__date__gte": (hoy - timedelta(days=20)).isoformat(),
+            "fecha_inicio__date__lte": (hoy - timedelta(days=1)).isoformat(),
+        })
+        self.assertEqual(r.status_code, 200)
+        ids = {row["id"] for row in r.json()["results"]}
+        self.assertIn(str(dentro.id), ids)
+        self.assertNotIn(str(vieja.id), ids)
+        self.assertNotIn(str(futura.id), ids)
+
+        # Combinado con estado__in: solo las abiertas del rango.
+        r2 = self.client.get("/api/v1/agenda/citas/", {
+            "fecha_inicio__date__gte": (hoy - timedelta(days=20)).isoformat(),
+            "fecha_inicio__date__lte": (hoy - timedelta(days=1)).isoformat(),
+            "estado__in": "pendiente,confirmada,en_espera,en_curso",
+        })
+        self.assertEqual(r2.json()["count"], 1)
+
 
 class CitaCotizacionItemTests(TestCase):
     def setUp(self):

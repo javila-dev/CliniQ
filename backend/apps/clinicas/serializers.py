@@ -164,6 +164,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
+            "modo_puesta_en_marcha",
         )
         read_only_fields = fields
 
@@ -796,6 +797,7 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
+            "modo_puesta_en_marcha",
             "total_usuarios",
             "usuarios_activos",
             "total_sedes",
@@ -838,8 +840,8 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Clinica
-        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_habilitada", "modulo_estetico_habilitado", "modulo_obesidad_habilitado")
-        extra_kwargs = {"nit": {"required": False}, "facial_verificacion_habilitada": {"required": False}, "modulo_estetico_habilitado": {"required": False}, "modulo_obesidad_habilitado": {"required": False}}
+        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_habilitada", "modulo_estetico_habilitado", "modulo_obesidad_habilitado", "modo_puesta_en_marcha")
+        extra_kwargs = {"nit": {"required": False}, "facial_verificacion_habilitada": {"required": False}, "modulo_estetico_habilitado": {"required": False}, "modulo_obesidad_habilitado": {"required": False}, "modo_puesta_en_marcha": {"required": False}}
 
     def validate_nit(self, value):
         queryset = Clinica.objects.filter(nit=value)

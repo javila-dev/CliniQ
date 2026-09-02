@@ -1,18 +1,41 @@
+from decimal import Decimal
+
 from rest_framework import serializers
 
-from apps.caja.models import CategoriaGasto, CierreCaja, GastoCaja
+from apps.caja.models import Caja, CategoriaGasto, GastoCaja, SesionCaja
+from apps.users.permissions import get_clinica_activa
 
 
 class CategoriaGastoSerializer(serializers.ModelSerializer):
     class Meta:
         model = CategoriaGasto
         fields = ["id", "clinica", "nombre", "activa", "created_at"]
-        read_only_fields = ["id", "created_at"]
+        read_only_fields = ["id", "created_at", "clinica"]
+
+    def validate(self, attrs):
+        nombre = attrs.get("nombre")
+        if nombre is None:
+            return attrs
+        nombre = nombre.strip()
+        attrs["nombre"] = nombre
+
+        request = self.context.get("request")
+        clinica = get_clinica_activa(request) if request else None
+        if clinica is None and self.instance is not None:
+            clinica = self.instance.clinica
+        if clinica is not None:
+            qs = CategoriaGasto.objects.filter(clinica=clinica, nombre__iexact=nombre)
+            if self.instance is not None:
+                qs = qs.exclude(pk=self.instance.pk)
+            if qs.exists():
+                raise serializers.ValidationError(
+                    {"nombre": ["Ya existe una categoría con ese nombre."]}
+                )
+        return attrs
 
 
 class GastoCajaSerializer(serializers.ModelSerializer):
     registrado_por_nombre = serializers.SerializerMethodField()
-    aprobado_por_nombre = serializers.SerializerMethodField()
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
 
@@ -20,6 +43,7 @@ class GastoCajaSerializer(serializers.ModelSerializer):
         model = GastoCaja
         fields = [
             "id",
+            "sesion",
             "sede",
             "sede_nombre",
             "categoria",
@@ -28,30 +52,14 @@ class GastoCajaSerializer(serializers.ModelSerializer):
             "valor",
             "soporte_foto",
             "fecha",
-            "estado",
-            "motivo_rechazo",
             "registrado_por",
             "registrado_por_nombre",
-            "aprobado_por",
-            "aprobado_por_nombre",
-            "aprobado_en",
             "created_at",
         ]
-        read_only_fields = [
-            "id",
-            "estado",
-            "motivo_rechazo",
-            "registrado_por",
-            "aprobado_por",
-            "aprobado_en",
-            "created_at",
-        ]
+        read_only_fields = ["id", "sesion", "registrado_por", "created_at"]
 
     def get_registrado_por_nombre(self, obj):
         return obj.registrado_por.get_full_name() if obj.registrado_por_id else None
-
-    def get_aprobado_por_nombre(self, obj):
-        return obj.aprobado_por.get_full_name() if obj.aprobado_por_id else None
 
     def validate(self, attrs):
         valor = attrs.get("valor", getattr(self.instance, "valor", None))
@@ -66,43 +74,81 @@ class GastoCajaSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class RechazarGastoSerializer(serializers.Serializer):
-    motivo_rechazo = serializers.CharField(min_length=5)
-
-
-class CierreCajaSerializer(serializers.ModelSerializer):
-    cerrado_por_nombre = serializers.SerializerMethodField()
+class CajaSerializer(serializers.ModelSerializer):
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
+    responsable_nombre = serializers.SerializerMethodField()
+    sesion_abierta_id = serializers.SerializerMethodField()
+    monto_apertura_sugerido = serializers.DecimalField(
+        max_digits=12, decimal_places=2, read_only=True,
+    )
 
     class Meta:
-        model = CierreCaja
+        model = Caja
         fields = [
             "id",
             "sede",
             "sede_nombre",
-            "fecha",
-            "total_cobros",
-            "total_gastos",
+            "responsable",
+            "responsable_nombre",
+            "saldo_inicial",
+            "activa",
+            "sesion_abierta_id",
+            "monto_apertura_sugerido",
+            "created_at",
+        ]
+        read_only_fields = ["id", "created_at"]
+
+    def get_responsable_nombre(self, obj):
+        return obj.responsable.get_full_name() if obj.responsable_id else None
+
+    def get_sesion_abierta_id(self, obj):
+        s = obj.sesion_abierta
+        return str(s.id) if s else None
+
+
+class SesionCajaSerializer(serializers.ModelSerializer):
+    caja_sede_nombre = serializers.CharField(source="caja.sede.nombre", read_only=True)
+    abierta_por_nombre = serializers.SerializerMethodField()
+    cerrada_por_nombre = serializers.SerializerMethodField()
+
+    class Meta:
+        model = SesionCaja
+        fields = [
+            "id",
+            "caja",
+            "caja_sede_nombre",
+            "estado",
+            "monto_apertura",
+            "abierta_por",
+            "abierta_por_nombre",
+            "abierta_en",
+            "total_ingresos",
+            "total_egresos",
+            "esperado",
             "efectivo_contado",
             "diferencia",
             "observaciones",
-            "cerrado_por",
-            "cerrado_por_nombre",
+            "cerrada_por",
+            "cerrada_por_nombre",
+            "cerrada_en",
             "created_at",
         ]
-        read_only_fields = [
-            "id",
-            "total_cobros",
-            "total_gastos",
-            "diferencia",
-            "cerrado_por",
-            "created_at",
-        ]
-        # El UniqueTogetherValidator automatico (sede+fecha) intercepta antes
-        # de que perform_create() corra, devolviendo un error generico en vez
-        # del codigo CIERRE_DUPLICADO -- la vista ya hace esa validacion con
-        # un mensaje mas claro.
-        validators = []
+        read_only_fields = fields
 
-    def get_cerrado_por_nombre(self, obj):
-        return obj.cerrado_por.get_full_name() if obj.cerrado_por_id else None
+    def get_abierta_por_nombre(self, obj):
+        return obj.abierta_por.get_full_name() if obj.abierta_por_id else None
+
+    def get_cerrada_por_nombre(self, obj):
+        return obj.cerrada_por.get_full_name() if obj.cerrada_por_id else None
+
+
+class AbrirSesionSerializer(serializers.Serializer):
+    caja = serializers.UUIDField()
+    monto_apertura = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+
+
+class CerrarSesionSerializer(serializers.Serializer):
+    efectivo_contado = serializers.DecimalField(
+        max_digits=12, decimal_places=2, min_value=Decimal("0"),
+    )
+    observaciones = serializers.CharField(required=False, allow_blank=True)

@@ -3,6 +3,7 @@ from django.urls import path
 from apps.reportes.views import (
     CotizacionesReporteView,
     DashboardView,
+    EstadoFinancieroView,
     IngresosView,
     OcupacionView,
     PacientesSinReagendarView,
@@ -11,6 +12,7 @@ from apps.reportes.views import (
 
 urlpatterns = [
     path("dashboard/", DashboardView.as_view(), name="reportes-dashboard"),
+    path("pyl/", EstadoFinancieroView.as_view(), name="reportes-pyl"),
     path("ingresos/", IngresosView.as_view(), name="reportes-ingresos"),
     path("servicios/", ServiciosView.as_view(), name="reportes-servicios"),
     path("ocupacion/", OcupacionView.as_view(), name="reportes-ocupacion"),

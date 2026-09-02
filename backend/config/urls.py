@@ -29,6 +29,7 @@ api_urlpatterns = [
     path("admin/", include("apps.clinicas.admin_urls")),
     path("core/", include("apps.core.urls")),
     path("obesidad/", include("apps.obesidad.urls")),
+    path("migracion/", include("apps.migracion.urls")),
 ]
 
 urlpatterns = [

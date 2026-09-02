@@ -61,6 +61,9 @@ class Cobro(models.Model):
         on_delete=models.PROTECT,
         related_name="cobros_creados",
     )
+    # ── Puesta en marcha: datos previos cargados por el asistente de migración ──
+    es_migracion = models.BooleanField(default=False, db_index=True)
+    lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -170,6 +173,10 @@ class PagoRecibido(models.Model):
         on_delete=models.PROTECT,
         related_name="pagos_recibidos",
     )
+    # ── Puesta en marcha: pago previo cargado por el asistente de migración.
+    # Nunca entra al arqueo de caja ni a los ingresos del periodo. ──
+    es_migracion = models.BooleanField(default=False, db_index=True)
+    lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

@@ -206,6 +206,33 @@ class CarteraFlowTests(TestCase):
         self.assertEqual(len(pagina["results"]), 1)
         self.assertIsNotNone(pagina["next"])
 
+        # Orden por apellido del paciente (Atencia < Zapata).
+        asc = self.client.get("/api/v1/cartera/", {"ordering": "paciente__apellidos"}).json()
+        self.assertIn("Kelly", asc["results"][0]["paciente_nombre"])
+        desc = self.client.get("/api/v1/cartera/", {"ordering": "-paciente__apellidos"}).json()
+        self.assertIn("Bruno", desc["results"][0]["paciente_nombre"])
+
+        # Un abono en la cartera de Kelly -> ordena por total_cobrado.
+        cartera_kelly = Cartera.objects.get(cotizacion=self.cotizacion)
+        cuota = cartera_kelly.cuotas.first()
+        self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "50000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": "efectivo",
+            },
+            format="json",
+        )
+        por_cobrado_desc = self.client.get("/api/v1/cartera/", {"ordering": "-total_cobrado"}).json()
+        self.assertEqual(por_cobrado_desc["results"][0]["total_pagado"], "50000.00")
+        por_cobrado_asc = self.client.get("/api/v1/cartera/", {"ordering": "total_cobrado"}).json()
+        self.assertEqual(por_cobrado_asc["results"][0]["total_pagado"], "0.00")
+
+        # Orden por saldo (Kelly debe 650k tras el abono; Zapata 200k).
+        por_saldo_desc = self.client.get("/api/v1/cartera/", {"ordering": "-saldo"}).json()
+        self.assertIn("Kelly", por_saldo_desc["results"][0]["paciente_nombre"])
+
     def test_resumen_acotado_por_fecha_desde(self):
         self.client.post(
             f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",

@@ -12,6 +12,7 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.clinicas.models import Servicio
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
+from apps.colaboradores.models import Colaborador
 from apps.cobros.serializers import (
     CobroCreateSerializer,
     CobroSerializer,
@@ -22,7 +23,7 @@ from apps.cobros.serializers import (
 )
 from apps.cobros.services import agregar_item_cobro, registrar_pago
 from apps.inventario.models import Insumo
-from apps.users.permissions import RequirePermission
+from apps.users.permissions import RequirePermission, get_clinica_activa
 from django.utils import timezone
 import logging
 
@@ -56,8 +57,28 @@ class CobroViewSet(ModelViewSet):
     def get_queryset(self):
         qs = super().get_queryset()
         user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(sede__clinica=user.clinica)
+        # Scope por clínica activa (header X-Active-Clinica para superadmin;
+        # user.clinica para el resto). None = superadmin sin clínica -> global.
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(sede__clinica=clinica)
+        elif user.rol != "superadmin":
+            qs = qs.none()
+        # Usuarios no-admin (recepción / profesional) solo ven ingresos de las
+        # sedes que tienen asignadas en su perfil de colaborador. Sin colaborador
+        # o sin sedes asignadas se mantiene el alcance de clínica.
+        if not user.es_admin:
+            colaborador = (
+                Colaborador.objects.filter(user=user)
+                .prefetch_related("sedes")
+                .first()
+            )
+            if colaborador is not None:
+                sedes_ids = list(colaborador.sedes.values_list("id", flat=True))
+                if not sedes_ids and colaborador.sede_principal_id:
+                    sedes_ids = [colaborador.sede_principal_id]
+                if sedes_ids:
+                    qs = qs.filter(sede_id__in=sedes_ids)
         origen = self.request.query_params.get("origen")
         cotizacion = self.request.query_params.get("cotizacion")
         fecha_desde = self.request.query_params.get("fecha_desde")
@@ -203,6 +224,7 @@ class CobroViewSet(ModelViewSet):
         estado = request.query_params.get("estado")
         origen = request.query_params.get("origen")
         search = request.query_params.get("search")
+        sede = request.query_params.get("sede")
         fecha_desde = request.query_params.get("fecha_desde")
         fecha_hasta = request.query_params.get("fecha_hasta")
 
@@ -210,6 +232,8 @@ class CobroViewSet(ModelViewSet):
             qs = qs.filter(estado=estado)
         if origen:
             qs = qs.filter(origen=origen)
+        if sede:
+            qs = qs.filter(sede_id=sede)
         if search:
             qs = qs.filter(Q(paciente__nombres__icontains=search) | Q(paciente__apellidos__icontains=search))
         if fecha_desde:

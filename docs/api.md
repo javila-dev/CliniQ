@@ -27,6 +27,7 @@ El backend ya tiene implementados estos módulos:
 - `H27.1` ítems de cotización con tipo semántico (`tratamiento`, `procedimiento`, `libre`)
 - `H29` storage MinIO con bucket público y privado
 - `H30` planes y límites de usuarios por clínica (multitenant)
+- Diagramas corporales y zonas tratadas en atención
 
 Todo cuelga de `api/v1/`.
 
@@ -76,6 +77,7 @@ Prefijo: `/auth`
 ### Endpoints
 
 - `POST /auth/login/`
+- `POST /auth/google/`
 - `POST /auth/refresh/`
 - `POST /auth/logout/`
 - `GET /auth/me/`
@@ -117,6 +119,32 @@ Response:
   }
 }
 ```
+
+### Login con Google
+
+`POST /auth/google/` — inicia sesión con una cuenta de Google **que ya existe** en el
+sistema. No crea usuarios: el alta sigue siendo interna desde el panel de Usuarios.
+
+Requiere la variable `GOOGLE_OAUTH_CLIENT_ID` en el backend; sin ella responde `503`.
+
+Request (el `credential` es el ID token de Google Identity Services):
+
+```json
+{ "credential": "google-id-token" }
+```
+
+Response `200`: idéntica a la de `POST /auth/login/` (`refresh`, `access`, `user`).
+
+Errores:
+
+| Código HTTP | `code`                      | Cuándo |
+|-------------|-----------------------------|--------|
+| 400         | `GOOGLE_CREDENTIAL_MISSING` | falta `credential` |
+| 401         | `GOOGLE_TOKEN_INVALID`      | el ID token no verifica (expirado, `aud` distinto, firma) |
+| 401         | `GOOGLE_EMAIL_UNVERIFIED`   | la cuenta de Google no tiene el correo verificado |
+| 403         | `USER_NOT_FOUND`            | no hay usuario activo con ese correo |
+| 403         | `CLINICA_INACTIVA`          | la clínica del usuario está desactivada |
+| 503         | `GOOGLE_LOGIN_NOT_CONFIGURED` | falta `GOOGLE_OAUTH_CLIENT_ID` |
 
 ### Me
 
@@ -413,6 +441,15 @@ Prefijo: `/clinicas`
 - `DELETE /clinicas/tratamientos/{id}/`
 - `POST /clinicas/tratamientos/{id}/items/`
 - `DELETE /clinicas/tratamientos/{id}/items/{item_id}/`
+- `GET /clinicas/campanas/`
+- `POST /clinicas/campanas/`
+- `GET /clinicas/campanas/{id}/`
+- `PATCH /clinicas/campanas/{id}/`
+- `DELETE /clinicas/campanas/{id}/`
+- `GET /clinicas/campanas/activas/`
+- `POST /clinicas/campanas/{id}/items/`
+- `PATCH /clinicas/campanas/{id}/items/{item_id}/`
+- `DELETE /clinicas/campanas/{id}/items/{item_id}/`
 
 ### Filtros
 
@@ -597,6 +634,102 @@ Gestión nested de pasos:
 }
 ```
 
+### Campañas (H32)
+
+Las campañas permiten configurar precios especiales para procedimientos o tratamientos del catálogo, con vigencia por fechas y sedes.
+
+**Permiso:** `campanas.gestionar` (no asignado a roles por defecto).
+
+`GET /clinicas/campanas/` — lista campañas de la clínica. Soporta `?activo=true|false`.
+
+`GET /clinicas/campanas/activas/` — campañas vigentes hoy.
+
+| Param | Tipo | Descripción |
+|---|---|---|
+| `sede_id` | uuid | Filtra campañas aplicables a esa sede (incluye las de todas las sedes) |
+
+**Shape de campaña:**
+```json
+{
+  "id": "uuid",
+  "nombre": "Campaña Verano",
+  "descripcion": "Descuentos especiales de temporada",
+  "fecha_inicio": "2026-06-01",
+  "fecha_fin": "2026-08-31",
+  "sedes": ["uuid-sede-1", "uuid-sede-2"],
+  "sedes_nombres": ["Sede Norte", "Sede Sur"],
+  "items": [
+    {
+      "id": "uuid",
+      "procedimiento": "uuid|null",
+      "procedimiento_nombre": "Toxina botulínica|null",
+      "tratamiento": "uuid|null",
+      "tratamiento_nombre": "Plan Premium|null",
+      "precio_campana": "280000.00",
+      "activo": true
+    }
+  ],
+  "activo": true,
+  "created_at": "...",
+  "updated_at": "...",
+  "stats": {
+    "cotizaciones_aceptadas": 12,
+    "items_vendidos": 15,
+    "monto_total": "4200000.00"
+  }
+}
+```
+
+**`stats` (solo lectura):** métricas de ventas atribuidas a la campaña. Una venta = cotización en `estado=aceptada` con al menos un ítem cuyo `campana_id` persistido coincide con esta campaña.
+
+| Campo | Descripción |
+|---|---|
+| `cotizaciones_aceptadas` | Cotizaciones únicas en `aceptada` con ≥1 ítem de esta campaña |
+| `items_vendidos` | Total de ítems (cotizaciones `aceptada`) con `campana_id` = esta campaña |
+| `monto_total` | Suma de `subtotal` de esos ítems (`num_citas × valor_unitario` menos descuento %) |
+
+Incluido en `GET /clinicas/campanas/`, `GET /clinicas/campanas/{id}/` y `GET /clinicas/campanas/activas/`. Si no hay ventas, los tres campos son `0` / `"0.00"`.
+
+**Atribución de campaña en cotizaciones:** al guardar un ítem con `valor_unitario` igual al `precio_campana` de una campaña activa para la sede, el backend persiste `campana_id` en el ítem (FK). Ese valor se mantiene aunque la campaña expire, lo que permite métricas históricas correctas. Si no hay campaña activa o el precio no coincide, `campana_id` queda en `null`.
+
+`POST /clinicas/campanas/` — crea campaña. Body:
+```json
+{
+  "nombre": "Campaña Verano",
+  "descripcion": "...",
+  "fecha_inicio": "2026-06-01",
+  "fecha_fin": "2026-08-31",
+  "sedes": ["uuid-sede-1", "uuid-sede-2"]
+}
+```
+`sedes` vacío (`[]`) = aplica a todas las sedes. Alias de escritura aceptado: `sedes_ids` (mismo significado que `sedes`).
+
+`POST /clinicas/campanas/{id}/items/` — agrega un ítem a la campaña:
+```json
+{ "procedimiento": "uuid", "precio_campana": "280000.00" }
+// o
+{ "tratamiento": "uuid", "precio_campana": "430000.00" }
+```
+
+`PATCH /clinicas/campanas/{id}/items/{item_id}/` — edita precio de un ítem.
+
+`DELETE /clinicas/campanas/{id}/items/{item_id}/` — desactiva ítem.
+
+**Integración con cotizaciones:** al serializar un `ItemCotizacion` con `procedimiento` o `tratamiento`, la respuesta incluye campos de solo lectura:
+
+```json
+{
+  "precio_campana_disponible": "280000.00",
+  "campana_id": "uuid",
+  "campana_nombre": "Campaña Verano"
+}
+```
+
+- `precio_campana_disponible` / `campana_nombre` (cuando no hay FK persistida): campaña **activa hoy** para la sede de la cotización.
+- `campana_id`: si el ítem se guardó con precio de campaña, devuelve la FK persistida (aunque la campaña ya no esté vigente). Si no hay FK, cae back al lookup de campaña activa.
+
+Si no hay campaña aplicable, los tres campos vienen en `null`. El frontend decide si aplicar el precio de campaña.
+
 ### Clínica
 
 `GET /clinicas/clinicas/`
@@ -655,9 +788,16 @@ Response ejemplo:
   "telefono": "3001234567",
   "ciudad": "Bogota",
   "direccion": "Calle 100 #15-20",
-  "logo_url": "http://localhost:9000/clinica-static/clinicas/logos/logo.png"
+  "logo_url": "http://localhost:9000/clinica-static/clinicas/logos/logo.png",
+  "registro_publico_token": "abc123xyz...",
+  "registro_publico": {
+    "tab_personal_requerido": false,
+    "tab_salud_requerido": false
+  }
 }
 ```
+
+`registro_publico_token` — token permanente de la clínica para armar el link de autoregistro público de pacientes (ver `/registro-publico/`).
 
 `POST /clinicas/mi-clinica/logo/`
 
@@ -937,6 +1077,8 @@ Prefijo: `/pacientes`
 - `PATCH /pacientes/{id}/`
 - `DELETE /pacientes/{id}/`
 - `GET /pacientes/buscar/`
+- `GET /registro-publico/clinica/` — autoregistro público (sin auth)
+- `POST /registro-publico/pacientes/` — autoregistro público (sin auth)
 - `GET /pacientes/{id}/consentimientos/`
 - `POST /pacientes/{id}/consentimientos/`
 - `GET /pacientes/{id}/consentimientos/verificar/?tratamiento={uuid}`
@@ -980,6 +1122,121 @@ Response:
 
 - No se puede crear si `autoriza_datos=false`
 - Para `CC` y `TI`, `numero_documento` debe ser numérico
+
+### Autoregistro público (Q29)
+
+Endpoints **sin autenticación** para que un paciente se registre solo mediante un link único por clínica.
+
+- `GET /registro-publico/clinica/?token={token}`
+- `POST /registro-publico/pacientes/`
+
+**Obtener el token (staff autenticado):** `GET /clinicas/mi-clinica/` → campo `registro_publico_token`. El frontend arma el link público, ej. `/registro/{token}`.
+
+**Rate limit:** 20 solicitudes/hora por IP en ambos endpoints.
+
+#### `GET /registro-publico/clinica/?token={token}`
+
+Valida el token y devuelve datos para el encabezado del formulario.
+
+Response `200`:
+
+```json
+{
+  "clinica_id": "uuid",
+  "clinica_nombre": "Beauty Clinic",
+  "logo_url": "https://cdn.example/clinicas/logos/logo.png",
+  "tab_personal_requerido": false,
+  "tab_salud_requerido": false
+}
+```
+
+`tab_personal_requerido` / `tab_salud_requerido` — si `true`, el paciente debe completar al menos un campo del tab correspondiente al enviar el formulario (validado también en `POST /registro-publico/pacientes/`). Configurable por la clínica vía `PATCH /configuracion/registro-publico/`.
+
+`404` si token inválido o clínica inactiva:
+
+```json
+{ "error": "Token de registro invalido.", "code": "TOKEN_INVALIDO" }
+```
+
+#### `POST /registro-publico/pacientes/`
+
+Crea el paciente inmediatamente (sin cola de aprobación). El paciente queda asociado a la clínica del token.
+
+Body (campos obligatorios marcados con *):
+
+```json
+{
+  "token": "abc123...",
+  "tipo_documento": "CC",
+  "numero_documento": "1020304050",
+  "nombres": "Ana",
+  "apellidos": "Gomez",
+  "fecha_nacimiento": "1990-05-15",
+  "sexo": "F",
+  "telefono": "3005551122",
+  "canal_confirmacion": "whatsapp",
+  "autoriza_datos": true,
+  "email": "ana@example.com",
+  "direccion": "Calle 1",
+  "ciudad": "Bogota"
+}
+```
+
+| Campo | Obligatorio |
+|---|---|
+| `token` | Sí |
+| `tipo_documento`, `numero_documento`, `nombres`, `apellidos` | Sí |
+| `fecha_nacimiento`, `sexo`, `telefono`, `canal_confirmacion` | Sí |
+| `autoriza_datos` | Sí (`true`) |
+| `email`, `direccion`, `ciudad`, `barrio`, `ocupacion`, EPS, responsable, etc. | No |
+
+Response `201`:
+
+```json
+{
+  "id": "uuid",
+  "nombre_completo": "Ana Gomez",
+  "clinica_nombre": "Beauty Clinic"
+}
+```
+
+Duplicado (`400`) — por documento, teléfono o email en la misma clínica:
+
+```json
+{
+  "error": "Ya existe un paciente registrado con ese telefono en esta clinica.",
+  "code": "PACIENTE_YA_EXISTE",
+  "campo": "telefono"
+}
+```
+
+Token inválido (`400`):
+
+```json
+{ "error": "Token de registro invalido.", "code": "TOKEN_INVALIDO" }
+```
+
+Tab requerido vacío (`400`) — cuando la clínica marcó el tab como obligatorio y no se envió ningún campo de esa sección:
+
+```json
+{
+  "error": "Debes completar al menos un campo en Datos personales.",
+  "code": "TAB_PERSONAL_REQUERIDO"
+}
+```
+
+```json
+{
+  "error": "Debes completar al menos un campo en Salud y afiliacion.",
+  "code": "TAB_SALUD_REQUERIDO"
+}
+```
+
+Campos considerados por tab: **Datos personales** — `direccion`, `ciudad`, `barrio`, `estado_civil`, `ocupacion`, `escolaridad`, `grupo_etnico`. **Salud y afiliación** — `eps`, `tipo_afiliado`, `regimen`, `grupo_sanguineo`.
+
+**Configuración (admin):** `GET/PATCH /configuracion/registro-publico/` con `tab_personal_requerido` y `tab_salud_requerido` (default `false`). También disponibles en `GET /clinicas/mi-clinica/` → `registro_publico`.
+
+El link/token es **permanente** mientras la clínica esté activa.
 
 ### Consentimientos del paciente
 
@@ -1051,14 +1308,181 @@ Prefijo: `/agenda`
 - `POST /agenda/citas/{id}/iniciar_checkin/`
 - `POST /agenda/citas/{id}/verificar_otp/`
 - `POST /agenda/citas/{id}/checkin_foto/`
+- `POST /agenda/citas/{id}/enviar_firma_asistencia/` — permiso `agenda.citas.editar` (H36, flujo con template)
+- `POST /agenda/citas/{id}/iniciar_registro_asistencia/` — permiso `agenda.citas.editar` (H36, flujo embedded sin template)
+- `POST /agenda/citas/{id}/recuperar_pdf_asistencia/` — permiso `agenda.citas.editar`
+- `GET /agenda/citas/{id}/registro_asistencia_pdf/` — permiso `agenda.citas.ver`
 
-### Bloqueos
+### Registro de asistencia PDF
 
-- `GET /agenda/bloqueos/`
-- `POST /agenda/bloqueos/`
+`GET /agenda/citas/{id}/registro_asistencia_pdf/`
+
+Genera y retorna el PDF de registro de asistencia para que el paciente lo firme físicamente al llegar a la cita.
+
+**Response:** `Content-Type: application/pdf` — PDF inline listo para imprimir.
+
+**Contenido del documento:**
+- Encabezado con logo y datos de la clínica (nombre, teléfono, NIT)
+- Referencia de la cita (`#CIT-XXXXXXXX`)
+- Datos del paciente: nombre completo, tipo y número de documento, teléfono
+- Detalle de la cita: fecha/hora, profesional, sede, procedimiento a realizar
+- **Bloque de cotización** (solo si `cita.item_cotizacion` existe): referencia de cotización, descripción del ítem y badge `sesión X/N` donde X = citas no canceladas del ítem y N = `num_citas` total
+- Párrafo de declaración con nombre y documento del paciente interpolados
+- Espacio de firma para el paciente y para el profesional a cargo
+- Footer con referencia, marca CliniQ y hora de impresión
+
+**Cuándo usar:** imprimir al momento en que el paciente llega a recepción, antes de iniciar la atención. Sirve como prueba legal de asistencia voluntaria.
+
+**Errores:**
+- `404` — cita no encontrada o no pertenece a la clínica del usuario
+
+### Firma electrónica de asistencia (H36)
+
+**Plantillas de asistencia** — CRUD en `/clinicas/plantillas-asistencia/`
+
+- `GET /clinicas/plantillas-asistencia/` — filtra por `activo=true/false`
+- `POST /clinicas/plantillas-asistencia/` — permiso `clinicas.config.gestionar`
+- `PATCH /clinicas/plantillas-asistencia/{id}/` — permiso `clinicas.config.gestionar`
+- `DELETE /clinicas/plantillas-asistencia/{id}/` — permiso `clinicas.config.gestionar`
+
+Campos: `id`, `clinica`, `nombre`, `documenso_template_token`, `activo`
+
+**Firma embedded sin template (H36.4):**
+
+`POST /agenda/citas/{id}/iniciar_registro_asistencia/`
+
+No requiere body. Flujo completo en el backend:
+
+1. Genera el PDF de registro de asistencia con WeasyPrint.
+2. Extrae las coordenadas del recuadro de firma usando `pdfplumber`: busca los marcadores invisibles `__SIG_TL__` (esquina superior-izq.) y `__SIG_BR__` (esquina inferior-der.) embebidos dentro del recuadro real de "Firma del paciente" y mide su posición/tamaño exactos; si no los encuentra usa coordenadas de fallback calibradas para A4.
+3. Crea el envelope en Documenso con el PDF embebido en el propio request (`POST /api/v2/envelope/create`, `multipart/form-data`, con `title`, `recipients` —incluido el campo de firma con las coordenadas calculadas— y el archivo PDF adjunto). Este flujo v2 no requiere transporte S3 configurado en Documenso (a diferencia del v1, que sí lo exige).
+4. Distribuye el documento (`POST /api/v2/envelope/distribute`) para obtener el `signing_token`/`signingUrl` del destinatario.
+5. Guarda `firma_asistencia_documento_id` (id del envelope) y cambia `firma_asistencia_estado` a `"enviada"`.
+
+Response:
+
+```json
+{ "signing_token": "abc123...", "document_id": "4567" }
+```
+
+El `signing_token` se usa en el componente embedded de Documenso en el frontend para presentar la firma al paciente en pantalla (tablet del local), sin enviar email.
+
+**Errores:**
+- `502 DOCUMENSO_ERROR` — Documenso no disponible o rechazó la petición.
+
+---
+
+**Firma con template (flujo anterior):**
+
+`POST /agenda/citas/{id}/enviar_firma_asistencia/`
+
+```json
+{ "template_id": "uuid" }
+```
+
+Response:
+
+```json
+{ "documento_id": "string", "documento_url": "https://..." }
+```
+
+Requiere una `PlantillaAsistencia` preconfigurada en Documenso con el campo de firma ya posicionado. Retorna una URL de firma (flujo por email o link directo).
+
+---
+
+**Campos en `CitaSerializer`** (read-only):
+
+| Campo | Descripción |
+|---|---|
+| `firma_asistencia_estado` | Ver tabla de valores abajo |
+| `firma_asistencia_documento_id` | Slug del envelope en Documenso (e.g. `envelope_abc123`) |
+| `firma_asistencia_signing_token` | Token del firmante; se usa para montar el widget embedded de Documenso |
+| `firma_asistencia_archivo_url` | URL del PDF firmado; `null` hasta que el webhook lo descargue o se llame `recuperar_pdf_asistencia` |
+
+| Valor de `firma_asistencia_estado` | Descripción |
+|---|---|
+| `sin_firma` | Sin documento enviado (default) |
+| `enviada` | Documento enviado, pendiente de firma |
+| `firmada` | Paciente firmó (`document.completed` webhook) |
+| `rechazada` | Paciente rechazó (`document.declined` webhook) |
+
+**Cómo se expone el resultado de la firma al frontend:** no hay WebSocket/push — el backend no notifica activamente. El flujo es:
+
+1. FE llama `iniciar_registro_asistencia` y muestra el widget embedded de Documenso con el `signing_token` recibido (estado queda en `enviada`).
+2. El paciente firma (o rechaza) en el widget. Documenso dispara el webhook `POST /webhooks/documenso/` de forma asíncrona.
+3. El webhook actualiza `firma_asistencia_estado` a `firmada`/`rechazada` en la `Cita` (ver detalle abajo).
+4. El FE detecta el cambio haciendo **polling** sobre `GET /agenda/citas/{id}/` (o el endpoint de lista/detalle que ya esté consumiendo) hasta ver que `firma_asistencia_estado` salió de `enviada`. Mismo patrón que ya usan para `firmado` en `ConsentimientoInformadoSerializer`.
+
+Recomendación de intervalo: cada 2-3s mientras el widget está abierto, con un timeout razonable (ej. 2 min) que muestre un error/reintento si Documenso nunca confirma.
+
+**Importante — a diferencia de consentimientos, acá NO hay bypass de frontend:** no existe ningún endpoint análogo a `completar_firma` para `firma_asistencia_estado`. El único código que puede escribir `"firmada"`/`"rechazada"` es el webhook (`_handle_firma_asistencia`), gateado por `X-Documenso-Secret`; ni `enviar_firma_asistencia` ni `iniciar_registro_asistencia` tocan ese valor (solo dejan `"enviada"`). El widget de Documenso emite un evento client-side al completar la firma (`document.completed` en su SDK embed) que el frontend puede usar **únicamente para UI** (ej. cerrar el modal del widget), pero nunca debe usarse para decidir que la firma quedó válida — eso solo lo confirma el webhook, reflejado en `firma_asistencia_estado` vía polling.
+
+---
+
+**Recuperar PDF firmado:**
+
+`POST /agenda/citas/{id}/recuperar_pdf_asistencia/`
+
+Permiso: `agenda.citas.editar`. Sin body.
+
+Descarga desde Documenso y persiste el PDF firmado en `firma_asistencia_archivo` cuando la cita ya tiene `firma_asistencia_estado=firmada` pero el archivo no fue guardado. Esto ocurre cuando el webhook de Documenso actualizó el estado correctamente pero la descarga del PDF falló — situación que se da en el flujo embedded porque Documenso no envía `externalId` en ese evento, por lo que el `document_id` numérico necesario para el download no estaba disponible hasta que se implementó el fallback por token.
+
+**Flujo interno:**
+
+1. Si `firma_asistencia_archivo` ya existe, retorna el serializer sin llamar a Documenso (idempotente).
+2. Llama `GET /api/v2/envelope/{firma_asistencia_documento_id}` para resolver el ID numérico del documento (`documentId` o `id` en la respuesta).
+3. Descarga el PDF con `GET /api/v1/documents/{numeric_id}/download`; si falla, intenta fallback con el slug directamente.
+4. Guarda el archivo en `firma_asistencia_archivo` y actualiza `updated_at`.
+5. Retorna el `CitaSerializer` completo con `firma_asistencia_archivo_url` poblado.
+
+**Errores:**
+
+| Código | HTTP | Descripción |
+|---|---|---|
+| `FIRMA_NO_COMPLETADA` | 409 | `firma_asistencia_estado` no es `firmada` |
+| `DOCUMENSO_ERROR` | 502 | Documenso no disponible o PDF aún no listo |
+
+**Webhook Documenso** (`/webhooks/documenso/`): maneja `DOCUMENT_COMPLETED`/`document.completed` y `DOCUMENT_DECLINED`/`document.declined`. Documentos de consentimiento médico se identifican por `externalId` (UUID del `ConsentimientoInformado`). Documentos de asistencia del flujo embedded (`iniciar_registro_asistencia`) **no tienen `externalId`** — Documenso ignora ese campo en el endpoint `POST /api/v2/envelope/create` multipart; el webhook los identifica por fallback usando el `token` del firmante contra `firma_asistencia_signing_token`. Los documentos del flujo template (`enviar_firma_asistencia`) sí usan `externalId = "asistencia:{cita_id}"` porque ese endpoint acepta JSON puro.
+
+### Bloqueos de agenda (H34)
+
+- `GET /agenda/bloqueos/` — permiso `agenda.bloqueos.ver`
+- `POST /agenda/bloqueos/` — permiso `agenda.crear_bloqueo`
 - `GET /agenda/bloqueos/{id}/`
-- `PATCH /agenda/bloqueos/{id}/`
-- `DELETE /agenda/bloqueos/{id}/`
+- `PATCH /agenda/bloqueos/{id}/` — permiso `agenda.crear_bloqueo`
+- `DELETE /agenda/bloqueos/{id}/` — permiso `agenda.crear_bloqueo`
+- `POST /agenda/bloqueos/{id}/aprobar/` — permiso `agenda.aprobar_bloqueo`
+- `POST /agenda/bloqueos/{id}/rechazar/` — permiso `agenda.aprobar_bloqueo`
+
+**Filtros disponibles:** `profesional`, `sede`, `fecha_inicio__date`, `estado`
+
+**Campos de respuesta:**
+
+| Campo | Tipo | Notas |
+|---|---|---|
+| `id` | uuid | |
+| `profesional` | uuid\|null | Puede ser null para bloqueos de sede completa |
+| `profesional_nombre` | string\|null | |
+| `sede` | uuid\|null | |
+| `sede_nombre` | string\|null | |
+| `fecha_inicio` | datetime | |
+| `fecha_fin` | datetime | |
+| `motivo` | string | Hasta 500 chars |
+| `estado` | string | `pendiente` \| `aprobado` \| `rechazado` |
+| `creado_por` | uuid\|null | Read-only, auto-asignado al crear |
+| `creado_por_nombre` | string\|null | Read-only |
+| `aprobado_por` | uuid\|null | Read-only, asignado al aprobar/rechazar |
+| `aprobado_por_nombre` | string\|null | Read-only |
+| `aprobado_en` | datetime\|null | Read-only |
+| `activo` | boolean | |
+
+**Comportamiento en `POST`:**
+- `creado_por` se auto-asigna al usuario autenticado.
+- Si el usuario tiene permiso `agenda.aprobar_bloqueo`, `estado` queda en `aprobado` automáticamente; si no, queda en `pendiente`.
+- `clinica` se deriva de la `sede` indicada (o de la clínica del usuario si no hay sede).
+- Al menos uno de `profesional` o `sede` debe estar presente.
+
+**Bloqueos en disponibilidad:** solo bloqueos `aprobado` bloquean slots en `verificar_disponibilidad_profesional`. Los bloqueos de sede completa (sin `profesional`) también se excluyen al calcular `get_slots_disponibles`.
 
 ### Filtros de citas
 
@@ -1066,9 +1490,13 @@ Prefijo: `/agenda`
 - `estado_confirmacion=sin_enviar|enviado|confirmado|sin_respuesta`
 - `profesional=<uuid>`
 - `sede=<uuid>`
+- `paciente=<uuid>` — filtra citas de un paciente específico
 - `fecha_inicio__date=YYYY-MM-DD`
 - `canal_origen=presencial|telefono|web|redes`
+- `firma_asistencia_estado=sin_firma|enviada|firmada|rechazada`
 - `search=<paciente>`
+
+> **Para listar asistencias firmadas de un paciente** usar `?paciente=<uuid>&firma_asistencia_estado=firmada`. No usar `?estado=completada` como aproximación: una cita puede estar firmada con `estado=en_curso` (el paciente firma al llegar, antes de que el profesional complete la sesión).
 
 ### Crear cita
 
@@ -2109,7 +2537,7 @@ Prefijo: `/cotizaciones`
 
 ### Filtros
 
-- `estado=borrador|aceptada|vencida`
+- `estado=borrador|aceptada|vencida|descartada`
 - `paciente=<uuid>`
 - `profesional=<uuid>`
 - `activo=true|false`
@@ -2180,6 +2608,7 @@ Request:
       "periodicidad": "Cada 4 meses",
       "valor_unitario": "350000.00",
       "descuento_porcentaje": "0.00",
+      "precio_bloqueado": false,
       "subtotal": "350000.00",
       "citas_agendadas": 0,
       "citas_completadas": 0,
@@ -2253,17 +2682,23 @@ Las `formas_pago` también usan reemplazo completo con la misma lógica. Si vien
 - `servicio` queda como alias legacy; el frontend nuevo debería preferir `procedimiento`.
 - si un item incluye `tratamiento`, backend auto-completa:
   - `descripcion <- tratamiento.nombre` si viene vacía
-  - `valor_unitario <- tratamiento.precio_estimado` si viene vacío
+  - `valor_unitario <- tratamiento.precio_estimado` si viene vacío y se fija `precio_bloqueado=true`
   - `num_citas <- suma(cantidad)` de los `tipos_sesion` del tratamiento si viene vacío
 - si un item incluye `procedimiento`, backend auto-completa:
   - `descripcion <- procedimiento.nombre` si viene vacía
-  - `valor_unitario <- procedimiento.precio` si viene vacío
+  - `valor_unitario <- procedimiento.precio_base` (si configurado) **solo si viene vacío** y fija `precio_bloqueado=true`; si no hay `precio_base`, usa `procedimiento.precio` sin bloquear
   - `num_citas <- 1` si viene vacío
   - `duracion_estimada <- "{duracion_min} min"` si viene vacía
+- **`precio_bloqueado`:** campo de respuesta (`true`/`false`). Indica que el precio vino del catálogo. Si `precio_bloqueado=true`, enviar un `valor_unitario` diferente al precio de catálogo requiere el permiso `cotizaciones.cambiar_precio`, **salvo** que el valor coincida con el `precio_campana` de una campaña activa para la sede de la cotización (ver campos `precio_campana_disponible`, `campana_id` en el ítem). Sin permiso ni campaña válida devuelve `400 PRECIO_BLOQUEADO`.
 - `PATCH` solo permitido si `estado=borrador`
 - `DELETE` hace soft-delete y solo está permitido si `estado=borrador`
 - cambios de estado válidos:
-  - `borrador -> aceptada`
+
+| Desde       | Hacia        | Quién puede                  |
+|-------------|--------------|------------------------------|
+|   |    |      |
+|   |  |      |
+|   |    |  /        |
 
 Error de transición inválida:
 
@@ -2274,6 +2709,18 @@ Error de transición inválida:
 }
 ```
 
+Error al revertir a borrador con cobros activos:
+
+```json
+{ "error": "La cotización tiene cobros activos. Anúlos primero.", "code": "COTIZACION_CON_COBROS" }
+```
+
+Error al revertir a borrador con citas agendadas:
+
+```json
+{ "error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS" }
+```
+
 Error al editar fuera de estados editables:
 
 ```json
@@ -2282,6 +2729,62 @@ Error al editar fuera de estados editables:
   "code": "COTIZACION_NO_EDITABLE"
 }
 ```
+
+### Precios fijos de catálogo (H31)
+
+Cada procedimiento (`/clinicas/procedimientos/`) puede tener un `precio_base` (nullable). Cada tratamiento del catálogo ya tiene `precio_estimado`. Cuando un ítem de cotización se crea con esas fuentes:
+
+- El backend fija `valor_unitario` desde el catálogo y marca `precio_bloqueado: true` en el item.
+- Intentar enviar un `valor_unitario` diferente al de catálogo sin el permiso `cotizaciones.cambiar_precio` devuelve `400 PRECIO_BLOQUEADO`, **excepto** cuando el valor enviado coincide con el `precio_campana` de una campaña activa para la sede (`precio_campana_disponible` en el GET del ítem).
+- Los ítems de tipo `libre` nunca se bloquean (`precio_bloqueado: false`).
+
+```json
+// PATCH /clinicas/procedimientos/{id}/ — configurar precio_base
+{ "precio_base": "350000.00" }
+```
+
+**Permiso requerido para override en cotizaciones:** `cotizaciones.cambiar_precio` — no incluido en los roles por defecto; el admin debe asignarlo explícitamente.
+
+### Tope de descuento por catálogo
+
+`Servicio.descuento_maximo_pct` y `TratamientoCatalogo.descuento_maximo_pct` (0–100,
+default **0**) definen el descuento máximo permitido sobre el **precio de lista**
+(`precio_base` / `precio_estimado`).
+
+- Al guardar un ítem de cotización de tipo `procedimiento`/`tratamiento` con precio
+  de lista, el **precio efectivo por unidad** (`valor_unitario * (1 - descuento_porcentaje/100)`)
+  no puede bajar de `precio_lista * (1 - descuento_maximo_pct/100)`.
+- Es un **tope duro**: no lo levanta `cotizaciones.cambiar_precio` ni ningún otro
+  permiso. Para descontar más hay que subir el tope en el catálogo.
+- Excepción: el ítem está a `valor_unitario == precio_campana` de una campaña activa
+  y `descuento_porcentaje == 0` (así funciona "aplicar precio de campaña").
+- Con `descuento_maximo_pct = 0` (default) el ítem de catálogo **no admite ningún
+  descuento** hasta que la clínica configure un tope.
+- Violarlo devuelve `400` con `code: DESCUENTO_EXCEDE_MAXIMO`.
+- Los ítems `libre` no tienen tope.
+
+El GET del ítem de cotización expone `descuento_maximo_pct` y `precio_lista`
+(strings, o `null` si no aplica).
+
+### Precio fijo al cobrar cita directa (H31.1)
+
+Cuando se crea un cobro de origen `cita` sin cotización asociada, el campo `servicio_precio_base` del `CitaSerializer` indica el precio fijo del procedimiento (o `null` si no tiene `precio_base` configurado o si la cita viene de cotización).
+
+**Campo nuevo en `CitaSerializer` (read-only):**
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `servicio_precio_base` | decimal\|null | `precio_base` del servicio; `null` si la cita viene de cotización o el servicio no tiene precio fijo |
+
+**Validación en `POST /cobros/`:**
+
+- Si `origen=cita`, la cita tiene `servicio` directo (sin `item_cotizacion`) y el servicio tiene `precio_base` configurado:
+  - Cualquier ítem de tipo `servicio` cuyo `precio_unitario` difiera del `precio_base` requiere permiso `cobros.cambiar_precio`.
+  - Sin ese permiso → `400 {"items": "No tienes permiso para modificar el precio de un servicio con precio fijo."}`.
+- Si `precio_base` es `null` → precio libre, sin restricción.
+- Citas originadas desde cotización → sin restricción en este endpoint.
+
+**Permiso requerido para override en cobros:** `cobros.cambiar_precio` — no incluido en roles por defecto.
 
 ### Cambiar estado
 
@@ -2827,7 +3330,9 @@ Prefijo: `/cartera`
 - `GET /cartera/`
 - `GET /cartera/{id}/`
 - `GET /cartera/resumen/`
+- `PATCH /cartera/cuotas/{id}/` — modificar plazo (H35)
 - `PATCH /cartera/cuotas/{id}/registrar_pago/`
+- `POST /cartera/cuotas/{id}/aprobar_excepcion/`
 
 ### Registrar pago de cuota
 
@@ -2847,9 +3352,14 @@ Request:
 
 Comportamiento:
 
-- marca la cuota como pagada
-- crea o reutiliza un `Cobro` con `origen=cotizacion`
-- registra un `PagoRecibido` asociado a ese cobro
+- **los pagos se acumulan**: `valor_pagado` es el total abonado a la cuota, no
+  el de un solo pago. Un abono parcial (`valor_pagado` < saldo) **no** cierra la
+  cuota; `pagada` pasa a `true` solo cuando lo acumulado cubre `valor_esperado`.
+  Se puede volver a llamar el endpoint sobre la misma cuota hasta cubrir el saldo.
+- rechaza (`400`, `code=PAGO_EXCEDE_CUOTA`) si `valor_pagado` supera el
+  `saldo_pendiente` actual de la cuota
+- crea o reutiliza un `Cobro` con `origen=cotizacion` y registra un
+  `PagoRecibido` por el monto de **este** pago
 - permite trazar ingresos de cartera en el mismo libro de `cobros`
 
 Response:
@@ -2864,6 +3374,8 @@ Response:
     "fecha_esperada": null,
     "pagada": true,
     "valor_pagado": "350000.00",
+    "saldo_pendiente": "0.00",
+    "vencida": false,
     "fecha_pago": "2026-05-27",
     "medio_pago": "transferencia",
     "observaciones": "Nequi"
@@ -2872,6 +3384,102 @@ Response:
   "pago_id": "uuid"
 }
 ```
+
+### Listado / detalle de cartera
+
+`GET /cartera/` está **paginado** (`PageNumberPagination`, 25 por página) y
+devuelve `{ count, next, previous, results }`. Parámetros de query:
+
+| Param | Descripción |
+|---|---|
+| `search` | Busca en nombres, apellidos y número de documento del paciente |
+| `page` | Número de página |
+| `page_size` | Filas por página (máx. 500) |
+| `paciente` / `sede_id` / `estado` | Filtros existentes (`estado` ∈ `pagada`/`vencida`/`pendiente`) |
+
+`GET /cartera/resumen/` **no** está paginado ni aplica `search` (es un panel
+global); sí respeta `paciente` / `sede_id` / `estado`. Acepta además
+`desde=YYYY-MM-DD` para acotar los KPI a las carteras creadas (cotización
+aceptada) desde esa fecha; sin `desde` cuenta todas.
+
+`GET /cartera/` y `GET /cartera/{id}/` incluyen, por cada cartera, señales de mora
+derivadas de las cuotas (una cuota cuenta como "con saldo" mientras
+`valor_esperado - valor_pagado > 0`, aunque tenga abonos):
+
+| Campo | Tipo | Descripción |
+|---|---|---|
+| `proxima_cuota_fecha` | date \| null | Fecha de la primera cuota con saldo pendiente |
+| `proxima_cuota_valor` | string \| null | **Saldo** de esa cuota (no el valor esperado) |
+| `en_mora` | boolean | Hay al menos una cuota con saldo y `fecha_esperada` pasada |
+| `mora_dias` | integer | Días de atraso de la cuota más vencida (`0` si no hay mora) |
+| `mora_valor` | string | Suma de los saldos de las cuotas vencidas |
+| `cuotas_pagadas` | integer | Cuotas **cubiertas por completo** (un abono parcial no cuenta) |
+
+`GET /cartera/resumen/` cuenta en `cuotas_vencidas` / `cuotas_vencidas_valor` las
+cuotas con saldo pendiente y fecha pasada (incluye las que tienen abonos
+parciales), y `total_cobrado` suma todos los abonos.
+
+### Bloqueo de agenda por deuda (H33)
+
+Cuando `Clinica.bloquear_agenda_por_deuda = true`, `POST /agenda/citas/` valida si el paciente tiene cuotas de cartera vencidas sin excepción aprobada. Si las hay, retorna `400`:
+
+```json
+{
+  "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
+  "code": "PACIENTE_CON_DEUDA",
+  "detalle": { "cuotas_vencidas": 3, "monto_total": "450000.00" }
+}
+```
+
+**Configuración de la clínica** (campos nuevos en `GET/PATCH /clinicas/clinicas/{id}/`):
+
+| Campo | Tipo | Default | Descripción |
+|---|---|---|---|
+| `bloquear_agenda_por_deuda` | boolean | `false` | Activa el bloqueo de agenda |
+| `dias_gracia_deuda` | integer | `0` | Días de gracia tras el vencimiento antes de bloquear |
+
+**Excepción administrativa:** `POST /cartera/cuotas/{id}/aprobar_excepcion/`
+
+- Requiere permiso `cartera.aprobar_excepcion` (no incluido en roles por defecto).
+- Marca la cuota como `excepcion_aprobada=true` — esa cuota ya no cuenta para el bloqueo.
+- Si todas las cuotas vencidas del paciente tienen excepción aprobada, se puede agendar.
+
+Response: el serializer completo de `CuotaCartera` con los nuevos campos:
+```json
+{
+  "id": "uuid",
+  "tipo": "cuotas",
+  "valor_esperado": "150000.00",
+  "fecha_esperada": "2026-04-01",
+  "pagada": false,
+  "excepcion_aprobada": true,
+  "aprobada_por": "uuid",
+  "aprobada_por_nombre": "Dra. López"
+}
+```
+
+Errores: `400 CUOTA_YA_PAGADA` si la cuota ya estaba pagada; `400 EXCEPCION_YA_APROBADA` si ya tenía excepción.
+
+### Modificar plazo de cuota (H35)
+
+`PATCH /cartera/cuotas/{id}/` — requiere permiso `cartera.modificar_plazo`
+
+Permite reprogramar la fecha de vencimiento y/o el monto de una cuota pendiente (no pagada). Cada cambio queda registrado en `CuotaCarteraLog`.
+
+Request (al menos un campo requerido):
+
+```json
+{
+  "fecha_vencimiento": "2026-09-30",
+  "monto": "250000.00"
+}
+```
+
+Response: serializer completo de `CuotaCartera` con los valores actualizados.
+
+Errores: `400 CUOTA_YA_PAGADA` si la cuota ya está pagada.
+
+**Auditoría:** por cada campo modificado se crea un registro `CuotaCarteraLog` con `campo`, `valor_anterior`, `valor_nuevo`, `modificado_por`.
 
 ## Campos y enums útiles para frontend
 
@@ -3205,15 +3813,93 @@ Prefijo: `/reportes`
 ### Endpoints
 
 - `GET /reportes/dashboard/`
+- `GET /reportes/pyl/`
 - `GET /reportes/ingresos/`
 - `GET /reportes/servicios/`
 - `GET /reportes/ocupacion/`
+
+### Estado financiero (P&L)
+
+`GET /reportes/pyl/?fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD&sede_id=<uuid>`
+Permiso: `reportes.ver_financieros`. Default: mes en curso.
+
+Scope de clínica: usa `get_clinica_activa(request)` — para superadmin la clínica
+del header `X-Active-Clinica` (sin header → global, todas las clínicas); para el
+resto, `user.clinica`. Lo mismo aplica a `/caja/gastos/`, `/caja/categorias/`,
+`/caja/cajas/`, `/caja/sesiones/`, `/cobros/cobros/` y `/cartera/`: un superadmin
+con clínica activa **no** ve datos de otras clínicas.
+
+Calcula, para el rango y para el **periodo anterior de igual duración**:
+`ingresos_facturado` (Σ `Cobro.total` no anulados con fecha en rango) −
+`costo_insumos` (Σ `costo_unitario·cantidad` de ítems `insumo_consumo` de esos cobros) −
+`gastos_operativos` (Σ `GastoCaja` con fecha en rango) = `margen`.
+`ingresos_recaudado` (Σ `PagoRecibido`) va como métrica secundaria.
+
+```json
+{
+  "periodo": { "inicio": "2026-08-01", "fin": "2026-08-31", "dias": 31 },
+  "actual":   { "ingresos_facturado": "...", "ingresos_recaudado": "...", "costo_insumos": "...", "gastos_operativos": "...", "margen": "...", "margen_pct": "..." },
+  "anterior": { "...igual..." },
+  "variacion_pct": { "ingresos_facturado": "12.5", "costo_insumos": null, "gastos_operativos": "-3.0", "margen": "20.1" },
+  "por_sede": [ { "sede_id": "...", "sede_nombre": "...", "ingresos_facturado": "...", "costo_insumos": "...", "gastos_operativos": "...", "margen": "...", "margen_pct": "..." } ]
+}
+```
+`variacion_pct.<campo>` = `null` cuando el periodo anterior está en cero.
+`por_sede` **solo** se incluye cuando no se envía `sede_id` (tabla comparativa).
+
+### Caja / Egresos
+
+La caja es **1:1 con la sede**: la configura un admin (`caja.cajas.gestionar`) con
+`saldo_inicial` y `responsable`. Todos los ingresos y egresos de la sede pasan por
+ella para el arqueo. No hay flujo de aprobación de gastos: el responsable de la
+caja responde por ella en auditoría.
+
+**`/caja/cajas/`** (CRUD, config) — `caja.cajas.gestionar` para escribir,
+`caja.cierre.ver` para leer. Campos: `sede`, `responsable` (user, opcional),
+`saldo_inicial`, `activa`. Solo lectura: `sesion_abierta_id`,
+`monto_apertura_sugerido` (efectivo contado en el último cierre, o `saldo_inicial`
+la primera vez).
+
+**`/caja/sesiones/`** — apertura → cierre de la caja. No está atada a una fecha;
+solo puede haber **una `abierta` por caja** a la vez (admite varios cierres por
+día / cambios de turno). Permiso: `caja.cierre.ver` (leer),
+`caja.cierre.realizar` (abrir/cerrar).
+- `POST /caja/sesiones/abrir/` `{ "caja": "<uuid>", "monto_apertura": "..."? }` —
+  `monto_apertura` por defecto = `monto_apertura_sugerido` (el fondo **arrastra**).
+  `400 CAJA_YA_ABIERTA` si ya hay una sesión abierta.
+- `POST /caja/sesiones/<id>/cerrar/` `{ "efectivo_contado": "...", "observaciones": ""? }` —
+  `total_ingresos` = Σ `PagoRecibido` en efectivo de cobros no anulados de la sede
+  en la ventana `[cierre anterior → ahora]`; `total_egresos` = Σ `GastoCaja` con
+  `sesion` = esta; `esperado` = `monto_apertura + total_ingresos − total_egresos`;
+  `diferencia` = `efectivo_contado − esperado`.
+- `GET /caja/sesiones/actual/?sede=<uuid>` → `{ "caja": {...} | null, "sesion": {...} | null }`
+  con `total_ingresos` / `total_egresos` / `esperado` recalculados en vivo.
+
+**`/caja/categorias/`** — catálogo de categorías de gasto, administrado desde
+Configuración → Cajas y categorías (`caja.categorias.gestionar` para escribir,
+`caja.categorias.ver` para leer/usar en filtros). El `nombre` es **único por
+clínica, sin distinguir mayúsculas** y se recorta de espacios (`400
+{"nombre": ["Ya existe una categoría con ese nombre."]}` si choca). Desactivar una
+categoría la saca del selector de gastos nuevos sin borrar el histórico.
+
+**`/caja/gastos/`** — un gasto se ata a la **sesión abierta** de la caja de su sede
+(`400 CAJA_CERRADA` si no hay ninguna). Editable / eliminable solo mientras esa
+sesión siga `abierta` (por `registrado_por` o admin); `400 SESION_CERRADA` una vez
+cerrada. El campo `fecha` sigue siendo editable (default hoy) y **no** se usa para
+el arqueo (eso va por el FK `sesion`). Filtros: `fecha`, `fecha__gte`,
+`fecha__lte`, `categoria`, `sede`, `sesion`.
 
 ### Dashboard
 
 `GET /reportes/dashboard/?sede_id=<uuid>&fecha=YYYY-MM-DD`
 
 `sede_id` y `fecha` son opcionales. Default: sede del usuario y fecha de hoy.
+
+Alternativamente se puede pedir un rango con `fecha_inicio=YYYY-MM-DD&fecha_fin=YYYY-MM-DD`
+(si llega cualquiera de los dos se ignora `fecha`). En ese caso `citas_hoy` y
+`cobros_hoy` agregan todo el periodo indicado; las claves de la respuesta no
+cambian. Lo usa el filtro de periodo del dashboard (hoy / este mes / últimos 3 y
+6 meses / último año).
 
 Response:
 ```json
@@ -3925,6 +4611,7 @@ Requiere: rol `admin` o `superadmin`.
     "nombre": "Profesional",
     "descripcion": "Hasta 10 usuarios activos",
     "max_usuarios": 10,
+    "max_sedes": 3,
     "activo": true,
     "created_at": "...",
     "updated_at": "..."
@@ -3932,11 +4619,15 @@ Requiere: rol `admin` o `superadmin`.
   "usuarios_activos": 7,
   "puede_agregar": true,
   "slots_disponibles": 3,
-  "sin_limite": false
+  "sin_limite": false,
+  "sedes_activas": 2,
+  "puede_agregar_sede": true,
+  "slots_disponibles_sedes": 1,
+  "sin_limite_sedes": false
 }
 ```
 
-Si la clínica no tiene plan o el plan tiene `max_usuarios = 0`:
+Si la clínica no tiene plan asignado, o el plan tiene `max_usuarios = 0` / `max_sedes = 0` (sin límite en esa dimensión):
 
 ```json
 {
@@ -3944,9 +4635,15 @@ Si la clínica no tiene plan o el plan tiene `max_usuarios = 0`:
   "usuarios_activos": 7,
   "puede_agregar": true,
   "slots_disponibles": null,
-  "sin_limite": true
+  "sin_limite": true,
+  "sedes_activas": 2,
+  "puede_agregar_sede": true,
+  "slots_disponibles_sedes": null,
+  "sin_limite_sedes": true
 }
 ```
+
+Los campos de usuarios y sedes son independientes: un plan puede tener límite de usuarios pero no de sedes (`max_sedes = 0`), en cuyo caso `sin_limite_sedes: true` y `slots_disponibles_sedes: null` aunque `sin_limite: false`.
 
 ### Verificación rápida de límite para el frontend
 
@@ -4198,6 +4895,202 @@ Campos `max_usuarios`, `max_sedes` y `precio` son opcionales (default 0 / null).
 ```json
 { "error": "No se puede eliminar un plan asignado a clinicas activas.", "code": "PLAN_IN_USE" }
 ```
+
+---
+
+## Diagramas corporales y zonas tratadas
+
+Permite marcar sobre imágenes PNG del cuerpo humano los puntos exactos donde se aplicó un tratamiento durante una atención. Los diagramas son recursos de la plataforma (solo superadmin los crea); las clínicas los asignan a sus servicios; los profesionales los anotan en cada nota clínica.
+
+### Flujo completo
+
+1. **Superadmin** sube los PNGs desde el admin Django (`/admin/`) o vía API.
+2. **Admin de clínica** asigna qué diagramas aplican a cada servicio.
+3. **Al abrir la pestaña "Zonas Tratadas"** de una atención, el frontend llama a `GET /historia-clinica/notas/{id}/zonas/` y recibe en un solo request los diagramas del servicio y las anotaciones ya guardadas.
+4. **El profesional** hace clic sobre el PNG → el frontend calcula `x, y` en proporciones (0.0–1.0 relativas al tamaño renderizado) → `POST /historia-clinica/anotaciones-zona/`.
+
+### Diagramas corporales
+
+Prefijo: `/clinicas/diagramas-corporales/`
+
+Recursos de la plataforma, sin FK a clínica. Visibles para todos los usuarios autenticados; escritura solo para superadmin.
+
+#### Listar
+
+`GET /clinicas/diagramas-corporales/`
+
+Devuelve solo los activos por defecto. Para ver todos (incluidos inactivos) pasar `?activo=false`.
+
+```json
+[
+  {
+    "id": "uuid",
+    "nombre": "Cara Frontal",
+    "imagen_url": "https://storage.../diagramas_corporales/uuid.png",
+    "orden": 1,
+    "activo": true
+  }
+]
+```
+
+#### Crear
+
+`POST /clinicas/diagramas-corporales/` — solo superadmin. Enviar `multipart/form-data`.
+
+| Campo    | Tipo   | Requerido | Descripción                              |
+|----------|--------|-----------|------------------------------------------|
+| `nombre` | string | sí        | Ej: "Cara Frontal", "Cuerpo Posterior"  |
+| `imagen` | file   | sí        | PNG del diagrama                         |
+| `orden`  | int    | no        | Posición en la lista (default 0)         |
+
+#### Editar / Desactivar
+
+```
+PATCH  /clinicas/diagramas-corporales/{id}/
+DELETE /clinicas/diagramas-corporales/{id}/
+```
+
+---
+
+### Diagramas por servicio
+
+Prefijo: `/clinicas/servicios/{id}/diagramas/`
+
+El admin de la clínica configura qué diagramas aplican a cada servicio. Requiere permiso `servicios.gestionar` para escritura.
+
+El campo `diagramas` también viene embebido en la respuesta de `GET /clinicas/servicios/{id}/`:
+
+```json
+{
+  "id": "uuid",
+  "nombre": "Toxina Botulínica",
+  ...
+  "diagramas": [
+    {
+      "id": "uuid-diagrama",
+      "nombre": "Cara Frontal",
+      "imagen_url": "https://...",
+      "orden": 1
+    }
+  ]
+}
+```
+
+#### Listar diagramas del servicio
+
+`GET /clinicas/servicios/{id}/diagramas/`
+
+#### Asignar diagrama
+
+`POST /clinicas/servicios/{id}/diagramas/`
+
+```json
+{
+  "diagrama": "uuid-diagrama",
+  "orden": 1
+}
+```
+
+Si el diagrama ya estaba asignado (inactivo), lo reactiva y actualiza el orden. Responde `201` con el objeto `ServicioDiagrama`.
+
+#### Quitar diagrama
+
+`DELETE /clinicas/servicios/{id}/diagramas/{diagrama_id}/`
+
+Soft-delete (marca `activo=false`). Responde `204`.
+
+---
+
+### Zonas tratadas en la atención
+
+#### Cargar pestaña (endpoint principal)
+
+`GET /historia-clinica/notas/{nota_id}/zonas/`
+
+Un solo request devuelve todo lo necesario para renderizar la pestaña:
+
+```json
+{
+  "diagramas": [
+    {
+      "id": "uuid",
+      "nombre": "Cara Frontal",
+      "imagen_url": "https://...",
+      "orden": 1
+    }
+  ],
+  "anotaciones": [
+    {
+      "id": "uuid",
+      "nota": "uuid-nota",
+      "diagrama": "uuid-diagrama",
+      "diagrama_nombre": "Cara Frontal",
+      "x": 0.42,
+      "y": 0.31,
+      "texto": "10 U toxina glabela",
+      "activo": true,
+      "created_at": "...",
+      "updated_at": "..."
+    }
+  ]
+}
+```
+
+`diagramas` viene de los diagramas activos asignados al servicio de la cita de esa nota. Si la nota no tiene cita o el servicio no tiene diagramas configurados, `diagramas` devuelve `[]`.
+
+#### Crear anotación
+
+`POST /historia-clinica/anotaciones-zona/`
+
+```json
+{
+  "nota": "uuid-nota",
+  "diagrama": "uuid-diagrama",
+  "x": 0.42,
+  "y": 0.31,
+  "texto": "10 U toxina glabela"
+}
+```
+
+| Campo     | Tipo   | Requerido | Descripción                                        |
+|-----------|--------|-----------|----------------------------------------------------|
+| `nota`    | uuid   | sí        | ID de la `NotaClinica`                             |
+| `diagrama`| uuid   | sí        | ID del `DiagramaCorporal`                          |
+| `x`       | float  | sí        | Posición horizontal relativa a la imagen (0.0–1.0) |
+| `y`       | float  | sí        | Posición vertical relativa a la imagen (0.0–1.0)   |
+| `texto`   | string | no        | Nota libre del profesional sobre ese punto         |
+
+El backend valida que `x` e `y` estén en rango 0.0–1.0 y que la nota pertenezca a la clínica del usuario.
+
+Responde `201` con el objeto creado.
+
+#### Editar anotación
+
+`PATCH /historia-clinica/anotaciones-zona/{id}/`
+
+Permite actualizar `texto`, `x`, `y` o mover el punto.
+
+#### Eliminar anotación
+
+`DELETE /historia-clinica/anotaciones-zona/{id}/`
+
+Soft-delete (`activo=false`). Responde `204`.
+
+#### Listar anotaciones de una nota
+
+`GET /historia-clinica/anotaciones-zona/?nota={nota_id}`
+
+Filtra por nota y devuelve solo las activas. Sin `?nota=` devuelve lista vacía.
+
+---
+
+### Notas de implementación frontend
+
+- Las coordenadas `x, y` son proporciones relativas al tamaño **renderizado** de la imagen, no píxeles absolutos. Al posicionar un marcador: `x = clickX / imageWidth`, `y = clickY / imageHeight`.
+- Al mostrar los marcadores sobre la imagen: `left = x * 100 + '%'`, `top = y * 100 + '%'` con `position: absolute` sobre el contenedor de la imagen (`position: relative`).
+- Las `imagen_url` de los diagramas son URLs públicas (sin `X-Amz-`), se pueden usar directamente como `src` de `<img>` o `background-image`.
+- Permiso requerido para crear/editar/eliminar anotaciones: `historia.notas.crear`.
+- Permiso requerido para ver: `historia.ver`.
 
 ---
 

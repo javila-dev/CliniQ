@@ -68,6 +68,7 @@ class CarteraListSerializer(serializers.ModelSerializer):
             "en_mora",
             "mora_dias",
             "mora_valor",
+            "es_migracion",
             "created_at",
         )
 

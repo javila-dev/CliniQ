@@ -460,12 +460,14 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total",
             "total_pagado",
             "saldo_pendiente",
+            "es_migracion",
             "activo",
             "created_at",
             "updated_at",
         )
         read_only_fields = (
             "id",
+            "es_migracion",
             "fecha_vencimiento",
             "total",
             "total_pagado",

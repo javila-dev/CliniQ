@@ -74,7 +74,8 @@ class CotizacionViewSet(ModelViewSet):
     ordering_fields = ("created_at", "updated_at")
 
     def get_permissions(self):
-        if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia", "historial_sesiones"}:
+        if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
+                           "historial_sesiones", "sesiones"}:
             return [RequirePermission("cotizaciones.ver")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
@@ -239,6 +240,11 @@ class CotizacionViewSet(ModelViewSet):
         from apps.configuracion.models import ConfiguracionCartera
         from apps.consentimientos.models import Consentimiento
         from apps.consentimientos.services import generar_consentimiento
+
+        # Datos previos (asistente de puesta en marcha): no se genera un
+        # compromiso de pago pendiente de firma — es histórico / firmado en papel.
+        if getattr(cotizacion, "es_migracion", False):
+            return None
 
         config = ConfiguracionCartera.objects.filter(
             clinica_id=cotizacion.clinica_id,
@@ -433,8 +439,12 @@ class CotizacionViewSet(ModelViewSet):
                 "duracion_min": duracion_min,
                 "periodicidad": item.periodicidad,
                 "citas_agendadas": item.citas_no_canceladas(),
-                "citas_completadas": item.citas.filter(estado=Cita.Estado.COMPLETADA).count(),
-                "citas_restantes": max(0, num_citas - item.citas_no_canceladas()),
+                "citas_completadas": (
+                    item.citas.filter(estado=Cita.Estado.COMPLETADA).count()
+                    + item.sesiones_previas_consumidas
+                ),
+                "citas_restantes": item.citas_restantes(),
+                "sesiones_previas": item.sesiones_previas_consumidas,
                 "citas": citas,
             }
             if sesiones_detalle is not None:

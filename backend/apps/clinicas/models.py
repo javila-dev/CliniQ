@@ -123,6 +123,14 @@ class Clinica(BaseModel):
         default=False,
         help_text="Habilita el módulo de obesidad (tratamientos, sesiones, control de peso). Activado por superadmin.",
     )
+    modo_puesta_en_marcha = models.BooleanField(
+        default=False,
+        help_text=(
+            "Habilita el asistente de puesta en marcha (cargar pacientes en curso, "
+            "saldos previos, etc.). Lo activa/desactiva el superadmin mientras la "
+            "clínica migra sus datos."
+        ),
+    )
 
     class Meta:
         db_table = "clinicas"

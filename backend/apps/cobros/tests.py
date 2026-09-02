@@ -7,6 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.clinicas.models import Clinica, Sede
 from apps.cobros.models import Cobro
+from apps.colaboradores.models import Colaborador
 from apps.cotizaciones.models import Cotizacion
 from apps.pacientes.models import Paciente
 
@@ -73,6 +74,47 @@ class CobrosIngresosTests(TestCase):
         self.assertEqual(response.json()["count"], 1)
         self.assertEqual(response.json()["results"][0]["id"], str(cobro.id))
         self.assertEqual(response.json()["results"][0]["cotizacion_numero"], f"COT-{str(self.cotizacion.id)[:8].upper()}")
+
+    def test_usuario_acotado_solo_ve_ingresos_de_sus_sedes(self):
+        sede_b = Sede.objects.create(
+            clinica=self.clinica, nombre="Norte", ciudad="Bogota",
+            direccion="Calle 20", telefono="3000000001", horario={},
+        )
+        cobro_a = Cobro.objects.create(
+            origen=Cobro.Origen.LIBRE, paciente=self.paciente, profesional=self.superadmin,
+            sede=self.sede, created_by=self.superadmin, total="10000.00", subtotal="10000.00",
+        )
+        Cobro.objects.create(
+            origen=Cobro.Origen.LIBRE, paciente=self.paciente, profesional=self.superadmin,
+            sede=sede_b, created_by=self.superadmin, total="20000.00", subtotal="20000.00",
+        )
+
+        recep = User.objects.create_user(
+            email="recep-cobros@example.com", password="secret123",
+            first_name="Rita", last_name="Recepcion",
+            rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        colab = Colaborador.objects.create(
+            user=recep, sede_principal=self.sede,
+            tipo_contrato=Colaborador.TipoContrato.EMPLEADO,
+            fecha_ingreso=timezone.localdate(), numero_documento="900900900",
+        )
+        colab.sedes.set([self.sede])
+
+        self.client.force_authenticate(recep)
+        lista = self.client.get("/api/v1/cobros/cobros/").json()
+        self.assertEqual(lista["count"], 1)
+        self.assertEqual(lista["results"][0]["id"], str(cobro_a.id))
+
+        # Admin sí ve las dos, y puede acotar con ?sede=
+        self.client.force_authenticate(self.superadmin)
+        self.assertEqual(self.client.get("/api/v1/cobros/cobros/").json()["count"], 2)
+        acotado = self.client.get(f"/api/v1/cobros/cobros/?sede={sede_b.id}").json()
+        self.assertEqual(acotado["count"], 1)
+        self.assertEqual(
+            self.client.get(f"/api/v1/cobros/cobros/resumen/?sede={self.sede.id}").json()["total_cobros"],
+            1,
+        )
 
     def test_resumen_separa_ingresos_por_origen(self):
         cobro_cita = Cobro.objects.create(

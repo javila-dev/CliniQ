@@ -87,8 +87,9 @@ TENANT_SCOPES: dict[str, str] = {
     "inventario.MovimientoInventario": "insumo__clinica_id",
     "inventario.Insumo": "clinica_id",
     "inventario.CategoriaInsumo": "clinica_id",
-    "caja.CierreCaja": "sede__clinica_id",
     "caja.GastoCaja": "sede__clinica_id",
+    "caja.SesionCaja": "caja__sede__clinica_id",
+    "caja.Caja": "sede__clinica_id",
     "caja.CategoriaGasto": "clinica_id",
     # --- Catálogo de la clínica ---
     "clinicas.CampanaItem": "campana__clinica_id",

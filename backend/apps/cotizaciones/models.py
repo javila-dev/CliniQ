@@ -42,6 +42,10 @@ class Cotizacion(BaseModel):
     validez_dias = models.PositiveIntegerField(default=30)
     notas = models.TextField(blank=True, default="")
 
+    # ── Puesta en marcha: datos previos cargados por el asistente de migración ──
+    es_migracion = models.BooleanField(default=False, db_index=True)
+    lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._estado_anterior = self.estado
@@ -145,6 +149,14 @@ class ItemCotizacion(BaseModel):
         related_name="items_cotizacion",
         help_text="Campaña cuyo precio se aplicó en este ítem (para métricas de ventas).",
     )
+    sesiones_previas_consumidas = models.PositiveIntegerField(
+        default=0,
+        help_text=(
+            "Sesiones que el paciente ya había hecho antes de usar CliniQ (carga "
+            "de puesta en marcha sin detalle por sesión). Se descuentan de las "
+            "sesiones agendables restantes."
+        ),
+    )
 
     class Meta:
         db_table = "items_cotizacion"
@@ -179,7 +191,12 @@ class ItemCotizacion(BaseModel):
         return self.num_citas
 
     def citas_restantes(self):
-        return max(0, self.num_sesiones_efectivas() - self.citas_no_canceladas())
+        return max(
+            0,
+            self.num_sesiones_efectivas()
+            - self.citas_no_canceladas()
+            - self.sesiones_previas_consumidas,
+        )
 
 
 class FormaPagoCotizacion(BaseModel):

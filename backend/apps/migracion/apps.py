@@ -1,0 +1,7 @@
+from django.apps import AppConfig
+
+
+class MigracionConfig(AppConfig):
+    default_auto_field = "django.db.models.BigAutoField"
+    name = "apps.migracion"
+    label = "migracion"

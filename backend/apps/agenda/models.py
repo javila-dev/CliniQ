@@ -150,6 +150,11 @@ class Cita(BaseModel):
         upload_to=cita_firma_asistencia_upload_path, null=True, blank=True
     )
 
+    # ── Puesta en marcha: sesión ya realizada antes de usar CliniQ, cargada por
+    # el asistente de migración. No dispara recordatorios ni mueve inventario. ──
+    es_migracion = models.BooleanField(default=False, db_index=True)
+    lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
+
     class Meta:
         db_table = "citas"
         ordering = ["fecha_inicio"]

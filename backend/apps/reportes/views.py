@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.db import connection
 from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum, When
@@ -10,11 +11,12 @@ from rest_framework.views import APIView
 
 from apps.agenda.models import Cita
 from apps.caja.models import GastoCaja
+from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.inventario.models import Insumo
 from apps.users.authorization import user_has_permission
-from apps.users.permissions import RequirePermission
+from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 def _clinica_scope(user):
@@ -41,6 +43,19 @@ def _parse_date(value, default):
 
 def _table_exists(table_name: str) -> bool:
     return table_name in connection.introspection.table_names()
+
+
+def _money(value) -> str:
+    return f"{Decimal(value or 0):.2f}"
+
+
+def _var_pct(actual, anterior):
+    """Variación % de `actual` vs `anterior`. None si no hay base de comparación."""
+    actual = Decimal(actual or 0)
+    anterior = Decimal(anterior or 0)
+    if anterior == 0:
+        return None
+    return f"{((actual - anterior) / abs(anterior) * 100):.1f}"
 
 
 class DashboardView(APIView):
@@ -95,7 +110,9 @@ class DashboardView(APIView):
         }
 
         if user_has_permission(user, "reportes.ver_financieros", request=request):
-            cobro_qs = Cobro.objects.filter(**_clinica_scope(user))
+            # Los datos previos cargados por el asistente de puesta en marcha no
+            # son ingresos del periodo.
+            cobro_qs = Cobro.objects.filter(**_clinica_scope(user)).exclude(es_migracion=True)
             if sede_id:
                 cobro_qs = cobro_qs.filter(sede_id=sede_id)
 
@@ -165,7 +182,7 @@ class IngresosView(APIView):
             fecha__date__gte=fecha_inicio,
             fecha__date__lte=fecha_fin,
             **_clinica_scope(user),
-        ).exclude(estado="anulado")
+        ).exclude(estado="anulado").exclude(es_migracion=True)
 
         if sede_id:
             cobro_qs = cobro_qs.filter(sede_id=sede_id)
@@ -181,7 +198,6 @@ class IngresosView(APIView):
             gasto_qs = GastoCaja.objects.filter(
                 fecha__gte=fecha_inicio,
                 fecha__lte=fecha_fin,
-                estado="aprobado",
                 **_clinica_scope(user),
             )
             if sede_id:
@@ -450,3 +466,119 @@ class OcupacionView(APIView):
                 "tasa_completadas_pct": str(round(tasa, 2)),
             })
         return Response(resultado)
+
+
+class EstadoFinancieroView(APIView):
+    """P&L simple del periodo: Facturado - Costo insumos - Gastos = Margen,
+    con comparativo vs el periodo anterior de igual duración y desglose por sede."""
+
+    permission_classes = (RequirePermission("reportes.ver_financieros"),)
+
+    _CAMPOS_VAR = ("ingresos_facturado", "costo_insumos", "gastos_operativos", "margen")
+
+    def get(self, request: Request):
+        hoy = date.today()
+        fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
+        inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
+        if inicio > fin:
+            inicio, fin = fin, inicio
+        sede_id = request.query_params.get("sede_id")
+
+        # Scope de clínica: la activa (header X-Active-Clinica para superadmin;
+        # user.clinica para el resto). None solo si es superadmin sin clínica
+        # seleccionada -> sin filtro (comportamiento global de siempre).
+        clinica = get_clinica_activa(request)
+
+        dias = (fin - inicio).days + 1
+        prev_fin = inicio - timedelta(days=1)
+        prev_inicio = prev_fin - timedelta(days=dias - 1)
+
+        actual = self._bloque(clinica, inicio, fin, sede_id)
+        anterior = self._bloque(clinica, prev_inicio, prev_fin, sede_id)
+
+        payload = {
+            "periodo": {"inicio": str(inicio), "fin": str(fin), "dias": dias},
+            "actual": self._fmt(actual),
+            "anterior": self._fmt(anterior),
+            "variacion_pct": {k: _var_pct(actual[k], anterior[k]) for k in self._CAMPOS_VAR},
+        }
+
+        if not sede_id:
+            payload["por_sede"] = self._por_sede(clinica, inicio, fin)
+
+        return Response(payload)
+
+    def _bloque(self, clinica, inicio, fin, sede_id):
+        scope = {"sede__clinica": clinica} if clinica else {}
+
+        cobro_qs = (
+            Cobro.objects.filter(fecha__date__gte=inicio, fecha__date__lte=fin, **scope)
+            .exclude(estado="anulado")
+            .exclude(es_migracion=True)
+        )
+        if sede_id:
+            cobro_qs = cobro_qs.filter(sede_id=sede_id)
+
+        ingresos_facturado = cobro_qs.aggregate(s=Sum("total"))["s"] or Decimal("0")
+        ingresos_recaudado = (
+            PagoRecibido.objects.filter(
+                cobro__in=cobro_qs, fecha__date__gte=inicio, fecha__date__lte=fin
+            ).aggregate(s=Sum("valor"))["s"]
+            or Decimal("0")
+        )
+        costo_insumos = (
+            ItemCobro.objects.filter(cobro__in=cobro_qs, tipo="insumo_consumo")
+            .annotate(
+                c=ExpressionWrapper(
+                    F("costo_unitario") * F("cantidad"),
+                    output_field=DecimalField(max_digits=14, decimal_places=2),
+                )
+            )
+            .aggregate(s=Sum("c"))["s"]
+            or Decimal("0")
+        )
+        gastos_operativos = Decimal("0")
+        if _table_exists(GastoCaja._meta.db_table):
+            gasto_qs = GastoCaja.objects.filter(
+                fecha__gte=inicio, fecha__lte=fin, **scope
+            )
+            if sede_id:
+                gasto_qs = gasto_qs.filter(sede_id=sede_id)
+            gastos_operativos = gasto_qs.aggregate(s=Sum("valor"))["s"] or Decimal("0")
+
+        margen = Decimal(ingresos_facturado) - Decimal(costo_insumos) - Decimal(gastos_operativos)
+        margen_pct = (margen / ingresos_facturado * 100) if ingresos_facturado else Decimal("0")
+
+        return {
+            "ingresos_facturado": Decimal(ingresos_facturado),
+            "ingresos_recaudado": Decimal(ingresos_recaudado),
+            "costo_insumos": Decimal(costo_insumos),
+            "gastos_operativos": Decimal(gastos_operativos),
+            "margen": margen,
+            "margen_pct": f"{margen_pct:.2f}",
+        }
+
+    @staticmethod
+    def _fmt(bloque):
+        return {
+            k: (v if k == "margen_pct" else _money(v))
+            for k, v in bloque.items()
+        }
+
+    def _por_sede(self, clinica, inicio, fin):
+        sedes = Sede.objects.filter(activo=True)
+        if clinica is not None:
+            sedes = sedes.filter(clinica=clinica)
+        resultado = []
+        for sede in sedes.order_by("nombre"):
+            b = self._bloque(clinica, inicio, fin, str(sede.id))
+            resultado.append({
+                "sede_id": str(sede.id),
+                "sede_nombre": sede.nombre,
+                "ingresos_facturado": _money(b["ingresos_facturado"]),
+                "costo_insumos": _money(b["costo_insumos"]),
+                "gastos_operativos": _money(b["gastos_operativos"]),
+                "margen": _money(b["margen"]),
+                "margen_pct": b["margen_pct"],
+            })
+        return resultado

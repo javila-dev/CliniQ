@@ -29,6 +29,12 @@ class Cartera(BaseModel):
     )
     total = models.DecimalField(max_digits=14, decimal_places=2)
 
+    # ── Puesta en marcha: saldo previo cargado por el asistente de migración.
+    # La deuda es real (entra a cartera y calcula mora); no cuenta como venta
+    # nueva del periodo. ──
+    es_migracion = models.BooleanField(default=False, db_index=True)
+    lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
+
     class Meta:
         db_table = "carteras"
         ordering = ["-created_at"]

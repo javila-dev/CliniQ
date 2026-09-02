@@ -2,7 +2,8 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import DecimalField, ExpressionWrapper, F, OuterRef, Subquery, Sum, Value
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -22,7 +23,7 @@ from apps.cartera.serializers import (
 from apps.cobros.models import Cobro
 from apps.cobros.services import registrar_pago
 from apps.core.logging import registrar_accion
-from apps.users.permissions import RequirePermission
+from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 class CarteraPagination(PageNumberPagination):
@@ -38,15 +39,56 @@ class CarteraViewSet(ReadOnlyModelViewSet):
     pagination_class = CarteraPagination
     # Búsqueda por nombre / documento del paciente (?search=).
     search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
+    # Orden por columna (?ordering=). `total_cobrado` / `saldo` /
+    # `proxima_cuota_fecha` son anotaciones que agrega `_annotate_orden`.
+    ordering_fields = (
+        "paciente__apellidos",
+        "total",
+        "total_cobrado",
+        "saldo",
+        "proxima_cuota_fecha",
+        "created_at",
+    )
+    ordering = ("-created_at",)
 
     def get_permissions(self):
         return [RequirePermission("cartera.ver")()]
 
+    def _annotate_orden(self, queryset):
+        """Anotaciones para ordenar por cobrado / saldo / próximo pago. Solo se
+        usan en el listado: en `resumen` romperían los `Sum` por el join a cuotas."""
+        proxima_subq = (
+            CuotaCartera.objects.filter(cartera=OuterRef("pk"))
+            .annotate(pend=CUOTA_PENDIENTE_EXPR)
+            .filter(pend__gt=0)
+            .order_by("fecha_esperada", "created_at")
+            .values("fecha_esperada")[:1]
+        )
+        queryset = queryset.annotate(
+            total_cobrado=Coalesce(
+                Sum("cuotas__valor_pagado"),
+                Value(Decimal("0")),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+            proxima_cuota_fecha=Subquery(proxima_subq),
+        )
+        return queryset.annotate(
+            saldo=ExpressionWrapper(
+                F("total") - F("total_cobrado"),
+                output_field=DecimalField(max_digits=14, decimal_places=2),
+            ),
+        )
+
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if user.rol != "superadmin":
-            queryset = queryset.filter(paciente__clinica=user.clinica)
+        # Scope por clínica activa (header X-Active-Clinica para superadmin;
+        # user.clinica para el resto). None = superadmin sin clínica -> global.
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            queryset = queryset.filter(paciente__clinica=clinica)
+        elif user.rol != "superadmin":
+            queryset = queryset.none()
 
         paciente = self.request.query_params.get("paciente")
         estado = self.request.query_params.get("estado")
@@ -57,6 +99,8 @@ class CarteraViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(cotizacion__sede_id=sede_id)
         if estado in {"pagada", "vencida", "pendiente"}:
             queryset = self._filter_by_estado(queryset, estado)
+        if self.action == "list":
+            queryset = self._annotate_orden(queryset)
         return queryset
 
     def _filter_by_estado(self, queryset, estado):
@@ -136,8 +180,11 @@ class CuotaCarteraViewSet(GenericViewSet):
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
-        if user.rol != "superadmin":
-            queryset = queryset.filter(cartera__paciente__clinica=user.clinica)
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            queryset = queryset.filter(cartera__paciente__clinica=clinica)
+        elif user.rol != "superadmin":
+            queryset = queryset.none()
         return queryset
 
     @transaction.atomic

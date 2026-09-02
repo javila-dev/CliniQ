@@ -131,6 +131,9 @@ class CitaViewSet(ModelViewSet):
         profesional = self.request.query_params.get("profesional")
         sede = self.request.query_params.get("sede")
         fecha_inicio_date = self.request.query_params.get("fecha_inicio__date")
+        fecha_inicio_date_gte = self.request.query_params.get("fecha_inicio__date__gte")
+        fecha_inicio_date_lte = self.request.query_params.get("fecha_inicio__date__lte")
+        fecha_inicio_date_lt = self.request.query_params.get("fecha_inicio__date__lt")
         canal_origen = self.request.query_params.get("canal_origen")
         paciente = self.request.query_params.get("paciente")
         firma_asistencia_estado = self.request.query_params.get("firma_asistencia_estado")
@@ -147,6 +150,12 @@ class CitaViewSet(ModelViewSet):
             queryset = queryset.filter(sede_id=sede)
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
+        if fecha_inicio_date_gte:
+            queryset = queryset.filter(fecha_inicio__date__gte=fecha_inicio_date_gte)
+        if fecha_inicio_date_lte:
+            queryset = queryset.filter(fecha_inicio__date__lte=fecha_inicio_date_lte)
+        if fecha_inicio_date_lt:
+            queryset = queryset.filter(fecha_inicio__date__lt=fecha_inicio_date_lt)
         if canal_origen:
             queryset = queryset.filter(canal_origen=canal_origen)
         if paciente:

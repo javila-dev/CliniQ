@@ -2,19 +2,38 @@ from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from apps.caja.models import CategoriaGasto, CierreCaja, GastoCaja
+from apps.caja.models import Caja, CategoriaGasto, GastoCaja, SesionCaja
 from apps.caja.serializers import (
+    AbrirSesionSerializer,
+    CajaSerializer,
     CategoriaGastoSerializer,
-    CierreCajaSerializer,
+    CerrarSesionSerializer,
     GastoCajaSerializer,
-    RechazarGastoSerializer,
+    SesionCajaSerializer,
 )
+from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, PagoRecibido
 from apps.users.permissions import RequirePermission, get_clinica_activa
+
+
+def _ingresos_efectivo(sede, desde, hasta):
+    """Σ de pagos en efectivo de cobros no anulados de la sede, en la ventana."""
+    return (
+        PagoRecibido.objects.filter(
+            cobro__sede=sede,
+            medio_pago="efectivo",
+            fecha__gte=desde,
+            fecha__lte=hasta,
+        )
+        .exclude(cobro__estado=Cobro.Estado.ANULADO)
+        .exclude(es_migracion=True)  # los pagos previos no pasan por el cajón
+        .aggregate(total=Sum("valor"))["total"]
+        or 0
+    )
 
 
 class CategoriaGastoViewSet(ModelViewSet):
@@ -30,23 +49,204 @@ class CategoriaGastoViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(clinica=user.clinica)
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(clinica=clinica)
+        elif self.request.user.rol != "superadmin":
+            qs = qs.none()
         return qs
+
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa.", "code": "CLINICA_REQUERIDA"})
+        serializer.save(clinica=clinica)
+
+
+class CajaViewSet(ModelViewSet):
+    """Configuración de la caja de cada sede (una por sede)."""
+
+    queryset = Caja.objects.select_related("sede", "responsable").all()
+    serializer_class = CajaSerializer
+    filterset_fields = ("sede", "activa")
+
+    def get_permissions(self):
+        if self.action in ("create", "update", "partial_update", "destroy"):
+            return [RequirePermission("caja.cajas.gestionar")()]
+        return [RequirePermission("caja.cierre.ver")()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(sede__clinica=clinica)
+        elif self.request.user.rol != "superadmin":
+            qs = qs.none()
+        return qs
+
+    def _check_sede_clinica(self, sede):
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None and sede.clinica_id != clinica.id:
+            raise ValidationError({"sede": "La sede no pertenece a la clínica activa.", "code": "SEDE_OTRA_CLINICA"})
+
+    def perform_create(self, serializer):
+        self._check_sede_clinica(serializer.validated_data["sede"])
+        serializer.save()
+
+    def perform_update(self, serializer):
+        sede = serializer.validated_data.get("sede", serializer.instance.sede)
+        self._check_sede_clinica(sede)
+        serializer.save()
+
+
+class SesionCajaViewSet(ReadOnlyModelViewSet):
+    """Aperturas y cierres de caja. Listado + acciones abrir / cerrar / actual."""
+
+    queryset = SesionCaja.objects.select_related(
+        "caja", "caja__sede", "abierta_por", "cerrada_por"
+    ).all()
+    serializer_class = SesionCajaSerializer
+    filterset_fields = ("caja", "estado")
+    ordering_fields = ("abierta_en", "cerrada_en")
+
+    def get_permissions(self):
+        if self.action in ("abrir", "cerrar"):
+            return [RequirePermission("caja.cierre.realizar")()]
+        return [RequirePermission("caja.cierre.ver")()]
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(caja__sede__clinica=clinica)
+        elif self.request.user.rol != "superadmin":
+            qs = qs.none()
+        sede_id = self.request.query_params.get("sede")
+        if sede_id:
+            qs = qs.filter(caja__sede_id=sede_id)
+        return qs
+
+    def _caja_de(self, caja_id):
+        try:
+            return Caja.objects.select_related("sede").get(pk=caja_id)
+        except Caja.DoesNotExist:
+            raise ValidationError({"caja": "Caja no encontrada.", "code": "CAJA_NOT_FOUND"})
+
+    @action(detail=False, methods=["get"], url_path="actual")
+    def actual(self, request):
+        """Estado de la caja de una sede: su config + la sesión abierta (si hay)
+        con el balance en vivo."""
+        sede_id = request.query_params.get("sede")
+        if not sede_id:
+            raise ValidationError({"sede": "sede es requerido.", "code": "SEDE_REQUERIDA"})
+        clinica = get_clinica_activa(request)
+        try:
+            sede_qs = Sede.objects.filter(id=sede_id)
+            if clinica is not None:
+                sede_qs = sede_qs.filter(clinica=clinica)
+            sede = sede_qs.get()
+        except Sede.DoesNotExist:
+            raise ValidationError({"sede": "Sede no encontrada.", "code": "SEDE_NOT_FOUND"})
+
+        caja = Caja.objects.filter(sede=sede).select_related("sede", "responsable").first()
+        if caja is None:
+            return Response({"caja": None, "sesion": None})
+
+        sesion = caja.sesion_abierta
+        payload = {"caja": CajaSerializer(caja).data, "sesion": None}
+        if sesion is not None:
+            ahora = timezone.now()
+            desde = self._ventana_desde(sesion)
+            ingresos = _ingresos_efectivo(sede, desde, ahora)
+            egresos = (
+                GastoCaja.objects.filter(sesion=sesion).aggregate(t=Sum("valor"))["t"] or 0
+            )
+            esperado = sesion.monto_apertura + ingresos - egresos
+            data = SesionCajaSerializer(sesion).data
+            data.update({
+                "total_ingresos": f"{ingresos:.2f}",
+                "total_egresos": f"{egresos:.2f}",
+                "esperado": f"{esperado:.2f}",
+            })
+            payload["sesion"] = data
+        return Response(payload)
+
+    def _ventana_desde(self, sesion):
+        """Inicio de la ventana de ingresos: el último cierre previo de la misma
+        caja (para no perder efectivo entre sesiones), o la apertura si es la 1ª."""
+        prev = (
+            SesionCaja.objects.filter(caja=sesion.caja, estado=SesionCaja.Estado.CERRADA)
+            .exclude(pk=sesion.pk)
+            .order_by("-cerrada_en")
+            .first()
+        )
+        return prev.cerrada_en if prev and prev.cerrada_en else sesion.abierta_en
+
+    @action(detail=False, methods=["post"], url_path="abrir")
+    def abrir(self, request):
+        ser = AbrirSesionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        caja = self._caja_de(ser.validated_data["caja"])
+
+        clinica = get_clinica_activa(request)
+        if clinica is not None and caja.sede.clinica_id != clinica.id:
+            raise PermissionDenied("La caja no pertenece a la clínica activa.")
+        if not caja.activa:
+            raise ValidationError({"caja": "La caja está inactiva.", "code": "CAJA_INACTIVA"})
+        if caja.sesion_abierta is not None:
+            raise ValidationError({"caja": "La caja ya tiene una sesión abierta.", "code": "CAJA_YA_ABIERTA"})
+
+        monto = ser.validated_data.get("monto_apertura")
+        if monto is None:
+            monto = caja.monto_apertura_sugerido
+
+        sesion = SesionCaja.objects.create(
+            caja=caja,
+            estado=SesionCaja.Estado.ABIERTA,
+            monto_apertura=monto,
+            abierta_por=request.user,
+        )
+        return Response(SesionCajaSerializer(sesion).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="cerrar")
+    def cerrar(self, request, pk=None):
+        sesion = self.get_object()
+        if sesion.estado != SesionCaja.Estado.ABIERTA:
+            raise ValidationError({"error": "La sesión ya está cerrada.", "code": "SESION_YA_CERRADA"})
+
+        ser = CerrarSesionSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+
+        ahora = timezone.now()
+        sede = sesion.caja.sede
+        desde = self._ventana_desde(sesion)
+        ingresos = _ingresos_efectivo(sede, desde, ahora)
+        egresos = GastoCaja.objects.filter(sesion=sesion).aggregate(t=Sum("valor"))["t"] or 0
+        esperado = sesion.monto_apertura + ingresos - egresos
+        contado = ser.validated_data["efectivo_contado"]
+
+        sesion.estado = SesionCaja.Estado.CERRADA
+        sesion.total_ingresos = ingresos
+        sesion.total_egresos = egresos
+        sesion.esperado = esperado
+        sesion.efectivo_contado = contado
+        sesion.diferencia = contado - esperado
+        sesion.observaciones = ser.validated_data.get("observaciones", "")
+        sesion.cerrada_por = request.user
+        sesion.cerrada_en = ahora
+        sesion.save()
+        return Response(SesionCajaSerializer(sesion).data)
 
 
 class GastoCajaViewSet(ModelViewSet):
     queryset = GastoCaja.objects.select_related(
-        "sede", "categoria", "registrado_por", "aprobado_por"
+        "sede", "categoria", "registrado_por", "sesion"
     ).all()
     serializer_class = GastoCajaSerializer
-    filterset_fields = ("estado", "fecha", "categoria", "sede")
+    filterset_fields = ("fecha", "categoria", "sede", "sesion")
     ordering_fields = ("fecha", "valor", "created_at")
 
     def get_permissions(self):
-        if self.action in ("aprobar", "rechazar"):
-            return [RequirePermission("caja.gastos.aprobar")()]
         if self.action in ("update", "partial_update", "destroy"):
             return [RequirePermission("caja.gastos.editar")()]
         if self.action == "create":
@@ -55,179 +255,45 @@ class GastoCajaViewSet(ModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(sede__clinica=user.clinica)
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(sede__clinica=clinica)
+        elif self.request.user.rol != "superadmin":
+            qs = qs.none()
+        fecha_gte = self.request.query_params.get("fecha__gte")
+        fecha_lte = self.request.query_params.get("fecha__lte")
+        if fecha_gte:
+            qs = qs.filter(fecha__gte=fecha_gte)
+        if fecha_lte:
+            qs = qs.filter(fecha__lte=fecha_lte)
         return qs
 
     def perform_create(self, serializer):
-        serializer.save(registrado_por=self.request.user)
+        sede = serializer.validated_data.get("sede")
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None and sede is not None and sede.clinica_id != clinica.id:
+            raise ValidationError({"sede": "La sede no pertenece a la clínica activa.", "code": "SEDE_OTRA_CLINICA"})
+
+        caja = Caja.objects.filter(sede=sede, activa=True).first()
+        if caja is None:
+            raise ValidationError({"sede": "La sede no tiene una caja configurada.", "code": "CAJA_NO_CONFIGURADA"})
+        sesion = caja.sesion_abierta
+        if sesion is None:
+            raise ValidationError({"error": "La caja está cerrada. Ábrela para registrar gastos.", "code": "CAJA_CERRADA"})
+
+        serializer.save(registrado_por=self.request.user, sesion=sesion)
+
+    def _assert_editable(self, gasto):
+        user = self.request.user
+        if gasto.sesion_id and gasto.sesion.estado == SesionCaja.Estado.CERRADA:
+            raise ValidationError({"error": "La sesión de caja ya fue cerrada.", "code": "SESION_CERRADA"})
+        if not user.es_admin and gasto.registrado_por_id != user.id:
+            raise PermissionDenied("Solo puedes modificar gastos que registraste.")
+
+    def perform_update(self, serializer):
+        self._assert_editable(serializer.instance)
+        serializer.save()
 
     def perform_destroy(self, instance):
-        if instance.estado == GastoCaja.Estado.APROBADO:
-            raise ValidationError(
-                {"error": "No se puede eliminar un gasto aprobado.", "code": "GASTO_APROBADO"}
-            )
+        self._assert_editable(instance)
         instance.delete()
-
-    @action(detail=True, methods=["post"], permission_classes=[RequirePermission("caja.gastos.aprobar")])
-    def aprobar(self, request, pk=None):
-        gasto = self.get_object()
-        if gasto.estado != GastoCaja.Estado.PENDIENTE:
-            raise ValidationError(
-                {"error": "Solo se pueden aprobar gastos en estado pendiente.", "code": "ESTADO_INVALIDO"}
-            )
-        gasto.estado = GastoCaja.Estado.APROBADO
-        gasto.aprobado_por = request.user
-        gasto.aprobado_en = timezone.now()
-        gasto.save(update_fields=["estado", "aprobado_por", "aprobado_en"])
-        return Response(GastoCajaSerializer(gasto).data)
-
-    @action(detail=True, methods=["post"], permission_classes=[RequirePermission("caja.gastos.aprobar")])
-    def rechazar(self, request, pk=None):
-        gasto = self.get_object()
-        if gasto.estado != GastoCaja.Estado.PENDIENTE:
-            raise ValidationError(
-                {"error": "Solo se pueden rechazar gastos en estado pendiente.", "code": "ESTADO_INVALIDO"}
-            )
-        serializer = RechazarGastoSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        gasto.estado = GastoCaja.Estado.RECHAZADO
-        gasto.motivo_rechazo = serializer.validated_data["motivo_rechazo"]
-        gasto.save(update_fields=["estado", "motivo_rechazo"])
-        return Response(GastoCajaSerializer(gasto).data)
-
-
-class CierreCajaViewSet(ModelViewSet):
-    queryset = CierreCaja.objects.select_related("sede", "cerrado_por").all()
-    serializer_class = CierreCajaSerializer
-    filterset_fields = ("sede", "fecha")
-    http_method_names = ["get", "post", "head", "options"]
-
-    def get_permissions(self):
-        if self.action == "create":
-            return [RequirePermission("caja.cierre.realizar")()]
-        return [RequirePermission("caja.cierre.ver")()]
-
-    def get_queryset(self):
-        qs = super().get_queryset()
-        user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(sede__clinica=user.clinica)
-        return qs
-
-    def perform_create(self, serializer):
-        sede = serializer.validated_data["sede"]
-        fecha = serializer.validated_data["fecha"]
-
-        if CierreCaja.objects.filter(sede=sede, fecha=fecha).exists():
-            raise ValidationError(
-                {
-                    "error": "Ya existe un cierre de caja para esta sede y fecha.",
-                    "code": "CIERRE_DUPLICADO",
-                }
-            )
-
-        total_cobros = (
-            PagoRecibido.objects.filter(
-                cobro__sede=sede,
-                cobro__estado=Cobro.Estado.PAGADO,
-                fecha__date=fecha,
-            ).aggregate(total=Sum("valor"))["total"]
-            or 0
-        )
-
-        total_gastos = (
-            GastoCaja.objects.filter(
-                sede=sede,
-                estado=GastoCaja.Estado.APROBADO,
-                fecha=fecha,
-            ).aggregate(total=Sum("valor"))["total"]
-            or 0
-        )
-
-        efectivo_contado = serializer.validated_data["efectivo_contado"]
-
-        total_efectivo_cobros = (
-            PagoRecibido.objects.filter(
-                cobro__sede=sede,
-                cobro__estado=Cobro.Estado.PAGADO,
-                fecha__date=fecha,
-                medio_pago="efectivo",
-            ).aggregate(total=Sum("valor"))["total"]
-            or 0
-        )
-        diferencia = efectivo_contado - total_efectivo_cobros + total_gastos
-
-        serializer.save(
-            cerrado_por=self.request.user,
-            total_cobros=total_cobros,
-            total_gastos=total_gastos,
-            diferencia=diferencia,
-        )
-
-    @action(detail=False, methods=["get"], url_path="resumen_dia")
-    def resumen_dia(self, request):
-        sede_id = request.query_params.get("sede_id")
-        fecha_str = request.query_params.get("fecha")
-
-        if not sede_id:
-            raise ValidationError({"error": "sede_id es requerido.", "code": "SEDE_REQUERIDA"})
-
-        from apps.clinicas.models import Sede
-        try:
-            clinica_activa = get_clinica_activa(request)
-            if clinica_activa is not None:
-                sede = Sede.objects.get(id=sede_id, clinica=clinica_activa)
-            else:
-                sede = Sede.objects.get(id=sede_id)
-        except Sede.DoesNotExist:
-            raise ValidationError({"error": "Sede no encontrada.", "code": "SEDE_NOT_FOUND"})
-
-        from datetime import date
-        if fecha_str:
-            try:
-                from datetime import datetime
-                fecha = datetime.strptime(fecha_str, "%Y-%m-%d").date()
-            except ValueError:
-                raise ValidationError({"error": "Formato de fecha inválido. Use YYYY-MM-DD.", "code": "FECHA_INVALIDA"})
-        else:
-            fecha = date.today()
-
-        cierre = CierreCaja.objects.filter(sede=sede, fecha=fecha).first()
-
-        pagos_qs = PagoRecibido.objects.filter(
-            cobro__sede=sede,
-            cobro__estado=Cobro.Estado.PAGADO,
-            fecha__date=fecha,
-        )
-
-        total_cobros = pagos_qs.aggregate(total=Sum("valor"))["total"] or 0
-
-        por_medio = list(
-            pagos_qs.values("medio_pago").annotate(total=Sum("valor")).order_by("medio_pago")
-        )
-
-        total_gastos_aprobados = (
-            GastoCaja.objects.filter(sede=sede, estado=GastoCaja.Estado.APROBADO, fecha=fecha)
-            .aggregate(total=Sum("valor"))["total"]
-            or 0
-        )
-
-        gastos_pendientes = GastoCaja.objects.filter(
-            sede=sede, estado=GastoCaja.Estado.PENDIENTE, fecha=fecha
-        ).count()
-
-        return Response(
-            {
-                "fecha": fecha,
-                "sede": str(sede.id),
-                "sede_nombre": sede.nombre,
-                "total_cobros": total_cobros,
-                "total_gastos": total_gastos_aprobados,
-                "gastos_pendientes_aprobacion": gastos_pendientes,
-                "por_medio_pago": por_medio,
-                "caja_cerrada": cierre is not None,
-                "cierre_id": str(cierre.id) if cierre else None,
-            }
-        )
