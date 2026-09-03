@@ -7,7 +7,11 @@
 # Requiere: docker login (una sola vez)
 
 param(
-    [string]$Tag = (Get-Date -Format "yyyyMMdd-HHmm")
+    [string]$Tag = (Get-Date -Format "yyyyMMdd-HHmm"),
+    # Por defecto se buildea SIN cache (+ --pull del base): evita imagenes
+    # viejas por capas cacheadas o contexto stale. Pasa -Cache para reusar
+    # capas en iteraciones rapidas.
+    [switch]$Cache
 )
 
 $ErrorActionPreference = "Stop"
@@ -20,7 +24,9 @@ Write-Host "Building $Image con tags :$Tag y :latest ..." -ForegroundColor Cyan
 
 # Las NEXT_PUBLIC_* salen de frontend/.env.production (gitignoreado, en esta
 # maquina). Aqui solo va lo server-side que Dokploy sobrescribe en runtime.
+$CacheFlags = if ($Cache) { @() } else { @('--no-cache', '--pull') }
 docker build -f Dockerfile.prod `
+    @CacheFlags `
     --build-arg BACKEND_URL=http://backend:8000 `
     -t "$Image`:$Tag" -t "$Image`:latest" .
 if ($LASTEXITCODE -ne 0) { throw "docker build failed" }
