@@ -6,12 +6,12 @@ import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
 import {
   Stethoscope, Clock, MessageSquare,
-  FileText, AlertCircle, Pencil, ClipboardList, ChevronDown, ChevronUp, UserCheck, FileSignature,
+  FileText, AlertCircle, Pencil, ChevronDown, ChevronUp, UserCheck, FileSignature,
   ReceiptText, Bell, ShieldCheck, ShieldX, ExternalLink,
 } from 'lucide-react'
 import Link from 'next/link'
 import { agendaApi } from '@/lib/api/agenda'
-import { isProfesional, canIniciarAtencion } from '@/lib/permissions'
+import { hasPermission, isProfesional, PERM } from '@/lib/permissions'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -21,15 +21,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { EditarCitaForm } from './EditarCitaForm'
 import { ConfirmacionForm } from './ConfirmacionForm'
 import { RegistrosConfirmacion } from './RegistrosConfirmacion'
-import { ConsentimientoFirmaSheet } from '@/components/atenciones/ConsentimientoFirmaSheet'
-import { IniciarPagoSheet } from '@/components/atenciones/IniciarPagoSheet'
-import { LlegadaCheckinSheet } from './LlegadaCheckinSheet'
-import { NuevaNotaForm } from '@/components/historia/NuevaNotaForm'
-import { historiaClinicaApi } from '@/lib/api/historiaClinica'
+import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
+import { CambiarProfesionalDialog } from './CambiarProfesionalDialog'
 import { formatDateTime, formatTime } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG, TRANSICIONES_ESTADO, CANAL_LABEL } from '@/lib/constants'
 import type { EstadoCita, MedioConfirmacion } from '@/types/agenda'
@@ -71,11 +69,9 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
   const [selectedAccion, setSelectedAccion] = useState<AccionModal | null>(null)
   const [motivo, setMotivo] = useState('')
   const [editando, setEditando] = useState(false)
-  const [registrandoNota, setRegistrandoNota] = useState(false)
   const [showRegistros, setShowRegistros] = useState(false)
-  const [firmaOpen, setFirmaOpen] = useState(false)
-  const [checkinOpen, setCheckinOpen] = useState(false)
-  const [pagoOpen, setPagoOpen] = useState(false)
+  const [wizardCitaId, setWizardCitaId] = useState<string | null>(null)
+  const [cambiarProfOpen, setCambiarProfOpen] = useState(false)
 
   const { data: cita, isLoading } = useQuery({
     queryKey: ['citas', citaId],
@@ -96,11 +92,6 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
       queryClient.invalidateQueries({ queryKey: ['registros-confirmacion', citaId] })
       setModalOpen(false)
       setMotivo('')
-      if (cita.estado === 'en_espera') {
-        const info = cita.consentimiento_info
-        if ((info?.consentimientos?.length ?? 0) > 0 && !info?.todos_firmados) setFirmaOpen(true)
-        return
-      }
       if (cita.estado === 'en_curso' && user?.es_profesional) {
         onClose()
         router.push(`/atenciones/${cita.id}`)
@@ -167,13 +158,6 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
 
   const isPasada = cita ? new Date(cita.fecha_inicio) < new Date() : false
 
-  const { data: historiaData } = useQuery({
-    queryKey: ['historias', cita?.paciente],
-    queryFn: () => historiaClinicaApi.historias.list({ paciente: cita!.paciente }),
-    enabled: registrandoNota && Boolean(cita?.paciente),
-  })
-  const historia = historiaData?.results[0]
-
   const { data: sesionesData } = useQuery({
     queryKey: ['cotizacion-sesiones', cita?.cotizacion_resumen?.cotizacion_id],
     queryFn: () => cotizacionesApi.sesiones(cita!.cotizacion_resumen!.cotizacion_id),
@@ -194,13 +178,12 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     setModalOpen(false)
     setMotivo('')
     setEditando(false)
-    setRegistrandoNota(false)
     setShowRegistros(false)
   }
 
   return (
     <>
-    <Sheet open={Boolean(citaId) && !firmaOpen && !checkinOpen && !pagoOpen} onOpenChange={(open) => { if (!open && !firmaOpen && !checkinOpen && !pagoOpen) handleClose() }}>
+    <Sheet open={Boolean(citaId) && !wizardCitaId} onOpenChange={(open) => { if (!open && !wizardCitaId) handleClose() }}>
       <SheetContent side="right" className="w-full sm:max-w-md flex flex-col">
         <SheetHeader>
           <div className="flex items-start justify-between">
@@ -213,12 +196,6 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 <Button size="sm" variant="outline" onClick={() => setEditando(true)}>
                   <Pencil className="h-3.5 w-3.5 mr-1.5" />
                   Editar
-                </Button>
-              )}
-              {['en_curso', 'completada'].includes(cita?.estado ?? '') && !registrandoNota && (
-                <Button size="sm" variant="outline" onClick={() => setRegistrandoNota(true)}>
-                  <ClipboardList className="h-3.5 w-3.5 mr-1.5" />
-                  Registrar nota
                 </Button>
               )}
             </div>
@@ -236,22 +213,6 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
               onCancel={() => setEditando(false)}
               onSuccess={() => setEditando(false)}
             />
-          ) : registrandoNota ? (
-            <div className="space-y-3">
-              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                Nueva nota clínica — {cita.paciente_nombre}
-              </p>
-              {!historia ? (
-                <p className="text-sm text-muted-foreground">Cargando historia clínica...</p>
-              ) : (
-                <NuevaNotaForm
-                  historiaId={historia.id}
-                  cita={cita}
-                  onSuccess={() => setRegistrandoNota(false)}
-                  onCancel={() => setRegistrandoNota(false)}
-                />
-              )}
-            </div>
           ) : (
             <>
               {/* Card principal — toda la info clave sin scroll */}
@@ -347,6 +308,23 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   <p className="text-sm font-medium">
                     {itemSesiones?.descripcion ?? cita.cotizacion_resumen.descripcion}
                   </p>
+                  {cita.sesion_tratamiento && (
+                    <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2">
+                      <p className="text-[11px] font-medium text-primary uppercase tracking-wide mb-0.5">
+                        Sesión de esta cita
+                      </p>
+                      <p className="text-sm font-semibold leading-snug">
+                        Sesión {cita.sesion_tratamiento.numero}/{cita.sesion_tratamiento.total}
+                        {' · '}
+                        {cita.sesion_tratamiento.tipo_sesion_nombre}
+                      </p>
+                      {cita.sesion_tratamiento.procedimientos.length > 0 && (
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          {cita.sesion_tratamiento.procedimientos.map((p) => p.nombre).join(', ')}
+                        </p>
+                      )}
+                    </div>
+                  )}
                   {itemSesiones && (
                     <div className="space-y-1">
                       <div className="flex justify-between text-xs text-muted-foreground">
@@ -410,61 +388,70 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
               {/* Acciones + recordatorio — todos inline */}
               {(() => {
                 const accionesModal: AccionModal[] = [
-                  ...(cita.estado === 'confirmada' && !isPasada
+                  ...(cita.estado === 'confirmada' && !isPasada && cita.estado_confirmacion !== 'confirmado'
                     ? [{ kind: 'manual' as const }]
                     : []),
                   ...transiciones
-                    .filter((e) => e !== 'en_espera' && e !== 'en_curso')
+                    .filter((e) => e !== 'en_espera' && e !== 'en_curso' && e !== 'completada' && !(e === 'cancelada' && cita.estado === 'en_curso'))
                     .map((estado) => ({ kind: 'estado' as const, estado })),
                 ]
                 const tieneEnEspera = transiciones.includes('en_espera')
                 const tieneEnCurso = transiciones.includes('en_curso')
-                const consentimientoPendiente = tieneEnCurso
-                  && (cita.consentimiento_info?.consentimientos?.length ?? 0) > 0
-                  && !cita.consentimiento_info?.todos_firmados
+                const necesitaAccion = tieneEnEspera || tieneEnCurso
+                  || (cita.estado === 'en_curso' && cita.firma_asistencia_estado !== 'firmada')
                 const tieneRecordatorio = !['cancelada', 'completada', 'no_asistio'].includes(cita.estado)
-                if (!tieneEnEspera && !tieneEnCurso && accionesModal.length === 0 && !tieneRecordatorio) return null
+                if (!necesitaAccion && accionesModal.length === 0 && !tieneRecordatorio) return null
+                // Desde 'confirmada' el asistente solo checkea la llegada (→ en_espera): el
+                // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
+                // no dar a entender que recepción "inicia la atención".
+                const soloCheckin = tieneEnEspera && !tieneEnCurso
+                const accionModalLabel = accionesModal.length > 0
+                  ? (ACCION_BTN_LABEL[accionKey(accionesModal[0])] ?? 'Registrar contacto')
+                  : ''
+                const puedeCambiarProf =
+                  (cita.estado === 'confirmada' || cita.estado === 'en_espera') && hasPermission(user, PERM.AGENDA_EDITAR)
+                const hayOtrasAcciones = accionesModal.length > 0 || tieneRecordatorio || puedeCambiarProf
                 return (
                   <div className="space-y-1.5">
-                    <div className="flex flex-wrap gap-2">
-                      {tieneEnEspera && (
-                        <Button size="sm" onClick={() => setCheckinOpen(true)}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {necesitaAccion && (
+                        <Button size="sm" onClick={() => setWizardCitaId(cita.id)}>
                           <UserCheck className="h-3.5 w-3.5 mr-1.5" />
-                          Registrar llegada
+                          {soloCheckin ? 'Registrar llegada' : 'Iniciar atención'}
                         </Button>
                       )}
-                      {tieneEnCurso && consentimientoPendiente && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="border-amber-300 text-amber-700 hover:bg-amber-50"
-                          disabled={cambiando}
-                          onClick={() => setFirmaOpen(true)}
-                        >
-                          <FileSignature className="h-3.5 w-3.5 mr-1.5" />
-                          Firmar consentimiento
-                        </Button>
-                      )}
-                      {tieneEnCurso && !consentimientoPendiente && (
-                        <Button size="sm" onClick={() => setPagoOpen(true)}>
-                          Iniciar atención
-                        </Button>
-                      )}
-                      {accionesModal.length > 0 && (
-                        <Button size="sm" variant="outline" onClick={() => handleOpenModal(accionesModal)}>
-                          {ACCION_BTN_LABEL[accionKey(accionesModal[0])] ?? 'Registrar contacto'}
-                        </Button>
-                      )}
-                      {tieneRecordatorio && (
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          disabled={enviandoRecordatorio}
-                          onClick={() => enviarRecordatorio()}
-                        >
-                          <Bell className="h-3.5 w-3.5 mr-1.5" />
-                          {enviandoRecordatorio ? 'Enviando…' : 'Recordatorio'}
-                        </Button>
+                      {hayOtrasAcciones && (
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button size="sm" variant="outline">
+                              Otras acciones
+                              <ChevronDown className="h-3.5 w-3.5 ml-1.5" />
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            {accionesModal.length > 0 && (
+                              <DropdownMenuItem onClick={() => handleOpenModal(accionesModal)}>
+                                <MessageSquare className="h-4 w-4 mr-2" />
+                                {accionModalLabel}
+                              </DropdownMenuItem>
+                            )}
+                            {tieneRecordatorio && (
+                              <DropdownMenuItem
+                                disabled={enviandoRecordatorio}
+                                onClick={() => enviarRecordatorio()}
+                              >
+                                <Bell className="h-4 w-4 mr-2" />
+                                {enviandoRecordatorio ? 'Enviando…' : 'Recordatorio'}
+                              </DropdownMenuItem>
+                            )}
+                            {puedeCambiarProf && (
+                              <DropdownMenuItem onClick={() => setCambiarProfOpen(true)}>
+                                <Stethoscope className="h-4 w-4 mr-2" />
+                                Cambiar profesional
+                              </DropdownMenuItem>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                       )}
                     </div>
                     {recordatorioOk && (
@@ -512,46 +499,14 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
       </SheetContent>
     </Sheet>
 
-    {/* Sheet de firma de consentimiento — primer consentimiento pendiente */}
-    {(() => {
-      const pendiente = cita?.consentimiento_info?.consentimientos?.find((c) => !c.vigente)
-      if (!pendiente) return null
-      return (
-        <ConsentimientoFirmaSheet
-          open={firmaOpen}
-          onOpenChange={setFirmaOpen}
-          pacienteId={cita!.paciente}
-          pacienteNombre={cita!.paciente_nombre}
-          token={pendiente.template_token}
-          templateNombre={pendiente.template_nombre}
-          consentimientoId={pendiente.consentimiento_id}
-          vigenciaMeses={undefined}
-          onCompleted={() => {
-            setFirmaOpen(false)
-            queryClient.invalidateQueries({ queryKey: ['citas'] })
-          }}
-        />
-      )
-    })()}
+    <IniciarAtencionWizard citaId={wizardCitaId} onClose={() => setWizardCitaId(null)} />
 
     {cita && (
-      <LlegadaCheckinSheet
-        open={checkinOpen}
-        onOpenChange={setCheckinOpen}
+      <CambiarProfesionalDialog
+        key={cita.id}
         cita={cita}
-        onCheckinSuccess={() => {
-          setCheckinOpen(false)
-          cambiarEstado({ estado: 'en_espera' })
-        }}
-      />
-    )}
-
-    {cita && (
-      <IniciarPagoSheet
-        open={pagoOpen}
-        onOpenChange={(open) => { setPagoOpen(open); if (!open) onClose() }}
-        cita={cita}
-        soloRegistrar={!canIniciarAtencion(user)}
+        open={cambiarProfOpen}
+        onOpenChange={setCambiarProfOpen}
       />
     )}
 
@@ -566,9 +521,9 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
           if (!cita) return null
           const accionesModal: AccionModal[] = [
             ...transiciones
-              .filter((e) => e !== 'en_espera' && e !== 'en_curso')
+              .filter((e) => e !== 'en_espera' && e !== 'en_curso' && e !== 'completada' && !(e === 'cancelada' && cita.estado === 'en_curso'))
               .map((estado) => ({ kind: 'estado' as const, estado })),
-            ...(cita.estado === 'confirmada' && !isPasada
+            ...(cita.estado === 'confirmada' && !isPasada && cita.estado_confirmacion !== 'confirmado'
               ? [{ kind: 'manual' as const }]
               : []),
           ]
