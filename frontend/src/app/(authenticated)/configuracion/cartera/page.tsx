@@ -32,9 +32,15 @@ export default function ConfiguracionCarteraPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <PageHeader
-        title="Compromiso de pago"
-        description="Configura si al aceptar una cotización se genera automáticamente un documento de compromiso de pago para firma del paciente."
+        title="Otros documentos"
+        description="Configuración de los documentos adicionales que maneja la clínica."
+        backHref="/configuracion"
       />
+
+      <div className="flex items-baseline gap-2.5">
+        <h2 className="text-sm font-semibold text-gray-800">Compromiso de pago</h2>
+        <span className="text-xs text-gray-400">Al aceptar una cotización</span>
+      </div>
 
       {isLoading ? (
         <div className="rounded-xl border bg-white p-8 text-center text-sm text-muted-foreground">

@@ -32,6 +32,7 @@ export interface Clinica {
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean
+  modo_puesta_en_marcha?: boolean
   created_at: string
   updated_at: string
 }
@@ -138,6 +139,7 @@ export interface Servicio {
   precio?: string | null               // deprecated; usar precio_referencia (H26)
   precio_referencia?: string | null    // H26: referencia interna, no comercial
   precio_base?: string | null          // H31: precio fijo del catálogo
+  descuento_maximo_pct?: string | null // tope de descuento en cotizaciones sobre precio_base
   requiere_consentimiento?: boolean        // legacy; derivar de consentimientos_requeridos
   documenso_template_token?: string | null // legacy
   documenso_template_nombre?: string | null // legacy
@@ -171,6 +173,8 @@ export interface CreateProcedimientoRequest {
   descripcion?: string
   duracion_min: number
   precio_referencia?: number | null
+  precio_base?: number | null           // precio de lista para cotizaciones (bloquea el precio)
+  descuento_maximo_pct?: number | null  // tope de descuento sobre precio_base (0 = sin descuento)
   vigencia_meses?: number
   profesionales?: string[]   // ids de Colaborador que realizan el procedimiento
 }
@@ -201,6 +205,7 @@ export interface TratamientoCatalogo {
   nombre: string
   descripcion: string | null
   precio_estimado: string | null  // Decimal como string (DRF)
+  descuento_maximo_pct?: string | null // tope de descuento en cotizaciones sobre precio_estimado
   total_sesiones: number          // sum(tipo.cantidad) donde es_compromiso=true
   activo: boolean
   tipos_sesion: TipoSesion[]
@@ -227,6 +232,7 @@ export interface CreateTratamientoCatalogoRequest {
   nombre: string
   descripcion?: string
   precio_estimado?: number | null
+  descuento_maximo_pct?: number | null  // tope de descuento sobre precio_estimado (0 = sin descuento)
   tipos_sesion: CreateTipoSesionRequest[]
 }
 

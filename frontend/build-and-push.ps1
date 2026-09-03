@@ -18,11 +18,10 @@ Set-Location -Path $PSScriptRoot
 
 Write-Host "Building $Image con tags :$Tag y :latest ..." -ForegroundColor Cyan
 
+# Las NEXT_PUBLIC_* salen de frontend/.env.production (gitignoreado, en esta
+# maquina). Aqui solo va lo server-side que Dokploy sobrescribe en runtime.
 docker build -f Dockerfile.prod `
-    --build-arg NEXT_PUBLIC_API_URL=/proxy/v1 `
     --build-arg BACKEND_URL=http://backend:8000 `
-    --build-arg NEXT_PUBLIC_BACKEND_ORIGIN=http://backend:8000 `
-    --build-arg NEXT_PUBLIC_DOCUMENSO_URL=https://documenso.2asoft.tech `
     -t "$Image`:$Tag" -t "$Image`:latest" .
 if ($LASTEXITCODE -ne 0) { throw "docker build failed" }
 
@@ -37,4 +36,19 @@ if ($LASTEXITCODE -ne 0) { throw "docker push latest failed" }
 Write-Host "`nListo. Imagenes subidas:" -ForegroundColor Green
 Write-Host "  $Image`:$Tag   (respaldo / rollback)" -ForegroundColor Green
 Write-Host "  $Image`:latest (el que usa Dokploy)" -ForegroundColor Green
-Write-Host "`nEn Dokploy haz Redeploy para traer la imagen nueva." -ForegroundColor Yellow
+
+# Deploy opcional: dispara el webhook de Dokploy para traer la imagen nueva.
+$DeployHook = "https://dokploy.2asoft.tech/api/deploy/compose/viH0zT3ehn_xXnZWUFMM3"
+$answer = Read-Host "`nDesplegar ahora en Dokploy? (s/N)"
+if ($answer -match '^(s|si|sí|y|yes)$') {
+    Write-Host "Disparando deploy en Dokploy ..." -ForegroundColor Cyan
+    try {
+        Invoke-RestMethod -Uri $DeployHook -Method Get -TimeoutSec 30 | Out-Null
+        Write-Host "Deploy disparado. Revisa el progreso en Dokploy." -ForegroundColor Green
+    } catch {
+        Write-Host "No se pudo disparar el deploy: $_" -ForegroundColor Red
+        exit 1
+    }
+} else {
+    Write-Host "`nDeploy omitido. En Dokploy haz Redeploy cuando quieras traer la imagen nueva." -ForegroundColor Yellow
+}

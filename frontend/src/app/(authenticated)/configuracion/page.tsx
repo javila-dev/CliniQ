@@ -3,9 +3,10 @@
 import Link from 'next/link'
 import {
   Settings2, Building2, Stethoscope, Users, ShieldCheck,
-  ClipboardList, ScrollText, Package2, ChevronRight, FileSignature, ClipboardCheck, Receipt,
+  ClipboardList, ScrollText, Package2, ChevronRight, FileSignature, ClipboardCheck, Receipt, Wallet,
 } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
@@ -19,7 +20,7 @@ interface ConfigItem {
   icon: React.ElementType
   color: string     // color del ícono
   bg: string        // fondo del ícono
-  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log'
+  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log' | 'caja_cajas_gestionar'
 }
 
 interface ConfigSection {
@@ -54,6 +55,39 @@ const SECTIONS: ConfigSection[] = [
     ],
   },
   {
+    title: 'Equipo y accesos',
+    description: 'Quién puede hacer qué',
+    items: [
+      {
+        href: '/equipo',
+        label: 'Usuarios',
+        description: 'Crea y gestiona las cuentas del equipo.',
+        icon: Users,
+        color: 'text-amber-500',
+        bg: 'bg-amber-50',
+        perm: 'usuarios_ver',
+      },
+      {
+        href: '/configuracion/roles',
+        label: 'Roles y permisos',
+        description: 'Define roles personalizados y sus privilegios.',
+        icon: ShieldCheck,
+        color: 'text-sky-500',
+        bg: 'bg-sky-50',
+        perm: 'roles_ver',
+      },
+      {
+        href: '/configuracion/log-acciones',
+        label: 'Log de acciones',
+        description: 'Historial auditable de quién hizo qué y cuándo en el sistema.',
+        icon: ClipboardCheck,
+        color: 'text-slate-500',
+        bg: 'bg-slate-50',
+        perm: 'core_ver_log',
+      },
+    ],
+  },
+  {
     title: 'Catálogo de servicios',
     description: 'Qué ofreces y cómo lo agrupas',
     items: [
@@ -68,7 +102,7 @@ const SECTIONS: ConfigSection[] = [
       },
       {
         href: '/configuracion/tratamientos',
-        label: 'Tratamientos',
+        label: 'Tratamientos (Protocolos)',
         description: 'Planes que agrupan procedimientos con precio estimado.',
         icon: Package2,
         color: 'text-cyan-600',
@@ -92,8 +126,8 @@ const SECTIONS: ConfigSection[] = [
       },
       {
         href: '/configuracion/cartera',
-        label: 'Compromiso de pago',
-        description: 'Consentimiento firmable de abono/saldo y compra promocional al aceptar una cotización.',
+        label: 'Otros documentos',
+        description: 'Configuración de documentos adicionales que maneja la clínica. Por ahora: compromiso de pago al aceptar una cotización.',
         icon: Receipt,
         color: 'text-rose-500',
         bg: 'bg-rose-50',
@@ -135,35 +169,17 @@ const SECTIONS: ConfigSection[] = [
     ],
   },
   {
-    title: 'Equipo y accesos',
-    description: 'Quién puede hacer qué',
+    title: 'Finanzas',
+    description: 'Caja física y categorías de gasto',
     items: [
       {
-        href: '/equipo',
-        label: 'Usuarios',
-        description: 'Crea y gestiona las cuentas del equipo.',
-        icon: Users,
-        color: 'text-amber-500',
-        bg: 'bg-amber-50',
-        perm: 'usuarios_ver',
-      },
-      {
-        href: '/configuracion/roles',
-        label: 'Roles y permisos',
-        description: 'Define roles personalizados y sus privilegios.',
-        icon: ShieldCheck,
-        color: 'text-sky-500',
-        bg: 'bg-sky-50',
-        perm: 'roles_ver',
-      },
-      {
-        href: '/configuracion/log-acciones',
-        label: 'Log de acciones',
-        description: 'Historial auditable de quién hizo qué y cuándo en el sistema.',
-        icon: ClipboardCheck,
-        color: 'text-slate-500',
-        bg: 'bg-slate-50',
-        perm: 'core_ver_log',
+        href: '/configuracion/cajas',
+        label: 'Cajas y categorías',
+        description: 'Fondo inicial y responsable de la caja de cada sede, y el catálogo de categorías de gasto.',
+        icon: Wallet,
+        color: 'text-green-600',
+        bg: 'bg-green-50',
+        perm: 'caja_cajas_gestionar',
       },
     ],
   },
@@ -227,16 +243,19 @@ export default function ConfiguracionPage() {
       if (item.perm === 'usuarios_ver')  return hasPermission(user, PERM.USUARIOS_VER)
       if (item.perm === 'roles_ver')     return hasPermission(user, PERM.ROLES_VER)
       if (item.perm === 'core_ver_log')  return hasPermission(user, PERM.CORE_VER_LOG_ACCIONES)
+      if (item.perm === 'caja_cajas_gestionar') return hasPermission(user, PERM.CAJA_CAJAS_GESTIONAR)
       return hasPermission(user, PERM.CLINICAS_EDITAR)
     }).map((item) => item.href)
   )
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 max-w-5xl mx-auto">
       <PageHeader
         title="Configuración"
         description="Administra los parámetros de tu clínica."
       />
+
+      <PuestaEnMarchaBanner dismissible={false} />
 
       {SECTIONS.map((section) => (
         <ConfigSection key={section.title} section={section} visibleHrefs={visibleHrefs} />

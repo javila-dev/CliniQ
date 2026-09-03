@@ -95,7 +95,6 @@ function Pagination({
   page: number; total: number; pageSize: number; onPage: (p: number) => void
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  if (totalPages <= 1) return null
 
   const pages: number[] = []
   const addPage = (p: number) => {
@@ -120,7 +119,7 @@ function Pagination({
           <>Mostrando <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)}</span> de <span className="font-medium text-foreground">{total}</span></>
         )}
       </p>
-      <div className="flex items-center gap-1">
+      <div className={cn('flex items-center gap-1', totalPages <= 1 && 'hidden')}>
         <button
           onClick={() => onPage(page - 1)}
           disabled={page === 1}
@@ -289,18 +288,18 @@ export default function CotizacionesPage() {
             Limpiar
           </Button>
         )}
-      </div>
 
-      {/* Tabs de estado */}
-      <Tabs value={tabEstado} onValueChange={cambiarTab}>
-        <TabsList className="h-9">
-          {ESTADO_TABS.map((t) => (
-            <TabsTrigger key={t.value} value={t.value} className="text-xs">
-              {t.label}
-            </TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        {/* Filtro de estado — en la misma fila, alineado a la derecha */}
+        <Tabs value={tabEstado} onValueChange={cambiarTab} className="ml-auto">
+          <TabsList className="h-9">
+            {ESTADO_TABS.map((t) => (
+              <TabsTrigger key={t.value} value={t.value} className="text-xs">
+                {t.label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* Lista */}
       {isLoading ? (
@@ -347,7 +346,14 @@ export default function CotizacionesPage() {
                     onClick={() => abrirDetalle(c)}
                   >
                     <td className="px-4 py-3">
-                      <p className="font-medium">{c.paciente_nombre}</p>
+                      <p className="font-medium">
+                        {c.paciente_nombre}
+                        {c.es_migracion && (
+                          <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            Datos previos
+                          </span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">{c.items.length} servicio{c.items.length !== 1 ? 's' : ''}</p>
                     </td>
                     <td className="px-4 py-3">

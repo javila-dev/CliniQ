@@ -21,6 +21,7 @@ export interface AdminTenant {
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
   modulo_obesidad_habilitado: boolean
+  modo_puesta_en_marcha: boolean
   total_usuarios: number
   usuarios_activos: number
   total_sedes: number
@@ -45,6 +46,7 @@ export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean
+  modo_puesta_en_marcha?: boolean
 }
 
 export interface CreatePlanRequest {

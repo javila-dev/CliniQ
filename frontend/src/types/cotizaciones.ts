@@ -29,6 +29,8 @@ export interface ItemCotizacion {
   descuento_porcentaje: string  // Decimal como string (DRF)
   subtotal: string              // Calculado por el backend
   precio_bloqueado?: boolean            // H31: precio fijo del catálogo
+  descuento_maximo_pct?: string | null  // tope de descuento del catálogo (null si no aplica)
+  precio_lista?: string | null          // precio de lista del catálogo (precio_base / precio_estimado)
   precio_campana_disponible?: string | null  // H32: precio de campaña activa
   campana_id?: string | null            // H32: UUID de la campaña activa
   campana_nombre?: string | null        // H32: nombre de la campaña activa
@@ -113,6 +115,7 @@ export interface Cotizacion {
   formas_pago: FormaPagoCotizacion[]
   total: string                 // Calculado por el backend
   total_pagado: string | null   // Abonado en cartera; null si aún no hay cartera (p. ej. borrador)
+  es_migracion?: boolean
   saldo_pendiente: string | null // Saldo por cobrar; null si aún no hay cartera
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización

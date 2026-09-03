@@ -2,11 +2,11 @@ import { apiClient } from './client'
 import type {
   DashboardData, IngresosPeriodo, ServicioReporte,
   OcupacionReporte, ReportesParams, CotizacionesMesMetrics,
-  PacienteSinReagendar,
+  PacienteSinReagendar, EstadoFinanciero,
 } from '@/types/reportes'
 
 export const reportesApi = {
-  getDashboard: async (params?: Pick<ReportesParams, 'sede_id' | 'fecha'>): Promise<DashboardData> => {
+  getDashboard: async (params?: Pick<ReportesParams, 'sede_id' | 'fecha' | 'fecha_inicio' | 'fecha_fin'>): Promise<DashboardData> => {
     const res = await apiClient.get<DashboardData>('/reportes/dashboard/', { params })
     return res.data
   },
@@ -33,6 +33,11 @@ export const reportesApi = {
 
   getPacientesSinReagendar: async (params?: Pick<ReportesParams, 'sede_id'>): Promise<PacienteSinReagendar[]> => {
     const res = await apiClient.get<PacienteSinReagendar[]>('/reportes/pacientes-sin-reagendar/', { params })
+    return res.data
+  },
+
+  getPyL: async (params?: Pick<ReportesParams, 'sede_id' | 'fecha_inicio' | 'fecha_fin'>): Promise<EstadoFinanciero> => {
+    const res = await apiClient.get<EstadoFinanciero>('/reportes/pyl/', { params })
     return res.data
   },
 }

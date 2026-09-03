@@ -1,9 +1,19 @@
 import { apiClient } from './client'
 import type { Cartera, ResumenCartera, RegistrarPagoPayload, CuotaCartera, CuotaVencida } from '@/types/cartera'
+import type { Paginated } from '@/types/common'
+
+export interface CarteraFilter {
+  paciente?: string
+  estado?: string
+  search?: string
+  ordering?: string
+  page?: number
+  page_size?: number
+}
 
 export const carteraApi = {
-  list: async (params?: { paciente?: string; estado?: string }): Promise<Cartera[]> => {
-    const res = await apiClient.get<Cartera[]>('/cartera/', { params })
+  list: async (params?: CarteraFilter): Promise<Paginated<Cartera>> => {
+    const res = await apiClient.get<Paginated<Cartera>>('/cartera/', { params })
     return res.data
   },
 
@@ -12,7 +22,7 @@ export const carteraApi = {
     return res.data
   },
 
-  resumen: async (params?: { sede_id?: string }): Promise<ResumenCartera> => {
+  resumen: async (params?: { sede_id?: string; desde?: string }): Promise<ResumenCartera> => {
     const res = await apiClient.get<ResumenCartera>('/cartera/resumen/', { params })
     return res.data
   },
@@ -31,16 +41,19 @@ export const carteraApi = {
     return res.data
   },
 
-  cuotasVencidas: async (): Promise<CuotaVencida[]> => {
-    const lista = await carteraApi.list()
-    const pendientes = lista.filter((c) => c.cuotas_pagadas < c.cuotas_total)
+  cuotasVencidas: async (desde?: string): Promise<CuotaVencida[]> => {
+    const { results: lista } = await carteraApi.list({ page_size: 500 })
+    const pendientes = lista.filter(
+      (c) => c.cuotas_pagadas < c.cuotas_total && (!desde || c.created_at.slice(0, 10) >= desde),
+    )
     const detalles = await Promise.all(pendientes.map((c) => carteraApi.get(c.id)))
     const hoy = new Date()
     const vencidas: CuotaVencida[] = []
     for (const cartera of detalles) {
       const cuotasCartera = cartera.cuotas ?? []
       cuotasCartera.forEach((cuota, idx) => {
-        if (cuota.pagada || !cuota.fecha_esperada) return
+        const saldo = Number(cuota.saldo_pendiente ?? cuota.valor_esperado)
+        if (saldo <= 0 || !cuota.fecha_esperada) return
         const fechaEsperada = new Date(cuota.fecha_esperada)
         if (fechaEsperada >= hoy) return
         const dias = Math.floor((hoy.getTime() - fechaEsperada.getTime()) / 86_400_000)
@@ -51,7 +64,7 @@ export const carteraApi = {
           cotizacion_id: cartera.cotizacion_id,
           tipo: cuota.tipo,
           descripcion: cuota.descripcion,
-          valor_esperado: cuota.valor_esperado,
+          valor_esperado: String(saldo),
           fecha_esperada: cuota.fecha_esperada,
           dias_vencida: dias,
           numero_cuota: idx + 1,

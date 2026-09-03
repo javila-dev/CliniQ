@@ -65,6 +65,40 @@ export interface ReportesParams {
   agrupar_por?: 'dia' | 'semana' | 'mes'
 }
 
+export interface PyLBloque {
+  ingresos_facturado: string
+  ingresos_recaudado: string
+  costo_insumos: string
+  gastos_operativos: string
+  margen: string
+  margen_pct: string
+}
+
+export interface PyLPorSede {
+  sede_id: string
+  sede_nombre: string
+  ingresos_facturado: string
+  costo_insumos: string
+  gastos_operativos: string
+  margen: string
+  margen_pct: string
+}
+
+export interface EstadoFinanciero {
+  periodo: { inicio: string; fin: string; dias: number }
+  actual: PyLBloque
+  anterior: PyLBloque
+  /** null cuando no hay base de comparación (periodo anterior en cero). */
+  variacion_pct: {
+    ingresos_facturado: string | null
+    costo_insumos: string | null
+    gastos_operativos: string | null
+    margen: string | null
+  }
+  /** Solo presente cuando NO se filtró por sede. */
+  por_sede?: PyLPorSede[]
+}
+
 export interface CotizacionesMesMetrics {
   total_mes: number
   aceptadas_mes: number

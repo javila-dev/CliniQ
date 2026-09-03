@@ -18,6 +18,8 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useUserSedes } from '@/hooks/useUserSedes'
+import { FinanzasTabs } from '@/components/finanzas/FinanzasTabs'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
@@ -54,6 +56,13 @@ function fmtDateTime(d: string) {
   })
 }
 
+// mm/dd/YYYY HH:mm (para la tabla)
+function fmtFechaTabla(d: string) {
+  const x = new Date(d)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(x.getMonth() + 1)}/${p(x.getDate())}/${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`
+}
+
 // ─── Registrar pago sheet ─────────────────────────────────────
 
 const pagoSchema = z.object({
@@ -86,7 +95,7 @@ function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; ope
     <Sheet open={open} onOpenChange={(v) => { if (!v) { reset(); onClose() } }}>
       <SheetContent className="w-full sm:max-w-md">
         <SheetHeader><SheetTitle>Registrar pago</SheetTitle></SheetHeader>
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d as Parameters<typeof mutation.mutate>[0]))} className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d as Parameters<typeof mutation.mutate>[0]))} className="p-6 space-y-4">
           <div className="rounded-lg bg-muted/40 p-3 text-sm space-y-1.5">
             <div className="flex justify-between">
               <span className="text-muted-foreground">Paciente</span>
@@ -170,7 +179,7 @@ function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; op
             </SheetTitle>
           </SheetHeader>
 
-          <div className="mt-5 space-y-5">
+          <div className="p-6 space-y-5">
             <div className="rounded-lg bg-muted/40 p-3 text-sm space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Paciente</span>
@@ -269,6 +278,14 @@ function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; op
 
 // ─── Row ──────────────────────────────────────────────────────
 
+// Columnas compartidas por el header y cada fila (mismo orden/anchos/gap/padding):
+// fecha | paciente | origen | total | sede | estado
+const COL_FECHA = 'w-36 shrink-0 hidden sm:block'
+const COL_ORIGEN = 'w-28 shrink-0 hidden md:block'
+const COL_TOTAL = 'w-32 shrink-0 text-right'
+const COL_SEDE = 'w-28 shrink-0 hidden lg:block'
+const COL_ESTADO = 'w-28 shrink-0'
+
 function IngresoRow({ cobro, onClick }: { cobro: Cobro; onClick: () => void }) {
   const cfg = ESTADO_CONFIG[cobro.estado]
   const Icon = cfg.icon
@@ -277,18 +294,14 @@ function IngresoRow({ cobro, onClick }: { cobro: Cobro; onClick: () => void }) {
   return (
     <div
       onClick={onClick}
-      className="flex items-center gap-3 px-4 py-2 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
+      className="flex items-center gap-4 px-5 py-2.5 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors cursor-pointer"
     >
-      <div className={cn(
-        'flex items-center justify-center h-7 w-7 rounded-md shrink-0',
-        origenCfg ? origenCfg.className.replace('ring-', 'ring-1 ring-').split(' ')[0] + ' bg-opacity-20' : 'bg-indigo-50'
-      )}>
-        {origenCfg
-          ? <origenCfg.icon className={cn('h-3.5 w-3.5', origenCfg.className.split(' ')[1])} />
-          : <Receipt className="h-3.5 w-3.5 text-indigo-600" />
-        }
+      {/* Fecha */}
+      <div className={cn(COL_FECHA, 'text-[11px] text-muted-foreground tabular-nums')}>
+        {fmtFechaTabla(cobro.fecha)}
       </div>
 
+      {/* Paciente */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <p className="text-xs font-semibold text-foreground truncate">{cobro.paciente_nombre ?? '—'}</p>
@@ -296,34 +309,59 @@ function IngresoRow({ cobro, onClick }: { cobro: Cobro; onClick: () => void }) {
             <span className="text-[11px] text-muted-foreground shrink-0">#{cobro.cotizacion_numero}</span>
           )}
         </div>
-        <p className="text-[11px] text-muted-foreground">{fmtDateTime(cobro.fecha)}</p>
+        {/* En pantallas chicas donde se ocultan columnas, resumen inline */}
+        <p className="text-[11px] text-muted-foreground lg:hidden truncate">
+          {fmtFechaTabla(cobro.fecha)} · {origenCfg?.label ?? '—'}{cobro.sede_nombre ? ` · ${cobro.sede_nombre}` : ''}
+        </p>
       </div>
 
-      <div className="hidden sm:block w-28 shrink-0 text-right">
+      {/* Origen */}
+      <div className={COL_ORIGEN}>
+        {origenCfg ? (
+          <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ring-1', origenCfg.className)}>
+            <origenCfg.icon className="h-2.5 w-2.5" />
+            {origenCfg.label}
+          </span>
+        ) : (
+          <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+            <Receipt className="h-2.5 w-2.5" />—
+          </span>
+        )}
+      </div>
+
+      {/* Total */}
+      <div className={COL_TOTAL}>
         <p className="text-xs font-bold text-foreground">{COP.format(Number(cobro.total))}</p>
         {cobro.estado !== 'pagado' && cobro.estado !== 'anulado' && (
           <p className="text-[11px] text-primary">Saldo: {COP.format(Number(cobro.saldo_pendiente))}</p>
         )}
       </div>
 
-      <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ring-1 shrink-0', cfg.className)}>
-        <Icon className="h-2.5 w-2.5" />
-        {cfg.label}
-      </span>
+      {/* Sede */}
+      <div className={cn(COL_SEDE, 'text-[11px] text-muted-foreground truncate')}>
+        {cobro.sede_nombre ?? '—'}
+      </div>
+
+      {/* Estado */}
+      <div className={COL_ESTADO}>
+        <span className={cn('inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium ring-1', cfg.className)}>
+          <Icon className="h-2.5 w-2.5" />
+          {cfg.label}
+        </span>
+      </div>
     </div>
   )
 }
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-3 px-4 py-2 border-b border-gray-100 animate-pulse">
-      <div className="h-7 w-7 rounded-md bg-gray-100 shrink-0" />
-      <div className="flex-1 space-y-1">
-        <div className="h-3 w-36 rounded bg-gray-100" />
-        <div className="h-2.5 w-24 rounded bg-gray-100" />
-      </div>
-      <div className="hidden sm:block h-6 w-20 rounded bg-gray-100" />
-      <div className="h-5 w-20 rounded bg-gray-100" />
+    <div className="flex items-center gap-4 px-5 py-2.5 border-b border-gray-100 animate-pulse">
+      <div className={COL_FECHA}><div className="h-3 w-28 rounded bg-gray-100" /></div>
+      <div className="flex-1"><div className="h-3.5 w-40 rounded bg-gray-100" /></div>
+      <div className={COL_ORIGEN}><div className="h-5 w-20 rounded bg-gray-100" /></div>
+      <div className={cn(COL_TOTAL, 'flex justify-end')}><div className="h-4 w-20 rounded bg-gray-100" /></div>
+      <div className={COL_SEDE}><div className="h-3 w-20 rounded bg-gray-100" /></div>
+      <div className={COL_ESTADO}><div className="h-5 w-20 rounded bg-gray-100" /></div>
     </div>
   )
 }
@@ -332,13 +370,14 @@ function Pagination({ page, total, pageSize, onPage }: {
   page: number; total: number; pageSize: number; onPage: (p: number) => void
 }) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize))
-  if (totalPages <= 1) return null
   return (
     <div className="flex items-center justify-between px-1 mt-5">
       <p className="text-sm text-muted-foreground">
-        {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} de {total}
+        {total === 0
+          ? 'Sin resultados'
+          : `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} de ${total}`}
       </p>
-      <div className="flex items-center gap-1">
+      <div className={cn('flex items-center gap-1', totalPages <= 1 && 'hidden')}>
         <button onClick={() => onPage(page - 1)} disabled={page === 1} className="h-8 w-8 rounded-lg flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-30 disabled:pointer-events-none">
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -393,10 +432,15 @@ export default function IngresosPage() {
 }
 
 function IngresosContent() {
+  const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
+  const [sedeId, setSedeId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [filtroEstado, setFiltroEstado] = useState('todos')
   const [filtroOrigen, setFiltroOrigen] = useState('todos')
+  // Sede efectiva: elección explícita o la sede por defecto del scope del usuario
+  // (un usuario acotado nunca ve ingresos de toda la clínica).
+  const sede = (sedeId ?? defaultSedeId) ?? undefined
   const [ingresoDetalle, setIngresoDetalle] = useState<Cobro | null>(null)
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -425,6 +469,7 @@ function IngresosContent() {
     search:       debouncedSearch || undefined,
     fecha_desde:  fechaDesde || undefined,
     fecha_hasta:  fechaHasta || undefined,
+    sede,
     page,
     page_size: 25,
   }
@@ -440,6 +485,7 @@ function IngresosContent() {
     search:      debouncedSearch || undefined,
     fecha_desde: fechaDesde || undefined,
     fecha_hasta: fechaHasta || undefined,
+    sede,
   }
   const { data: resumen } = useQuery({
     queryKey: ['ingresos-resumen', resumenParams],
@@ -450,6 +496,8 @@ function IngresosContent() {
 
   return (
     <div className="space-y-5">
+
+      <FinanzasTabs />
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
@@ -473,6 +521,39 @@ function IngresosContent() {
           </div>
         </div>
       </div>
+
+      {/* Separación por sede (solo si el usuario tiene acceso a más de una) */}
+      {sedes.length > 1 && (
+        <div className="flex flex-wrap gap-2">
+          {isAllSedes && (
+            <button
+              onClick={() => { setSedeId(null); setPage(1) }}
+              className={cn(
+                'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+                sede === undefined
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground'
+              )}
+            >
+              Todas las sedes
+            </button>
+          )}
+          {sedes.map((s) => (
+            <button
+              key={s.id}
+              onClick={() => { setSedeId(s.id); setPage(1) }}
+              className={cn(
+                'px-3 py-1 rounded-full text-xs font-medium border transition-colors',
+                sede === s.id
+                  ? 'bg-primary text-primary-foreground border-primary'
+                  : 'border-border text-muted-foreground hover:border-foreground/40 hover:text-foreground'
+              )}
+            >
+              {s.nombre}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Date filters + origin tabs */}
       <div className="flex items-center justify-between gap-2">
@@ -556,11 +637,13 @@ function IngresosContent() {
 
       {/* Table */}
       <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center gap-4 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
-          <div className="w-9 shrink-0" />
-          <div className="flex-1"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Paciente / Fecha</span></div>
-          <div className="hidden sm:block w-32 shrink-0 text-right"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Total</span></div>
-          <div className="w-28 shrink-0"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Estado</span></div>
+        <div className="flex items-center gap-4 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+          <div className={COL_FECHA}>Fecha</div>
+          <div className="flex-1">Paciente</div>
+          <div className={COL_ORIGEN}>Origen</div>
+          <div className={COL_TOTAL}>Total</div>
+          <div className={COL_SEDE}>Sede</div>
+          <div className={COL_ESTADO}>Estado</div>
         </div>
 
         {isLoading ? (

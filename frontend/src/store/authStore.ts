@@ -12,6 +12,7 @@ interface AuthState {
   isImpersonating: boolean
 
   login: (email: string, password: string) => Promise<void>
+  loginWithGoogle: (credential: string) => Promise<void>
   logout: () => Promise<void>
   loadUser: () => Promise<void>
   setUser: (user: AuthUser) => void
@@ -30,6 +31,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true })
     try {
       const data = await authApi.login({ email, password })
+      localStorage.setItem('access_token', data.access)
+      localStorage.setItem('refresh_token', data.refresh)
+      if (data.user.clinica_id) localStorage.setItem('clinica_id', data.user.clinica_id)
+      set({ user: data.user, isAuthenticated: true, hasCheckedAuth: true })
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  loginWithGoogle: async (credential) => {
+    set({ isLoading: true })
+    try {
+      const data = await authApi.loginWithGoogle(credential)
       localStorage.setItem('access_token', data.access)
       localStorage.setItem('refresh_token', data.refresh)
       if (data.user.clinica_id) localStorage.setItem('clinica_id', data.user.clinica_id)

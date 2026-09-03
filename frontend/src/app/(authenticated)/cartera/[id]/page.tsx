@@ -45,11 +45,17 @@ const pagoSchema = z.object({
 
 type PagoForm = z.infer<typeof pagoSchema>
 
-function estadoCuota(cuota: CuotaCartera): 'pagada' | 'vencida' | 'pendiente' {
-  if (cuota.pagada) return 'pagada'
+function saldoCuota(cuota: CuotaCartera): number {
+  return Number(cuota.saldo_pendiente ?? cuota.valor_esperado)
+}
+
+function estadoCuota(cuota: CuotaCartera): 'pagada' | 'vencida' | 'pendiente' | 'parcial' {
+  if (saldoCuota(cuota) <= 0) return 'pagada'
   // Comparación por fecha "solo día" para no marcar como vencida una cuota
   // que vence hoy (new Date("YYYY-MM-DD") es medianoche UTC).
-  if (cuota.fecha_esperada && cuota.fecha_esperada.slice(0, 10) < todayISO()) return 'vencida'
+  const atrasada = Boolean(cuota.fecha_esperada && cuota.fecha_esperada.slice(0, 10) < todayISO())
+  if (atrasada) return 'vencida'
+  if (Number(cuota.valor_pagado ?? 0) > 0) return 'parcial'
   return 'pendiente'
 }
 
@@ -59,6 +65,8 @@ function CuotaBadge({ cuota }: { cuota: CuotaCartera }) {
     return <Badge variant="success" className="text-xs gap-1"><CheckCircle2 className="h-3 w-3" />Pagada</Badge>
   if (estado === 'vencida')
     return <Badge variant="destructive" className="text-xs gap-1"><AlertCircle className="h-3 w-3" />Vencida</Badge>
+  if (estado === 'parcial')
+    return <Badge variant="warning" className="text-xs gap-1"><Clock className="h-3 w-3" />Abono parcial</Badge>
   return <Badge variant="secondary" className="text-xs gap-1"><Clock className="h-3 w-3" />Pendiente</Badge>
 }
 
@@ -145,7 +153,7 @@ function RegistrarPagoModal({
   const { register, handleSubmit, reset, formState: { errors }, setValue } = useForm<PagoForm>({
     resolver: zodResolver(pagoSchema),
     defaultValues: {
-      valor_pagado: parseFloat(cuota.valor_esperado) || undefined,
+      valor_pagado: parseFloat(cuota.saldo_pendiente ?? cuota.valor_esperado) || undefined,
       fecha_pago: todayISO(),
       medio_pago: '',
       observaciones: '',
@@ -187,6 +195,11 @@ function RegistrarPagoModal({
               <p className="text-xs text-muted-foreground mt-0.5">Vence: {formatDate(cuota.fecha_esperada)}</p>
             )}
             <p className="text-xs text-muted-foreground mt-0.5">Esperado: {formatCOP(cuota.valor_esperado)}</p>
+            {Number(cuota.valor_pagado ?? 0) > 0 && (
+              <p className="text-xs text-amber-600 mt-0.5">
+                Ya abonado: {formatCOP(cuota.valor_pagado ?? 0)} · Saldo: {formatCOP(cuota.saldo_pendiente ?? cuota.valor_esperado)}
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -308,12 +321,23 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
         <Card>
           <CardContent className="pt-5">
             <p className="text-xs text-muted-foreground">Saldo pendiente</p>
-            <p className={`text-2xl font-bold tabular-nums mt-1 ${Number(cartera.saldo_pendiente) > 0 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            <p className={`text-2xl font-bold tabular-nums mt-1 ${
+              Number(cartera.saldo_pendiente) <= 0
+                ? 'text-emerald-600'
+                : cartera.en_mora ? 'text-rose-600' : 'text-amber-600'
+            }`}>
               {formatCOP(cartera.saldo_pendiente)}
             </p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {cartera.cuotas_pagadas} de {cartera.cuotas_total} cuotas pagadas
-            </p>
+            {cartera.en_mora ? (
+              <Badge variant="destructive" className="text-xs gap-1 mt-1">
+                <AlertCircle className="h-3 w-3" />
+                En mora · {cartera.mora_dias} día{cartera.mora_dias !== 1 ? 's' : ''} · {formatCOP(cartera.mora_valor)}
+              </Badge>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {cartera.cuotas_pagadas} de {cartera.cuotas_total} cuotas pagadas
+              </p>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -351,28 +375,32 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
                             )}
                           </p>
                         )}
-                        {cuota.pagada && cuota.fecha_pago && (
+                        {cuota.fecha_pago && Number(cuota.valor_pagado ?? 0) > 0 && (
                           <p className="text-emerald-600">
-                            Pagado el {formatDate(cuota.fecha_pago)} · {cuota.medio_pago}
+                            {saldoCuota(cuota) <= 0 ? 'Pagado el ' : 'Último abono el '}
+                            {formatDate(cuota.fecha_pago)} · {cuota.medio_pago}
                             {cuota.observaciones && ` · ${cuota.observaciones}`}
+                          </p>
+                        )}
+                        {saldoCuota(cuota) > 0 && Number(cuota.valor_pagado ?? 0) > 0 && (
+                          <p className={estado === 'vencida' ? 'text-rose-600 font-medium' : 'text-amber-600 font-medium'}>
+                            Abonado {formatCOP(cuota.valor_pagado ?? 0)} · falta {formatCOP(saldoCuota(cuota))}
                           </p>
                         )}
                       </div>
                     </div>
                     <div className="text-right shrink-0">
                       <p className="text-sm font-semibold tabular-nums">
-                        {cuota.pagada && cuota.valor_pagado
-                          ? formatCOP(cuota.valor_pagado)
-                          : formatCOP(cuota.valor_esperado)}
+                        {formatCOP(cuota.valor_esperado)}
                       </p>
-                      {!cuota.pagada && (
+                      {saldoCuota(cuota) > 0 && (
                         <Button
                           size="sm"
                           variant={estado === 'vencida' ? 'destructive' : 'outline'}
                           className="mt-2 text-xs h-7"
                           onClick={() => setCuotaSeleccionada(cuota)}
                         >
-                          Registrar pago
+                          {Number(cuota.valor_pagado ?? 0) > 0 ? 'Cobrar saldo' : 'Registrar pago'}
                         </Button>
                       )}
                     </div>

@@ -21,6 +21,7 @@ import {
   ShieldCheck,
   Zap,
   Building2,
+  PieChart,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -50,6 +51,7 @@ const NAV = {
   cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.COBROS_VER            },
   consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER   },
   cobros:         { href: '/ingresos',       label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER            },
+  resultados:     { href: '/resultados',     label: 'Resultados',      icon: PieChart,        perm: PERM.REPORTES_VER_FINANCIEROS },
   campanas:       { href: '/configuracion/campanas', label: 'Campañas', icon: Zap,            perm: PERM.CAMPANAS_GESTIONAR    },
   configuracion:  { href: '/configuracion',  label: 'Configuración',   icon: Settings2,       perm: PERM.CLINICAS_EDITAR       },
 }
@@ -58,6 +60,7 @@ function allow(user: AuthUser | null, item: typeof NAV[keyof typeof NAV]): boole
   if (item.href === '/dashboard')     return canAccess.dashboard(user)
   if (item.href === '/atenciones')    return canAccess.atenciones(user)
   if (item.href === '/configuracion') return canAccess.configuracion(user)
+  if (item.href === '/resultados')    return canAccess.finanzas(user)
   return hasPermission(user, item.perm)
 }
 
@@ -65,8 +68,9 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const n = NAV
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
-  const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes, n.cobros].filter(vis)
-  const ventasItems: NavItem[]   = [n.cotizaciones, n.campanas, n.cartera].filter(vis)
+  const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
+  const ventasItems: NavItem[]   = [n.cotizaciones, n.campanas].filter(vis)
+  const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
 
   const entries: NavEntry[] = []
 
@@ -77,6 +81,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   if (vis(n.dashboard))  entries.push(n.dashboard)
   if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems })
   if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems   })
+  if (finanzasItems.length) entries.push({ section: 'Finanzas', items: finanzasItems })
   if (vis(n.configuracion)) entries.push(n.configuracion)
 
   return entries

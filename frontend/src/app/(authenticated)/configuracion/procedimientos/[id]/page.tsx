@@ -78,7 +78,7 @@ function TabGeneral({ servicioId }: { servicioId: string }) {
           )} />
         </div>
         <div className="space-y-1.5">
-          <Label>Precio de referencia</Label>
+          <Label>Precio</Label>
           <Controller name="precio_referencia" control={control} render={({ field }) => (
             <div className="relative">
               <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>

@@ -343,7 +343,7 @@ export const clinicasApi = {
   },
 
   tratamientos: {
-    list: async (params?: { activo?: boolean; search?: string }): Promise<Paginated<TratamientoCatalogo>> => {
+    list: async (params?: { activo?: boolean; search?: string; page?: number; page_size?: number }): Promise<Paginated<TratamientoCatalogo>> => {
       const res = await apiClient.get<Paginated<TratamientoCatalogo>>('/clinicas/tratamientos/', { params })
       return res.data
     },

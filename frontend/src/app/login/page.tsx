@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -9,6 +9,7 @@ import Image from 'next/image'
 import { Eye, EyeOff, Sparkles, CalendarDays, FileText, Users, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { authApi } from '@/lib/api/auth'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { defaultRoute } from '@/lib/permissions'
 import type { AuthUser } from '@/types/auth'
 import { Button } from '@/components/ui/button'
@@ -51,7 +52,7 @@ function getPostLoginRoute(user: AuthUser) {
 }
 
 export default function LoginPage() {
-  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, login, user } = useAuthStore()
+  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, login, loginWithGoogle, user } = useAuthStore()
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
@@ -96,6 +97,25 @@ export default function LoginPage() {
       setServerError(msg)
     }
   }
+
+  const handleGoogleCredential = useCallback(
+    async (credential: string) => {
+      setServerError(null)
+      try {
+        await loginWithGoogle(credential)
+        const freshUser = useAuthStore.getState().user
+        setIsNavigating(true)
+        router.replace(freshUser ? getPostLoginRoute(freshUser) : getSafeNextPath() ?? '/agenda')
+      } catch (err: any) {
+        const msg =
+          err?.response?.data?.error ||
+          err?.response?.data?.detail ||
+          'No pudimos iniciar sesión con Google. Intenta con tu correo y contraseña.'
+        setServerError(msg)
+      }
+    },
+    [loginWithGoogle, router],
+  )
 
   const onRecoverySubmit = async ({ email }: RecoveryForm) => {
     setRecoveryError(null)
@@ -200,7 +220,7 @@ export default function LoginPage() {
           >
 
             {/* ── Slide 1: Login ── */}
-            <div className="w-full shrink-0 px-7">
+            <div className="w-full shrink-0 px-7 pb-2">
 
               {/* Mobile logo */}
               <div className="mb-8 lg:hidden">
@@ -208,7 +228,7 @@ export default function LoginPage() {
               </div>
 
               <div className="mb-8">
-                <h1 className="text-2xl font-bold text-foreground">Bienvenida de vuelta</h1>
+                <h1 className="text-2xl font-bold text-foreground">Bienvenido de vuelta</h1>
                 <p className="text-sm text-muted-foreground mt-1">Ingresa tus credenciales para continuar</p>
               </div>
 
@@ -283,10 +303,27 @@ export default function LoginPage() {
                   )}
                 </Button>
               </form>
+
+              {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && (
+                <>
+                  <div className="mt-6 flex items-center gap-3">
+                    <span className="h-px flex-1 bg-border" />
+                    <span className="text-xs text-muted-foreground">o</span>
+                    <span className="h-px flex-1 bg-border" />
+                  </div>
+
+                  <div className="mt-4 pb-1">
+                    <GoogleSignInButton
+                      onCredential={handleGoogleCredential}
+                      onError={(msg) => setServerError(msg)}
+                    />
+                  </div>
+                </>
+              )}
             </div>
 
             {/* ── Slide 2: Recuperar contraseña ── */}
-            <div className="w-full shrink-0 px-7">
+            <div className="w-full shrink-0 px-7 pb-2">
 
               {/* Mobile logo */}
               <div className="mb-8 lg:hidden">

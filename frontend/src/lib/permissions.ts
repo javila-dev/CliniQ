@@ -10,6 +10,7 @@ export const PERM = {
 
   // Reportes / dashboard
   REPORTES_VER:              'reportes.ver',
+  REPORTES_VER_FINANCIEROS:  'reportes.ver_financieros',
 
   // Agenda
   AGENDA_VER:                'agenda.citas.ver',
@@ -79,6 +80,20 @@ export const PERM = {
   COTIZACIONES_VER:          'cotizaciones.ver',
   COTIZACIONES_GESTIONAR:    'cotizaciones.gestionar',
   COTIZACIONES_CAMBIAR_PRECIO: 'cotizaciones.cambiar_precio',
+
+  // Caja / egresos
+  CAJA_GASTOS_VER:           'caja.gastos.ver',
+  CAJA_GASTOS_REGISTRAR:     'caja.gastos.registrar',
+  CAJA_GASTOS_EDITAR:        'caja.gastos.editar',
+  CAJA_GASTOS_APROBAR:       'caja.gastos.aprobar',
+  CAJA_CAJAS_GESTIONAR:      'caja.cajas.gestionar',
+  CAJA_CIERRE_VER:           'caja.cierre.ver',
+  CAJA_CIERRE_REALIZAR:      'caja.cierre.realizar',
+  CAJA_CATEGORIAS_VER:       'caja.categorias.ver',
+  CAJA_CATEGORIAS_GESTIONAR: 'caja.categorias.gestionar',
+
+  // Puesta en marcha / migración
+  MIGRACION_GESTIONAR:       'migracion.gestionar',
 } as const
 
 export type PermKey = typeof PERM[keyof typeof PERM]
@@ -151,6 +166,33 @@ export const canAccess = {
 
   cobros: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.COBROS_VER),
+
+  // Acceso al workspace de Resultados: basta con poder ver al menos una pestaña
+  // (Ingresos, Egresos o Caja); el Resumen/P&L se restringe aparte.
+  finanzas: (u: AuthUser | null | undefined) =>
+    isAdminOrSuperAdmin(u)
+    || hasPermission(u, PERM.COBROS_VER)
+    || hasPermission(u, PERM.CAJA_GASTOS_VER)
+    || hasPermission(u, PERM.CAJA_CIERRE_VER),
+
+  // Pestaña Resumen (P&L consolidado): solo admin/superadmin.
+  resultadosPyL: (u: AuthUser | null | undefined) =>
+    isAdminOrSuperAdmin(u),
+
+  egresos: (u: AuthUser | null | undefined) =>
+    hasPermission(u, PERM.CAJA_GASTOS_VER),
+
+  cierreCaja: (u: AuthUser | null | undefined) =>
+    hasPermission(u, PERM.CAJA_CIERRE_VER),
+
+  cajasConfig: (u: AuthUser | null | undefined) =>
+    hasPermission(u, PERM.CAJA_CAJAS_GESTIONAR),
+
+  // Rol/permiso para el asistente de puesta en marcha. La disponibilidad real
+  // exige además que la clínica activa tenga `modo_puesta_en_marcha` (se chequea
+  // aparte contra `miClinica`).
+  puestaEnMarcha: (u: AuthUser | null | undefined) =>
+    isSuperAdmin(u) || hasPermission(u, PERM.MIGRACION_GESTIONAR),
 
   consentimientos: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.CONSENTIMIENTOS_VER),

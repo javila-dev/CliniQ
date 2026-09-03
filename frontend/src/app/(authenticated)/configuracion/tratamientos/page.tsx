@@ -1,16 +1,17 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Plus, MoreHorizontal, Pencil, Power, Loader2, Package2,
   Maximize2, Minimize2, X, Search, ChevronUp, ChevronDown,
-  Stethoscope, GripVertical, Info, Clock,
+  ChevronLeft, ChevronRight, Stethoscope, GripVertical, Info, Clock,
 } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
+import { useDebounce } from '@/hooks/useDebounce'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ProcedimientoDialog } from '@/components/configuracion/ProcedimientoDialog'
 import { Button } from '@/components/ui/button'
@@ -33,6 +34,7 @@ const schema = z.object({
   nombre: z.string().min(1, 'Requerido'),
   descripcion: z.string().optional(),
   precio_estimado: z.number().min(0).nullable().optional(),
+  descuento_maximo_pct: z.number().min(0).max(100).nullable().optional(),
   activo: z.boolean().optional(),
 })
 type FormValues = z.infer<typeof schema>
@@ -305,8 +307,9 @@ function TratamientoDialog({
       nombre: tratamiento.nombre,
       descripcion: tratamiento.descripcion ?? '',
       precio_estimado: tratamiento.precio_estimado ? parseFloat(tratamiento.precio_estimado) : null,
+      descuento_maximo_pct: tratamiento.descuento_maximo_pct != null ? parseFloat(tratamiento.descuento_maximo_pct) : 0,
       activo: tratamiento.activo,
-    } : { nombre: '', descripcion: '', precio_estimado: null, activo: true },
+    } : { nombre: '', descripcion: '', precio_estimado: null, descuento_maximo_pct: 0, activo: true },
     resetOptions: { keepDirtyValues: false },
   })
 
@@ -406,18 +409,31 @@ function TratamientoDialog({
                   <Label>Descripción</Label>
                   <Textarea {...register('descripcion')} placeholder="Descripción opcional..." rows={3} />
                 </div>
-                <div className="space-y-1.5">
-                  <Label>Precio estimado</Label>
-                  <Controller name="precio_estimado" control={control} render={({ field }) => (
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
-                      <Input inputMode="numeric" className="pl-7" placeholder="0"
-                        value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
-                        onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); field.onChange(raw ? Number(raw) : null) }}
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Precio de lista</Label>
+                    <Controller name="precio_estimado" control={control} render={({ field }) => (
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
+                        <Input inputMode="numeric" className="pl-7" placeholder="0"
+                          value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
+                          onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); field.onChange(raw ? Number(raw) : null) }}
+                        />
+                      </div>
+                    )} />
+                    <p className="text-xs text-muted-foreground">Precio al agregar este tratamiento en una cotización (bloquea el precio).</p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Descuento máx. (%)</Label>
+                    <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
+                      <Input type="number" min={0} max={100} step={1}
+                        value={field.value ?? 0}
+                        onChange={(e) => field.onChange(e.target.value === '' ? 0 : Number(e.target.value))}
                       />
-                    </div>
-                  )} />
-                  <p className="text-xs text-muted-foreground">Precio sugerido al agregar este tratamiento en una cotización.</p>
+                    )} />
+                    {errors.descuento_maximo_pct && <p className="text-xs text-destructive">{errors.descuento_maximo_pct.message}</p>}
+                    <p className="text-xs text-muted-foreground">Máximo permitido sobre el precio de lista. 0 = sin descuento.</p>
+                  </div>
                 </div>
                 {isEdit && (
                   <div className="flex items-center justify-between rounded-lg border px-4 py-3">
@@ -540,30 +556,13 @@ function TratamientosTable({
           {tratamientos.map((t) => (
             <tr key={t.id} className={cn('hover:bg-gray-50/50 transition-colors', !t.activo && 'opacity-55')}>
               <td className="px-4 py-3">
-                <p className="font-medium text-gray-900">{t.nombre}</p>
+                <div className="flex items-center gap-2">
+                  <p className="font-medium text-gray-900">{t.nombre}</p>
+                  <span className="inline-flex items-center bg-gray-100 text-gray-600 text-[10px] font-medium px-2 py-0.5 rounded-full shrink-0">
+                    {t.total_sesiones} {t.total_sesiones === 1 ? 'sesión' : 'sesiones'}
+                  </span>
+                </div>
                 {t.descripcion && <p className="text-xs text-muted-foreground truncate max-w-sm mt-0.5">{t.descripcion}</p>}
-                {/* Pills de tipos de sesión */}
-                {t.tipos_sesion.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1.5">
-                    {t.tipos_sesion.map((tipo) => (
-                      <span key={tipo.id} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-[10px] font-medium px-2 py-0.5 rounded-full">
-                        {tipo.nombre}
-                        <span className="text-gray-400">×{tipo.cantidad}</span>
-                        {!tipo.es_compromiso && <span className="text-gray-300 italic"> info</span>}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {/* Procedimientos únicos */}
-                {t.tipos_sesion.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-1">
-                    {Array.from(new Set(t.tipos_sesion.flatMap((ts) => ts.procedimientos.map((p) => p.nombre)))).map((nombre) => (
-                      <span key={nombre} className="inline-flex items-center gap-0.5 text-[10px] text-emerald-700">
-                        <Stethoscope className="h-2.5 w-2.5" />{nombre}
-                      </span>
-                    ))}
-                  </div>
-                )}
               </td>
               <td className="px-4 py-3 text-right hidden md:table-cell">
                 {t.precio_estimado
@@ -606,15 +605,23 @@ function TratamientosTable({
 
 // ─── Page ─────────────────────────────────────────────────────
 
+const PAGE_SIZE = 25
+
 export default function TratamientosPage() {
   const qc = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<TratamientoCatalogo | null>(null)
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['tratamientos', 'all'],
-    queryFn: () => clinicasApi.tratamientos.list(),
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const debSearch = useDebounce(search, 350)
+
+  const params = { search: debSearch || undefined, page, page_size: PAGE_SIZE }
+  const { data, isLoading, isError, isFetching } = useQuery({
+    queryKey: ['tratamientos', 'all', params],
+    queryFn: () => clinicasApi.tratamientos.list(params),
     retry: 1,
+    placeholderData: keepPreviousData,
   })
 
   const toggleMut = useMutation({
@@ -624,6 +631,9 @@ export default function TratamientosPage() {
   })
 
   const tratamientos = data?.results ?? []
+  const total = data?.count ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const buscando = debSearch.trim().length > 0
 
   return (
     <div className="space-y-6">
@@ -638,6 +648,18 @@ export default function TratamientosPage() {
         }
       />
 
+      {!isError && (
+        <div className="relative max-w-sm">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            className="pl-9 h-9 bg-white"
+            placeholder="Buscar por nombre…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          />
+        </div>
+      )}
+
       {isLoading && <div className="flex justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>}
 
       {isError && (
@@ -650,7 +672,13 @@ export default function TratamientosPage() {
         </div>
       )}
 
-      {!isLoading && !isError && tratamientos.length === 0 && (
+      {!isLoading && !isError && tratamientos.length === 0 && buscando && (
+        <div className="rounded-xl border bg-white px-4 py-12 text-center text-sm text-muted-foreground">
+          Sin tratamientos para “{debSearch}”.
+        </div>
+      )}
+
+      {!isLoading && !isError && tratamientos.length === 0 && !buscando && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <Package2 className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">No hay tratamientos configurados</p>
@@ -664,11 +692,27 @@ export default function TratamientosPage() {
       )}
 
       {!isLoading && !isError && tratamientos.length > 0 && (
-        <TratamientosTable
-          tratamientos={tratamientos}
-          onEdit={(t) => { setEditTarget(t); setDialogOpen(true) }}
-          onToggle={(t) => toggleMut.mutate({ id: t.id, activo: !t.activo })}
-        />
+        <div className={cn('space-y-3 transition-opacity', isFetching && 'opacity-60')}>
+          <TratamientosTable
+            tratamientos={tratamientos}
+            onEdit={(t) => { setEditTarget(t); setDialogOpen(true) }}
+            onToggle={(t) => toggleMut.mutate({ id: t.id, activo: !t.activo })}
+          />
+          <div className="flex items-center justify-between text-sm">
+            <p className="text-muted-foreground">
+              {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}
+            </p>
+            <div className={cn('flex items-center gap-2', totalPages <= 1 && 'hidden')}>
+              <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="text-muted-foreground tabular-nums">{page} / {totalPages}</span>
+              <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          </div>
+        </div>
       )}
 
       <TratamientoDialog open={dialogOpen} onOpenChange={setDialogOpen} tratamiento={editTarget} />

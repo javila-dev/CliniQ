@@ -16,6 +16,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
@@ -25,7 +26,8 @@ const schema = z.object({
   nombre: z.string().min(1, 'Requerido'),
   descripcion: z.string().optional(),
   duracion_min: z.number().int().min(1, 'Duración requerida'),
-  precio_referencia: z.number().min(0).nullable().optional(),
+  precio_base: z.number().min(0).nullable().optional(),
+  descuento_maximo_pct: z.number().min(0).max(100).nullable().optional(),
   requiere_consentimiento: z.boolean(),
   documenso_template_id: z.string().nullable().optional(),
   documenso_template_nombre: z.string().nullable().optional(),
@@ -36,7 +38,8 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>
 
 const DEFAULT_VALUES: FormValues = {
-  nombre: '', descripcion: '', duracion_min: 30, precio_referencia: null,
+  nombre: '', descripcion: '', duracion_min: 30,
+  precio_base: null, descuento_maximo_pct: 0,
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, vigencia_meses: 12, profesionales: [], activo: true,
 }
@@ -59,10 +62,10 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
   const [tab, setTab] = useState<'datos' | 'zonas'>('datos')
   const [expanded, setExpanded] = useState(false)
 
-  // precio_referencia: usa precio_referencia si existe, fallback a precio (backward compat)
-  function getPrecioRef(p: Procedimiento | null): number | null {
+  // Un solo precio: precio_base (con fallbacks legacy).
+  function getPrecio(p: Procedimiento | null): number | null {
     if (!p) return null
-    const val = p.precio_referencia ?? p.precio
+    const val = p.precio_base ?? p.precio_referencia ?? p.precio
     return val ? parseFloat(val) : null
   }
 
@@ -86,7 +89,8 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       nombre: fullTarget.nombre,
       descripcion: fullTarget.descripcion ?? '',
       duracion_min: fullTarget.duracion_min,
-      precio_referencia: getPrecioRef(fullTarget),
+      precio_base: getPrecio(fullTarget),
+      descuento_maximo_pct: fullTarget.descuento_maximo_pct != null ? parseFloat(fullTarget.descuento_maximo_pct) : 0,
       requiere_consentimiento: (fullTarget.consentimientos_requeridos?.length ?? 0) > 0,
       documenso_template_id: primerConsentimiento?.template_id ?? null,
       documenso_template_nombre: primerConsentimiento?.template_nombre ?? null,
@@ -119,7 +123,9 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
         nombre: data.nombre,
         descripcion: data.descripcion,
         duracion_min: data.duracion_min,
-        precio_referencia: data.precio_referencia ?? null,
+        precio_base: data.precio_base ?? null,
+        precio_referencia: data.precio_base ?? null,
+        descuento_maximo_pct: data.descuento_maximo_pct ?? 0,
         vigencia_meses: data.requiere_consentimiento ? data.vigencia_meses : undefined,
         profesionales: data.profesionales ?? [],
       }
@@ -230,8 +236,8 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
                     {errors.duracion_min && <p className="text-xs text-destructive">{errors.duracion_min.message}</p>}
                   </div>
                   <div className="space-y-1.5">
-                    <Label>Precio de referencia</Label>
-                    <Controller name="precio_referencia" control={control} render={({ field }) => (
+                    <Label>Precio</Label>
+                    <Controller name="precio_base" control={control} render={({ field }) => (
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
                         <Input inputMode="numeric" className="pl-7" placeholder="0"
@@ -240,6 +246,33 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
                         />
                       </div>
                     )} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Flexibilidad de precio</Label>
+                    <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
+                      <Select
+                        value={String(field.value ?? 0)}
+                        onValueChange={(v) => field.onChange(Number(v))}
+                      >
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="0">Firme — no se puede cambiar</SelectItem>
+                          <SelectItem value="5">Hasta 5% de descuento</SelectItem>
+                          <SelectItem value="10">Hasta 10% de descuento</SelectItem>
+                          <SelectItem value="15">Hasta 15% de descuento</SelectItem>
+                          <SelectItem value="20">Hasta 20% de descuento</SelectItem>
+                          <SelectItem value="25">Hasta 25% de descuento</SelectItem>
+                          <SelectItem value="30">Hasta 30% de descuento</SelectItem>
+                          <SelectItem value="50">Hasta 50% de descuento</SelectItem>
+                          <SelectItem value="100">Libre — precio sugerido, editable</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    )} />
+                    <p className="text-xs text-muted-foreground">
+                      Controla cuánto se puede bajar el precio al armar una cotización.
+                    </p>
                   </div>
                 </div>
                 <div className="space-y-1.5">

@@ -429,7 +429,8 @@ function construirFilasTipadas(
       indice += 1
       const titulo = `Sesión ${indice}/${total} · ${grupo.tipoSesionNombre}`
 
-      if (s.estado === 'completada') {
+      // El backend puede mandar 'completada' (H27) o 'completado' (enum del modelo).
+      if (s.estado === 'completada' || (s.estado as string) === 'completado') {
         const cita = s.cita ? citaById.get(s.cita) : undefined
         filas.push({
           key: s.id,
@@ -437,7 +438,7 @@ function construirFilasTipadas(
           citaEstado: 'completada',
           citaId: cita?.cita_id ?? null,
           fecha: cita?.fecha_inicio ?? s.fecha,
-          detalle: cita ? `${cita.profesional_nombre} · ${cita.sede_nombre}` : s.profesional_nombre,
+          detalle: cita ? `${cita.profesional_nombre} · ${cita.sede_nombre}` : (s.profesional_nombre || 'Anterior a CliniQ'),
         })
         continue
       }

@@ -275,6 +275,27 @@ function getPrecioMinimoItem(
   return null
 }
 
+/** Tope de descuento del catálogo para un ítem: precio de lista + % máx. */
+function getDescMaxItem(
+  tipo: string | undefined,
+  procedimientoId: string | null | undefined,
+  tratamientoId: string | null | undefined,
+  procedimientos: Procedimiento[],
+  tratamientos: TratamientoCatalogo[],
+): { precioLista: number; descMaxPct: number } | null {
+  if (tipo === 'procedimiento' && procedimientoId) {
+    const p = procedimientos.find((x) => x.id === procedimientoId)
+    if (p?.precio_base) return { precioLista: parseFloat(p.precio_base), descMaxPct: parseFloat(p.descuento_maximo_pct ?? '0') }
+    return null
+  }
+  if (tipo === 'tratamiento' && tratamientoId) {
+    const t = tratamientos.find((x) => x.id === tratamientoId)
+    if (t?.precio_estimado) return { precioLista: parseFloat(t.precio_estimado), descMaxPct: parseFloat(t.descuento_maximo_pct ?? '0') }
+    return null
+  }
+  return null
+}
+
 // ── Props ──────────────────────────────────────────────────────────────────────
 
 interface CotizacionFormProps {
@@ -523,6 +544,26 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     })
     if (itemBajoMin) {
       toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
+      return
+    }
+
+    const itemDescExcedido = items.find((item) => {
+      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [])
+      if (!info) return false
+      const desc = item.descuento_porcentaje || 0
+      const efectivo = (item.valor_unitario || 0) * (1 - desc / 100)
+      const piso = info.precioLista * (1 - info.descMaxPct / 100)
+      const campanaExacta = !!item.precio_campana_disponible && desc === 0 && item.valor_unitario === parseFloat(item.precio_campana_disponible)
+      return !campanaExacta && efectivo < piso - 1
+    })
+    if (itemDescExcedido) {
+      const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [])
+      toast.error(
+        'Descuento sobre el máximo',
+        info && info.descMaxPct > 0
+          ? `"${itemDescExcedido.descripcion}" supera el descuento máximo permitido (${info.descMaxPct}%).`
+          : `"${itemDescExcedido.descripcion}" no admite descuento.`,
+      )
       return
     }
 
@@ -1001,6 +1042,18 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                       precioCampana, procedimientos ?? [], tratamientos ?? [],
                     )
                     const bajoPrecioMin = !soloLectura && precioMinimo !== null && val < precioMinimo
+
+                    // Tope de descuento del catálogo: el precio efectivo por unidad
+                    // no puede bajar de precioLista * (1 - descMaxPct/100).
+                    const descMaxInfo = soloLectura ? null : getDescMaxItem(
+                      items[idx]?.tipo, items[idx]?.procedimiento, items[idx]?.tratamiento,
+                      procedimientos ?? [], tratamientos ?? [],
+                    )
+                    const precioEfectivo = val * (1 - desc / 100)
+                    const pisoDescuento = descMaxInfo ? descMaxInfo.precioLista * (1 - descMaxInfo.descMaxPct / 100) : null
+                    const precioCampanaExacto = !!precioCampana && desc === 0 && val === parseFloat(precioCampana)
+                    const descExcedido = pisoDescuento !== null && !precioCampanaExacto && precioEfectivo < pisoDescuento - 1
+
                     const campanaDisponible = !!precioCampana && !soloLectura
                     const campanaAplicada = !!precioCampana &&
                       parseFloat(precioCampana) === (items[idx]?.valor_unitario ?? -1)
@@ -1091,11 +1144,21 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                       <div>
                         <p className="text-xs text-muted-foreground md:hidden mb-1">Desc %</p>
                         <Input
-                          type="number" min={0} max={100}
-                          className="h-8 text-sm text-right"
+                          type="number" min={0} max={descMaxInfo ? descMaxInfo.descMaxPct : 100}
+                          className={cn(
+                            'h-8 text-sm text-right',
+                            descExcedido && 'border-destructive focus-visible:ring-destructive',
+                          )}
                           disabled={soloLectura}
                           {...register(`items.${idx}.descuento_porcentaje`, { valueAsNumber: true })}
                         />
+                        {descExcedido && (
+                          <p className="text-[10px] text-destructive mt-0.5 text-right">
+                            {descMaxInfo && descMaxInfo.descMaxPct > 0
+                              ? `Máx ${descMaxInfo.descMaxPct}% · mín ${cop(pisoDescuento!)}`
+                              : 'Sin descuento permitido'}
+                          </p>
+                        )}
                       </div>
                     )
 

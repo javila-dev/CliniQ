@@ -87,11 +87,13 @@ function TenantSheet({
   const [facialHabilitado, setFacialHabilitado]       = useState(tenant?.facial_verificacion_habilitada ?? false)
   const [moduloEstetico, setModuloEstetico]           = useState(tenant?.modulo_estetico_habilitado ?? true)
   const [moduloObesidad, setModuloObesidad]           = useState(tenant?.modulo_obesidad_habilitado ?? false)
+  const [puestaEnMarcha, setPuestaEnMarcha]           = useState(tenant?.modo_puesta_en_marcha ?? false)
 
   useEffect(() => {
     setFacialHabilitado(tenant?.facial_verificacion_habilitada ?? false)
     setModuloEstetico(tenant?.modulo_estetico_habilitado ?? true)
     setModuloObesidad(tenant?.modulo_obesidad_habilitado ?? false)
+    setPuestaEnMarcha(tenant?.modo_puesta_en_marcha ?? false)
   }, [tenant?.id])
 
   const mutation = useMutation({
@@ -106,6 +108,7 @@ function TenantSheet({
           facial_verificacion_habilitada: facialHabilitado,
           modulo_estetico_habilitado: moduloEstetico,
           modulo_obesidad_habilitado: moduloObesidad,
+          modo_puesta_en_marcha: puestaEnMarcha,
         } : {}),
       }
       if (isEdit) return adminApi.tenants.update(tenant!.id, payload)
@@ -228,6 +231,22 @@ function TenantSheet({
                 <Switch
                   checked={moduloObesidad}
                   onCheckedChange={setModuloObesidad}
+                />
+              </div>
+
+              <div className="border-t border-violet-100 my-1" />
+
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-medium text-gray-800">Modo puesta en marcha</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Habilita el asistente para cargar pacientes en curso y saldos previos
+                    mientras la clínica migra sus datos. Apágalo cuando termine.
+                  </p>
+                </div>
+                <Switch
+                  checked={puestaEnMarcha}
+                  onCheckedChange={setPuestaEnMarcha}
                 />
               </div>
             </div>

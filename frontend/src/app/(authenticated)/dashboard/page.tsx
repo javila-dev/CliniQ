@@ -23,9 +23,11 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { SetupChecklist, useSetupChecklist } from '@/components/shared/SetupChecklist'
+import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
 import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
 import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
@@ -83,6 +85,54 @@ function mesActual() {
   return { ini, fin }
 }
 
+type PeriodoKey = 'hoy' | 'mes' | '3m' | '6m' | '1a'
+
+const PERIODOS: { key: PeriodoKey; label: string }[] = [
+  { key: 'hoy', label: 'Hoy' },
+  { key: 'mes', label: 'Este mes' },
+  { key: '3m', label: 'Últimos 3 meses' },
+  { key: '6m', label: 'Últimos 6 meses' },
+  { key: '1a', label: 'Último año' },
+]
+
+const PERIODO_SUFIJO: Record<PeriodoKey, string> = {
+  hoy: 'de hoy',
+  mes: 'del mes',
+  '3m': '· últimos 3 meses',
+  '6m': '· últimos 6 meses',
+  '1a': '· último año',
+}
+
+/** Rango [ini, fin] en ISO YYYY-MM-DD para el periodo elegido; `fin` = hoy. */
+function rangoPeriodo(key: PeriodoKey): { ini: string; fin: string } {
+  const hoy = new Date()
+  const fin = hoy.toLocaleDateString('en-CA')
+  let ini: Date
+  switch (key) {
+    case 'hoy': ini = hoy; break
+    case 'mes': ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1); break
+    case '3m': ini = new Date(hoy.getFullYear(), hoy.getMonth() - 3, hoy.getDate()); break
+    case '6m': ini = new Date(hoy.getFullYear(), hoy.getMonth() - 6, hoy.getDate()); break
+    case '1a': ini = new Date(hoy.getFullYear() - 1, hoy.getMonth(), hoy.getDate()); break
+  }
+  return { ini: ini.toLocaleDateString('en-CA'), fin }
+}
+
+/** El endpoint devuelve `periodo` como día (YYYY-MM-DD), mes (YYYY-MM) o
+ *  semana ISO (YYYY-Www) según `agrupar_por`. Formatea cada caso para el eje X. */
+function fmtPeriodoGrafica(p: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
+    return new Date(p + 'T00:00:00').toLocaleDateString('es-CO', { month: 'short', day: 'numeric' })
+  }
+  if (/^\d{4}-\d{2}$/.test(p)) {
+    const [y, m] = p.split('-').map(Number)
+    return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short', year: '2-digit' })
+  }
+  const wk = p.match(/^(\d{4})-W?(\d{2})$/)
+  if (wk) return `Sem ${wk[2]}`
+  return p
+}
+
 function KPICard({
   label, value, sub, icon: Icon, iconBg, iconColor, loading, alert,
 }: {
@@ -127,7 +177,7 @@ function GraficaIngresos({ data, loading }: { data: { periodo: string; total_cob
   if (loading) return <Skeleton className="h-48 w-full rounded-xl" />
 
   const chartData = data.map(d => ({
-    fecha: new Date(d.periodo + 'T00:00:00').toLocaleDateString('es-CO', { month: 'short', day: 'numeric' }),
+    fecha: fmtPeriodoGrafica(d.periodo),
     Ingresos: parseFloat(d.total_cobros),
     Gastos: parseFloat(d.total_gastos),
   }))
@@ -317,6 +367,11 @@ function DashboardContent() {
   const [sheetPacientes, setSheetPacientes] = useState(false)
   const [sheetNotificacionesFallidas, setSheetNotificacionesFallidas] = useState(false)
   const [sedeId, setSedeId] = useState<string | null>(null)
+  const [periodo, setPeriodo] = useState<PeriodoKey>('hoy')
+  // Filtro de periodo de las métricas. `hoy` conserva el comportamiento original
+  // del dashboard (KPIs y cobros del día); el resto abarca un rango hasta hoy.
+  const rango = rangoPeriodo(periodo)
+  const periodoSufijo = PERIODO_SUFIJO[periodo]
 
   const { allDone: checklistDone } = useSetupChecklist()
   const esSoloProfesional = user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.REPORTES_VER)
@@ -331,6 +386,9 @@ function DashboardContent() {
   // (= todas). Así un usuario de una sede nunca recibe métricas de toda la clínica.
   const sede = (sedeId ?? defaultSedeId) ?? undefined
 
+  // KPIs "de hoy": alimentan el hero, "Progreso del día" y "Cobros de hoy por
+  // medio" (que se mantienen anclados a hoy) y, cuando periodo === 'hoy', también
+  // la fila de KPIs superior.
   const { data: kpis, isLoading: kpisLoading } = useQuery({
     queryKey: ['reportes', 'dashboard', sede],
     queryFn: () => reportesApi.getDashboard({ sede_id: sede }),
@@ -338,29 +396,52 @@ function DashboardContent() {
     refetchInterval: STALE,
   })
 
+  // KPIs del rango elegido: solo se pide cuando el periodo no es 'hoy'.
+  const { data: kpisPeriodo, isLoading: kpisPeriodoLoading } = useQuery({
+    queryKey: ['reportes', 'dashboard', 'periodo', periodo, sede],
+    queryFn: () => reportesApi.getDashboard({ sede_id: sede, fecha_inicio: rango.ini, fecha_fin: rango.fin }),
+    staleTime: STALE,
+    refetchInterval: STALE,
+    enabled: periodo !== 'hoy',
+  })
+
+  const kpisView = periodo === 'hoy' ? kpis : kpisPeriodo
+  const kpisViewLoading = periodo === 'hoy' ? kpisLoading : kpisPeriodoLoading
+
+  // Gráfica de tendencia: con periodo 'hoy' conserva la ventana de 30 días; con
+  // rangos amplios agrupa por semana/mes para no saturar el eje.
+  const ingRango = periodo === 'hoy'
+    ? { ini: addDaysISO(todayISO(), -29), fin: todayISO(), agrupar: 'dia' as const }
+    : { ini: rango.ini, fin: rango.fin, agrupar: (periodo === '1a' ? 'mes' : periodo === 'mes' ? 'dia' : 'semana') as 'dia' | 'semana' | 'mes' }
+
   const { data: ingresos, isLoading: ingresosLoading } = useQuery({
-    queryKey: ['reportes', 'ingresos', '30d', sede],
-    queryFn: () => {
-      const fin = todayISO()
-      const ini = addDaysISO(fin, -29)
-      return reportesApi.getIngresos({ fecha_inicio: ini, fecha_fin: fin, agrupar_por: 'dia', sede_id: sede })
-    },
+    queryKey: ['reportes', 'ingresos', periodo, sede],
+    queryFn: () => reportesApi.getIngresos({
+      fecha_inicio: ingRango.ini,
+      fecha_fin: ingRango.fin,
+      agrupar_por: ingRango.agrupar,
+      sede_id: sede,
+    }),
     staleTime: STALE,
     refetchInterval: STALE,
     enabled: canVerFinanzas,
   })
 
   const { data: servicios, isLoading: serviciosLoading } = useQuery({
-    queryKey: ['reportes', 'servicios', sede],
-    queryFn: () => reportesApi.getServicios({ sede_id: sede }),
+    queryKey: ['reportes', 'servicios', periodo, sede],
+    queryFn: () => reportesApi.getServicios(
+      periodo === 'hoy'
+        ? { sede_id: sede }
+        : { fecha_inicio: rango.ini, fecha_fin: rango.fin, sede_id: sede }
+    ),
     staleTime: STALE,
     refetchInterval: STALE,
     enabled: canVerFinanzas,
   })
 
   const { data: ocupacionMes, isLoading: ocupacionMesLoading } = useQuery({
-    queryKey: ['reportes', 'ocupacion', 'mes', sede],
-    queryFn: () => reportesApi.getOcupacion({ sede_id: sede }),
+    queryKey: ['reportes', 'ocupacion', 'periodo', periodo, sede],
+    queryFn: () => reportesApi.getOcupacion({ fecha_inicio: rango.ini, fecha_fin: rango.fin, sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
   })
@@ -393,9 +474,10 @@ function DashboardContent() {
   const citasHoy = citasHoyData?.results
 
   const { data: cotizacionesMes, isLoading: cotizacionesMesLoading } = useQuery({
-    queryKey: ['reportes', 'cotizaciones', 'mes', sede],
+    queryKey: ['reportes', 'cotizaciones', periodo, sede],
     queryFn: () => {
-      const { ini, fin } = mesActual()
+      // periodo 'hoy' -> mes en curso (comportamiento original de la tarjeta).
+      const { ini, fin } = periodo === 'hoy' ? mesActual() : rango
       return reportesApi.getCotizacionesMes({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede })
     },
     staleTime: STALE,
@@ -412,17 +494,16 @@ function DashboardContent() {
   })
 
   const { data: citasSinCerrarData } = useQuery({
-    queryKey: ['citas', 'sin-cerrar-mes', sede],
-    queryFn: () => {
-      const ayer = addDaysISO(todayISO(), -1)
-      const { ini } = mesActual()
-      return agendaApi.citas.list({
-        fecha_inicio__date__gte: ini,
-        fecha_inicio__date__lte: ayer,
-        page_size: 200,
-        ...(sede && { sede }),
-      })
-    },
+    queryKey: ['citas', 'sin-cerrar', periodo, sede],
+    // Citas cuya FECHA cae dentro del periodo y siguen en un estado abierto.
+    // El backend filtra por fecha de la cita y por estado; usamos `count`.
+    queryFn: () => agendaApi.citas.list({
+      fecha_inicio__date__gte: rango.ini,
+      fecha_inicio__date__lte: rango.fin,
+      estado__in: 'pendiente,confirmada,en_espera,en_curso',
+      page_size: 1,
+      ...(sede && { sede }),
+    }),
     staleTime: STALE,
     refetchInterval: STALE,
   })
@@ -450,29 +531,130 @@ function DashboardContent() {
     ? (citasHoy?.filter(c => c.estado === 'completada').length ?? 0)
     : (kpis?.citas_hoy.completadas ?? 0)
 
+  // Valores de la fila de KPIs, ya sujetos al filtro de periodo (los de arriba
+  // se mantienen "de hoy" para el hero y "Progreso del día").
+  const citasKpi = kpisView?.citas_hoy.total ?? 0
+  const completadasKpi = kpisView?.citas_hoy.completadas ?? 0
+  // Cotizaciones y Servicios: con 'hoy' muestran el mes en curso (su etiqueta
+  // dice "del mes"). "No atendidas" y "Ocupación" sí siguen el filtro completo.
+  const periodoSufijoRetro = periodo === 'hoy' ? 'del mes' : periodoSufijo
+  // Etiqueta corta para el tab de "Ocupación" (que comparte espacio con "Hoy").
+  const periodoTabCorto: Record<PeriodoKey, string> = { hoy: 'Hoy', mes: 'Mes', '3m': '3M', '6m': '6M', '1a': '1A' }
+
   const ocupacionActiva = tabOcupacion === 'mes' ? ocupacionMes : ocupacionHoy
   const ocupacionLoading = tabOcupacion === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
 
   const sinReagendar = pacientesSinReagendar ?? []
 
-  const ESTADOS_ABIERTOS: EstadoCita[] = ['pendiente', 'confirmada', 'en_espera', 'en_curso']
-  const citasSinCerrarMes = (citasSinCerrarData?.results ?? []).filter(
-    c => ESTADOS_ABIERTOS.includes(c.estado as EstadoCita)
-  )
-
+  // Citas del periodo por desenlace (todo por fecha de la cita).
+  const sinCerrarPeriodo = citasSinCerrarData?.count ?? 0
   const totalNoAsistioMes = (ocupacionMes ?? []).reduce((s, o) => s + o.no_asistio, 0)
+  const totalCanceladasMes = (ocupacionMes ?? []).reduce((s, o) => s + o.canceladas, 0)
   const totalCitasMes = (ocupacionMes ?? []).reduce((s, o) => s + o.total_citas, 0)
-  const totalNoAtendidas = totalNoAsistioMes + citasSinCerrarMes.length
-  // % de inasistencia del mes: numerador y denominador con el MISMO alcance
-  // (citas del mes). Antes se mezclaba `citasSinCerrar` (de cualquier mes) con
-  // `totalCitasMes` y salían valores absurdos (p.ej. 300%).
+  // "No atendidas" = no asistió + citas sin cerrar (las canceladas se muestran
+  // aparte en el subtítulo como contexto, no suman al titular).
+  const totalNoAtendidas = totalNoAsistioMes + sinCerrarPeriodo
   const pctNoAsistioMes = totalCitasMes > 0
     ? Math.min((totalNoAsistioMes / totalCitasMes) * 100, 100)
     : 0
 
+  // Fila de KPIs superior — común a la variante con y sin checklist. Sujeta al
+  // filtro de periodo salvo "No atendidas", que siempre es retrospectiva.
+  const kpiCards = (
+    <>
+      <KPICard
+        label={periodo === 'hoy' ? 'Citas hoy' : `Citas ${periodoSufijo}`}
+        value={citasKpi}
+        sub={periodo === 'hoy'
+          ? `${kpisView?.citas_hoy.pendientes ?? 0} pendientes · ${kpisView?.citas_hoy.confirmadas ?? 0} confirmadas`
+          : `${completadasKpi} completadas`}
+        icon={CalendarDays}
+        iconBg="bg-blue-50"
+        iconColor="text-blue-500"
+        loading={kpisViewLoading}
+      />
+      <KPICard
+        label={periodo === 'hoy' ? 'Ingresos hoy' : `Ingresos ${periodoSufijo}`}
+        value={kpisView ? COP.format(Number(kpisView.cobros_hoy.total_cop)) : '—'}
+        sub={`${kpisView?.cobros_hoy.pagados ?? 0} cobros pagados`}
+        icon={DollarSign}
+        iconBg="bg-emerald-50"
+        iconColor="text-emerald-500"
+        loading={kpisViewLoading}
+      />
+      <KPICard
+        label="Completadas"
+        value={completadasKpi}
+        sub={citasKpi > 0 ? `${Math.round((completadasKpi / citasKpi) * 100)}% ${periodo === 'hoy' ? 'del día' : 'del periodo'}` : undefined}
+        icon={CheckCircle2}
+        iconBg="bg-green-50"
+        iconColor="text-green-500"
+        loading={kpisViewLoading}
+      />
+      <KPICard
+        label={`No atendidas ${periodoSufijo}`}
+        value={ocupacionMesLoading ? '—' : totalNoAtendidas}
+        sub={`${totalCanceladasMes} cancel. · ${totalNoAsistioMes} no asistió${totalCitasMes > 0 ? ` (${pctNoAsistioMes.toFixed(0)}%)` : ''} · ${sinCerrarPeriodo} sin cerrar`}
+        icon={UserX}
+        iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
+        iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
+        loading={ocupacionMesLoading}
+      />
+    </>
+  )
+
+  // Fila de filtros: badges de sede a la izquierda, dropdown de periodo a la
+  // derecha. Va encima de los KPI. "Todas las sedes" solo para quien realmente
+  // ve todas (admin/superadmin).
+  const filtrosLinea = (
+    <div className="flex flex-wrap items-center justify-between gap-3">
+      {sedes.length > 1 ? (
+        <div className="flex flex-wrap gap-2">
+          {isAllSedes && (
+            <button
+              onClick={() => setSedeId(null)}
+              className={cn(
+                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                sede === undefined
+                  ? 'bg-primary text-white border-primary'
+                  : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
+              )}
+            >
+              Todas las sedes
+            </button>
+          )}
+          {sedes.map(s => (
+            <button
+              key={s.id}
+              onClick={() => setSedeId(s.id)}
+              className={cn(
+                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
+                sede === s.id
+                  ? 'bg-primary text-white border-primary'
+                  : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
+              )}
+            >
+              {s.nombre}
+            </button>
+          ))}
+        </div>
+      ) : <div />}
+      <Select value={periodo} onValueChange={(v) => setPeriodo(v as PeriodoKey)}>
+        <SelectTrigger className="w-[180px] h-8 text-xs bg-white ml-auto">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {PERIODOS.map(p => (
+            <SelectItem key={p.key} value={p.key} className="text-xs">{p.label}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+
   if (esSoloProfesional) {
     return (
-      <div className="w-[80%] mx-auto space-y-6">
+      <div className="w-[90%] mx-auto space-y-6">
         {/* Hero */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
           <div className="relative z-10">
@@ -617,7 +799,7 @@ function DashboardContent() {
   }
 
   return (
-    <div className="w-[80%] mx-auto space-y-6">
+    <div className="w-[90%] mx-auto space-y-6">
 
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
@@ -640,130 +822,22 @@ function DashboardContent() {
         <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
       </div>
 
+      <PuestaEnMarchaBanner />
+
+      {/* Filtros (sede + periodo) — encima de los KPI */}
+      {filtrosLinea}
+
       {/* Checklist + KPIs */}
       {!checklistDone ? (
         <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 items-start">
           <SetupChecklist />
           <div className="grid grid-cols-2 gap-4">
-            <KPICard
-              label="Citas hoy"
-              value={kpis?.citas_hoy.total ?? 0}
-              sub={`${kpis?.citas_hoy.pendientes ?? 0} pendientes · ${kpis?.citas_hoy.confirmadas ?? 0} confirmadas`}
-              icon={CalendarDays}
-              iconBg="bg-blue-50"
-              iconColor="text-blue-500"
-              loading={kpisLoading}
-            />
-            <KPICard
-              label="Ingresos hoy"
-              value={kpis ? COP.format(Number(kpis.cobros_hoy.total_cop)) : '—'}
-              sub={`${kpis?.cobros_hoy.pagados ?? 0} cobros pagados`}
-              icon={DollarSign}
-              iconBg="bg-emerald-50"
-              iconColor="text-emerald-500"
-              loading={kpisLoading}
-            />
-            <KPICard
-              label="Completadas"
-              value={completadas}
-              sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
-              icon={CheckCircle2}
-              iconBg="bg-green-50"
-              iconColor="text-green-500"
-              loading={kpisLoading}
-            />
-            <KPICard
-              label="No atendidas (mes)"
-              value={ocupacionMesLoading ? '—' : totalNoAtendidas}
-              sub={
-                totalCitasMes > 0
-                  ? `${totalNoAsistioMes} no asistieron (${pctNoAsistioMes.toFixed(0)}%) · ${citasSinCerrarMes.length} sin cerrar`
-                  : `${citasSinCerrarMes.length} sin cerrar`
-              }
-              icon={UserX}
-              iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
-              iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
-              loading={ocupacionMesLoading}
-            />
+            {kpiCards}
           </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <KPICard
-            label="Citas hoy"
-            value={kpis?.citas_hoy.total ?? 0}
-            sub={`${kpis?.citas_hoy.pendientes ?? 0} pendientes · ${kpis?.citas_hoy.confirmadas ?? 0} confirmadas`}
-            icon={CalendarDays}
-            iconBg="bg-blue-50"
-            iconColor="text-blue-500"
-            loading={kpisLoading}
-          />
-          <KPICard
-            label="Ingresos hoy"
-            value={kpis ? COP.format(Number(kpis.cobros_hoy.total_cop)) : '—'}
-            sub={`${kpis?.cobros_hoy.pagados ?? 0} cobros pagados`}
-            icon={DollarSign}
-            iconBg="bg-emerald-50"
-            iconColor="text-emerald-500"
-            loading={kpisLoading}
-          />
-          <KPICard
-            label="Completadas"
-            value={completadas}
-            sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
-            icon={CheckCircle2}
-            iconBg="bg-green-50"
-            iconColor="text-green-500"
-            loading={kpisLoading}
-          />
-          <KPICard
-            label="No atendidas (mes)"
-            value={ocupacionMesLoading ? '—' : totalNoAtendidas}
-            sub={
-              totalCitasMes > 0
-                ? `${totalNoAsistioMes} no asistieron (${pctNoAsistioMes.toFixed(0)}%) · ${citasSinCerrarMes.length} sin cerrar`
-                : `${citasSinCerrarMes.length} sin cerrar`
-            }
-            icon={UserX}
-            iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
-            iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
-            loading={ocupacionMesLoading}
-          />
-        </div>
-      )}
-
-      {/* Filtro por sede. "Todas las sedes" solo para quien realmente ve todas
-          (admin/superadmin); un usuario acotado nunca puede desagregar fuera de
-          sus sedes. */}
-      {sedes.length > 1 && (
-        <div className="w-full flex flex-wrap gap-2">
-          {isAllSedes && (
-            <button
-              onClick={() => setSedeId(null)}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-                sede === undefined
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
-              )}
-            >
-              Todas las sedes
-            </button>
-          )}
-          {sedes.map(s => (
-            <button
-              key={s.id}
-              onClick={() => setSedeId(s.id)}
-              className={cn(
-                'px-3 py-1.5 rounded-full text-xs font-medium border transition-colors',
-                sede === s.id
-                  ? 'bg-primary text-white border-primary'
-                  : 'bg-white text-muted-foreground border-gray-200 hover:border-primary/50 hover:text-foreground'
-              )}
-            >
-              {s.nombre}
-            </button>
-          ))}
+          {kpiCards}
         </div>
       )}
 
@@ -774,7 +848,7 @@ function DashboardContent() {
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" />
-                <h2 className="font-semibold text-sm">Cotizaciones del mes</h2>
+                <h2 className="font-semibold text-sm">Cotizaciones {periodoSufijoRetro}</h2>
               </div>
               <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1">
                 Ver todas <ArrowRight className="h-3 w-3" />
@@ -896,8 +970,12 @@ function DashboardContent() {
           <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center justify-between mb-4">
               <div>
-                <h2 className="font-semibold text-sm">Ingresos últimos 30 días</h2>
-                <p className="text-xs text-muted-foreground mt-0.5">Cobros vs gastos por día</p>
+                <h2 className="font-semibold text-sm">
+                  {periodo === 'hoy' ? 'Ingresos últimos 30 días' : `Ingresos ${periodoSufijo}`}
+                </h2>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Cobros vs gastos{periodo === 'hoy' || periodo === 'mes' ? ' por día' : ingRango.agrupar === 'mes' ? ' por mes' : ' por semana'}
+                </p>
               </div>
               <TrendingUp className="h-4 w-4 text-muted-foreground" />
             </div>
@@ -933,11 +1011,11 @@ function DashboardContent() {
       {/* Tablas: servicios + ocupación */}
       <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-2')}>
 
-        {/* Servicios del mes */}
+        {/* Servicios del periodo */}
         {canVerFinanzas && (
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between px-5 py-4 border-b">
-            <h2 className="font-semibold text-sm">Servicios del mes</h2>
+            <h2 className="font-semibold text-sm">Servicios {periodoSufijoRetro}</h2>
             <span className="text-xs text-muted-foreground">por ingresos</span>
           </div>
           {serviciosLoading ? (
@@ -945,7 +1023,9 @@ function DashboardContent() {
               {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-10 w-full" />)}
             </div>
           ) : !servicios?.length ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">Sin datos este mes</div>
+            <div className="py-10 text-center text-sm text-muted-foreground">
+              {periodo === 'hoy' ? 'Sin datos este mes' : 'Sin datos en el periodo'}
+            </div>
           ) : (
             <div className="divide-y divide-gray-50">
               <div className="grid grid-cols-4 px-5 py-2 bg-gray-50/60">
@@ -977,13 +1057,13 @@ function DashboardContent() {
         </div>
         )}
 
-        {/* Ocupación por profesional — con tabs Hoy / Mes */}
+        {/* Ocupación por profesional — tab del periodo elegido vs. Hoy */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between px-5 py-4 border-b">
             <h2 className="font-semibold text-sm">Ocupación por profesional</h2>
             <Tabs value={tabOcupacion} onValueChange={v => setTabOcupacion(v as 'mes' | 'hoy')}>
               <TabsList className="h-7">
-                <TabsTrigger value="mes" className="text-xs px-3 h-5">Mes</TabsTrigger>
+                <TabsTrigger value="mes" className="text-xs px-3 h-5">{periodoTabCorto[periodo]}</TabsTrigger>
                 <TabsTrigger value="hoy" className="text-xs px-3 h-5">Hoy</TabsTrigger>
               </TabsList>
             </Tabs>
@@ -994,7 +1074,7 @@ function DashboardContent() {
             </div>
           ) : !ocupacionActiva?.length ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
-              {tabOcupacion === 'hoy' ? 'Sin citas para hoy' : 'Sin datos este mes'}
+              {tabOcupacion === 'hoy' ? 'Sin citas para hoy' : 'Sin datos en el periodo'}
             </div>
           ) : (
             <div className="divide-y divide-gray-50">

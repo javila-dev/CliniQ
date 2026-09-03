@@ -1,4 +1,4 @@
-export type EstadoCuota = 'pagada' | 'pendiente' | 'vencida'
+export type EstadoCuota = 'pagada' | 'pendiente' | 'vencida' | 'parcial'
 
 export interface CuotaCartera {
   id: string
@@ -8,6 +8,8 @@ export interface CuotaCartera {
   fecha_esperada: string | null
   pagada: boolean
   valor_pagado: string | null
+  saldo_pendiente: string  // valor_esperado - abonos
+  vencida: boolean
   fecha_pago: string | null
   medio_pago: string
   observaciones: string
@@ -26,6 +28,10 @@ export interface Cartera {
   cuotas_pagadas: number
   proxima_cuota_fecha: string | null
   proxima_cuota_valor: string | null
+  en_mora: boolean
+  mora_dias: number
+  mora_valor: string
+  es_migracion?: boolean
   created_at: string
   cuotas?: CuotaCartera[]
 }

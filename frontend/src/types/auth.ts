@@ -29,6 +29,10 @@ export interface LoginRequest {
   password: string
 }
 
+export interface GoogleLoginRequest {
+  credential: string // ID token de Google Identity Services
+}
+
 export interface LoginResponse {
   access: string
   refresh: string
