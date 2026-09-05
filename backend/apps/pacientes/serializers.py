@@ -4,6 +4,54 @@ from rest_framework import serializers
 
 from apps.clinicas.models import Clinica
 from apps.pacientes.models import AntecedentePaciente, CheckIn, Paciente
+from apps.users.authorization import user_has_permission
+
+PERMISO_DATOS_SENSIBLES = "pacientes.datos_sensibles.ver"
+
+# Campos que se enmascaran en la API (lectura) y se ignoran al escribir cuando el
+# usuario no tiene PERMISO_DATOS_SENSIBLES. NO afecta a la generacion de PDFs /
+# documentos legales, que leen el modelo directamente.
+CAMPOS_SENSIBLES_PACIENTE = (
+    "numero_documento",
+    "telefono",
+    "email",
+    "telefono_responsable",
+    "direccion",
+    "ciudad",
+    "barrio",
+    "fecha_nacimiento",
+)
+
+
+def enmascarar_cola(value, visibles=4):
+    """Deja visibles los ultimos `visibles` caracteres; el resto pasa a viñetas."""
+    s = "" if value is None else str(value)
+    if not s:
+        return s
+    if visibles <= 0 or len(s) <= visibles:
+        return "•" * len(s)
+    return "•" * (len(s) - visibles) + s[-visibles:]
+
+
+def enmascarar_email(value):
+    s = "" if value is None else str(value)
+    if not s:
+        return s
+    if "@" not in s:
+        return enmascarar_cola(s, 2)
+    local, _, dominio = s.partition("@")
+    cola = local[-2:] if len(local) > 2 else ""
+    return f"{'•' * max(len(local) - len(cola), 1)}{cola}@{dominio}"
+
+
+def usuario_ve_datos_sensibles(context):
+    """True si no hay que enmascarar: sin usuario autenticado (registro publico,
+    procesos internos) o con el permiso explicito."""
+    request = context.get("request") if context else None
+    user = getattr(request, "user", None)
+    if user is None or not getattr(user, "is_authenticated", False):
+        return True
+    return user_has_permission(user, PERMISO_DATOS_SENSIBLES, request=request)
 
 
 class PacienteSerializer(serializers.ModelSerializer):
@@ -23,6 +71,7 @@ class PacienteSerializer(serializers.ModelSerializer):
     tiene_antecedentes = serializers.SerializerMethodField()
     tiene_foto_control = serializers.SerializerMethodField()
     foto_control_url = serializers.SerializerMethodField()
+    datos_sensibles_ocultos = serializers.SerializerMethodField()
     escolaridad = serializers.ChoiceField(
         choices=Paciente.Escolaridad.choices,
         required=False,
@@ -94,6 +143,7 @@ class PacienteSerializer(serializers.ModelSerializer):
             "tiene_antecedentes",
             "tiene_foto_control",
             "foto_control_url",
+            "datos_sensibles_ocultos",
             "activo",
             "created_at",
             "updated_at",
@@ -108,6 +158,7 @@ class PacienteSerializer(serializers.ModelSerializer):
             "tiene_antecedentes",
             "tiene_foto_control",
             "foto_control_url",
+            "datos_sensibles_ocultos",
             "created_at",
             "updated_at",
         )
@@ -125,6 +176,33 @@ class PacienteSerializer(serializers.ModelSerializer):
             return None
         request = self.context.get("request")
         return request.build_absolute_uri(obj.foto_control.url) if request else obj.foto_control.url
+
+    def get_datos_sensibles_ocultos(self, obj):
+        return not usuario_ve_datos_sensibles(self.context)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if usuario_ve_datos_sensibles(self.context):
+            return data
+        for campo in ("numero_documento", "telefono", "telefono_responsable"):
+            if data.get(campo):
+                data[campo] = enmascarar_cola(data[campo], 4)
+        for campo in ("direccion", "ciudad", "barrio"):
+            if data.get(campo):
+                data[campo] = "••••"
+        if data.get("email"):
+            data["email"] = enmascarar_email(data["email"])
+        # La fecha exacta se oculta; `edad` (campo aparte) sigue disponible.
+        data["fecha_nacimiento"] = None
+        return data
+
+    def update(self, instance, validated_data):
+        # Un usuario sin permiso ve los valores enmascarados: si el front reenvía
+        # el formulario, esos campos no deben sobrescribir el dato real.
+        if not usuario_ve_datos_sensibles(self.context):
+            for campo in CAMPOS_SENSIBLES_PACIENTE:
+                validated_data.pop(campo, None)
+        return super().update(instance, validated_data)
 
     def validate_numero_documento(self, value):
         tipo_documento = self.initial_data.get("tipo_documento")
@@ -214,6 +292,15 @@ class BusquedaPacienteSerializer(serializers.ModelSerializer):
             "telefono",
             "canal_confirmacion",
         )
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if usuario_ve_datos_sensibles(self.context):
+            return data
+        for campo in ("numero_documento", "telefono"):
+            if data.get(campo):
+                data[campo] = enmascarar_cola(data[campo], 4)
+        return data
 
 
 class AntecedentePacienteSerializer(serializers.ModelSerializer):

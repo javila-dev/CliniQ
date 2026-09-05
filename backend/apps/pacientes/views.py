@@ -122,7 +122,9 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             | Q(apellidos__icontains=query)
             | Q(numero_documento__icontains=query)
         )[:10]
-        serializer = BusquedaPacienteSerializer(queryset, many=True)
+        serializer = BusquedaPacienteSerializer(
+            queryset, many=True, context=self.get_serializer_context()
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get", "put", "patch"], url_path="antecedentes")

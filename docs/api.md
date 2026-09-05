@@ -1084,6 +1084,28 @@ Prefijo: `/pacientes`
 - `GET /pacientes/{id}/consentimientos/verificar/?tratamiento={uuid}`
 - `POST /pacientes/{id}/consentimientos/{consentimiento_id}/subir_pdf/`
 
+### Datos sensibles (enmascarado)
+
+Sin el permiso `pacientes.datos_sensibles.ver`, la API **enmascara** los datos de
+identificación y contacto del paciente. Por defecto solo lo tienen `admin` y
+`superadmin`; se puede asignar a otros roles.
+
+| Campo | Con permiso | Sin permiso |
+|---|---|---|
+| `numero_documento` | `1098765432` | `••••••5432` (últimos 4) |
+| `telefono`, `telefono_responsable` | completo | `•••••••4567` (últimos 4) |
+| `email` | completo | `••••••••••po@example.com` (últimos 2 del usuario + dominio) |
+| `direccion`, `ciudad`, `barrio` | completo | `••••` |
+| `fecha_nacimiento` | `1996-05-20` | `null` (el campo `edad` sí se devuelve) |
+
+- Aplica a `GET /pacientes/`, `GET /pacientes/{id}/` y `GET /pacientes/buscar/`.
+- El response incluye `datos_sensibles_ocultos: true|false`.
+- En `PATCH /pacientes/{id}/` sin el permiso, esos campos se ignoran (no se puede
+  sobrescribir el dato real con el valor enmascarado).
+- **No** afecta a PDFs ni documentos legales (consentimientos, compromiso de pago,
+  historia clínica, cotizaciones): se generan siempre con el dato completo.
+- El autorregistro público (`POST /registro-publico/pacientes/`) no enmascara.
+
 ### Filtros
 
 - `activo=true|false`

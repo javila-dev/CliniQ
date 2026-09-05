@@ -321,3 +321,99 @@ class RegistroPublicoTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["tab_personal_requerido"])
         self.assertTrue(response.json()["tab_salud_requerido"])
+
+
+class DatosSensiblesPacienteTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Sensibles", nit="900777888")
+        self.admin = User.objects.create_user(
+            email="admin-sensibles@example.com",
+            password="secret123",
+            first_name="Admin",
+            last_name="Sensibles",
+            rol=User.Role.ADMIN,
+            clinica=self.clinica,
+        )
+        self.recepcion = User.objects.create_user(
+            email="recepcion-sensibles@example.com",
+            password="secret123",
+            first_name="Recepcion",
+            last_name="Sensibles",
+            rol=User.Role.RECEPCION,
+            clinica=self.clinica,
+        )
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="1098765432",
+            nombres="Laura",
+            apellidos="Restrepo",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO,
+            direccion="Calle 45 # 12-30",
+            ciudad="Medellin",
+            barrio="El Poblado",
+            telefono="+573001234567",
+            email="laura.restrepo@example.com",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+
+    def _auth(self, user):
+        self.client.force_authenticate(user)
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+
+    def test_recepcion_recibe_datos_enmascarados(self):
+        self._auth(self.recepcion)
+        data = self.client.get(f"/api/v1/pacientes/{self.paciente.id}/").json()
+
+        self.assertTrue(data["datos_sensibles_ocultos"])
+        self.assertEqual(data["numero_documento"], "••••••5432")
+        self.assertTrue(data["telefono"].endswith("4567"))
+        self.assertIn("•", data["telefono"])
+        self.assertTrue(data["email"].startswith("•"))
+        self.assertTrue(data["email"].endswith("po@example.com"))
+        self.assertEqual(data["direccion"], "••••")
+        self.assertEqual(data["ciudad"], "••••")
+        self.assertEqual(data["barrio"], "••••")
+        self.assertIsNone(data["fecha_nacimiento"])
+        # La edad (campo aparte) sigue disponible.
+        self.assertIsNotNone(data["edad"])
+        self.assertEqual(data["edad"], self.paciente.edad)
+
+    def test_admin_ve_datos_completos(self):
+        self._auth(self.admin)
+        data = self.client.get(f"/api/v1/pacientes/{self.paciente.id}/").json()
+
+        self.assertFalse(data["datos_sensibles_ocultos"])
+        self.assertEqual(data["numero_documento"], "1098765432")
+        self.assertEqual(data["telefono"], "+573001234567")
+        self.assertEqual(data["email"], "laura.restrepo@example.com")
+        self.assertEqual(data["direccion"], "Calle 45 # 12-30")
+        self.assertIsNotNone(data["fecha_nacimiento"])
+
+    def test_recepcion_no_puede_sobrescribir_dato_sensible(self):
+        self._auth(self.recepcion)
+        response = self.client.patch(
+            f"/api/v1/pacientes/{self.paciente.id}/",
+            {"numero_documento": "0000000000", "telefono": "+570000000000", "ocupacion": "Ingeniera"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.paciente.refresh_from_db()
+        self.assertEqual(self.paciente.numero_documento, "1098765432")
+        self.assertEqual(self.paciente.telefono, "+573001234567")
+        # Un campo no sensible sí se actualiza.
+        self.assertEqual(self.paciente.ocupacion, "Ingeniera")
+
+    def test_buscar_enmascara_para_recepcion(self):
+        self._auth(self.recepcion)
+        resultados = self.client.get("/api/v1/pacientes/buscar/?q=Restrepo").json()
+        self.assertEqual(len(resultados), 1)
+        self.assertEqual(resultados[0]["numero_documento"], "••••••5432")
+
+        self._auth(self.admin)
+        resultados = self.client.get("/api/v1/pacientes/buscar/?q=Restrepo").json()
+        self.assertEqual(resultados[0]["numero_documento"], "1098765432")

@@ -60,6 +60,7 @@ PERMISSION_CATALOG = [
     ("pacientes.antecedentes.editar", "pacientes", "antecedentes.editar", "Editar antecedentes", True),
     ("pacientes.antecedentes.ver", "pacientes", "antecedentes.ver", "Ver antecedentes", True),
     ("pacientes.crear", "pacientes", "crear", "Crear pacientes", True),
+    ("pacientes.datos_sensibles.ver", "pacientes", "datos_sensibles.ver", "Ver datos sensibles del paciente sin enmascarar (documento, telefono, email, direccion, fecha de nacimiento)", False),
     ("pacientes.editar", "pacientes", "editar", "Editar pacientes", True),
     ("pacientes.eliminar", "pacientes", "eliminar", "Eliminar pacientes", False),
     ("pacientes.ver", "pacientes", "ver", "Ver pacientes", True),
