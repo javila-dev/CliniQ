@@ -166,6 +166,7 @@ class CitaSerializer(serializers.ModelSerializer):
     servicio_precio_base = serializers.SerializerMethodField()
     firma_asistencia_archivo_url = serializers.SerializerMethodField()
     cobro_id = serializers.SerializerMethodField()
+    deuda_info = serializers.SerializerMethodField()
 
     class Meta:
         model = Cita
@@ -212,6 +213,7 @@ class CitaSerializer(serializers.ModelSerializer):
             "servicio_precio",
             "servicio_precio_base",
             "cobro_id",
+            "deuda_info",
             "created_by",
             "created_at",
             "updated_at",
@@ -239,6 +241,7 @@ class CitaSerializer(serializers.ModelSerializer):
             "servicio_precio",
             "servicio_precio_base",
             "cobro_id",
+            "deuda_info",
             "created_by",
             "created_at",
             "updated_at",
@@ -275,6 +278,18 @@ class CitaSerializer(serializers.ModelSerializer):
             return str(obj.cobro.id)
         except Exception:
             return None
+
+    def get_deuda_info(self, obj):
+        # Solo en detalle / cambio de estado: evita un query de cartera por fila
+        # en el listado de agenda (que puede traer decenas de citas).
+        view = self.context.get("view")
+        if getattr(view, "action", None) not in ("retrieve", "cambiar_estado"):
+            return None
+        if not obj.paciente_id or not obj.sede_id:
+            return None
+        from apps.agenda.services import deuda_bloqueante_info
+
+        return deuda_bloqueante_info(obj.paciente, obj.sede.clinica)
 
     def get_servicio_precio(self, obj):
         if obj.servicio_id and obj.servicio:

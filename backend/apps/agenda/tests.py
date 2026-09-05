@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.agenda.models import Cita, RegistroConfirmacion
+from apps.cartera.models import Cartera, CuotaCartera
 from apps.clinicas.models import Clinica, Sede, Servicio, ServicioConsentimiento
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion
@@ -192,6 +193,58 @@ class CitaEnEsperaFlowTests(TestCase):
         self.cita.refresh_from_db()
         self.assertEqual(self.cita.estado, Cita.Estado.EN_CURSO)
         self.assertIsNotNone(self.cita.fecha_inicio_real)
+
+    def test_en_espera_a_en_curso_bloqueado_por_deuda(self):
+        self.clinica.bloquear_agenda_por_deuda = True
+        self.clinica.dias_gracia_deuda = 0
+        self.clinica.save(update_fields=["bloquear_agenda_por_deuda", "dias_gracia_deuda"])
+
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.ACEPTADA,
+        )
+        cartera = Cartera.objects.create(
+            cotizacion=cotizacion,
+            paciente=self.paciente,
+            total="100000.00",
+        )
+        cuota = CuotaCartera.objects.create(
+            cartera=cartera,
+            tipo=CuotaCartera.Tipo.TRANSFERENCIA,
+            valor_esperado="100000.00",
+            fecha_esperada=timezone.localdate() - timedelta(days=5),
+            pagada=False,
+        )
+
+        self.cita.estado = Cita.Estado.EN_ESPERA
+        self.cita.save(update_fields=["estado", "updated_at"])
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.EN_CURSO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PACIENTE_CON_DEUDA")
+        self.assertEqual(int(response.json()["detalle"]["cuotas_vencidas"]), 1)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.EN_ESPERA)
+
+        # Con la excepción aprobada en Cartera, la mora deja de bloquear
+        # (el siguiente freno ya es el de consentimiento, no el de deuda).
+        cuota.excepcion_aprobada = True
+        cuota.save(update_fields=["excepcion_aprobada"])
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.EN_CURSO},
+            format="json",
+        )
+
+        self.assertEqual(response.json().get("code"), "CONSENTIMIENTO_REQUERIDO")
 
     def test_listado_filtra_por_rango_de_fecha_de_la_cita(self):
         def _cita(dias, estado=Cita.Estado.PENDIENTE):

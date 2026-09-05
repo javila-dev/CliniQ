@@ -89,7 +89,10 @@ class Clinica(BaseModel):
     intervalo_recordatorio_horas = models.PositiveIntegerField(default=24)
     bloquear_agenda_por_deuda = models.BooleanField(
         default=False,
-        help_text="Si True, impide crear citas a pacientes con cuotas vencidas.",
+        help_text=(
+            "Si True, impide crear citas e iniciar la atención de pacientes con "
+            "cuotas de cartera vencidas."
+        ),
     )
     dias_gracia_deuda = models.PositiveIntegerField(
         default=0,

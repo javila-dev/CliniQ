@@ -227,20 +227,19 @@ def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion
     return None, ""
 
 
-@transaction.atomic
-def _validar_deuda_paciente(paciente, clinica):
-    from datetime import date, timedelta
-    from decimal import Decimal
-    from django.db.models import Sum
-    from apps.cartera.models import CUOTA_PENDIENTE_EXPR, CuotaCartera
+def _cuotas_vencidas_bloqueantes(paciente, clinica):
+    """Cuotas de cartera del paciente que bloquean agenda/atención: vencidas más
+    allá de los días de gracia, con saldo pendiente y sin excepción aprobada.
 
-    if not clinica.bloquear_agenda_por_deuda:
-        return
+    No mira el toggle de la clínica: esa decisión es del caller.
+    """
+    from datetime import date, timedelta
+    from apps.cartera.models import CUOTA_PENDIENTE_EXPR, CuotaCartera
 
     dias_gracia = clinica.dias_gracia_deuda or 0
     fecha_limite = date.today() - timedelta(days=dias_gracia)
 
-    cuotas_vencidas = (
+    return (
         CuotaCartera.objects.filter(
             cartera__paciente=paciente,
             cartera__paciente__clinica=clinica,
@@ -251,17 +250,41 @@ def _validar_deuda_paciente(paciente, clinica):
         .filter(pendiente__gt=0)
     )
 
-    if cuotas_vencidas.exists():
-        count = cuotas_vencidas.count()
-        monto = cuotas_vencidas.aggregate(s=Sum("pendiente"))["s"] or Decimal("0")
-        raise ValidationError({
-            "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
-            "code": "PACIENTE_CON_DEUDA",
-            "detalle": {
-                "cuotas_vencidas": count,
-                "monto_total": f"{monto:.2f}",
-            },
-        })
+
+def deuda_bloqueante_info(paciente, clinica):
+    """Detalle de la deuda que bloquea agendar/atender a este paciente, o ``None``
+    si no aplica (clínica sin ``bloquear_agenda_por_deuda`` o sin cuotas vencidas).
+
+    Se usa tanto para levantar el error como para pintar el aviso en la UI.
+    """
+    from decimal import Decimal
+    from django.db.models import Count, Sum
+
+    if not clinica.bloquear_agenda_por_deuda:
+        return None
+
+    cuotas = _cuotas_vencidas_bloqueantes(paciente, clinica)
+    agg = cuotas.aggregate(n=Count("id"), s=Sum("pendiente"))
+    if not agg["n"]:
+        return None
+
+    return {
+        "cuotas_vencidas": agg["n"],
+        "monto_total": f"{agg['s'] or Decimal('0'):.2f}",
+        "cuota_ids": [str(cid) for cid in cuotas.values_list("id", flat=True)],
+    }
+
+
+@transaction.atomic
+def _validar_deuda_paciente(paciente, clinica, *, accion="agendar una nueva cita"):
+    info = deuda_bloqueante_info(paciente, clinica)
+    if info is None:
+        return
+    raise ValidationError({
+        "error": f"El paciente tiene cuotas vencidas. No se puede {accion}.",
+        "code": "PACIENTE_CON_DEUDA",
+        "detalle": info,
+    })
 
 
 def crear_cita(data: dict, created_by) -> Cita:

@@ -284,6 +284,15 @@ class CitaViewSet(ModelViewSet):
             raise ValidationError({"error": "El flujo de estado no es valido."})
 
         if nuevo_estado == Cita.Estado.EN_CURSO:
+            # Bloqueo duro por mora: si la cotización que originó la cita (o
+            # cualquier cartera del paciente) tiene cuotas vencidas y la clínica
+            # activó bloquear_agenda_por_deuda, no se puede iniciar la atención.
+            # Sin excepción en el wizard: se resuelve pagando o aprobando la
+            # excepción desde Cartera.
+            services._validar_deuda_paciente(
+                cita.paciente, cita.sede.clinica, accion="iniciar la atención"
+            )
+
             info = build_consentimiento_info(cita)
             if not info["todos_firmados"]:
                 pendientes = [item["template_nombre"] for item in info["consentimientos"] if not item["vigente"]]

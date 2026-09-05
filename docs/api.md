@@ -3419,30 +3419,48 @@ derivadas de las cuotas (una cuota cuenta como "con saldo" mientras
 cuotas con saldo pendiente y fecha pasada (incluye las que tienen abonos
 parciales), y `total_cobrado` suma todos los abonos.
 
-### Bloqueo de agenda por deuda (H33)
+### Bloqueo por deuda (H33)
 
-Cuando `Clinica.bloquear_agenda_por_deuda = true`, `POST /agenda/citas/` valida si el paciente tiene cuotas de cartera vencidas sin excepción aprobada. Si las hay, retorna `400`:
+Cuando `Clinica.bloquear_agenda_por_deuda = true`, el sistema valida si el paciente
+tiene cuotas de cartera vencidas (más allá de `dias_gracia_deuda`) sin excepción
+aprobada. El bloqueo actúa en **dos puntos**:
+
+- `POST /agenda/citas/` (agendar) — mensaje: *"No se puede agendar una nueva cita."*
+- `POST /agenda/citas/{id}/cambiar_estado/` con `estado=en_curso` (iniciar la
+  atención desde el wizard) — mensaje: *"No se puede iniciar la atención."*.
+  Este freno es duro: no hay excepción en el wizard, se resuelve pagando o
+  aprobando la excepción desde Cartera.
+
+Ambos retornan `400`:
 
 ```json
 {
   "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
   "code": "PACIENTE_CON_DEUDA",
-  "detalle": { "cuotas_vencidas": 3, "monto_total": "450000.00" }
+  "detalle": {
+    "cuotas_vencidas": 3,
+    "monto_total": "450000.00",
+    "cuota_ids": ["uuid", "uuid", "uuid"]
+  }
 }
 ```
+
+El detalle de las citas (`GET /agenda/citas/{id}/`) incluye `deuda_info` con el
+mismo `{ cuotas_vencidas, monto_total, cuota_ids }` (o `null`) para que el wizard
+muestre el aviso antes de intentar iniciar.
 
 **Configuración de la clínica** (campos nuevos en `GET/PATCH /clinicas/clinicas/{id}/`):
 
 | Campo | Tipo | Default | Descripción |
 |---|---|---|---|
-| `bloquear_agenda_por_deuda` | boolean | `false` | Activa el bloqueo de agenda |
+| `bloquear_agenda_por_deuda` | boolean | `false` | Activa el bloqueo al agendar **y** al iniciar la atención |
 | `dias_gracia_deuda` | integer | `0` | Días de gracia tras el vencimiento antes de bloquear |
 
 **Excepción administrativa:** `POST /cartera/cuotas/{id}/aprobar_excepcion/`
 
 - Requiere permiso `cartera.aprobar_excepcion` (no incluido en roles por defecto).
 - Marca la cuota como `excepcion_aprobada=true` — esa cuota ya no cuenta para el bloqueo.
-- Si todas las cuotas vencidas del paciente tienen excepción aprobada, se puede agendar.
+- Si todas las cuotas vencidas del paciente tienen excepción aprobada, se puede agendar e iniciar la atención.
 
 Response: el serializer completo de `CuotaCartera` con los nuevos campos:
 ```json
