@@ -23,6 +23,11 @@ from apps.clinicas.models import Clinica
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions_catalog import (
+    CAPABILITY_CATALOG,
+    CAPABILITY_PERMISSIONS,
+    role_is_professional_from_keys,
+)
 from apps.users.serializers import (
     InvitationRequestSerializer,
     LoginSerializer,
@@ -489,6 +494,55 @@ class PermisoListView(APIView):
         )
 
 
+class CapacidadListView(APIView):
+    """
+    Capa semantica para el selector amigable de roles.
+
+    Devuelve las areas de capacidad (frases en lenguaje de clinica -> claves
+    tecnicas) y, aparte, el catalogo tecnico completo agrupado por modulo para
+    el modo avanzado. Una sola llamada trae todo lo que necesita la sheet.
+    """
+
+    permission_classes = (RequirePermission("roles.ver"),)
+
+    def get(self, request, *args, **kwargs):
+        permisos = list(Permiso.objects.filter(activo=True).order_by("modulo", "accion", "clave"))
+        claves_validas = {p.clave for p in permisos}
+
+        areas = []
+        for area in CAPABILITY_CATALOG:
+            capacidades = []
+            for cap in area["capacidades"]:
+                permisos_cap = [k for k in cap["permisos"] if k in claves_validas]
+                if not permisos_cap:
+                    continue
+                capacidades.append(
+                    {
+                        "clave": cap["clave"],
+                        "titulo": cap["titulo"],
+                        "descripcion": cap["descripcion"],
+                        "permisos": permisos_cap,
+                        "profesional": bool(cap.get("profesional")),
+                    }
+                )
+            if capacidades:
+                areas.append(
+                    {"area": area["area"], "titulo": area["titulo"], "capacidades": capacidades}
+                )
+
+        agrupados = {}
+        for permiso in permisos:
+            agrupados.setdefault(permiso.modulo, []).append(PermisoSerializer(permiso).data)
+        permisos_tecnicos = [
+            {"modulo": modulo, "permisos": items} for modulo, items in agrupados.items()
+        ]
+
+        return Response(
+            {"areas": areas, "permisos_tecnicos": permisos_tecnicos},
+            status=status.HTTP_200_OK,
+        )
+
+
 class RolViewSet(GenericViewSet):
     serializer_class = RolSerializer
     queryset = Rol.objects.prefetch_related("permisos").annotate(usuarios_count=Count("usuarios"))
@@ -599,17 +653,28 @@ class RolViewSet(GenericViewSet):
             )
         serializer = RolPermisosUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        keys = serializer.validated_data["permission_keys"]
         antes = RolSerializer(rol, context=self.get_serializer_context()).data
-        permisos = list(Permiso.objects.filter(clave__in=serializer.validated_data["permission_keys"]))
+        permisos = list(Permiso.objects.filter(clave__in=keys))
+        # El perfil profesional del rol se deriva de las capacidades clinicas
+        # seleccionadas; se propaga a los usuarios que ya tienen el rol asignado.
+        es_profesional = role_is_professional_from_keys(keys)
         with transaction.atomic():
             RolPermiso.objects.filter(rol=rol).delete()
             RolPermiso.objects.bulk_create([RolPermiso(rol=rol, permiso=permiso) for permiso in permisos])
+            if rol.es_profesional != es_profesional:
+                rol.es_profesional = es_profesional
+                rol.save(update_fields=["es_profesional", "updated_at"])
+            rol.usuarios.exclude(es_profesional=es_profesional).update(es_profesional=es_profesional)
             RolAuditoria.objects.create(
                 rol=rol,
                 usuario=request.user,
                 accion=RolAuditoria.Accion.ASIGNAR_PERMISOS,
                 antes=antes,
-                despues={"permission_keys": sorted(serializer.validated_data["permission_keys"])},
+                despues={
+                    "permission_keys": sorted(keys),
+                    "es_profesional": es_profesional,
+                },
             )
         rol.refresh_from_db()
         return Response(RolSerializer(rol, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)

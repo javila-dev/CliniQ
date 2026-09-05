@@ -481,12 +481,15 @@ class RolPermisosUpdateSerializer(serializers.Serializer):
     )
 
     def validate_permission_keys(self, value):
+        # La capa de capacidades curadas define que se puede asignar a un rol,
+        # asi que aceptamos cualquier permiso activo del catalogo (el flag
+        # `assignable` solo ordena el modo tecnico avanzado, ya no restringe).
         keys = sorted(set(value))
-        permisos = Permiso.objects.filter(clave__in=keys, activo=True, assignable=True)
+        permisos = Permiso.objects.filter(clave__in=keys, activo=True)
         encontrados = set(permisos.values_list("clave", flat=True))
         faltantes = sorted(set(keys) - encontrados)
         if faltantes:
             raise serializers.ValidationError(
-                "Permisos no asignables o inexistentes: " + ", ".join(faltantes)
+                "Permisos inexistentes o inactivos: " + ", ".join(faltantes)
             )
         return keys
