@@ -509,6 +509,52 @@ class CotizacionViewSet(ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+    @action(detail=False, methods=["get"], url_path="precios_campana")
+    def precios_campana(self, request):
+        """Mapa de precios de campaña vigentes para poblar el formulario de
+        cotización antes de guardar.
+
+        El serializer solo calcula ``precio_campana_disponible`` sobre ítems ya
+        persistidos (en ``to_representation``), así que al crear/editar en el
+        cliente no hay forma de conocer el precio especial hasta guardar. Este
+        endpoint devuelve, indexado por id de catálogo, el precio de campaña que
+        aplica para la sede indicada (``?sede=<id>``; sin sede solo campañas
+        globales). Requiere ``cotizaciones.gestionar`` (vía get_permissions).
+        """
+        from apps.users.permissions import get_clinica_activa
+        from apps.cotizaciones.serializers import campana_items_vigentes
+
+        clinica = get_clinica_activa(request)
+        if clinica is None and getattr(request.user, "rol", None) != "superadmin":
+            clinica = getattr(request.user, "clinica", None)
+
+        sede = None
+        sede_id = request.query_params.get("sede")
+        if sede_id and clinica is not None:
+            from apps.clinicas.models import Sede
+
+            try:
+                sede = Sede.objects.get(pk=sede_id, clinica=clinica)
+            except (Sede.DoesNotExist, ValueError, TypeError):
+                sede = None
+
+        tratamientos, procedimientos = {}, {}
+        for item in campana_items_vigentes(clinica=clinica, sede=sede):
+            entry = {
+                "precio_campana": str(item.precio_campana),
+                "campana_id": str(item.campana_id),
+                "campana_nombre": item.campana.nombre,
+            }
+            if item.tratamiento_id:
+                tratamientos.setdefault(str(item.tratamiento_id), entry)
+            if item.procedimiento_id:
+                procedimientos.setdefault(str(item.procedimiento_id), entry)
+
+        return Response(
+            {"tratamientos": tratamientos, "procedimientos": procedimientos},
+            status=status.HTTP_200_OK,
+        )
+
 
 _CHECKIN_LABEL = {"otp_whatsapp": "Check-in por WhatsApp", "foto_presencial": "Check-in con foto"}
 _MEDIO_LABEL = dict(RegistroConfirmacion.Medio.choices)

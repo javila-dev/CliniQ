@@ -9,12 +9,18 @@ from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
 
-def lookup_campana_item(*, clinica, sede, procedimiento=None, tratamiento=None):
+def campana_items_vigentes(*, clinica, sede):
+    """CampanaItem activos de campañas vigentes de la clínica.
+
+    Filtra por sede: una campaña sin sedes aplica a todas; con ``sede=None`` solo
+    se consideran las campañas globales. Fuente única de la semántica "vigente"
+    que comparten el lookup por ítem y el endpoint de precios de campaña.
+    """
     from datetime import date
     from apps.clinicas.models import CampanaItem
 
-    if not clinica or not (procedimiento or tratamiento):
-        return None
+    if not clinica:
+        return CampanaItem.objects.none()
 
     hoy = date.today()
     qs = CampanaItem.objects.filter(
@@ -28,6 +34,14 @@ def lookup_campana_item(*, clinica, sede, procedimiento=None, tratamiento=None):
         qs = qs.filter(Q(campana__sedes__isnull=True) | Q(campana__sedes=sede)).distinct()
     else:
         qs = qs.filter(campana__sedes__isnull=True)
+    return qs
+
+
+def lookup_campana_item(*, clinica, sede, procedimiento=None, tratamiento=None):
+    if not (procedimiento or tratamiento):
+        return None
+
+    qs = campana_items_vigentes(clinica=clinica, sede=sede)
     if procedimiento:
         qs = qs.filter(procedimiento=procedimiento)
     else:
