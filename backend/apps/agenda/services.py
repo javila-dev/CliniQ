@@ -244,6 +244,7 @@ def _cuotas_vencidas_bloqueantes(paciente, clinica):
             cartera__paciente=paciente,
             cartera__paciente__clinica=clinica,
             excepcion_aprobada=False,
+            anulada=False,
             fecha_esperada__lt=fecha_limite,
         )
         .annotate(pendiente=CUOTA_PENDIENTE_EXPR)

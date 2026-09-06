@@ -81,6 +81,13 @@ def aceptar_cotizacion_por_firma_compromiso(consentimiento) -> None:
         return
     if consentimiento.estado != Consentimiento.Estado.FIRMADO:
         return
+    # El acta de un acuerdo de pago tambien es un Consentimiento sin plantilla
+    # atado a la cotizacion, pero no debe disparar la aceptacion de la cotizacion
+    # (que ya esta aceptada): la maneja apps.cartera.services.
+    from apps.cartera.models import AcuerdoPago
+
+    if AcuerdoPago.objects.filter(documento_id=consentimiento.id).exists():
+        return
 
     cotizacion = consentimiento.cotizacion
     if cotizacion.estado != Cotizacion.Estado.BORRADOR:

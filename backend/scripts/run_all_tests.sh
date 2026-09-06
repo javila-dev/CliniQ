@@ -10,6 +10,7 @@ MODULES=(
   apps.protocolos.tests
   apps.cotizaciones.tests
   apps.cartera.tests
+  apps.cartera.tests_acuerdos
   apps.cobros.tests
   apps.pacientes.tests
   apps.colaboradores.tests

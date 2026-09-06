@@ -1,10 +1,13 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
 
-from apps.cartera.views import CarteraViewSet, CuotaCarteraViewSet
+from apps.cartera.views import AcuerdoPagoViewSet, CarteraViewSet, CuotaCarteraViewSet
 
 
 router = DefaultRouter()
+# `acuerdos` va antes que el prefijo vacío para que `^acuerdos/` no lo capture
+# el patrón `^(?P<pk>[^/.]+)/$` de CarteraViewSet.
+router.register("acuerdos", AcuerdoPagoViewSet, basename="cartera-acuerdo")
 router.register("", CarteraViewSet, basename="cartera")
 
 urlpatterns = [

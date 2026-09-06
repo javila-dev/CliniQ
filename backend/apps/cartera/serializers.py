@@ -3,7 +3,7 @@ from decimal import Decimal
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.cartera.models import Cartera, CuotaCartera
+from apps.cartera.models import AcuerdoPago, Cartera, CuotaCartera
 
 
 class CuotaCarteraSerializer(serializers.ModelSerializer):
@@ -14,6 +14,7 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
         max_digits=14, decimal_places=2, read_only=True
     )
     vencida = serializers.BooleanField(read_only=True)
+    acuerdo_numero = serializers.IntegerField(source="acuerdo.numero", read_only=True, allow_null=True)
 
     class Meta:
         model = CuotaCartera
@@ -33,6 +34,8 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
             "excepcion_aprobada",
             "aprobada_por",
             "aprobada_por_nombre",
+            "anulada",
+            "acuerdo_numero",
         )
         read_only_fields = fields
 
@@ -72,12 +75,16 @@ class CarteraListSerializer(serializers.ModelSerializer):
             "created_at",
         )
 
+    def _cuotas_vivas(self, obj):
+        # Excluye las anuladas por un acuerdo de pago. Usa la cache del prefetch.
+        return [c for c in obj.cuotas.all() if not c.anulada]
+
     def get_cuotas_total(self, obj):
-        return obj.cuotas.count()
+        return len(self._cuotas_vivas(obj))
 
     def get_cuotas_pagadas(self, obj):
         # "Pagada" = cubierta por completo (un abono parcial no cuenta).
-        return sum(1 for c in obj.cuotas.all() if c.saldo_pendiente <= 0)
+        return sum(1 for c in self._cuotas_vivas(obj) if c.saldo_pendiente <= 0)
 
     def _resumen_cuotas(self, obj):
         """Calcula una sola vez por cartera: próxima cuota con saldo y mora."""
@@ -89,8 +96,10 @@ class CarteraListSerializer(serializers.ModelSerializer):
         mora_dias = 0
         mora_valor = Decimal("0")
         # obj.cuotas.all() respeta el orden del modelo: fecha_esperada, created_at
-        # (las cuotas sin fecha quedan al final).
+        # (las cuotas sin fecha quedan al final). Se ignoran las anuladas por acuerdo.
         for c in obj.cuotas.all():
+            if c.anulada:
+                continue
             pendiente = c.saldo_pendiente
             if pendiente <= 0:
                 continue
@@ -126,11 +135,95 @@ class CarteraListSerializer(serializers.ModelSerializer):
         return f"{self._resumen_cuotas(obj)['mora_valor']:.2f}"
 
 
+class AcuerdoDocumentoSerializer(serializers.Serializer):
+    """Estado de firma del acta de un acuerdo (subconjunto de Consentimiento)."""
+
+    id = serializers.UUIDField(read_only=True)
+    estado = serializers.CharField(read_only=True)
+    firmado_en = serializers.DateTimeField(read_only=True)
+    documenso_signing_token = serializers.CharField(read_only=True)
+    documenso_documento_id = serializers.CharField(read_only=True)
+
+
+class AcuerdoPagoSerializer(serializers.ModelSerializer):
+    estado_display = serializers.CharField(source="get_estado_display", read_only=True)
+    creado_por_nombre = serializers.CharField(
+        source="creado_por.nombre_completo", read_only=True, allow_null=True
+    )
+    documento = AcuerdoDocumentoSerializer(read_only=True)
+    cuotas_nuevas = serializers.SerializerMethodField()
+
+    class Meta:
+        model = AcuerdoPago
+        fields = (
+            "id",
+            "cartera",
+            "numero",
+            "motivo",
+            "estado",
+            "estado_display",
+            "saldo_al_proponer",
+            "plan_propuesto",
+            "vigente_desde",
+            "creado_por_nombre",
+            "motivo_anulacion",
+            "anulado_en",
+            "documento",
+            "cuotas_nuevas",
+            "created_at",
+        )
+        read_only_fields = fields
+
+    def get_cuotas_nuevas(self, obj):
+        if obj.estado != AcuerdoPago.Estado.VIGENTE:
+            return []
+        return CuotaCarteraSerializer(
+            obj.cuotas.filter(anulada=False).order_by("fecha_esperada", "created_at"),
+            many=True,
+        ).data
+
+
 class CarteraDetailSerializer(CarteraListSerializer):
-    cuotas = CuotaCarteraSerializer(many=True, read_only=True)
+    cuotas = serializers.SerializerMethodField()
+    acuerdos = serializers.SerializerMethodField()
+    acuerdo_pendiente = serializers.SerializerMethodField()
 
     class Meta(CarteraListSerializer.Meta):
-        fields = CarteraListSerializer.Meta.fields + ("cuotas",)
+        fields = CarteraListSerializer.Meta.fields + ("cuotas", "acuerdos", "acuerdo_pendiente")
+
+    def get_cuotas(self, obj):
+        # Solo el plan vigente: las cuotas anuladas por un acuerdo no se muestran.
+        vivas = [c for c in obj.cuotas.all() if not c.anulada]
+        return CuotaCarteraSerializer(vivas, many=True).data
+
+    def get_acuerdos(self, obj):
+        return AcuerdoPagoSerializer(
+            obj.acuerdos.all().order_by("-created_at"), many=True
+        ).data
+
+    def get_acuerdo_pendiente(self, obj):
+        pendiente = next(
+            (a for a in obj.acuerdos.all() if a.estado == AcuerdoPago.Estado.PENDIENTE_FIRMA),
+            None,
+        )
+        return AcuerdoPagoSerializer(pendiente).data if pendiente else None
+
+
+class CuotaPropuestaSerializer(serializers.Serializer):
+    tipo = serializers.ChoiceField(choices=CuotaCartera.Tipo.choices)
+    descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+    valor_esperado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
+    fecha_esperada = serializers.DateField()
+
+
+class CrearAcuerdoPagoSerializer(serializers.Serializer):
+    cartera = serializers.PrimaryKeyRelatedField(queryset=Cartera.objects.all())
+    motivo = serializers.CharField(max_length=2000)
+    cuotas = CuotaPropuestaSerializer(many=True, allow_empty=False)
+
+
+class AnularAcuerdoPagoSerializer(serializers.Serializer):
+    motivo = serializers.CharField(max_length=2000)
 
 
 class ModificarPlazoCuotaSerializer(serializers.Serializer):

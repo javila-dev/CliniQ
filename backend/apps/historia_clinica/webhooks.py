@@ -118,6 +118,17 @@ def _handle_compromiso_pago(external_id: str, event: str, document_id: str | Non
                 "Webhook Documenso compromiso_pago: fallo al aceptar cotizacion | id=%s",
                 consentimiento_id,
             )
+        # Si el documento firmado es el acta de un acuerdo de pago, aplicarlo
+        # (swap del plan de cuotas).
+        try:
+            from apps.cartera.services import aplicar_acuerdo_pago_por_firma
+
+            aplicar_acuerdo_pago_por_firma(consentimiento)
+        except Exception:
+            logger.exception(
+                "Webhook Documenso compromiso_pago: fallo al aplicar acuerdo de pago | id=%s",
+                consentimiento_id,
+            )
 
     # Reintento de un webhook ya procesado: no volver a descargar/guardar el
     # PDF, o cada reintento deja un archivo huerfano nuevo en storage

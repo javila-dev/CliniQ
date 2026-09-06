@@ -95,6 +95,19 @@ class CuotaCartera(BaseModel):
         related_name="cuotas_cartera_registradas",
     )
 
+    # ── Acuerdos de pago (renegociación del plan) ──
+    # `anulada=True`: cuota del plan original reemplazada por un acuerdo de pago.
+    # Deja de contar para saldo/mora/UI pero se conserva para auditoría.
+    # `acuerdo`: si está seteado, la cuota pertenece al plan de ese acuerdo.
+    anulada = models.BooleanField(default=False, db_index=True)
+    acuerdo = models.ForeignKey(
+        "cartera.AcuerdoPago",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cuotas",
+    )
+
     class Meta:
         db_table = "cuotas_cartera"
         ordering = ["fecha_esperada", "created_at"]
@@ -119,6 +132,81 @@ class CuotaCartera(BaseModel):
 
     def __str__(self) -> str:
         return f"Cuota {self.id} - {self.cartera_id}"
+
+
+class AcuerdoPago(BaseModel):
+    """Renegociación del plan de pago de una cartera.
+
+    Se crea en estado ``pendiente_firma`` y **no altera la cartera**: el plan
+    nuevo vive en ``plan_propuesto`` (JSON) hasta que Documenso confirma la firma
+    del acta. Recién ahí ``aplicar_acuerdo_pago`` anula las cuotas viejas
+    pendientes, materializa el plan nuevo y levanta la mora.
+    """
+
+    class Estado(models.TextChoices):
+        PENDIENTE_FIRMA = "pendiente_firma", "Pendiente de firma"
+        VIGENTE = "vigente", "Vigente"
+        ANULADO = "anulado", "Anulado"
+        REQUIERE_REVISION = "requiere_revision", "Requiere revisión"
+
+    cartera = models.ForeignKey(
+        Cartera,
+        on_delete=models.CASCADE,
+        related_name="acuerdos",
+    )
+    numero = models.PositiveSmallIntegerField(help_text="Secuencial por cartera.")
+    motivo = models.TextField()
+    saldo_al_proponer = models.DecimalField(max_digits=14, decimal_places=2)
+    # [{tipo, descripcion, valor_esperado (str), fecha_esperada (ISO date)}]
+    plan_propuesto = models.JSONField()
+    documento = models.OneToOneField(
+        "consentimientos.Consentimiento",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="acuerdo_pago",
+    )
+    estado = models.CharField(
+        max_length=20,
+        choices=Estado.choices,
+        default=Estado.PENDIENTE_FIRMA,
+    )
+    vigente_desde = models.DateTimeField(null=True, blank=True)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="acuerdos_pago_creados",
+    )
+    anulado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="acuerdos_pago_anulados",
+    )
+    anulado_en = models.DateTimeField(null=True, blank=True)
+    motivo_anulacion = models.TextField(blank=True)
+
+    class Meta:
+        db_table = "acuerdos_pago"
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["cartera", "numero"],
+                name="uniq_acuerdo_numero_por_cartera",
+            ),
+            # Un solo acuerdo pendiente de firma por cartera (garantía de BD).
+            models.UniqueConstraint(
+                fields=["cartera"],
+                condition=models.Q(estado="pendiente_firma"),
+                name="uniq_acuerdo_pendiente_por_cartera",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"Acuerdo de pago N°{self.numero} - cartera {self.cartera_id} ({self.estado})"
 
 
 class CuotaCarteraLog(models.Model):

@@ -3355,6 +3355,10 @@ Prefijo: `/cartera`
 - `PATCH /cartera/cuotas/{id}/` — modificar plazo (H35)
 - `PATCH /cartera/cuotas/{id}/registrar_pago/`
 - `POST /cartera/cuotas/{id}/aprobar_excepcion/`
+- `GET  /cartera/acuerdos/?cartera={id}` — historial de acuerdos de pago
+- `POST /cartera/acuerdos/` — crear acuerdo de pago
+- `POST /cartera/acuerdos/{id}/anular/` — cancelar un acuerdo aún no firmado
+- `POST /cartera/acuerdos/{id}/verificar-firma/` — reconciliar la firma con Documenso
 
 ### Registrar pago de cuota
 
@@ -3520,6 +3524,56 @@ Response: serializer completo de `CuotaCartera` con los valores actualizados.
 Errores: `400 CUOTA_YA_PAGADA` si la cuota ya está pagada.
 
 **Auditoría:** por cada campo modificado se crea un registro `CuotaCarteraLog` con `campo`, `valor_anterior`, `valor_nuevo`, `modificado_por`.
+
+### Acuerdos de pago (renegociación del plan)
+
+Un **acuerdo de pago** reemplaza las cuotas pendientes de una cartera por un plan
+nuevo, cuando el paciente no pagó según la cotización. Permiso: `cartera.modificar_plazo`.
+
+**Regla clave: el acuerdo solo entra en vigencia cuando Documenso confirma la
+firma del acta.** Al crearse queda en `pendiente_firma` y **no altera la cartera**:
+el plan viejo sigue vigente, la mora sigue bloqueando y los pagos quedan bloqueados.
+
+Estados: `pendiente_firma` → `vigente` (al firmarse) · `anulado` (cancelado antes
+de firmar) · `requiere_revision` (el saldo cambió entre la propuesta y la firma).
+
+**`POST /cartera/acuerdos/`**
+```json
+{
+  "cartera": "uuid",
+  "motivo": "El paciente se atrasó; se reprograma en 4 cuotas.",
+  "cuotas": [
+    {"tipo": "transferencia", "descripcion": "Cuota 1", "valor_esperado": "250000.00", "fecha_esperada": "2026-10-05"}
+  ]
+}
+```
+Reglas / errores (`400`):
+- `SIN_SALDO` — la cartera no tiene saldo pendiente.
+- `ACUERDO_PENDIENTE_EXISTE` — ya hay uno `pendiente_firma` (uno por cartera).
+- `FIRMA_NO_DISPONIBLE` — Documenso no está configurado.
+- `SUMA_NO_CUADRA` — `sum(valor_esperado)` ≠ saldo pendiente (detalle: `esperado`, `recibido`, `diferencia`).
+- `FECHA_PASADA` — alguna cuota tiene fecha anterior a hoy.
+- `MONTO_INVALIDO` / `PLAN_VACIO` / `MOTIVO_REQUERIDO`.
+
+Respuesta: el acuerdo (`estado: "pendiente_firma"`) con `documento` (el acta) para
+lanzar el flujo de firma Documenso (mismos endpoints que el compromiso de pago:
+`/consentimientos/{doc_id}/iniciar_firma_documenso`, `enviar_link_documenso`, …).
+
+Al confirmarse la firma (webhook, confirmación eager o
+`POST /cartera/acuerdos/{id}/verificar-firma/`): las cuotas viejas sin abono se
+marcan `anulada=true` + `excepcion_aprobada=true` (se levanta la mora), las
+parcialmente pagadas se cierran a lo abonado, y se crean las cuotas del plan
+nuevo. `estado` pasa a `vigente`.
+
+**Mientras un acuerdo está `pendiente_firma`:** `PATCH /cartera/cuotas/{id}/` y
+`.../registrar_pago/` responden `400 ACUERDO_PENDIENTE_FIRMA`.
+
+**`POST /cartera/acuerdos/{id}/anular/`** `{ "motivo": "..." }` — solo si
+`pendiente_firma` (si no: `400 ACUERDO_NO_ANULABLE`). Revoca el acta.
+
+**Detalle de cartera** (`GET /cartera/{id}/`): `cuotas` solo trae el plan vigente
+(sin anuladas); cada cuota lleva `anulada` y `acuerdo_numero`. Se agregan
+`acuerdos` (historial) y `acuerdo_pendiente` (o `null`).
 
 ## Campos y enums útiles para frontend
 

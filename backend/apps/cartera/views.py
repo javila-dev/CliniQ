@@ -2,7 +2,7 @@ from datetime import date, datetime, time
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import DecimalField, ExpressionWrapper, F, OuterRef, Subquery, Sum, Value
+from django.db.models import DecimalField, ExpressionWrapper, F, OuterRef, Prefetch, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
@@ -12,14 +12,18 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.cartera.models import CUOTA_PENDIENTE_EXPR, Cartera, CuotaCartera, CuotaCarteraLog
+from apps.cartera.models import AcuerdoPago, CUOTA_PENDIENTE_EXPR, Cartera, CuotaCartera, CuotaCarteraLog
 from apps.cartera.serializers import (
+    AcuerdoPagoSerializer,
+    AnularAcuerdoPagoSerializer,
     CarteraDetailSerializer,
     CarteraListSerializer,
+    CrearAcuerdoPagoSerializer,
     CuotaCarteraSerializer,
     ModificarPlazoCuotaSerializer,
     RegistrarPagoCuotaSerializer,
 )
+from apps.cartera.services import anular_acuerdo_pago, aplicar_acuerdo_pago_por_firma, crear_acuerdo_pago
 from apps.cobros.models import Cobro
 from apps.cobros.services import registrar_pago
 from apps.core.logging import registrar_accion
@@ -34,7 +38,20 @@ class CarteraPagination(PageNumberPagination):
 
 
 class CarteraViewSet(ReadOnlyModelViewSet):
-    queryset = Cartera.objects.select_related("cotizacion", "paciente").prefetch_related("cuotas").all()
+    # Las cuotas anuladas (reemplazadas por un acuerdo de pago) no se muestran ni
+    # cuentan: el prefetch ya las excluye para saldo/mora/listado.
+    queryset = (
+        Cartera.objects.select_related("cotizacion", "paciente")
+        .prefetch_related(
+            Prefetch(
+                "cuotas",
+                queryset=CuotaCartera.objects.filter(anulada=False).order_by("fecha_esperada", "created_at"),
+            ),
+            "acuerdos",
+            "acuerdos__documento",
+        )
+        .all()
+    )
     serializer_class = CarteraListSerializer
     pagination_class = CarteraPagination
     # Búsqueda por nombre / documento del paciente (?search=).
@@ -58,7 +75,7 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         """Anotaciones para ordenar por cobrado / saldo / próximo pago. Solo se
         usan en el listado: en `resumen` romperían los `Sum` por el join a cuotas."""
         proxima_subq = (
-            CuotaCartera.objects.filter(cartera=OuterRef("pk"))
+            CuotaCartera.objects.filter(cartera=OuterRef("pk"), anulada=False)
             .annotate(pend=CUOTA_PENDIENTE_EXPR)
             .filter(pend__gt=0)
             .order_by("fecha_esperada", "created_at")
@@ -109,7 +126,8 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         for cartera in queryset:
             is_pagada = cartera.saldo_pendiente <= 0
             is_vencida = (
-                cartera.cuotas.annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+                cartera.cuotas.filter(anulada=False)
+                .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
                 .filter(pendiente__gt=0, fecha_esperada__lt=today)
                 .exists()
             )
@@ -147,6 +165,7 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         cuotas_vencidas_qs = (
             CuotaCartera.objects.filter(
                 cartera__in=queryset,
+                anulada=False,
                 fecha_esperada__lt=timezone.localdate(),
             )
             .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
@@ -187,11 +206,24 @@ class CuotaCarteraViewSet(GenericViewSet):
             queryset = queryset.none()
         return queryset
 
+    def _guard_acuerdo_pendiente(self, cuota):
+        pendiente = cuota.cartera.acuerdos.filter(
+            estado=AcuerdoPago.Estado.PENDIENTE_FIRMA
+        ).first()
+        if pendiente is not None:
+            raise ValidationError({
+                "error": "Hay un acuerdo de pago pendiente de firma en esta cartera. "
+                         "Fírmalo o cancélalo antes de mover o cobrar cuotas.",
+                "code": "ACUERDO_PENDIENTE_FIRMA",
+                "detalle": {"acuerdo_id": str(pendiente.id), "numero": pendiente.numero},
+            })
+
     @transaction.atomic
     def partial_update(self, request, pk=None):
         cuota = self.get_object()
         if cuota.pagada:
             raise ValidationError({"error": "No se puede modificar una cuota ya pagada.", "code": "CUOTA_YA_PAGADA"})
+        self._guard_acuerdo_pendiente(cuota)
         serializer = ModificarPlazoCuotaSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         datos = serializer.validated_data
@@ -230,6 +262,7 @@ class CuotaCarteraViewSet(GenericViewSet):
         cuota = self.get_object()
         if cuota.saldo_pendiente <= 0:
             raise ValidationError({"error": "La cuota ya fue cobrada por completo.", "code": "CUOTA_YA_PAGADA"})
+        self._guard_acuerdo_pendiente(cuota)
         serializer = RegistrarPagoCuotaSerializer(data=request.data, context={"cuota": cuota})
         serializer.is_valid(raise_exception=True)
         # Los pagos se acumulan: un abono parcial no cierra la cuota, solo baja
@@ -315,3 +348,84 @@ class CuotaCarteraViewSet(GenericViewSet):
         cuota.aprobada_por = request.user
         cuota.save(update_fields=["excepcion_aprobada", "aprobada_por", "updated_at"])
         return Response(CuotaCarteraSerializer(cuota).data, status=status.HTTP_200_OK)
+
+
+class AcuerdoPagoViewSet(GenericViewSet):
+    """Acuerdos de pago (renegociación del plan de cuotas de una cartera).
+
+    - ``GET  /cartera/acuerdos/?cartera={id}`` — historial.
+    - ``POST /cartera/acuerdos/`` — crea el acuerdo en ``pendiente_firma`` y
+      genera el acta firmable. NO altera la cartera todavía.
+    - ``POST /cartera/acuerdos/{id}/anular/`` — cancela un acuerdo aún no firmado.
+    - ``POST /cartera/acuerdos/{id}/verificar-firma/`` — consulta Documenso y,
+      si el acta ya está firmada, aplica el acuerdo.
+    """
+
+    queryset = AcuerdoPago.objects.select_related(
+        "cartera", "cartera__paciente", "cartera__cotizacion", "documento", "creado_por"
+    ).all()
+    serializer_class = AcuerdoPagoSerializer
+
+    def get_permissions(self):
+        if self.action == "list":
+            return [RequirePermission("cartera.ver")()]
+        return [RequirePermission("cartera.modificar_plazo")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            queryset = queryset.filter(cartera__paciente__clinica=clinica)
+        elif user.rol != "superadmin":
+            queryset = queryset.none()
+        cartera_id = self.request.query_params.get("cartera")
+        if cartera_id:
+            queryset = queryset.filter(cartera_id=cartera_id)
+        return queryset
+
+    def list(self, request, *args, **kwargs):
+        serializer = self.get_serializer(self.get_queryset(), many=True)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def create(self, request, *args, **kwargs):
+        serializer = CrearAcuerdoPagoSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        cartera = serializer.validated_data["cartera"]
+        acuerdo = crear_acuerdo_pago(
+            cartera,
+            motivo=serializer.validated_data["motivo"],
+            cuotas=serializer.validated_data["cuotas"],
+            request=request,
+        )
+        return Response(
+            AcuerdoPagoSerializer(acuerdo, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="anular")
+    def anular(self, request, pk=None):
+        acuerdo = self.get_object()
+        serializer = AnularAcuerdoPagoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        acuerdo = anular_acuerdo_pago(
+            acuerdo, motivo=serializer.validated_data["motivo"], request=request
+        )
+        return Response(
+            AcuerdoPagoSerializer(acuerdo, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], url_path="verificar-firma")
+    def verificar_firma(self, request, pk=None):
+        from apps.consentimientos.services import verificar_firma_compromiso_pago_en_documenso
+
+        acuerdo = self.get_object()
+        if acuerdo.documento_id is not None:
+            verificar_firma_compromiso_pago_en_documenso(acuerdo.documento)
+            aplicar_acuerdo_pago_por_firma(acuerdo.documento)
+        acuerdo.refresh_from_db()
+        return Response(
+            AcuerdoPagoSerializer(acuerdo, context={"request": request}).data,
+            status=status.HTTP_200_OK,
+        )

@@ -43,7 +43,11 @@ def _contexto_merge_cotizacion(cotizacion) -> dict:
     existir aun si se genera antes de aceptar la cotizacion.
     """
     cartera = getattr(cotizacion, "cartera", None)
-    cuotas = list(cartera.cuotas.order_by("fecha_esperada")) if cartera else []
+    cuotas = (
+        list(cartera.cuotas.filter(anulada=False).order_by("fecha_esperada"))
+        if cartera
+        else []
+    )
     costo_total = cotizacion.total
     abono_inicial = cuotas[0].valor_esperado if cuotas else None
     # Saldo del COMPROMISO (total - abono acordado), no el saldo ya pagado en
@@ -77,6 +81,7 @@ def renderizar_template_cotizacion_con_datos(cotizacion, plantilla: PlantillaCon
 
 
 COMPROMISO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/compromiso_pago_estandar.html"
+ACTA_ACUERDO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/acta_acuerdo_pago_estandar.html"
 
 
 def renderizar_compromiso_pago_estandar(cotizacion) -> str:
@@ -88,6 +93,69 @@ def renderizar_compromiso_pago_estandar(cotizacion) -> str:
     from django.template.loader import render_to_string
 
     return render_to_string(COMPROMISO_PAGO_ESTANDAR_TEMPLATE, _contexto_merge_cotizacion(cotizacion))
+
+
+def documenso_configurado() -> bool:
+    """True si la integracion con Documenso esta operativa (URL + API key)."""
+    return bool(settings.DOCUMENSO_API_URL and settings.DOCUMENSO_API_KEY)
+
+
+def renderizar_acta_acuerdo_pago(acuerdo) -> str:
+    """Cuerpo estandar (no configurable) del acta de acuerdo de pago: plan
+    anterior (las cuotas que se reemplazan) vs plan nuevo (``plan_propuesto``).
+    Se congela en ``Consentimiento.contenido_snapshot``.
+    """
+    from datetime import date as _date
+    from decimal import Decimal
+    from django.template.loader import render_to_string
+
+    cartera = acuerdo.cartera
+    plan_anterior = [
+        {
+            "descripcion": c.descripcion,
+            "fecha_esperada": c.fecha_esperada,
+            "valor": c.saldo_pendiente,
+        }
+        for c in cartera.cuotas.filter(anulada=False, pagada=False).order_by("fecha_esperada", "created_at")
+    ]
+    plan_nuevo = []
+    for row in acuerdo.plan_propuesto:
+        fecha = row.get("fecha_esperada")
+        if isinstance(fecha, str) and fecha:
+            fecha = _date.fromisoformat(fecha)
+        plan_nuevo.append({
+            "descripcion": row.get("descripcion") or "Cuota",
+            "fecha_esperada": fecha,
+            "valor_esperado": Decimal(str(row.get("valor_esperado", "0"))),
+        })
+
+    return render_to_string(ACTA_ACUERDO_PAGO_ESTANDAR_TEMPLATE, {
+        "paciente": cartera.paciente,
+        "clinica": cartera.cotizacion.clinica,
+        "numero": acuerdo.numero,
+        "motivo": acuerdo.motivo,
+        "saldo": acuerdo.saldo_al_proponer,
+        "plan_anterior": plan_anterior,
+        "plan_nuevo": plan_nuevo,
+        "fecha_generacion": timezone.localdate(),
+    })
+
+
+def generar_acta_acuerdo_pago(acuerdo) -> Consentimiento:
+    """Crea el ``Consentimiento`` (sin plantilla, atado a la cotizacion) que
+    sirve de acta firmable del acuerdo de pago. Reutiliza toda la maquinaria
+    Documenso del compromiso de pago."""
+    cotizacion = acuerdo.cartera.cotizacion
+    contenido_snapshot = renderizar_acta_acuerdo_pago(acuerdo)
+    hash_contenido = hashlib.sha256(contenido_snapshot.encode("utf-8")).hexdigest()
+    return Consentimiento.objects.create(
+        cotizacion=cotizacion,
+        paciente=cotizacion.paciente,
+        plantilla=None,
+        contenido_snapshot=contenido_snapshot,
+        hash_contenido=hash_contenido,
+        token_expira=timezone.now() + timedelta(hours=48),
+    )
 
 
 def generar_pdf_consentimiento(consentimiento: Consentimiento) -> bytes:
@@ -205,6 +273,10 @@ def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     if consentimiento.plantilla_id:
         return consentimiento.plantilla.nombre
     if consentimiento.cotizacion_id:
+        from apps.cartera.models import AcuerdoPago
+
+        if AcuerdoPago.objects.filter(documento_id=consentimiento.id).exists():
+            return "acta de acuerdo de pago"
         return "compromiso de pago"
     return "consentimiento"
 
@@ -267,8 +339,10 @@ def confirmar_firma_compromiso_pago(consentimiento: Consentimiento) -> Consentim
 
 
 def _auto_aceptar_cotizacion(consentimiento: Consentimiento) -> None:
-    """Si el compromiso de pago quedo firmado, deja que cotizaciones decida si
-    su cotizacion debe pasar a aceptada automaticamente."""
+    """Hook post-firma para consentimientos atados a una cotizacion:
+    - compromiso de pago recien firmado -> acepta la cotizacion si corresponde;
+    - acta de acuerdo de pago recien firmada -> aplica el acuerdo (swap del plan).
+    """
     try:
         from apps.cotizaciones.services import aceptar_cotizacion_por_firma_compromiso
 
@@ -276,6 +350,15 @@ def _auto_aceptar_cotizacion(consentimiento: Consentimiento) -> None:
     except Exception:
         logger.exception(
             "[_auto_aceptar_cotizacion] fallo al aceptar cotizacion por firma | consentimiento_id=%s",
+            consentimiento.id,
+        )
+    try:
+        from apps.cartera.services import aplicar_acuerdo_pago_por_firma
+
+        aplicar_acuerdo_pago_por_firma(consentimiento)
+    except Exception:
+        logger.exception(
+            "[_auto_aceptar_cotizacion] fallo al aplicar acuerdo de pago por firma | consentimiento_id=%s",
             consentimiento.id,
         )
 

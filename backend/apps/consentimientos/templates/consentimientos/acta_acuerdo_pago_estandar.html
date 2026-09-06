@@ -1,0 +1,66 @@
+<h1>Acta de acuerdo de pago</h1>
+
+<p>
+  Entre <strong>{{ clinica.nombre }}</strong> y <strong>{{ paciente.nombre_completo }}</strong>,
+  identificado(a) con <strong>{{ paciente.tipo_documento }} {{ paciente.numero_documento }}</strong>,
+  se celebra el siguiente acuerdo de pago (N.&deg; {{ numero }}) sobre el saldo pendiente de la
+  cotización de servicios ya aceptada.
+</p>
+
+<h2>Motivo</h2>
+<p>{{ motivo }}</p>
+
+<h2>Saldo objeto del acuerdo</h2>
+<p>
+  Saldo pendiente al momento del acuerdo:
+  <strong>${{ saldo|floatformat:0 }}</strong>
+</p>
+
+{% if plan_anterior %}
+<h2>Plan de pago anterior (queda sin efecto)</h2>
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
+  <tr>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Fecha</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Concepto</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor pendiente</td>
+  </tr>
+  {% for cuota in plan_anterior %}
+  <tr>
+    <td style="padding:4px 6px 4px 0; text-decoration:line-through; color:#9ca3af;">{{ cuota.fecha_esperada|date:"d/m/Y"|default:"Sin fecha" }}</td>
+    <td style="padding:4px 6px; text-decoration:line-through; color:#9ca3af;">{{ cuota.descripcion|default:"Cuota" }}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right; text-decoration:line-through; color:#9ca3af;">${{ cuota.valor|floatformat:0 }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
+<h2>Nuevo plan de pago acordado</h2>
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
+  <tr>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Fecha</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Concepto</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor</td>
+  </tr>
+  {% for cuota in plan_nuevo %}
+  <tr>
+    <td style="padding:4px 6px 4px 0;">{{ cuota.fecha_esperada|date:"d/m/Y" }}</td>
+    <td style="padding:4px 6px;">{{ cuota.descripcion|default:"Cuota" }}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right;"><strong>${{ cuota.valor_esperado|floatformat:0 }}</strong></td>
+  </tr>
+  {% endfor %}
+  <tr>
+    <td colspan="2" style="padding:6px 6px 4px 0; text-align:right; border-top:0.5px solid #e5e7eb;">Total</td>
+    <td style="padding:6px 0 4px 6px; text-align:right; border-top:0.5px solid #e5e7eb;"><strong>${{ saldo|floatformat:0 }}</strong></td>
+  </tr>
+</table>
+
+<h2>Condiciones</h2>
+<p>
+  Este acuerdo reemplaza el plan de pago anterior sobre el saldo indicado. Me comprometo a
+  cumplir con los pagos en las fechas aquí acordadas. En caso de incumplimiento de alguna de
+  las cuotas de este acuerdo, autorizo a <strong>{{ clinica.nombre }}</strong> a suspender la
+  prestación de los servicios pendientes hasta regularizar la situación. Declaro que acepto
+  este acuerdo de forma libre y voluntaria.
+</p>
+
+<p style="font-size:10px; color:#9ca3af;">Documento generado el {{ fecha_generacion|date:"d/m/Y" }}.</p>
