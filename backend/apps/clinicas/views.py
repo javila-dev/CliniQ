@@ -38,6 +38,7 @@ from apps.clinicas.serializers import (
     AdminTenantCreateSerializer,
     AdminTenantSerializer,
     AdminTenantUpdateSerializer,
+    AdminTenantUsuarioSerializer,
     CampanaItemSerializer,
     CampanaSerializer,
     ClinicaRecordatorioConfigSerializer,
@@ -63,6 +64,9 @@ from apps.clinicas.serializers import (
 )
 from apps.consentimientos.models import PlantillaAsistencia
 from apps.configuracion.models import DocumensoConsentimientoTemplate
+from apps.core.logging import registrar_accion
+from apps.core.models import LogAccion
+from apps.core.serializers import LogAccionSerializer
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file
 from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
 
@@ -317,49 +321,166 @@ class AdminTenantViewSet(ModelViewSet):
     def get_serializer_context(self):
         return {**super().get_serializer_context(), "request": self.request}
 
+    # Campos de la clinica cuyo cambio queda registrado en el historial (LogAccion).
+    _TENANT_TRACKED_FIELDS = (
+        "nombre", "nit", "email", "telefono", "activo", "plan_id",
+        "facial_verificacion_habilitada", "modulo_estetico_habilitado",
+        "modulo_obesidad_habilitado", "modo_puesta_en_marcha",
+    )
+    _MODULO_LABELS = {
+        "facial_verificacion_habilitada": "Verificación facial",
+        "modulo_estetico_habilitado": "Módulo estético",
+        "modulo_obesidad_habilitado": "Módulo obesidad",
+        "modo_puesta_en_marcha": "Modo puesta en marcha",
+    }
+
     def create(self, request, *args, **kwargs):
         from apps.users.rbac import ensure_default_roles_for_clinica
         from apps.users.models import Rol
         from apps.users import services as user_services
 
         serializer = AdminTenantCreateSerializer(data=request.data, context=self.get_serializer_context())
+        # admin_email es obligatorio y su unicidad se valida aca: si algo falla,
+        # no se persiste ninguna clinica (nada de tenants huerfanos sin admin).
         serializer.is_valid(raise_exception=True)
-        admin_email = serializer.validated_data.get("admin_email", "").strip()
+        admin_email = serializer.validated_data["admin_email"].strip()
 
         with transaction.atomic():
             clinica = serializer.save()
             ensure_default_roles_for_clinica(clinica)
+            registrar_accion(
+                request, "tenant.crear", clinica,
+                {"resumen": f"Clínica «{clinica.nombre}» creada"},
+                clinica=clinica,
+            )
 
-            if admin_email:
-                if User.objects.filter(email__iexact=admin_email).exists():
-                    return Response(
-                        {"error": "Ya existe un usuario con ese email.", "code": "ADMIN_EMAIL_DUPLICATE"},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-                rol_admin = Rol.objects.filter(clinica=clinica, slug="admin", activo=True).first()
-                admin_user = User(
-                    email=admin_email,
-                    clinica=clinica,
-                    rol="admin",
-                    rol_dinamico=rol_admin,
-                )
-                admin_user.set_unusable_password()
-                admin_user.save()
-                try:
-                    user_services.send_invitation_email(admin_user)
-                except Exception:
-                    pass
+            rol_admin = Rol.objects.filter(clinica=clinica, slug="admin", activo=True).first()
+            admin_user = User(
+                email=admin_email,
+                clinica=clinica,
+                rol="admin",
+                rol_dinamico=rol_admin,
+            )
+            admin_user.set_unusable_password()
+            admin_user.save()
+            enviado = True
+            try:
+                user_services.send_invitation_email(admin_user)
+            except Exception:
+                enviado = False
+            registrar_accion(
+                request, "usuario.crear", admin_user,
+                {
+                    "resumen": f"Usuario admin {admin_user.email} creado con invitación",
+                    "usuario_email": admin_user.email,
+                    "rol": "admin",
+                    "email_enviado": enviado,
+                },
+                clinica=clinica,
+            )
 
         clinica_data = self.get_queryset().get(pk=clinica.pk)
         return Response(AdminTenantSerializer(clinica_data).data, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):
         clinica = self.get_object()
+        antes = {f: getattr(clinica, f) for f in self._TENANT_TRACKED_FIELDS}
         serializer = AdminTenantUpdateSerializer(clinica, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        clinica.refresh_from_db()
+        self._registrar_cambios_tenant(request, clinica, antes)
         clinica_data = self.get_queryset().get(pk=clinica.pk)
         return Response(AdminTenantSerializer(clinica_data).data, status=status.HTTP_200_OK)
+
+    def _registrar_cambios_tenant(self, request, clinica, antes):
+        def _plain(value):
+            return str(value) if isinstance(value, UUID) else value
+
+        despues = {f: getattr(clinica, f) for f in antes}
+        cambios = {
+            f: {"antes": _plain(antes[f]), "despues": _plain(despues[f])}
+            for f in antes
+            if antes[f] != despues[f]
+        }
+        if not cambios:
+            return
+
+        if "activo" in cambios:
+            cambios.pop("activo")
+            registrar_accion(
+                request,
+                "tenant.activar" if clinica.activo else "tenant.desactivar",
+                clinica,
+                {"resumen": f"Clínica {'activada' if clinica.activo else 'desactivada'}"},
+                clinica=clinica,
+            )
+
+        if "plan_id" in cambios:
+            cambios.pop("plan_id")
+            plan_nombre = clinica.plan.nombre if clinica.plan_id else "sin plan"
+            registrar_accion(
+                request, "tenant.plan_cambiar", clinica,
+                {"resumen": f"Plan cambiado a {plan_nombre}", "plan": plan_nombre},
+                clinica=clinica,
+            )
+
+        for f in [c for c in cambios if c in self._MODULO_LABELS]:
+            cambios.pop(f)
+            habilitado = bool(getattr(clinica, f))
+            registrar_accion(
+                request, "tenant.modulo", clinica,
+                {
+                    "resumen": f"Add-on «{self._MODULO_LABELS[f]}» {'activado' if habilitado else 'desactivado'}",
+                    "modulo": f,
+                    "habilitado": habilitado,
+                },
+                clinica=clinica,
+            )
+
+        if cambios:
+            registrar_accion(
+                request, "tenant.editar", clinica,
+                {"resumen": "Datos de la clínica actualizados", "cambios": cambios},
+                clinica=clinica,
+            )
+
+    @action(detail=True, methods=["get"], url_path="usuarios")
+    def usuarios(self, request, pk=None):
+        clinica = self.get_object()
+        usuarios = (
+            User.objects.filter(clinica=clinica)
+            .select_related("rol_dinamico")
+            .order_by("-activo", "last_name", "first_name", "email")
+        )
+        return Response(AdminTenantUsuarioSerializer(usuarios, many=True).data)
+
+    @action(detail=True, methods=["get"], url_path="historial")
+    def historial(self, request, pk=None):
+        clinica = self.get_object()
+        queryset = (
+            LogAccion.objects.filter(clinica=clinica)
+            .select_related("clinica", "usuario")
+            .order_by("-created_at")
+        )
+
+        grupo = request.query_params.get("grupo")
+        if grupo == "gestion":
+            queryset = queryset.filter(accion__regex=r"^(tenant|usuario|rol)\.")
+        elif grupo == "accesos":
+            queryset = queryset.filter(accion__startswith="auth.")
+
+        accion = request.query_params.get("accion")
+        if accion:
+            queryset = queryset.filter(accion__startswith=accion)
+        usuario = request.query_params.get("usuario")
+        if usuario:
+            queryset = queryset.filter(usuario_id=usuario)
+
+        page = self.paginate_queryset(queryset)
+        if page is not None:
+            return self.get_paginated_response(LogAccionSerializer(page, many=True).data)
+        return Response(LogAccionSerializer(queryset, many=True).data)
 
 
 class PlanViewSet(ModelViewSet):

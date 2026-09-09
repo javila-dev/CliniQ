@@ -836,7 +836,9 @@ class AdminTenantCreateSerializer(serializers.ModelSerializer):
         required=False,
         allow_null=True,
     )
-    admin_email = serializers.EmailField(write_only=True, required=False, allow_blank=True)
+    # Un tenant SIEMPRE se crea con su admin: es obligatorio y se valida antes de
+    # persistir nada (ver AdminTenantViewSet.create).
+    admin_email = serializers.EmailField(write_only=True, required=True, allow_blank=False)
 
     class Meta:
         model = Clinica
@@ -846,6 +848,13 @@ class AdminTenantCreateSerializer(serializers.ModelSerializer):
     def validate_nit(self, value):
         if Clinica.objects.filter(nit=value).exists():
             raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
+        return value
+
+    def validate_admin_email(self, value):
+        from django.contrib.auth import get_user_model
+
+        if get_user_model().objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Ya existe un usuario con ese email.")
         return value
 
     def create(self, validated_data):
@@ -872,6 +881,39 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
         if queryset.exists():
             raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
         return value
+
+
+class AdminTenantUsuarioSerializer(serializers.Serializer):
+    """Listado de usuarios de un tenant para el panel de superadmin."""
+
+    id = serializers.UUIDField(read_only=True)
+    email = serializers.EmailField(read_only=True)
+    nombre_completo = serializers.CharField(read_only=True)
+    rol = serializers.SerializerMethodField()
+    rol_nombre = serializers.SerializerMethodField()
+    activo = serializers.BooleanField(read_only=True)
+    last_login = serializers.DateTimeField(read_only=True)
+    date_joined = serializers.DateTimeField(read_only=True)
+    estado = serializers.SerializerMethodField()
+
+    def get_rol(self, obj):
+        if getattr(obj, "rol_dinamico", None):
+            return obj.rol_dinamico.slug
+        return obj.rol
+
+    def get_rol_nombre(self, obj):
+        if getattr(obj, "rol_dinamico", None):
+            return obj.rol_dinamico.nombre
+        return obj.get_rol_display() if hasattr(obj, "get_rol_display") else obj.rol
+
+    def get_estado(self, obj):
+        # "pendiente" = nunca inicio sesion (invitacion sin usar); ver
+        # AdminTenantSerializer.get_admin_usuario_pendiente.
+        if not obj.activo:
+            return "inactivo"
+        if obj.last_login is None:
+            return "pendiente"
+        return "activo"
 
 
 # ─── Campañas ─────────────────────────────────────────────────────────────────

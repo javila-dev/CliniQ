@@ -20,6 +20,7 @@ from django.db import OperationalError, ProgrammingError
 from django.db.models.deletion import ProtectedError
 
 from apps.clinicas.models import Clinica
+from apps.core.logging import registrar_accion
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
@@ -158,6 +159,11 @@ class LoginView(APIView):
         if inactiva is not None:
             return inactiva
 
+        registrar_accion(
+            request, "auth.login", user,
+            {"resumen": f"Inicio de sesión de {user.email}", "metodo": "password"},
+            clinica=user.clinica, actor=user,
+        )
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
 
 
@@ -227,6 +233,11 @@ class GoogleLoginView(APIView):
 
         user_agent = request.META.get("HTTP_USER_AGENT", "")
         data = issue_login_tokens(user, user_agent=user_agent)
+        registrar_accion(
+            request, "auth.login", user,
+            {"resumen": f"Inicio de sesión de {user.email}", "metodo": "google"},
+            clinica=user.clinica, actor=user,
+        )
         logger.info("Login con Google | user=%s", user.pk)
         return Response(data, status=status.HTTP_200_OK)
 
@@ -598,6 +609,10 @@ class RolViewSet(GenericViewSet):
             accion=RolAuditoria.Accion.CREAR,
             despues=RolSerializer(rol, context=self.get_serializer_context()).data,
         )
+        registrar_accion(
+            request, "rol.crear", rol,
+            {"resumen": f"Rol «{rol.nombre}» creado"}, clinica=rol.clinica,
+        )
         return Response(self.get_serializer(rol).data, status=status.HTTP_201_CREATED)
 
     def partial_update(self, request, pk=None):
@@ -618,6 +633,10 @@ class RolViewSet(GenericViewSet):
             accion=RolAuditoria.Accion.EDITAR,
             antes=antes,
             despues=despues,
+        )
+        registrar_accion(
+            request, "rol.editar", rol,
+            {"resumen": f"Rol «{rol.nombre}» actualizado"}, clinica=rol.clinica,
         )
         return Response(despues, status=status.HTTP_200_OK)
 
@@ -640,7 +659,13 @@ class RolViewSet(GenericViewSet):
             accion=RolAuditoria.Accion.ELIMINAR,
             antes=antes,
         )
+        rol_id, rol_nombre, rol_clinica = str(rol.pk), rol.nombre, rol.clinica
         rol.delete()
+        registrar_accion(
+            request, "rol.eliminar", None,
+            {"resumen": f"Rol «{rol_nombre}» eliminado"},
+            clinica=rol_clinica, objeto_tipo="Rol", objeto_id=rol_id,
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["put"], url_path="permisos")
@@ -677,6 +702,14 @@ class RolViewSet(GenericViewSet):
                 },
             )
         rol.refresh_from_db()
+        registrar_accion(
+            request, "rol.permisos", rol,
+            {
+                "resumen": f"Permisos del rol «{rol.nombre}» actualizados",
+                "permission_keys": sorted(keys),
+            },
+            clinica=rol.clinica,
+        )
         return Response(RolSerializer(rol, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
 
 
@@ -759,6 +792,12 @@ class UserViewSet(GenericViewSet):
                 message, code = limit_error
                 return error_response(message, code, status.HTTP_403_FORBIDDEN)
         user = serializer.save()
+        rol_slug = user.rol_dinamico.slug if user.rol_dinamico_id else user.rol
+        registrar_accion(
+            request, "usuario.crear", user,
+            {"resumen": f"Usuario {user.email} creado", "usuario_email": user.email, "rol": rol_slug},
+            clinica=user.clinica,
+        )
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
 
     def retrieve(self, request, pk=None):
@@ -770,6 +809,15 @@ class UserViewSet(GenericViewSet):
         serializer = UserUpdateSerializer(user, data=request.data, partial=True, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
         serializer.save()
+        registrar_accion(
+            request, "usuario.editar", user,
+            {
+                "resumen": f"Usuario {user.email} actualizado",
+                "usuario_email": user.email,
+                "campos": sorted(request.data.keys()),
+            },
+            clinica=user.clinica,
+        )
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)
 
     def destroy(self, request, pk=None):
@@ -779,6 +827,7 @@ class UserViewSet(GenericViewSet):
                 {"error": "No puedes eliminarte a ti mismo.", "code": "SELF_DELETE"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        user_id, user_email, user_clinica = str(user.pk), user.email, user.clinica
         try:
             user.delete()
         except ProtectedError as exc:
@@ -786,6 +835,11 @@ class UserViewSet(GenericViewSet):
                 {"error": _protected_relations_message(exc), "code": "USER_DELETE_PROTECTED"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        registrar_accion(
+            request, "usuario.eliminar", None,
+            {"resumen": f"Usuario {user_email} eliminado", "usuario_email": user_email},
+            clinica=user_clinica, objeto_tipo="User", objeto_id=user_id,
+        )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=False, methods=["get"], url_path="limite")
@@ -827,6 +881,11 @@ class UserViewSet(GenericViewSet):
             )
         user.set_password(nueva)
         user.save(update_fields=["password"])
+        registrar_accion(
+            request, "usuario.cambiar_password", user,
+            {"resumen": f"Contraseña actualizada para {user.email}", "usuario_email": user.email},
+            clinica=user.clinica,
+        )
         return Response({"ok": True})
 
     @action(detail=True, methods=["post"], url_path="reenviar_invitacion")
@@ -841,6 +900,16 @@ class UserViewSet(GenericViewSet):
             )
 
         _, url, email_enviado = services.generar_link_invitacion(user)
+
+        registrar_accion(
+            request, "usuario.reenviar_invitacion", user,
+            {
+                "resumen": f"Invitación reenviada a {user.email}",
+                "usuario_email": user.email,
+                "email_enviado": email_enviado,
+            },
+            clinica=user.clinica,
+        )
 
         return Response({
             "ok": True,
@@ -860,6 +929,11 @@ class UserViewSet(GenericViewSet):
                     return error_response(message, code, status.HTTP_403_FORBIDDEN)
         user.activo = True
         user.save(update_fields=["activo"])
+        registrar_accion(
+            request, "usuario.activar", user,
+            {"resumen": f"Usuario {user.email} activado", "usuario_email": user.email},
+            clinica=user.clinica,
+        )
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="desactivar")
@@ -872,4 +946,9 @@ class UserViewSet(GenericViewSet):
             )
         user.activo = False
         user.save(update_fields=["activo"])
+        registrar_accion(
+            request, "usuario.desactivar", user,
+            {"resumen": f"Usuario {user.email} desactivado", "usuario_email": user.email},
+            clinica=user.clinica,
+        )
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)

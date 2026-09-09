@@ -17,8 +17,28 @@ def _paciente_nombre(objeto) -> str | None:
     return getattr(paciente, "nombre_completo", None) or str(paciente)
 
 
-def registrar_accion(request, accion: str, objeto, detalle: dict = None):
-    user = getattr(request, "user", None)
+def registrar_accion(
+    request,
+    accion: str,
+    objeto,
+    detalle: dict = None,
+    *,
+    clinica=None,
+    actor=None,
+    objeto_tipo: str = None,
+    objeto_id: str = None,
+):
+    """Registra una entrada en LogAccion.
+
+    - `clinica` fija el tenant destino explicitamente. Necesario para acciones del
+      superadmin (su `user.clinica` es None) que deben quedar atribuidas a la
+      clinica sobre la que opera, no a "Sistema".
+    - `actor` fuerza el usuario responsable cuando `request.user` no sirve (login,
+      donde el request todavia es anonimo).
+    - `objeto_tipo` / `objeto_id` permiten registrar contra un objeto que ya no
+      tiene pk (p. ej. despues de un delete) o sin instancia.
+    """
+    user = actor if actor is not None else getattr(request, "user", None)
     if user is not None and not getattr(user, "is_authenticated", False):
         user = None
 
@@ -28,12 +48,14 @@ def registrar_accion(request, accion: str, objeto, detalle: dict = None):
         if nombre:
             enriched["paciente_nombre"] = nombre
 
+    clinica_destino = clinica or getattr(user, "clinica", None)
+
     LogAccion.objects.create(
-        clinica=getattr(user, "clinica", None),
+        clinica=clinica_destino,
         usuario=user,
         accion=accion,
-        objeto_tipo=objeto.__class__.__name__,
-        objeto_id=str(objeto.pk),
+        objeto_tipo=objeto_tipo or (objeto.__class__.__name__ if objeto is not None else ""),
+        objeto_id=objeto_id or (str(objeto.pk) if objeto is not None and objeto.pk is not None else ""),
         detalle=enriched,
         ip=get_client_ip(request) if request is not None else None,
     )
