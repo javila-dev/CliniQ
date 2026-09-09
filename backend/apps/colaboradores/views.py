@@ -15,6 +15,7 @@ from apps.colaboradores.serializers import (
     ProfesionalListSerializer,
     colaborador_tiene_citas_futuras,
 )
+from apps.users import services as user_services
 from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
@@ -108,6 +109,19 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         nuevo_activo = serializer.validated_data.get("activo", instance.activo)
         if instance.activo and not nuevo_activo and colaborador_tiene_citas_futuras(instance):
             raise ValidationError({"activo": "No se puede desactivar un colaborador con citas futuras."})
+
+        # Desactivar el colaborador desactiva su usuario (ver
+        # ColaboradorSerializer._sync_user_activo); cambiar su rol puede quitarle
+        # el admin. En ninguno de los dos casos la clínica puede quedar sin
+        # ningún administrador activo.
+        rol_dinamico_nuevo = serializer.validated_data.get("_rol_dinamico")
+        quedara_admin = user_services.es_admin(instance.user) if rol_dinamico_nuevo is None else rol_dinamico_nuevo.slug == "admin"
+        if user_services.dejaria_clinica_sin_admin(
+            instance.user, quedara_activo=bool(nuevo_activo), quedara_admin=quedara_admin
+        ):
+            raise ValidationError(
+                "La clínica quedaría sin ningún administrador activo. Activa o designa otro administrador antes de aplicar este cambio."
+            )
         serializer.save()
 
     def perform_destroy(self, instance):

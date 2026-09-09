@@ -808,6 +808,23 @@ class UserViewSet(GenericViewSet):
         user = self.get_object()
         serializer = UserUpdateSerializer(user, data=request.data, partial=True, context=self.get_serializer_context())
         serializer.is_valid(raise_exception=True)
+
+        va = serializer.validated_data
+        quedara_activo = va.get("activo", user.activo)
+        rol_dinamico_nuevo = va.get("_rol_dinamico")
+        if rol_dinamico_nuevo is not None:
+            quedara_admin = rol_dinamico_nuevo.slug == "admin"
+        elif "rol" in va:
+            quedara_admin = va["rol"] == "admin"
+        else:
+            quedara_admin = services.es_admin(user)
+        if services.dejaria_clinica_sin_admin(user, quedara_activo=quedara_activo, quedara_admin=quedara_admin):
+            return error_response(
+                "La clínica quedaría sin ningún administrador activo. Activa o designa otro administrador antes de aplicar este cambio.",
+                "LAST_ACTIVE_ADMIN",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
         serializer.save()
         registrar_accion(
             request, "usuario.editar", user,
@@ -826,6 +843,12 @@ class UserViewSet(GenericViewSet):
             return Response(
                 {"error": "No puedes eliminarte a ti mismo.", "code": "SELF_DELETE"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if services.dejaria_clinica_sin_admin(user, quedara_activo=False, quedara_admin=False):
+            return error_response(
+                "La clínica quedaría sin ningún administrador activo. Activa o designa otro administrador antes de eliminar a este.",
+                "LAST_ACTIVE_ADMIN",
+                status.HTTP_400_BAD_REQUEST,
             )
         user_id, user_email, user_clinica = str(user.pk), user.email, user.clinica
         try:
@@ -943,6 +966,12 @@ class UserViewSet(GenericViewSet):
             return Response(
                 {"error": "No puedes desactivarte a ti mismo.", "code": "SELF_DEACTIVATE"},
                 status=status.HTTP_400_BAD_REQUEST,
+            )
+        if services.dejaria_clinica_sin_admin(user, quedara_activo=False, quedara_admin=True):
+            return error_response(
+                "La clínica quedaría sin ningún administrador activo. Activa o designa otro administrador antes de desactivar a este.",
+                "LAST_ACTIVE_ADMIN",
+                status.HTTP_400_BAD_REQUEST,
             )
         user.activo = False
         user.save(update_fields=["activo"])

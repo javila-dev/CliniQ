@@ -408,6 +408,40 @@ def contar_usuarios_que_ocupan_cupo(clinica) -> int:
     return usuarios_que_ocupan_cupo(clinica).count()
 
 
+ES_ADMIN_Q = Q(rol="admin") | Q(rol_dinamico__slug="admin")
+
+
+def es_admin(user) -> bool:
+    """True si el usuario tiene rol admin (legacy o dinámico)."""
+    if getattr(user, "rol", None) == "admin":
+        return True
+    rol_dinamico = getattr(user, "rol_dinamico", None)
+    return bool(rol_dinamico and rol_dinamico.slug == "admin")
+
+
+def dejaria_clinica_sin_admin(user, *, quedara_activo: bool, quedara_admin: bool) -> bool:
+    """True si aplicar el cambio dejaría a la clínica de `user` sin ningún
+    administrador activo.
+
+    `quedara_activo` / `quedara_admin` describen el estado del usuario DESPUÉS del
+    cambio (para borrado usar quedara_activo=False). Sólo bloquea cuando `user`
+    es hoy uno de los admins activos que se cuentan; si no cuenta, el cambio no
+    reduce nada y devuelve False.
+    """
+    if not getattr(user, "clinica_id", None):
+        return False
+    admin_ids = set(
+        User.objects.filter(clinica_id=user.clinica_id, activo=True)
+        .filter(ES_ADMIN_Q)
+        .values_list("id", flat=True)
+    )
+    if user.id not in admin_ids:
+        return False
+    if quedara_activo and quedara_admin:
+        return False
+    return len(admin_ids) <= 1
+
+
 @transaction.atomic
 def confirm_password_reset(token: str, new_password: str) -> User:
     reset_token = get_valid_password_reset_token(token)
