@@ -710,7 +710,17 @@ class UserViewSet(GenericViewSet):
         )
         clinica_activa = get_clinica_activa(self.request)
         if clinica_activa is not None:
-            if self.action in {"retrieve", "update", "partial_update", "destroy"}:
+            acciones_sobre_usuario = {
+                "retrieve", "update", "partial_update", "destroy",
+                "reenviar_invitacion", "activar", "desactivar", "cambiar_password",
+            }
+            if self.request.user.rol == "superadmin" and self.action in acciones_sobre_usuario:
+                # El superadmin es global: al operar sobre un usuario concreto por
+                # id (p. ej. reenviar la invitacion del admin de un tenant desde el
+                # panel), no lo limita la clinica que este impersonando. Sin esto,
+                # el filtro por clinica activa provoca un 404 falso.
+                pass
+            elif self.action in {"retrieve", "update", "partial_update", "destroy"}:
                 # Un superadmin no pertenece a ninguna clinica (clinica=None), asi
                 # que el filtro por clinica activa lo excluia de su propio registro
                 # al editar su perfil mientras impersona una clinica (404 falso).
