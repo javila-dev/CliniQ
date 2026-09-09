@@ -39,6 +39,7 @@ from apps.clinicas.serializers import (
     AdminTenantSerializer,
     AdminTenantUpdateSerializer,
     AdminTenantUsuarioSerializer,
+    CrearAdminTenantSerializer,
     CampanaItemSerializer,
     CampanaSerializer,
     ClinicaRecordatorioConfigSerializer,
@@ -288,6 +289,38 @@ class ClinicaViewSet(ModelViewSet):
         return Response(ClinicaSerializer(clinica, context={"request": request}).data, status=status.HTTP_200_OK)
 
 
+def _provisionar_admin_tenant(request, clinica, email):
+    """Crea el usuario admin de una clinica, genera su link de invitacion y lo
+    deja registrado en el historial. Devuelve (user, url, email_enviado).
+
+    El caller es responsable de validar que el email no exista y de envolver la
+    llamada en una transaccion.
+    """
+    from apps.users.rbac import ensure_default_roles_for_clinica
+    from apps.users.models import Rol
+    from apps.users import services as user_services
+
+    ensure_default_roles_for_clinica(clinica)
+    rol_admin = Rol.objects.filter(clinica=clinica, slug="admin", activo=True).first()
+    admin_user = User(email=email, clinica=clinica, rol="admin", rol_dinamico=rol_admin)
+    admin_user.set_unusable_password()
+    admin_user.save()
+
+    _, url, email_enviado = user_services.generar_link_invitacion(admin_user)
+
+    registrar_accion(
+        request, "usuario.crear", admin_user,
+        {
+            "resumen": f"Usuario admin {admin_user.email} creado con invitación",
+            "usuario_email": admin_user.email,
+            "rol": "admin",
+            "email_enviado": email_enviado,
+        },
+        clinica=clinica,
+    )
+    return admin_user, url, email_enviado
+
+
 class AdminTenantViewSet(ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
     permission_classes = [IsSuperAdmin]
@@ -307,6 +340,13 @@ class AdminTenantViewSet(ModelViewSet):
                     distinct=True,
                 ),
                 total_sedes=Count("sedes", filter=Q(sedes__activo=True), distinct=True),
+                # Un tenant sin ningun usuario con rol admin queda "huerfano":
+                # nadie puede administrarlo. Se resuelve con la accion crear-admin.
+                total_admins=Count(
+                    "usuarios",
+                    filter=Q(usuarios__rol="admin") | Q(usuarios__rol_dinamico__slug="admin"),
+                    distinct=True,
+                ),
             )
             .order_by("nombre")
         )
@@ -335,10 +375,6 @@ class AdminTenantViewSet(ModelViewSet):
     }
 
     def create(self, request, *args, **kwargs):
-        from apps.users.rbac import ensure_default_roles_for_clinica
-        from apps.users.models import Rol
-        from apps.users import services as user_services
-
         serializer = AdminTenantCreateSerializer(data=request.data, context=self.get_serializer_context())
         # admin_email es obligatorio y su unicidad se valida aca: si algo falla,
         # no se persiste ninguna clinica (nada de tenants huerfanos sin admin).
@@ -347,37 +383,12 @@ class AdminTenantViewSet(ModelViewSet):
 
         with transaction.atomic():
             clinica = serializer.save()
-            ensure_default_roles_for_clinica(clinica)
             registrar_accion(
                 request, "tenant.crear", clinica,
                 {"resumen": f"Clínica «{clinica.nombre}» creada"},
                 clinica=clinica,
             )
-
-            rol_admin = Rol.objects.filter(clinica=clinica, slug="admin", activo=True).first()
-            admin_user = User(
-                email=admin_email,
-                clinica=clinica,
-                rol="admin",
-                rol_dinamico=rol_admin,
-            )
-            admin_user.set_unusable_password()
-            admin_user.save()
-            enviado = True
-            try:
-                user_services.send_invitation_email(admin_user)
-            except Exception:
-                enviado = False
-            registrar_accion(
-                request, "usuario.crear", admin_user,
-                {
-                    "resumen": f"Usuario admin {admin_user.email} creado con invitación",
-                    "usuario_email": admin_user.email,
-                    "rol": "admin",
-                    "email_enviado": enviado,
-                },
-                clinica=clinica,
-            )
+            _provisionar_admin_tenant(request, clinica, admin_email)
 
         clinica_data = self.get_queryset().get(pk=clinica.pk)
         return Response(AdminTenantSerializer(clinica_data).data, status=status.HTTP_201_CREATED)
@@ -454,6 +465,41 @@ class AdminTenantViewSet(ModelViewSet):
             .order_by("-activo", "last_name", "first_name", "email")
         )
         return Response(AdminTenantUsuarioSerializer(usuarios, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="crear-admin")
+    def crear_admin(self, request, pk=None):
+        """Resuelve un tenant huerfano: crea su usuario admin y devuelve el link
+        de invitacion. No requiere impersonar la clinica."""
+        from django.db.models import Q
+
+        clinica = self.get_object()
+        serializer = CrearAdminTenantSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        email = serializer.validated_data["email"].strip()
+
+        if clinica.usuarios.filter(Q(rol="admin") | Q(rol_dinamico__slug="admin")).exists():
+            return Response(
+                {"error": "La clínica ya tiene un administrador.", "code": "ADMIN_ALREADY_EXISTS"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if User.objects.filter(email__iexact=email).exists():
+            return Response(
+                {"error": "Ya existe un usuario con ese email.", "code": "ADMIN_EMAIL_DUPLICATE"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        with transaction.atomic():
+            user, url, email_enviado = _provisionar_admin_tenant(request, clinica, email)
+
+        return Response(
+            {
+                "ok": True,
+                "usuario": {"id": str(user.id), "email": user.email},
+                "url": url,
+                "email_enviado": email_enviado,
+            },
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["get"], url_path="historial")
     def historial(self, request, pk=None):

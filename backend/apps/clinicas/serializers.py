@@ -1,7 +1,7 @@
 from django.apps import apps
 from rest_framework import serializers
 
-from django.db import transaction
+from django.db import models, transaction
 
 from apps.colaboradores.models import Colaborador
 from apps.core.storage import get_public_url
@@ -792,6 +792,17 @@ class AdminTenantSerializer(serializers.ModelSerializer):
     usuarios_activos = serializers.IntegerField(read_only=True, default=0)
     total_sedes = serializers.IntegerField(read_only=True, default=0)
     admin_usuario_pendiente = serializers.SerializerMethodField()
+    sin_admin = serializers.SerializerMethodField()
+
+    def get_sin_admin(self, obj):
+        # Tenant huerfano: ningun usuario con rol admin. Requiere annotate
+        # total_admins (AdminTenantViewSet.get_queryset); si falta, se calcula.
+        total = getattr(obj, "total_admins", None)
+        if total is None:
+            total = obj.usuarios.filter(
+                models.Q(rol="admin") | models.Q(rol_dinamico__slug="admin")
+            ).count()
+        return total == 0
 
     def get_admin_usuario_pendiente(self, obj):
         # "Pendiente" = admin que aun no uso el link de activacion. El usuario se
@@ -824,6 +835,7 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "usuarios_activos",
             "total_sedes",
             "admin_usuario_pendiente",
+            "sin_admin",
             "created_at",
             "updated_at",
         )
@@ -881,6 +893,12 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
         if queryset.exists():
             raise serializers.ValidationError("Ya existe una clinica con ese NIT.")
         return value
+
+
+class CrearAdminTenantSerializer(serializers.Serializer):
+    """Payload de AdminTenantViewSet.crear_admin: solo el email del futuro admin."""
+
+    email = serializers.EmailField()
 
 
 class AdminTenantUsuarioSerializer(serializers.Serializer):
