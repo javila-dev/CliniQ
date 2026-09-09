@@ -2716,31 +2716,24 @@ Las `formas_pago` también usan reemplazo completo con la misma lógica. Si vien
 - `DELETE` hace soft-delete y solo está permitido si `estado=borrador`
 - cambios de estado válidos:
 
-| Desde       | Hacia        | Quién puede                  |
-|-------------|--------------|------------------------------|
-|   |    |      |
-|   |  |      |
-|   |    |  /        |
+| Desde       | Hacia        | Quién puede            |
+|-------------|--------------|------------------------|
+| `borrador`  | `aceptada`   | `cotizaciones.gestionar` |
+| `borrador`  | `descartada` | `cotizaciones.gestionar` |
 
-Error de transición inválida:
+**Una cotización `aceptada` no tiene transiciones de salida.** No se puede
+devolver a `borrador` ni descartar: ya generó cartera + cuotas y, si la clínica
+lo exige, el compromiso de pago firmado. Un error de aceptación se corrige
+creando una cotización nueva. Para renegociar el plan de pago se usa un
+**acuerdo de pago** (ver sección Cartera).
+
+Error de transición inválida (incluye el intento `aceptada → borrador`):
 
 ```json
 {
-  "error": "Transicion de estado invalida.",
+  "error": "Una cotización aceptada no se puede devolver a borrador.",
   "code": "INVALID_TRANSITION"
 }
-```
-
-Error al revertir a borrador con cobros activos:
-
-```json
-{ "error": "La cotización tiene cobros activos. Anúlos primero.", "code": "COTIZACION_CON_COBROS" }
-```
-
-Error al revertir a borrador con citas agendadas:
-
-```json
-{ "error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS" }
 ```
 
 Error al editar fuera de estados editables:

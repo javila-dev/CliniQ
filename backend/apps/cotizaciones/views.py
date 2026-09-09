@@ -27,15 +27,17 @@ from apps.cotizaciones.serializers import (
     RegistrarEnvioCotizacionSerializer,
 )
 from apps.notificaciones.services import email_provider_config, enviar_documento_whatsapp_webhook, enviar_email
-from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import RequirePermission
 
 logger = logging.getLogger(__name__)
 
 
+# Una cotización aceptada NO vuelve a borrador: ya generó cartera + cuotas y, si
+# la clínica lo exige, el compromiso de pago firmado. Un error de aceptación se
+# corrige creando una cotización nueva.
 TRANSICIONES_COTIZACION = {
     Cotizacion.Estado.BORRADOR: {Cotizacion.Estado.ACEPTADA, Cotizacion.Estado.DESCARTADA},
-    Cotizacion.Estado.ACEPTADA: {Cotizacion.Estado.BORRADOR},
+    Cotizacion.Estado.ACEPTADA: set(),
     Cotizacion.Estado.VENCIDA: set(),
     Cotizacion.Estado.DESCARTADA: set(),
 }
@@ -179,20 +181,13 @@ class CotizacionViewSet(ModelViewSet):
         nuevo_estado = serializer.validated_data["estado"]
         permitidos = set(TRANSICIONES_COTIZACION.get(cotizacion.estado, set()))
         if nuevo_estado not in permitidos:
-            raise ValidationError({"error": "Transicion de estado invalida.", "code": "INVALID_TRANSITION"})
-
-        if nuevo_estado == Cotizacion.Estado.BORRADOR:
-            if not (user_is_tenant_admin(request.user) or request.user.rol == "superadmin"):
-                raise ValidationError({"error": "Solo admin o superadmin pueden revertir a borrador.", "code": "PERMISSION_DENIED"})
-            from apps.cobros.models import Cobro
-            if cotizacion.cobros.exclude(estado=Cobro.Estado.ANULADO).exists():
-                raise ValidationError({"error": "La cotización tiene cobros activos. Anúlos primero.", "code": "COTIZACION_CON_COBROS"})
-            tiene_citas = any(
-                item.citas_no_canceladas() > 0
-                for item in cotizacion.items.filter(activo=True).prefetch_related("citas")
+            detalle = (
+                "Una cotización aceptada no se puede devolver a borrador."
+                if cotizacion.estado == Cotizacion.Estado.ACEPTADA
+                and nuevo_estado == Cotizacion.Estado.BORRADOR
+                else "Transicion de estado invalida."
             )
-            if tiene_citas:
-                raise ValidationError({"error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS"})
+            raise ValidationError({"error": detalle, "code": "INVALID_TRANSITION"})
 
         if nuevo_estado == Cotizacion.Estado.ACEPTADA:
             from apps.consentimientos.models import Consentimiento

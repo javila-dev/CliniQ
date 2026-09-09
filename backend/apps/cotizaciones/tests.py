@@ -162,6 +162,24 @@ class CotizacionFlowTests(TestCase):
         cotizacion.refresh_from_db()
         self.assertEqual(cotizacion.estado, Cotizacion.Estado.ACEPTADA)
 
+    def test_cotizacion_aceptada_no_vuelve_a_borrador(self):
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.ACEPTADA,
+        )
+        for nuevo in (Cotizacion.Estado.BORRADOR, Cotizacion.Estado.DESCARTADA):
+            response = self.client.post(
+                f"/api/v1/cotizaciones/{cotizacion.id}/cambiar_estado/",
+                {"estado": nuevo},
+                format="json",
+            )
+            self.assertEqual(response.status_code, 400, nuevo)
+            self.assertEqual(response.json()["code"], "INVALID_TRANSITION")
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.ACEPTADA)
+
     def test_patch_persiste_periodicidad_en_items(self):
         create_response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
         cotizacion_id = create_response.json()["id"]
