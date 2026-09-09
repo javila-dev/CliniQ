@@ -794,7 +794,14 @@ class AdminTenantSerializer(serializers.ModelSerializer):
     admin_usuario_pendiente = serializers.SerializerMethodField()
 
     def get_admin_usuario_pendiente(self, obj):
-        usuario = obj.usuarios.filter(is_active=False, rol="admin").order_by("date_joined").first()
+        # "Pendiente" = admin que aun no uso el link de activacion. El usuario se
+        # crea con is_active=True desde el inicio, asi que el estado real es
+        # last_login IS NULL (nunca inicio sesion).
+        usuario = (
+            obj.usuarios.filter(rol="admin", last_login__isnull=True)
+            .order_by("date_joined")
+            .first()
+        )
         if usuario is None:
             return None
         return {"id": str(usuario.id), "email": usuario.email}
