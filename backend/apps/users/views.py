@@ -7,7 +7,7 @@ from django.db import transaction
 from django.db.models import Count, Q
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import AuthenticationFailed, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.throttling import SimpleRateThrottle
@@ -151,8 +151,29 @@ class LoginView(APIView):
         serializer = LoginSerializer(data=request.data, context={"request": request})
         try:
             serializer.is_valid(raise_exception=True)
-        except Exception:
+        except (ValidationError, AuthenticationFailed):
+            # Credenciales que no validan. SimpleJWT no distingue "clave
+            # incorrecta" de "cuenta inactiva" (en ambos casos authenticate()
+            # devuelve None), asi que lo resolvemos aca para no mandar a un
+            # usuario recien invitado a "revisar su contrasena" cuando el
+            # problema real es que todavia no activo su acceso.
+            inactiva = self._respuesta_cuenta_inactiva(request.data.get("email"))
+            if inactiva is not None:
+                return inactiva
             return error_response("Credenciales invalidas.", "INVALID_CREDENTIALS", status.HTTP_401_UNAUTHORIZED)
+        except Exception:
+            # Un fallo aca no es "credenciales invalidas": es un error real
+            # armando la respuesta de login (payload de usuario, sesion unica,
+            # acceso a DB). Antes quedaba enmascarado como 401 y era invisible.
+            logger.exception(
+                "Fallo inesperado al iniciar sesion | email=%s",
+                request.data.get("email"),
+            )
+            return error_response(
+                "No pudimos completar el inicio de sesion. Intenta de nuevo en unos minutos.",
+                "LOGIN_FAILED",
+                status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
         user = serializer.user
         inactiva = _clinica_inactiva_response(user)
@@ -165,6 +186,36 @@ class LoginView(APIView):
             clinica=user.clinica, actor=user,
         )
         return Response(serializer.validated_data, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _respuesta_cuenta_inactiva(email):
+        """Si el email corresponde a una cuenta inactiva, devuelve un
+        error_response explicativo; si no, None (para caer en el mensaje
+        generico de credenciales invalidas y no revelar de mas).
+        """
+        email = force_str(email or "").strip()
+        if not email:
+            return None
+        user = (
+            User.objects.filter(email__iexact=email)
+            .filter(Q(is_active=False) | Q(activo=False))
+            .order_by("-is_active")
+            .first()
+        )
+        if user is None:
+            return None
+        if not user.has_usable_password():
+            return error_response(
+                "Tu cuenta todavia no esta activada. Abre el correo de invitacion "
+                "de CliniQ y crea tu contrasena para continuar.",
+                "ACCOUNT_NOT_ACTIVATED",
+                status.HTTP_403_FORBIDDEN,
+            )
+        return error_response(
+            "Tu cuenta esta desactivada. Contacta al administrador de tu clinica.",
+            "ACCOUNT_DISABLED",
+            status.HTTP_403_FORBIDDEN,
+        )
 
 
 class GoogleLoginView(APIView):
