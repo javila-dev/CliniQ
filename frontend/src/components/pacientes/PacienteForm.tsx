@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Lock } from 'lucide-react'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -79,6 +79,9 @@ interface PacienteFormProps {
   submitLabel?: string
   initialNombre?: string
   compact?: boolean
+  /** false → los datos sensibles (documento, teléfono, email, dirección, fecha de
+   *  nacimiento) llegan enmascarados; se muestran de solo lectura y no se envían. */
+  canEditSensitive?: boolean
 }
 
 // Campo reutilizable: label + input + error
@@ -107,8 +110,11 @@ function OptionalSelect({ value, onChange, placeholder = '—', children }: {
   )
 }
 
-export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, compact = false }: PacienteFormProps) {
+export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, compact = false, canEditSensitive = true }: PacienteFormProps) {
   const [tab, setTab] = useState('basico')
+
+  // Solo al editar: si el usuario no puede ver datos sensibles, llegan enmascarados.
+  const lockSensitive = defaultValues != null && !canEditSensitive
 
   const detectado = defaultValues?.telefono ? detectarPais(defaultValues.telefono) : null
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
@@ -141,7 +147,7 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
   const autorizaDatos = watch('autoriza_datos')
 
   const handleFormSubmit = async (values: FormValues) => {
-    await onSubmit({
+    const payload: CreatePacienteRequest = {
       nombres: values.nombres, apellidos: values.apellidos,
       tipo_documento: values.tipo_documento, numero_documento: values.numero_documento,
       sexo: values.sexo, fecha_nacimiento: values.fecha_nacimiento || undefined,
@@ -159,12 +165,30 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
       nombre_responsable: values.nombre_responsable || undefined,
       parentesco_responsable: values.parentesco_responsable || undefined,
       telefono_responsable: values.telefono_responsable || undefined,
-    })
+    }
+
+    if (lockSensitive) {
+      // El usuario nunca vio el valor real: no lo reenviamos (el backend también lo ignora).
+      for (const campo of ['numero_documento', 'fecha_nacimiento', 'telefono', 'email', 'direccion', 'ciudad', 'barrio', 'telefono_responsable'] as const) {
+        delete (payload as unknown as Record<string, unknown>)[campo]
+      }
+    }
+
+    await onSubmit(payload)
   }
 
   // ── Bloque de campos básicos (reutilizado en compact y en tab 1) ──────────────
   const BasicFields = (
     <div className="space-y-3">
+      {lockSensitive && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+          <Lock className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+          <p className="text-xs text-amber-800">
+            No tienes permiso para ver datos sensibles del paciente. Documento, teléfono, correo,
+            dirección y fecha de nacimiento se muestran enmascarados y no se pueden editar.
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Nombres *" error={errors.nombres?.message}>
           <Input className="h-9" placeholder="Ana María" {...register('nombres')} />
@@ -206,18 +230,19 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
             className="h-9"
             inputMode={DOCS_NUMERICOS.includes(tipoDoc) ? 'numeric' : 'text'}
             placeholder="1020304050"
+            disabled={lockSensitive}
             {...register('numero_documento')}
           />
         </Field>
         <Field label="Fecha de nacimiento">
-          <Input className="h-9" type="date" {...register('fecha_nacimiento')} />
+          <Input className="h-9" type="date" disabled={lockSensitive} {...register('fecha_nacimiento')} />
         </Field>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <Field label="Teléfono *" error={errors.telefono?.message}>
           <div className="flex h-9">
-            <Select value={codigoPais} onValueChange={setCodigoPais}>
+            <Select value={codigoPais} onValueChange={setCodigoPais} disabled={lockSensitive}>
               <SelectTrigger className="h-9 w-[90px] shrink-0 rounded-r-none border-r-0 text-sm px-2">
                 <SelectValue>
                   {(() => {
@@ -242,12 +267,13 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
               className="h-9 rounded-l-none flex-1 min-w-0"
               type="tel"
               placeholder="3001234567"
+              disabled={lockSensitive}
               {...register('telefono')}
             />
           </div>
         </Field>
         <Field label="Correo electrónico" error={errors.email?.message}>
-          <Input className="h-9" type="email" placeholder="paciente@email.com" {...register('email')} />
+          <Input className="h-9" type="email" placeholder="paciente@email.com" disabled={lockSensitive} {...register('email')} />
         </Field>
         <Field label="Canal de confirmación *">
           <Controller name="canal_confirmacion" control={control} render={({ field }) => (
@@ -321,15 +347,15 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
         <TabsContent value="personal" className="pt-4 space-y-3">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="Dirección" className="sm:col-span-2">
-              <Input className="h-9" placeholder="Calle 45 # 12-30 Apto 201" {...register('direccion')} />
+              <Input className="h-9" placeholder="Calle 45 # 12-30 Apto 201" disabled={lockSensitive} {...register('direccion')} />
             </Field>
             <Field label="Barrio">
-              <Input className="h-9" placeholder="El Poblado" {...register('barrio')} />
+              <Input className="h-9" placeholder="El Poblado" disabled={lockSensitive} {...register('barrio')} />
             </Field>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="Ciudad / Municipio">
-              <Input className="h-9" placeholder="Medellín" {...register('ciudad')} />
+              <Input className="h-9" placeholder="Medellín" disabled={lockSensitive} {...register('ciudad')} />
             </Field>
             <Field label="Estado civil">
               <Controller name="estado_civil" control={control} render={({ field }) => (
@@ -386,7 +412,7 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
                 <Input className="h-9" placeholder="Esposo, Madre…" {...register('parentesco_responsable')} />
               </Field>
               <Field label="Teléfono del responsable">
-                <Input className="h-9" type="tel" placeholder="3109876543" {...register('telefono_responsable')} />
+                <Input className="h-9" type="tel" placeholder="3109876543" disabled={lockSensitive} {...register('telefono_responsable')} />
               </Field>
             </div>
           </div>

@@ -88,6 +88,49 @@ services:
     networks:
       - cliniq_net
 
+  face-service:
+    build:
+      context: ./face-service
+      dockerfile: Dockerfile
+    container_name: cliniq_face_service
+    restart: unless-stopped
+    environment:
+      INTERNAL_API_KEY: ${FACE_SERVICE_API_KEY}
+      MODEL_NAME: ${FACE_MODEL_NAME:-buffalo_s}
+      MODEL_ROOT: /app/models
+    volumes:
+      - face_models:/app/models
+    expose:
+      - "8001"
+    mem_limit: 2g
+    cpus: "2.0"
+    networks:
+      - cliniq_net
+
+  playwright:
+    image: mcr.microsoft.com/playwright:v1.48.0-jammy
+    container_name: cliniq_playwright
+    profiles:
+      - e2e
+    working_dir: /e2e
+    volumes:
+      - ./e2e:/e2e
+    environment:
+      BASE_URL: http://frontend:3000
+      BACKEND_URL: http://backend:8000
+      TEST_EMAIL_ADMIN: ${TEST_EMAIL_ADMIN}
+      TEST_PASSWORD_ADMIN: ${TEST_PASSWORD_ADMIN}
+      TEST_EMAIL_PROFESIONAL: ${TEST_EMAIL_PROFESIONAL}
+      TEST_PASSWORD_PROFESIONAL: ${TEST_PASSWORD_PROFESIONAL}
+      TEST_EMAIL_RECEPCION: ${TEST_EMAIL_RECEPCION}
+      TEST_PASSWORD_RECEPCION: ${TEST_PASSWORD_RECEPCION}
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - cliniq_net
+    command: sh -c "npm install --prefer-offline && npx playwright install chromium && npx playwright test"
+
 networks:
   cliniq_net:
     driver: bridge
@@ -96,3 +139,4 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  face_models:

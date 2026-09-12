@@ -8,6 +8,7 @@ import { agendaApi } from '@/lib/api/agenda'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
+import { mensajeErrorDeuda } from '@/lib/deuda'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -89,9 +90,11 @@ export function PagoContent({ cita, soloRegistrar = false, onInicioExitoso, onRe
         return
       }
       setError(
-        soloRegistrar || onPagoRegistrado
-          ? 'No se pudo registrar el cobro. Intenta de nuevo.'
-          : 'No se pudo iniciar la atención. Intenta de nuevo.'
+        mensajeErrorDeuda(err) ?? (
+          soloRegistrar || onPagoRegistrado
+            ? 'No se pudo registrar el cobro. Intenta de nuevo.'
+            : 'No se pudo iniciar la atención. Intenta de nuevo.'
+        )
       )
     },
   })

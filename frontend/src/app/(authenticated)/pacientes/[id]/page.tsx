@@ -6,7 +6,7 @@ import {
   ArrowLeft, Pencil, FileText, Calendar, ClipboardList, Plus,
   ChevronRight, Receipt, ShieldCheck, ExternalLink, CheckCircle,
   Loader2, ClipboardCheck, Wallet, ShieldCheck as ShieldCheckIcon,
-  Camera, AlertTriangle, X, RefreshCw,
+  Camera, AlertTriangle, X, RefreshCw, Lock,
 } from 'lucide-react'
 import type { CheckInRecord } from '@/lib/api/pacientes'
 import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
@@ -132,7 +132,7 @@ function AsistenciaFila({ cita, pacienteId }: { cita: Cita; pacienteId: string }
   )
 }
 
-function Seccion({ title, children }: { title: string; children: React.ReactNode }) {
+function Seccion({ title, children, hint }: { title: string; children: React.ReactNode; hint?: React.ReactNode }) {
   return (
     <Card>
       <CardHeader className="pb-3 pt-4 px-5">
@@ -141,6 +141,7 @@ function Seccion({ title, children }: { title: string; children: React.ReactNode
             {title}
           </span>
         </CardTitle>
+        {hint}
       </CardHeader>
       <CardContent className="pt-0 px-5 pb-5">
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-4">
@@ -217,7 +218,7 @@ export default function PacienteDetailPage({ params }: Props) {
   if (isError || !p) return <ErrorState onRetry={refetch} />
 
   const initials = `${p.nombres.charAt(0)}${p.apellidos.charAt(0)}`.toUpperCase()
-  const edad = p.fecha_nacimiento ? calcularEdad(p.fecha_nacimiento) : null
+  const edad = p.edad ?? (p.fecha_nacimiento ? calcularEdad(p.fecha_nacimiento) : null)
   const direccionCompleta = [p.direccion, p.barrio, p.ciudad].filter(Boolean).join(', ')
 
   const cotCount = cotizacionesData?.results?.length ?? 0
@@ -313,7 +314,15 @@ export default function PacienteDetailPage({ params }: Props) {
 
         {/* Columna principal */}
         <div className="lg:col-span-2 space-y-4">
-          <Seccion title="Identificación y contacto">
+          <Seccion
+            title="Identificación y contacto"
+            hint={p.datos_sensibles_ocultos ? (
+              <p className="flex items-center gap-1.5 text-xs text-amber-600 mt-1">
+                <Lock className="h-3 w-3 shrink-0" />
+                Datos enmascarados — requiere el permiso “Ver datos sensibles del paciente”.
+              </p>
+            ) : undefined}
+          >
             <Dato label="Tipo de documento" value={p.tipo_documento} />
             <Dato label="Número de documento" value={p.numero_documento} />
             <Dato label="Sexo" value={SEXO_LABEL[p.sexo] ?? p.sexo} />

@@ -27,17 +27,57 @@ export interface AdminTenant {
   total_sedes: number
   // usuario admin inicial creado con admin_email; null si no se creó o ya activó
   admin_usuario_pendiente: { id: string; email: string } | null
+  // true si la clínica no tiene ningún usuario con rol admin (tenant huérfano)
+  sin_admin: boolean
   created_at: string
   updated_at: string
 }
+
+export interface CrearAdminResult {
+  ok: boolean
+  usuario: { id: string; email: string }
+  url: string
+  email_enviado: boolean
+}
+
+export type AdminTenantUsuarioEstado = 'activo' | 'pendiente' | 'inactivo'
+
+export interface AdminTenantUsuario {
+  id: string
+  email: string
+  nombre_completo: string
+  rol: string
+  rol_nombre: string
+  activo: boolean
+  last_login: string | null
+  date_joined: string
+  estado: AdminTenantUsuarioEstado
+}
+
+export interface AdminTenantLogAccion {
+  id: string
+  clinica: string | null
+  clinica_nombre: string | null
+  usuario: string | null
+  usuario_email: string | null
+  usuario_nombre: string
+  accion: string
+  objeto_tipo: string
+  objeto_id: string
+  detalle: Record<string, unknown> & { resumen?: string; cambios?: Record<string, { antes: unknown; despues: unknown }> }
+  ip: string | null
+  created_at: string
+}
+
+export type AdminTenantHistorialGrupo = 'todo' | 'gestion' | 'accesos'
 
 export interface CreateTenantRequest {
   nombre: string
   nit?: string
   email?: string
   telefono?: string
-  plan?: string        // uuid
-  admin_email?: string // crea usuario admin inicial
+  plan?: string       // uuid
+  admin_email: string // obligatorio: el tenant siempre nace con su admin
 }
 
 export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email'>> & {
@@ -82,4 +122,27 @@ export interface GrupoZonas {
   diagramas: GrupoZonasDiagrama[]
   created_at: string
   updated_at: string
+}
+
+// ── Usuarios de consola (superadmin / equipo interno, sin clínica) ──────────
+
+export interface ConsoleUsuario {
+  id: string
+  email: string
+  first_name: string
+  last_name: string
+  nombre_completo: string
+  es_superadmin: boolean
+  is_staff: boolean
+  activo: boolean
+  invitacion_pendiente: boolean
+  last_login: string | null
+  created_at: string
+}
+
+export interface CreateConsoleUsuarioRequest {
+  email: string
+  first_name: string
+  last_name?: string
+  es_superadmin: boolean
 }

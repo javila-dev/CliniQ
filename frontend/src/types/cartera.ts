@@ -13,6 +13,43 @@ export interface CuotaCartera {
   fecha_pago: string | null
   medio_pago: string
   observaciones: string
+  anulada?: boolean
+  acuerdo_numero?: number | null   // != null → cuota del plan de un acuerdo de pago
+}
+
+export type AcuerdoEstado = 'pendiente_firma' | 'vigente' | 'anulado' | 'requiere_revision'
+
+export interface AcuerdoDocumento {
+  id: string
+  estado: string
+  firmado_en: string | null
+  documenso_signing_token: string
+  documenso_documento_id: string
+}
+
+export interface CuotaPropuestaInput {
+  tipo: string
+  descripcion: string
+  valor_esperado: string
+  fecha_esperada: string
+}
+
+export interface AcuerdoPago {
+  id: string
+  cartera: string
+  numero: number
+  motivo: string
+  estado: AcuerdoEstado
+  estado_display: string
+  saldo_al_proponer: string
+  plan_propuesto: CuotaPropuestaInput[]
+  vigente_desde: string | null
+  creado_por_nombre: string | null
+  motivo_anulacion: string
+  anulado_en: string | null
+  documento: AcuerdoDocumento | null
+  cuotas_nuevas: CuotaCartera[]
+  created_at: string
 }
 
 export interface Cartera {
@@ -34,6 +71,8 @@ export interface Cartera {
   es_migracion?: boolean
   created_at: string
   cuotas?: CuotaCartera[]
+  acuerdos?: AcuerdoPago[]
+  acuerdo_pendiente?: AcuerdoPago | null
 }
 
 export interface CuotaVencida {

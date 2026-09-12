@@ -18,6 +18,7 @@ export interface Paciente {
   numero_documento: string
   sexo: Sexo
   fecha_nacimiento: string | null
+  edad?: number | null
   telefono: string
   email: string | null
   canal_confirmacion: CanalConfirmacion
@@ -25,6 +26,10 @@ export interface Paciente {
   activo: boolean
   created_at: string
   updated_at: string
+
+  /** true si la API enmascaró documento/teléfono/email/dirección/fecha de nacimiento
+   *  por falta del permiso pacientes.datos_sensibles.ver */
+  datos_sensibles_ocultos?: boolean
 
   // H5.2 — campos extendidos
   direccion?: string

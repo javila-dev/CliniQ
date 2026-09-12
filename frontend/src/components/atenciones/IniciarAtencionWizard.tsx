@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Check, CheckCircle2, Maximize2, Minimize2, X, Loader2 } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { AlertTriangle, Check, CheckCircle2, Maximize2, Minimize2, X, Loader2 } from 'lucide-react'
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import { agendaApi } from '@/lib/api/agenda'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { textoDeudaBloqueante } from '@/lib/deuda'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
 import { ConsentimientoFirmaContent } from './ConsentimientoFirmaContent'
 import { PagoContent } from './PagoContent'
@@ -35,6 +37,7 @@ interface Props {
 
 export function IniciarAtencionWizard({ citaId, onClose }: Props) {
   const queryClient = useQueryClient()
+  const router = useRouter()
   const [maximized, setMaximized] = useState(false)
   const [firmandoConsentimiento, setFirmandoConsentimiento] = useState(false)
   const [pagoRegistrado, setPagoRegistrado] = useState(false)
@@ -304,7 +307,32 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
             </div>
           )}
 
-          {allDone && !viewingStep ? (
+          {cita?.deuda_info ? (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
+              <div className="h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">
+                <AlertTriangle className="h-8 w-8 text-red-600" />
+              </div>
+              <div className="max-w-md">
+                <p className="text-lg font-semibold text-red-700">Atención bloqueada por mora</p>
+                <p className="text-sm text-muted-foreground mt-1.5">
+                  {textoDeudaBloqueante(cita.deuda_info)} No se puede iniciar la atención hasta
+                  registrar el pago o aprobar una excepción desde <span className="font-medium text-foreground">Cartera</span>.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    router.push(`/cartera?paciente=${cita.paciente}`)
+                    handleOpenChange(false)
+                  }}
+                >
+                  Ver cartera del paciente
+                </Button>
+                <Button variant="ghost" onClick={() => handleOpenChange(false)}>Cerrar</Button>
+              </div>
+            </div>
+          ) : allDone && !viewingStep ? (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
               <div className="h-16 w-16 rounded-full bg-green-100 flex items-center justify-center">
                 <CheckCircle2 className="h-8 w-8 text-green-600" />

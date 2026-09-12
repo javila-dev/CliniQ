@@ -16,11 +16,13 @@ interface CompromisoPagoFirmaContentProps {
   initialSigningToken?: string | null
   onFirmado?: () => void
   onCancel?: () => void
+  /** Nombre del documento en la UI. Por defecto "Compromiso de pago". */
+  documentoLabel?: string
 }
 
 type Modo = 'elegir' | 'firmar' | 'enviado'
 
-export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningToken, onFirmado, onCancel }: CompromisoPagoFirmaContentProps) {
+export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningToken, onFirmado, onCancel, documentoLabel = 'Compromiso de pago' }: CompromisoPagoFirmaContentProps) {
   const queryClient = useQueryClient()
   const [modo, setModo] = useState<Modo>(initialSigningToken ? 'firmar' : 'elegir')
   const [signingToken, setSigningToken] = useState<string | null>(initialSigningToken ?? null)
@@ -71,7 +73,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
         setFirmado(true)
         queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
         onFirmado?.()
-        toast.success('Firma confirmada', 'El paciente ya firmó el compromiso de pago.')
+        toast.success('Firma confirmada', `El paciente ya firmó el ${documentoLabel.toLowerCase()}.`)
       } else {
         toast({ title: 'Todavía sin firmar', description: 'El paciente aún no ha firmado. Espera un momento e inténtalo de nuevo.' })
       }
@@ -140,7 +142,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
       // no-op — el webhook de Documenso confirmará el estado igualmente
     }
     queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
-    toast.success('Compromiso de pago firmado', 'El paciente firmó el documento.')
+    toast.success(`${documentoLabel} firmado`, 'El paciente firmó el documento.')
     onFirmado?.()
   }
 
@@ -174,16 +176,16 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
         {firmado ? (
           <div className="flex flex-col items-center justify-center gap-3 py-12 text-center h-full">
             <CheckCircle2 className="h-10 w-10 text-green-600" />
-            <p className="text-sm font-medium">Compromiso de pago firmado</p>
+            <p className="text-sm font-medium">{documentoLabel} firmado</p>
             <p className="text-xs text-muted-foreground max-w-xs">El paciente firmó el documento correctamente.</p>
           </div>
         ) : modo === 'elegir' ? (
           <div className="flex flex-col items-center gap-4 pt-[8%] text-center">
             <FileSignature className="h-10 w-10 text-muted-foreground" />
             <div className="space-y-1">
-              <p className="text-sm font-medium">Compromiso de pago</p>
+              <p className="text-sm font-medium">{documentoLabel}</p>
               <p className="text-xs text-muted-foreground max-w-xs">
-                ¿Cómo va a firmar el paciente el compromiso de pago?
+                ¿Cómo va a firmar el paciente el {documentoLabel.toLowerCase()}?
               </p>
             </div>
             <div className="flex flex-col gap-2 w-full max-w-xs pt-2">
@@ -248,9 +250,9 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
           <div className="flex flex-col items-center gap-4 pt-[10%] text-center">
             <FileSignature className="h-10 w-10 text-muted-foreground" />
             <div className="space-y-1">
-              <p className="text-sm font-medium">Compromiso de pago</p>
+              <p className="text-sm font-medium">{documentoLabel}</p>
               <p className="text-xs text-muted-foreground max-w-xs">
-                El paciente debe firmar el compromiso de pago para completar la aceptación.
+                El paciente debe firmar el {documentoLabel.toLowerCase()}.
               </p>
             </div>
             <Button onClick={handleGenerar} disabled={generando}>

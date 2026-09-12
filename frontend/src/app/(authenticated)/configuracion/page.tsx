@@ -20,7 +20,7 @@ interface ConfigItem {
   icon: React.ElementType
   color: string     // color del ícono
   bg: string        // fondo del ícono
-  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log' | 'caja_cajas_gestionar'
+  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log' | 'caja_cajas_gestionar' | 'servicios_ver' | 'sedes_ver' | 'consentimientos_plantillas_ver'
 }
 
 interface ConfigSection {
@@ -50,7 +50,7 @@ const SECTIONS: ConfigSection[] = [
         icon: Building2,
         color: 'text-violet-500',
         bg: 'bg-violet-50',
-        perm: 'clinicas_editar',
+        perm: 'sedes_ver',
       },
     ],
   },
@@ -98,7 +98,7 @@ const SECTIONS: ConfigSection[] = [
         icon: Stethoscope,
         color: 'text-emerald-600',
         bg: 'bg-emerald-50',
-        perm: 'clinicas_editar',
+        perm: 'servicios_ver',
       },
       {
         href: '/configuracion/tratamientos',
@@ -107,7 +107,7 @@ const SECTIONS: ConfigSection[] = [
         icon: Package2,
         color: 'text-cyan-600',
         bg: 'bg-cyan-50',
-        perm: 'clinicas_editar',
+        perm: 'servicios_ver',
       },
     ],
   },
@@ -122,7 +122,7 @@ const SECTIONS: ConfigSection[] = [
         icon: FileSignature,
         color: 'text-indigo-500',
         bg: 'bg-indigo-50',
-        perm: 'clinicas_editar',
+        perm: 'consentimientos_plantillas_ver',
       },
       {
         href: '/configuracion/cartera',
@@ -244,6 +244,9 @@ export default function ConfiguracionPage() {
       if (item.perm === 'roles_ver')     return hasPermission(user, PERM.ROLES_VER)
       if (item.perm === 'core_ver_log')  return hasPermission(user, PERM.CORE_VER_LOG_ACCIONES)
       if (item.perm === 'caja_cajas_gestionar') return hasPermission(user, PERM.CAJA_CAJAS_GESTIONAR)
+      if (item.perm === 'servicios_ver')  return hasPermission(user, PERM.SERVICIOS_VER)
+      if (item.perm === 'sedes_ver')      return hasPermission(user, PERM.SEDES_VER)
+      if (item.perm === 'consentimientos_plantillas_ver') return hasPermission(user, PERM.CONSENTIMIENTOS_PLANTILLAS_VER)
       return hasPermission(user, PERM.CLINICAS_EDITAR)
     }).map((item) => item.href)
   )

@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { toast } from '@/hooks/use-toast'
 import { ColaboradorSheet } from '@/components/colaboradores/ColaboradorSheet'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
@@ -339,6 +341,7 @@ export default function PersonalPage() {
   const [filtroEstado, setFiltroEstado] = useState('activos')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Colaborador | null>(null)
+  const [toggleTarget, setToggleTarget] = useState<Colaborador | null>(null)
   const debouncedSearch = useDebounce(search, 350)
 
   const handleImpersonate = async (colaborador: Colaborador) => {
@@ -374,6 +377,18 @@ export default function PersonalPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
       qc.invalidateQueries({ queryKey: ['mi-plan'] })
+      setToggleTarget(null)
+    },
+    onError: (e: any) => {
+      const data = e?.response?.data
+      const msg = typeof data?.error === 'string'
+        ? data.error
+        : typeof data?.activo?.[0] === 'string'
+          ? data.activo[0]
+          : typeof data?.[0] === 'string'
+            ? data[0]
+            : 'Intenta de nuevo.'
+      toast.error('No se pudo cambiar el estado', msg)
     },
   })
 
@@ -392,6 +407,7 @@ export default function PersonalPage() {
         title="Equipo"
         description="Gestiona los colaboradores y usuarios de tu clínica."
         backHref="/configuracion"
+        helpSlug="crear-usuarios-y-asignar-roles"
       />
 
       {/* Sub-header */}
@@ -507,7 +523,7 @@ export default function PersonalPage() {
               colaborador={c}
               canActivate={puedeAgregar}
               onEdit={() => handleEdit(c)}
-              onToggle={() => toggleMut.mutate({ id: c.id, activo: !c.activo })}
+              onToggle={() => setToggleTarget(c)}
               onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}
             />
           ))
@@ -519,6 +535,21 @@ export default function PersonalPage() {
         onOpenChange={(v) => { setSheetOpen(v); if (!v) setEditTarget(null) }}
         colaborador={editTarget}
         puedeAgregar={puedeAgregar}
+      />
+
+      <ConfirmDialog
+        open={!!toggleTarget}
+        onOpenChange={(v) => { if (!v && !toggleMut.isPending) setToggleTarget(null) }}
+        title={toggleTarget?.activo ? 'Desactivar usuario' : 'Activar usuario'}
+        description={
+          toggleTarget?.activo
+            ? `${toggleTarget?.nombre_completo} perderá el acceso a la clínica hasta que se reactive.`
+            : `Se restablecerá el acceso de ${toggleTarget?.nombre_completo} a la clínica.`
+        }
+        confirmLabel={toggleTarget?.activo ? 'Desactivar' : 'Activar'}
+        variant={toggleTarget?.activo ? 'destructive' : 'default'}
+        loading={toggleMut.isPending}
+        onConfirm={() => toggleTarget && toggleMut.mutate({ id: toggleTarget.id, activo: !toggleTarget.activo })}
       />
     </div>
   )

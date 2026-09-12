@@ -30,8 +30,7 @@ import { pacientesApi } from '@/lib/api/pacientes'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
-import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
-import { cobrosApi } from '@/lib/api/cobros'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
 import type { Cotizacion, EstadoCotizacion, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento } from '@/types/clinicas'
@@ -312,7 +311,6 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const esNueva = !cotizacion
   const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
-  const isAdmin = isAdminOrSuperAdmin(user)
   // Sin cotizaciones.gestionar el formulario es de solo lectura (p. ej. recepción,
   // que tiene cotizaciones.ver pero no puede crear/editar). El backend responde 403
   // a create/patch/cambiar_estado, así que aquí evitamos la UI editable + submit fallido.
@@ -340,15 +338,6 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
 
   const { sedes } = useUserSedes()
 
-  const { data: cobrosData } = useQuery({
-    queryKey: ['cobros-cotizacion', cotizacion?.id],
-    queryFn: () => cobrosApi.list({ cotizacion: cotizacion!.id }),
-    enabled: !!cotizacion?.id && cotizacion?.estado === 'aceptada' && isAdmin,
-  })
-  const tieneCobrosActivos = (cobrosData?.results ?? []).some((c) => c.estado !== 'anulado')
-  const totalCitasAgendadas = cotizacion?.items.reduce((s, i) => s + (i.citas_agendadas ?? 0), 0) ?? 0
-  const puedeRevertirABorrador = isAdmin && !tieneCobrosActivos && totalCitasAgendadas === 0
-
   const pagosRef = useRef<HTMLDivElement>(null)
   const { register, control, handleSubmit, reset, setValue, getValues, setError, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -368,6 +357,30 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
 
   const items = useWatch({ control, name: 'items' })
   const validez = useWatch({ control, name: 'validez_dias' })
+  const sedeSeleccionada = useWatch({ control, name: 'sede' })
+
+  // Precios de campaña vigentes para la sede elegida. El backend solo calcula
+  // precio_campana_disponible sobre ítems ya guardados, así que aquí lo
+  // resolvemos en cliente para que el banner "precio especial" y el mínimo
+  // permitido funcionen también al crear/editar en borrador.
+  const puedeEditarItems = canGestionar && (esNueva || cotizacion?.estado === 'borrador')
+  const { data: preciosCampana } = useQuery({
+    queryKey: ['precios-campana', sedeSeleccionada ?? null],
+    queryFn: () => cotizacionesApi.preciosCampana(sedeSeleccionada),
+    enabled: puedeEditarItems,
+    staleTime: 5 * 60_000,
+  })
+
+  const campanaDeCatalogo = (
+    tipo: TipoItemCotizacion | undefined,
+    tratamientoId: string | null | undefined,
+    procedimientoId: string | null | undefined,
+  ) => {
+    if (!preciosCampana) return null
+    if (tipo === 'tratamiento' && tratamientoId) return preciosCampana.tratamientos[tratamientoId] ?? null
+    if (tipo === 'procedimiento' && procedimientoId) return preciosCampana.procedimientos[procedimientoId] ?? null
+    return null
+  }
 
   const subtotalBruto = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1), 0)
   const totalDescuentos = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1) * ((i.descuento_porcentaje || 0) / 100), 0)
@@ -405,6 +418,23 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     }
   }, [cotizacion, reset])
 
+  // Al cargar los precios de campaña (o al cambiar de sede) re-sincroniza los
+  // ítems ya agregados: los recién seleccionados los cubre onTratamiento/
+  // onProcedimientoChange.
+  useEffect(() => {
+    if (!preciosCampana) return
+    getValues('items').forEach((it, idx) => {
+      const camp = campanaDeCatalogo(it.tipo, it.tratamiento, it.procedimiento)
+      const nuevoPrecio = camp?.precio_campana ?? null
+      const nuevoNombre = camp?.campana_nombre ?? null
+      if ((it.precio_campana_disponible ?? null) !== nuevoPrecio) {
+        setValue(`items.${idx}.precio_campana_disponible`, nuevoPrecio)
+        setValue(`items.${idx}.campana_nombre`, nuevoNombre)
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preciosCampana])
+
   function onTratamientoChange(idx: number, t: TratamientoCatalogo) {
     setValue(`items.${idx}.tipo`, 'tratamiento')
     setValue(`items.${idx}.tratamiento`, t.id)
@@ -412,6 +442,9 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     const sesionesLabel = t.total_sesiones > 0 ? ` (${t.total_sesiones} sesiones)` : ''
     setValue(`items.${idx}.descripcion`, `${t.nombre}${sesionesLabel}`)
     setValue(`items.${idx}.num_citas`, 1)
+    const camp = preciosCampana?.tratamientos[t.id] ?? null
+    setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
+    setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
     if (t.precio_estimado) setValue(`items.${idx}.valor_unitario`, parseFloat(t.precio_estimado))
   }
 
@@ -420,6 +453,9 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     setValue(`items.${idx}.procedimiento`, p.id)
     setValue(`items.${idx}.tratamiento`, null)
     setValue(`items.${idx}.descripcion`, p.nombre)
+    const camp = preciosCampana?.procedimientos[p.id] ?? null
+    setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
+    setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
     const precio = p.precio_base ?? p.precio_referencia
     if (precio) setValue(`items.${idx}.valor_unitario`, parseFloat(precio))
   }
@@ -701,34 +737,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               >
                 {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Aceptar'}
               </Button>
-            )}
-            {cotizacion?.estado === 'aceptada' && isAdmin && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="text-amber-600 border-amber-200 hover:bg-amber-50 hover:text-amber-700 disabled:pointer-events-none"
-                        disabled={!puedeRevertirABorrador || cambiando}
-                        onClick={() => cambiarEstado('borrador')}
-                      >
-                        {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Devolver a borrador'}
-                      </Button>
-                    </span>
-                  </TooltipTrigger>
-                  {!puedeRevertirABorrador && (
-                    <TooltipContent side="bottom" className="max-w-xs text-xs">
-                      {totalCitasAgendadas > 0
-                        ? `Tiene ${totalCitasAgendadas} cita${totalCitasAgendadas > 1 ? 's' : ''} agendada${totalCitasAgendadas > 1 ? 's' : ''}. Cancélalas primero.`
-                        : tieneCobrosActivos
-                          ? 'Tiene cobros registrados activos. Anúlalos primero.'
-                          : 'No se puede devolver a borrador.'}
-                    </TooltipContent>
-                  )}
-                </Tooltip>
-              </TooltipProvider>
             )}
             {!soloLectura && (
               <Button

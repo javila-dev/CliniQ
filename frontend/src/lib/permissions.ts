@@ -9,7 +9,7 @@ export const PERM = {
   CORE_VER_LOG_ACCIONES:     'core.ver_log_acciones',
 
   // Reportes / dashboard
-  REPORTES_VER:              'reportes.ver',
+  REPORTES_VER:              'reportes.ver_operativos',
   REPORTES_VER_FINANCIEROS:  'reportes.ver_financieros',
 
   // Agenda
@@ -24,6 +24,7 @@ export const PERM = {
   PACIENTES_VER:             'pacientes.ver',
   PACIENTES_CREAR:           'pacientes.crear',
   PACIENTES_EDITAR:          'pacientes.editar',
+  PACIENTES_DATOS_SENSIBLES_VER: 'pacientes.datos_sensibles.ver',
 
   // Historia clínica
   HISTORIA_VER:              'historia.ver',
@@ -41,9 +42,10 @@ export const PERM = {
 
   // Consentimientos
   CONSENTIMIENTOS_VER:       'consentimientos.ver',
-  CONSENTIMIENTOS_GESTIONAR: 'consentimientos.gestionar',
+  CONSENTIMIENTOS_GESTIONAR: 'consentimientos.plantillas.gestionar',
   CONSENTIMIENTOS_GENERAR:   'consentimientos.generar',
   CONSENTIMIENTOS_REVOCAR:   'consentimientos.revocar',
+  CONSENTIMIENTOS_PLANTILLAS_VER: 'consentimientos.plantillas.ver',
 
   // Inventario
   INVENTARIO_VER:            'inventario.ver',
@@ -69,10 +71,19 @@ export const PERM = {
   CLINICAS_VER:              'clinicas.ver',
   CLINICAS_EDITAR:           'clinicas.editar',
 
+  // Servicios / catálogo (procedimientos, tratamientos)
+  SERVICIOS_VER:             'servicios.ver',
+  SERVICIOS_GESTIONAR:       'servicios.gestionar',
+
+  // Sedes
+  SEDES_VER:                 'sedes.ver',
+  SEDES_GESTIONAR:           'sedes.gestionar',
+
   // Campañas
   CAMPANAS_GESTIONAR:        'campanas.gestionar',
 
   // Cartera
+  CARTERA_VER:               'cartera.ver',
   CARTERA_APROBAR_EXCEPCION: 'cartera.aprobar_excepcion',
   CARTERA_MODIFICAR_PLAZO:   'cartera.modificar_plazo',
 
@@ -147,8 +158,22 @@ export function canIniciarAtencion(user: AuthUser | null | undefined): boolean {
 // Cada entrada define si se puede acceder al feature/ruta correspondiente.
 
 export const canAccess = {
-  admin: (u: AuthUser | null | undefined) =>
-    isSuperAdmin(u),
+  // /console (gestión de plataforma: clínicas, planes, usuarios internos, flags
+  // globales): superadmin o equipo interno (is_staff). Nada que ver con permisos
+  // de una clínica — es acceso a la consola, no a un feature dentro de una.
+  console: (u: AuthUser | null | undefined) =>
+    isSuperAdmin(u) || u?.is_staff === true,
+
+  // Editar el centro de ayuda: superadmin o equipo interno (is_staff de Django).
+  // Un gestor siempre puede entrar, aunque el flag global esté apagado
+  // (necesita poder preparar contenido antes de activarlo para todas las clínicas).
+  ayudaAdmin: (u: AuthUser | null | undefined) =>
+    isSuperAdmin(u) || u?.is_staff === true,
+
+  // Ver el centro de ayuda: cualquier autenticado, pero solo si un superadmin lo
+  // activó globalmente (u?.centro_ayuda_habilitado) — o si ya es gestor de todos modos.
+  ayudaCentro: (u: AuthUser | null | undefined) =>
+    u?.centro_ayuda_habilitado === true || canAccess.ayudaAdmin(u),
 
   dashboard: (_u: AuthUser | null | undefined) => true,
 
@@ -223,6 +248,8 @@ export const canAccess = {
 // ── Ruta de aterrizaje post-login ─────────────────────────────────────────────
 
 export function defaultRoute(user: AuthUser): string {
-  if (isSuperAdmin(user)) return '/admin'
+  // Superadmin y el equipo interno (staff sin clínica) no tienen "su" clínica —
+  // aterrizan en /console. Un usuario de clínica normal siempre trae clinica_id.
+  if (!user.clinica_id) return '/console'
   return '/dashboard'
 }

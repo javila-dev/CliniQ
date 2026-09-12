@@ -1,6 +1,20 @@
 import { apiClient } from './client'
-import type { Cartera, ResumenCartera, RegistrarPagoPayload, CuotaCartera, CuotaVencida } from '@/types/cartera'
+import type {
+  Cartera,
+  ResumenCartera,
+  RegistrarPagoPayload,
+  CuotaCartera,
+  CuotaVencida,
+  AcuerdoPago,
+  CuotaPropuestaInput,
+} from '@/types/cartera'
 import type { Paginated } from '@/types/common'
+
+export interface CrearAcuerdoPayload {
+  cartera: string
+  motivo: string
+  cuotas: CuotaPropuestaInput[]
+}
 
 export interface CarteraFilter {
   paciente?: string
@@ -38,6 +52,27 @@ export const carteraApi = {
 
   patchCuota: async (cuotaId: string, data: { fecha_vencimiento?: string; monto?: number }): Promise<CuotaCartera> => {
     const res = await apiClient.patch<CuotaCartera>(`/cartera/cuotas/${cuotaId}/`, data)
+    return res.data
+  },
+
+  // ── Acuerdos de pago ────────────────────────────────────────────────────
+  listAcuerdos: async (carteraId: string): Promise<AcuerdoPago[]> => {
+    const res = await apiClient.get<AcuerdoPago[]>('/cartera/acuerdos/', { params: { cartera: carteraId } })
+    return res.data
+  },
+
+  crearAcuerdo: async (data: CrearAcuerdoPayload): Promise<AcuerdoPago> => {
+    const res = await apiClient.post<AcuerdoPago>('/cartera/acuerdos/', data)
+    return res.data
+  },
+
+  anularAcuerdo: async (acuerdoId: string, motivo: string): Promise<AcuerdoPago> => {
+    const res = await apiClient.post<AcuerdoPago>(`/cartera/acuerdos/${acuerdoId}/anular/`, { motivo })
+    return res.data
+  },
+
+  verificarFirmaAcuerdo: async (acuerdoId: string): Promise<AcuerdoPago> => {
+    const res = await apiClient.post<AcuerdoPago>(`/cartera/acuerdos/${acuerdoId}/verificar-firma/`)
     return res.data
   },
 

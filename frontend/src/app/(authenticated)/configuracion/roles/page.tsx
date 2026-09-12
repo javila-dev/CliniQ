@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Shield, Users, Pencil, Trash2, ChevronDown, ChevronUp,
-  Lock, CheckSquare, Square,
+  Lock, CheckSquare, Square, Minus, Stethoscope, Wrench,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -23,7 +23,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
-import type { Rol, PermisoGrupo } from '@/types/usuarios'
+import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse } from '@/types/usuarios'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -42,13 +42,119 @@ function toSlug(nombre: string): string {
     .replace(/\s+/g, '_')
 }
 
-// ── Editor de permisos ─────────────────────────────────────────────────────────
+// ── Editor de capacidades (capa semántica) ────────────────────────────────────
+// `selected` son siempre claves de permiso técnicas — es lo que se envía al
+// backend. Las capacidades y el modo avanzado son dos vistas sobre ese set.
 
-function PermisosEditor({
-  grupos,
+type EstadoCap = 'on' | 'off' | 'partial'
+
+function estadoDeCapacidad(capKeys: string[], selected: string[]): EstadoCap {
+  const dentro = capKeys.filter(k => selected.includes(k)).length
+  if (dentro === 0) return 'off'
+  if (dentro === capKeys.length) return 'on'
+  return 'partial'
+}
+
+function CapacidadesEditor({
+  areas,
   selected,
   onChange,
   readonly,
+}: {
+  areas: CapacidadArea[]
+  selected: string[]
+  onChange: (keys: string[]) => void
+  readonly: boolean
+}) {
+  const toggleCapacidad = (clave: string, capKeys: string[], estado: EstadoCap) => {
+    if (readonly) return
+    if (estado === 'on') {
+      // Al apagar: quita sus claves, salvo las que otra capacidad totalmente
+      // activa todavía necesita (permisos compartidos entre capacidades).
+      const requeridasPorOtras = new Set(
+        areas
+          .flatMap(a => a.capacidades)
+          .filter(c => c.clave !== clave && c.permisos.every(k => selected.includes(k)))
+          .flatMap(c => c.permisos),
+      )
+      onChange(selected.filter(k => !capKeys.includes(k) || requeridasPorOtras.has(k)))
+    } else {
+      onChange([...new Set([...selected, ...capKeys])])
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      {areas.map(area => {
+        const total = area.capacidades.length
+        const activas = area.capacidades.filter(
+          c => estadoDeCapacidad(c.permisos, selected) === 'on',
+        ).length
+
+        return (
+          <div key={area.area} className="rounded-xl border border-gray-150 overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-2.5 bg-gray-50/70 border-b border-gray-100">
+              <span className="text-sm font-semibold">{area.titulo}</span>
+              <span className={cn(
+                'text-xs tabular-nums',
+                activas > 0 ? 'text-rose-500 font-medium' : 'text-muted-foreground',
+              )}>
+                {activas}/{total}
+              </span>
+            </div>
+
+            <div className="divide-y divide-gray-50">
+              {area.capacidades.map(cap => {
+                const estado = estadoDeCapacidad(cap.permisos, selected)
+                const activo = estado === 'on'
+                return (
+                  <button
+                    key={cap.clave}
+                    type="button"
+                    disabled={readonly}
+                    onClick={() => toggleCapacidad(cap.clave, cap.permisos, estado)}
+                    className={cn(
+                      'w-full flex items-start gap-3 px-4 py-3 text-left transition-colors',
+                      readonly ? 'cursor-default' : 'hover:bg-gray-50',
+                      activo && !readonly && 'bg-rose-50/40',
+                    )}
+                  >
+                    <div className={cn(
+                      'mt-0.5 h-[18px] w-[18px] rounded-md flex items-center justify-center shrink-0 border transition-colors',
+                      estado === 'on'   && 'bg-rose-500 border-rose-500 text-white',
+                      estado === 'partial' && 'bg-rose-100 border-rose-300 text-rose-600',
+                      estado === 'off'  && 'border-gray-300',
+                    )}>
+                      {estado === 'on' && <span className="text-[11px] font-bold leading-none">✓</span>}
+                      {estado === 'partial' && <Minus className="h-3 w-3" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-medium">{cap.titulo}</p>
+                        {cap.profesional && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-600 text-[10px] font-medium px-1.5 py-0.5">
+                            <Stethoscope className="h-3 w-3" />
+                            Atención clínica
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-0.5">{cap.descripcion}</p>
+                    </div>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+// ── Modo avanzado: permisos técnicos crudos ──────────────────────────────────
+
+function PermisosTecnicosEditor({
+  grupos, selected, onChange, readonly,
 }: {
   grupos: PermisoGrupo[]
   selected: string[]
@@ -56,28 +162,21 @@ function PermisosEditor({
   readonly: boolean
 }) {
   const [expandidos, setExpandidos] = useState<Record<string, boolean>>({})
-
-  const toggleGrupo = (modulo: string) =>
-    setExpandidos(prev => ({ ...prev, [modulo]: !prev[modulo] }))
+  const toggleGrupo = (m: string) => setExpandidos(p => ({ ...p, [m]: !p[m] }))
 
   const togglePermiso = (clave: string) => {
     if (readonly) return
     onChange(
-      selected.includes(clave)
-        ? selected.filter(k => k !== clave)
-        : [...selected, clave]
+      selected.includes(clave) ? selected.filter(k => k !== clave) : [...selected, clave],
     )
   }
-
-  const toggleTodosGrupo = (grupo: PermisoGrupo) => {
+  const toggleTodosGrupo = (g: PermisoGrupo) => {
     if (readonly) return
-    const claves = grupo.permisos.map(p => p.clave)
-    const todosMarcados = claves.every(c => selected.includes(c))
-    onChange(
-      todosMarcados
-        ? selected.filter(k => !claves.includes(k))
-        : [...new Set([...selected, ...claves])]
-    )
+    const claves = g.permisos.map(p => p.clave)
+    const todos = claves.every(c => selected.includes(c))
+    onChange(todos
+      ? selected.filter(k => !claves.includes(k))
+      : [...new Set([...selected, ...claves])])
   }
 
   return (
@@ -87,58 +186,44 @@ function PermisosEditor({
         const claves = grupo.permisos.map(p => p.clave)
         const marcados = claves.filter(c => selected.includes(c)).length
         const todos = marcados === claves.length
-
         return (
           <div key={grupo.modulo} className="border rounded-lg overflow-hidden">
             <div className="flex items-center bg-gray-50/80 hover:bg-gray-100/80 transition-colors">
               {!readonly && (
-                <button
-                  type="button"
-                  onClick={() => toggleTodosGrupo(grupo)}
-                  className="px-3 py-2.5 shrink-0 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  {todos
-                    ? <CheckSquare className="h-4 w-4 text-rose-500" />
-                    : <Square className="h-4 w-4" />}
+                <button type="button" onClick={() => toggleTodosGrupo(grupo)}
+                  className="px-3 py-2 shrink-0 text-muted-foreground hover:text-foreground">
+                  {todos ? <CheckSquare className="h-4 w-4 text-rose-500" /> : <Square className="h-4 w-4" />}
                 </button>
               )}
-              <button
-                type="button"
-                className="flex-1 flex items-center justify-between px-3 py-2.5"
-                onClick={() => toggleGrupo(grupo.modulo)}
-              >
+              <button type="button" className="flex-1 flex items-center justify-between px-3 py-2"
+                onClick={() => toggleGrupo(grupo.modulo)}>
                 <div className="flex items-center gap-2">
-                  <span className="text-sm font-semibold capitalize">{grupo.modulo}</span>
+                  <span className="text-sm font-medium capitalize">{grupo.modulo}</span>
                   <span className="text-xs text-muted-foreground">{marcados}/{claves.length}</span>
                 </div>
                 {open ? <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />}
               </button>
             </div>
-
             {open && (
               <div className="divide-y divide-gray-50">
                 {grupo.permisos.map(permiso => {
                   const activo = selected.includes(permiso.clave)
                   return (
-                    <button
-                      key={permiso.clave}
-                      type="button"
-                      disabled={readonly}
+                    <button key={permiso.clave} type="button" disabled={readonly}
                       onClick={() => togglePermiso(permiso.clave)}
                       className={cn(
-                        'w-full flex items-start gap-3 px-4 py-2.5 text-left transition-colors',
+                        'w-full flex items-start gap-3 px-4 py-2 text-left transition-colors',
                         readonly ? 'cursor-default' : 'hover:bg-gray-50',
-                        activo && !readonly && 'bg-rose-50/50'
-                      )}
-                    >
+                        activo && !readonly && 'bg-rose-50/50',
+                      )}>
                       <div className={cn(
-                        'mt-0.5 h-4 w-4 rounded flex items-center justify-center shrink-0 border transition-colors',
-                        activo ? 'bg-rose-500 border-rose-500' : 'border-gray-300'
+                        'mt-0.5 h-4 w-4 rounded flex items-center justify-center shrink-0 border',
+                        activo ? 'bg-rose-500 border-rose-500' : 'border-gray-300',
                       )}>
                         {activo && <span className="text-white text-[10px] font-bold">✓</span>}
                       </div>
                       <div className="min-w-0">
-                        <p className="text-sm font-medium">{permiso.descripcion}</p>
+                        <p className="text-sm">{permiso.descripcion}</p>
                         <p className="text-xs text-muted-foreground font-mono">{permiso.clave}</p>
                       </div>
                     </button>
@@ -156,15 +241,22 @@ function PermisosEditor({
 // ── Sheet Crear/Editar rol ─────────────────────────────────────────────────────
 
 function RolSheet({
-  rol, open, onClose, grupos,
+  rol, open, onClose, capacidades,
 }: {
   rol: Rol | null  // null = modo creación
   open: boolean
   onClose: () => void
-  grupos: PermisoGrupo[]
+  capacidades: CapacidadesResponse | undefined
 }) {
   const qc = useQueryClient()
   const isEditing = Boolean(rol)
+  const [verTecnicos, setVerTecnicos] = useState(false)
+
+  const areas = capacidades?.areas ?? []
+  const gruposTecnicos = capacidades?.permisos_tecnicos ?? []
+  const profesionalKeys = new Set(
+    areas.flatMap(a => a.capacidades.filter(c => c.profesional).flatMap(c => c.permisos)),
+  )
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(rolSchema),
@@ -217,6 +309,7 @@ function RolSheet({
   }
 
   const readonly = Boolean(rol && !rol.editable)
+  const esProfesional = permKeys.some(k => profesionalKeys.has(k))
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
@@ -262,18 +355,65 @@ function RolSheet({
           <Separator />
 
           <div className="space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Permisos asignados
-            </p>
-            {grupos.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Cargando permisos…</p>
+            <div className="flex items-center justify-between">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                ¿Qué puede hacer este rol?
+              </p>
+              {!readonly && permKeys.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => setPermKeys([])}
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                >
+                  Limpiar todo
+                </button>
+              )}
+            </div>
+
+            {esProfesional && (
+              <div className="flex items-start gap-2 rounded-lg bg-sky-50/70 border border-sky-100 px-3 py-2">
+                <Stethoscope className="h-4 w-4 text-sky-600 mt-0.5 shrink-0" />
+                <p className="text-xs text-sky-700">
+                  Este rol podrá realizar atenciones clínicas: quien lo tenga aparecerá
+                  como profesional en la agenda y podrá firmar la historia.
+                </p>
+              </div>
+            )}
+
+            {areas.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Cargando capacidades…</p>
             ) : (
-              <PermisosEditor
-                grupos={grupos}
+              <CapacidadesEditor
+                areas={areas}
                 selected={permKeys}
                 onChange={setPermKeys}
                 readonly={readonly}
               />
+            )}
+
+            {gruposTecnicos.length > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setVerTecnicos(v => !v)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <Wrench className="h-3.5 w-3.5" />
+                  {verTecnicos ? 'Ocultar' : 'Ver'} permisos técnicos
+                  <span className="text-muted-foreground/60">({permKeys.length})</span>
+                  {verTecnicos ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </button>
+                {verTecnicos && (
+                  <div className="mt-2">
+                    <PermisosTecnicosEditor
+                      grupos={gruposTecnicos}
+                      selected={permKeys}
+                      onChange={setPermKeys}
+                      readonly={readonly}
+                    />
+                  </div>
+                )}
+              </div>
             )}
           </div>
         </div>
@@ -385,9 +525,9 @@ function RolesContent() {
     staleTime: 5 * 60 * 1000,
   })
 
-  const { data: grupos = [] } = useQuery({
-    queryKey: ['permisos-catalogo'],
-    queryFn: () => rolesApi.listarPermisos(),
+  const { data: capacidades } = useQuery({
+    queryKey: ['capacidades-catalogo'],
+    queryFn: () => rolesApi.listarCapacidades(),
     staleTime: 60 * 60 * 1000, // 1 hora — el catálogo cambia poco
   })
 
@@ -467,7 +607,7 @@ function RolesContent() {
         rol={rolSheet.rol}
         open={rolSheet.open}
         onClose={() => setRolSheet({ open: false, rol: null })}
-        grupos={grupos}
+        capacidades={capacidades}
       />
 
       <Dialog open={!!eliminando} onOpenChange={v => { if (!v) { setEliminando(null); setDeleteError(null) } }}>

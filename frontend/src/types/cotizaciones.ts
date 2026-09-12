@@ -123,6 +123,19 @@ export interface Cotizacion {
   updated_at: string
 }
 
+// H32: precio de campaña vigente por id de catálogo, para poblar el formulario
+// antes de guardar (el backend solo lo calcula sobre ítems ya persistidos).
+export interface PrecioCampanaEntry {
+  precio_campana: string   // Decimal como string (DRF)
+  campana_id: string
+  campana_nombre: string
+}
+
+export interface PreciosCampanaMap {
+  tratamientos: Record<string, PrecioCampanaEntry>
+  procedimientos: Record<string, PrecioCampanaEntry>
+}
+
 export interface CreateItemCotizacion {
   tipo: TipoItemCotizacion
   tratamiento?: string | null

@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { pacientesApi } from '@/lib/api/pacientes'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
@@ -23,6 +25,8 @@ export default function EditarPacientePage({ params }: Props) {
   const { id } = use(params)
   const router = useRouter()
   const queryClient = useQueryClient()
+  const { user } = useAuthStore()
+  const canEditSensitive = hasPermission(user, PERM.PACIENTES_DATOS_SENSIBLES_VER)
   const [serverError, setServerError] = useState<string | null>(null)
 
   const { data: paciente, isLoading, isError } = useQuery({
@@ -82,6 +86,7 @@ export default function EditarPacientePage({ params }: Props) {
             onSubmit={handleSubmit}
             isLoading={isPending}
             submitLabel="Guardar cambios"
+            canEditSensitive={canEditSensitive}
           />
         </CardContent>
       </Card>

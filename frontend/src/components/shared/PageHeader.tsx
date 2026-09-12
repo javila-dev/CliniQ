@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { ArrowLeft } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ReactNode } from 'react'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 
 interface PageHeaderProps {
   title: string
@@ -9,9 +10,11 @@ interface PageHeaderProps {
   action?: ReactNode
   className?: string
   backHref?: string
+  /** Slug de un artículo del centro de ayuda: agrega un "?" junto al título. */
+  helpSlug?: string
 }
 
-export function PageHeader({ title, description, action, className, backHref }: PageHeaderProps) {
+export function PageHeader({ title, description, action, className, backHref, helpSlug }: PageHeaderProps) {
   return (
     <div className={cn('flex items-start justify-between gap-4 mb-6', className)}>
       <div>
@@ -24,7 +27,10 @@ export function PageHeader({ title, description, action, className, backHref }: 
             Volver
           </Link>
         )}
-        <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-2xl font-bold tracking-tight text-foreground">{title}</h1>
+          {helpSlug && <HelpButton slug={helpSlug} />}
+        </div>
         {description && (
           typeof description === 'string'
             ? <p className="text-sm text-muted-foreground mt-1">{description}</p>

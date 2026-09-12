@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { mensajeErrorDeuda } from '@/lib/deuda'
 import type { Cita } from '@/types/agenda'
 import type { MedioPago } from '@/types/cobros'
 
@@ -68,10 +69,12 @@ export function IniciarPagoSheet({ open, onOpenChange, cita, soloRegistrar = fal
         setRegistrado(true)
       }
     },
-    onError: () => setError(
-      soloRegistrar
-        ? 'No se pudo registrar el cobro. Intenta de nuevo.'
-        : 'No se pudo iniciar la atención. Intenta de nuevo.'
+    onError: (err) => setError(
+      mensajeErrorDeuda(err) ?? (
+        soloRegistrar
+          ? 'No se pudo registrar el cobro. Intenta de nuevo.'
+          : 'No se pudo iniciar la atención. Intenta de nuevo.'
+      )
     ),
   })
 

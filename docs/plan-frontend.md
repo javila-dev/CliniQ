@@ -2638,6 +2638,511 @@ Cuando la cita vinculada tiene `sesion_ejecutada_id` (campo que llega una vez H3
 
 ---
 
+---
+
+## Hitos pendientes — orden de ejecución: 0.1 → 2 → 3 → 1 → 0 → 5 → 3firma → 6
+
+---
+
+### Fase F22 — Vista semanal por defecto en agenda (hito 0.1)
+
+**Motivación:** los usuarios reportan que la agenda abre por defecto en vista mensual o diaria, lo que obliga a cambiar la vista manualmente en cada sesión. El estándar de uso es la vista semanal.
+
+**Cambio único:** en el estado inicial del componente de agenda (`src/app/(authenticated)/agenda/page.tsx` o el store/hook que gestiona la vista), cambiar el valor por defecto de la vista de `"month"` / `"day"` a `"week"`.
+
+Si la vista se persiste en `localStorage`, el cambio de default solo aplica cuando no existe valor previo guardado.
+
+**Definition of done F22:**
+- [ ] La agenda abre en vista semanal por defecto para usuarios nuevos o sin preferencia guardada
+- [ ] Las vistas mensual y diaria siguen disponibles y funcionan
+- [ ] Si el usuario cambia la vista, su elección persiste en la sesión
+
+> No hay cambios de backend para este hito.
+
+---
+
+### Fase F23 — Precios fijos de procedimientos (hito 2)
+
+**Depende de backend:** H31
+
+**Motivación:** al agregar un ítem a una cotización, el precio debe pre-llenarse desde el catálogo. Si la clínica lo configura así, el recepcionista no puede modificarlo a menos que tenga permiso.
+
+**Cambios en `CotizacionForm.tsx` / componente de ítems:**
+
+- Al seleccionar `procedimiento` o `tratamiento` en un ítem nuevo, hacer `GET /clinicas/procedimientos/{id}/` o usar el objeto ya cargado → tomar `precio_base` / `precio_estimado` como `valor_unitario`.
+- Si la respuesta del ítem creado trae `precio_bloqueado: true`, el campo de precio se renderiza como texto no editable (con ícono de candado y tooltip "Precio fijo del catálogo").
+- Si el usuario tiene `permissions.includes('cotizaciones.cambiar_precio')`, mostrar el candado pero permitir edición.
+- Si el backend devuelve `403` al intentar editar el precio bloqueado, mostrar toast de error.
+
+**Cambios en tipos — `src/types/cotizaciones.ts`:**
+```typescript
+export interface ItemCotizacion {
+  // ... campos existentes ...
+  precio_bloqueado: boolean
+}
+```
+
+**Definition of done F23:**
+- [ ] Al seleccionar procedimiento/tratamiento, `valor_unitario` se pre-llena desde el catálogo
+- [ ] Campo de precio no editable si `precio_bloqueado=true` y sin permiso `cotizaciones.cambiar_precio`
+- [ ] Ícono de candado visible con tooltip explicativo
+- [ ] 403 del backend muestra toast con mensaje claro
+- [ ] Cross-ref backend: **H31**
+
+---
+
+### Fase F23.1 — Precio fijo al cobrar cita por servicio
+
+**Depende de backend:** H31.1
+
+**Motivación:** en el formulario de cobro de una cita agendada por servicio directo, el monto debe pre-llenarse desde `Procedimiento.precio_base` y no ser editable sin permiso.
+
+**Cambios en el componente de cobro (formulario de pago previo a la cita):**
+
+- Al cargar el cobro, leer `cita.servicio_precio_base` de la respuesta de la cita.
+- Si `servicio_precio_base` tiene valor: pre-llenar el campo `monto` y renderizarlo como no editable (igual al patrón de `precio_bloqueado` de F23) con ícono de candado y tooltip "Precio fijo del servicio".
+- Si el usuario tiene `permissions.includes('cobros.cambiar_precio')`: campo editable.
+- Si el backend devuelve 403 al intentar enviar un monto diferente → toast "No tienes permiso para modificar el precio de este cobro".
+- Si `servicio_precio_base` es `null` (servicio sin precio configurado, o cita de cotización) → campo libre sin candado.
+
+**Cambios en tipos — `src/types/agenda.ts`:**
+```typescript
+export interface Cita {
+  // ... campos existentes ...
+  servicio_precio_base: string | null   // null si cotización o servicio sin precio
+}
+```
+
+**Definition of done F23.1:**
+- [ ] Campo `monto` en formulario de cobro pre-llenado desde `servicio_precio_base`
+- [ ] Candado visible con tooltip cuando el precio está fijo
+- [ ] Sin permiso `cobros.cambiar_precio` → campo no editable
+- [ ] Con permiso → editable
+- [ ] 403 del backend muestra toast descriptivo
+- [ ] Citas de cotización o servicio sin precio → campo libre sin candado
+- [ ] Cross-ref backend: **H31.1**
+
+---
+
+### Fase F24 — Módulo de campañas (hito 3)
+
+**Depende de backend:** H32
+
+**Motivación:** la clínica puede crear campañas de precio especial por período y sede. Al cotizar, si aplica una campaña al ítem seleccionado, se propone el precio de campaña y el recepcionista puede aceptarlo o mantener el precio base.
+
+#### F24.1 — Configuración de campañas
+
+**Ruta:** `/configuracion/campanas`
+
+**Tipos — `src/types/campanas.ts` (nuevo archivo):**
+```typescript
+export interface CampanaItem {
+  id:              string
+  procedimiento:   string | null
+  procedimiento_nombre: string | null
+  tratamiento:     string | null
+  tratamiento_nombre: string | null
+  precio_campana:  string
+}
+
+export interface Campana {
+  id:            string
+  nombre:        string
+  descripcion:   string
+  fecha_inicio:  string
+  fecha_fin:     string
+  activo:        boolean
+  sedes:         string[]          // UUIDs; vacío = todas las sedes
+  sedes_nombres: string[]
+  items:         CampanaItem[]
+  created_at:    string
+}
+```
+
+**API — `src/lib/api/campanas.ts` (nuevo archivo):**
+```typescript
+export const campanasApi = {
+  list:    (params?) => apiClient.get('/clinicas/campanas/', { params }),
+  activas: (sedeId?) => apiClient.get('/clinicas/campanas/activas/', { params: sedeId ? { sede_id: sedeId } : undefined }),
+  get:     (id) => apiClient.get(`/clinicas/campanas/${id}/`),
+  create:  (data) => apiClient.post('/clinicas/campanas/', data),
+  update:  (id, data) => apiClient.patch(`/clinicas/campanas/${id}/`, data),
+  delete:  (id) => apiClient.delete(`/clinicas/campanas/${id}/`),
+  addItem: (id, data) => apiClient.post(`/clinicas/campanas/${id}/items/`, data),
+  updateItem: (id, itemId, data) => apiClient.patch(`/clinicas/campanas/${id}/items/${itemId}/`, data),
+  removeItem: (id, itemId) => apiClient.delete(`/clinicas/campanas/${id}/items/${itemId}/`),
+}
+```
+
+Página `/configuracion/campanas`: tabla de campañas con badges de vigencia (activa/próxima/vencida), dialog de creación/edición con selector de sedes y lista de ítems de campaña.
+
+#### F24.2 — Integración en cotización
+
+Al crear un ítem en `CotizacionForm`:
+1. Si el backend devuelve `precio_campana_disponible` en la respuesta, mostrar banner inline:
+   ```
+   ⚡ Campaña "Verano 2026" disponible — precio especial: $280.000
+   [Aplicar precio de campaña]  [Mantener precio base]
+   ```
+2. Si el usuario acepta: `PATCH` del ítem con `valor_unitario = precio_campana_disponible`.
+3. Badge en el ítem: "Campaña aplicada" cuando se usó el precio de campaña.
+
+**Definition of done F24:**
+- [ ] Página `/configuracion/campanas` con CRUD de campañas e ítems
+- [ ] Banner de precio de campaña al crear ítem si aplica campaña activa
+- [ ] Acción "Aplicar precio de campaña" actualiza el campo con PATCH
+- [ ] Badge "Campaña aplicada" visible en ítems con precio de campaña
+- [ ] Cross-ref backend: **H32**
+
+---
+
+### Fase F25 — Bloqueo de agendamiento por cuotas vencidas (hito 1)
+
+**Depende de backend:** H33
+
+**Motivación:** si el backend rechaza la creación de cita por deuda del paciente, el frontend debe mostrar el error con contexto de deuda y un acceso directo a la cartera del paciente.
+
+**Cambios en `NuevaCitaModal.tsx`:**
+
+Al recibir error `PACIENTE_CON_DEUDA` del `POST /agenda/citas/`:
+```
+⚠ No se puede agendar
+El paciente tiene 3 cuotas vencidas por un total de $450.000.
+
+[Ver cartera del paciente]   [Cancelar]
+```
+- Botón "Ver cartera del paciente" navega a `/cartera?paciente={pacienteId}` y cierra el modal.
+- Si el usuario tiene permiso `cartera.aprobar_excepcion`, mostrar adicionalmente botón "Aprobar excepción" que llama `POST /cartera/cuotas/{id}/aprobar_excepcion/` para cada cuota vencida (preguntar confirmación antes).
+
+**Cambios en `EditarCitaForm.tsx`:** misma lógica de error si se cambia la fecha de una cita en estado de rescheduling.
+
+**Definition of done F25:**
+- [ ] Error `PACIENTE_CON_DEUDA` muestra modal/alert con número de cuotas y monto total
+- [ ] Botón "Ver cartera" navega correctamente
+- [ ] Botón "Aprobar excepción" visible solo con permiso; llama al endpoint de excepción
+- [ ] Cross-ref backend: **H33**
+
+---
+
+### Fase F26 — Bloqueo de espacios de agenda con aprobación (hito 0)
+
+**Depende de backend:** H34
+
+**Motivación:** recepción puede solicitar bloqueos que quedan pendientes de aprobación; el admin los aprueba desde la misma pantalla de agenda. Los bloqueos aprobados aparecen como rangos ocupados en la vista de slots.
+
+#### F26.1 — Panel de bloqueos en la agenda
+
+**Nuevos tipos — `src/types/agenda.ts`:**
+```typescript
+export type EstadoBloqueo = 'pendiente' | 'aprobado' | 'rechazado'
+
+export interface BloqueoAgenda {
+  id:             string
+  sede:           string | null
+  profesional:    string | null
+  profesional_nombre: string | null
+  fecha_inicio:   string
+  fecha_fin:      string
+  motivo:         string
+  estado:         EstadoBloqueo
+  creado_por_nombre: string
+  aprobado_por_nombre: string | null
+  aprobado_en:    string | null
+}
+```
+
+**API — agregar a `src/lib/api/agenda.ts`:**
+```typescript
+bloqueos: {
+  list:     (params?) => apiClient.get('/agenda/bloqueos/', { params }),
+  create:   (data) => apiClient.post('/agenda/bloqueos/', data),
+  update:   (id, data) => apiClient.patch(`/agenda/bloqueos/${id}/`, data),
+  delete:   (id) => apiClient.delete(`/agenda/bloqueos/${id}/`),
+  aprobar:  (id) => apiClient.post(`/agenda/bloqueos/${id}/aprobar/`),
+  rechazar: (id, motivo?) => apiClient.post(`/agenda/bloqueos/${id}/rechazar/`, { motivo }),
+}
+```
+
+**Componente `BloqueosPanel`** (sheet lateral o sección en agenda):
+- Lista de bloqueos filtrable por sede, profesional y estado.
+- Botón "+ Nuevo bloqueo": dialog con fecha inicio, fecha fin, profesional (opcional), motivo.
+- Fila de bloqueo pendiente: badge ámbar + botones "Aprobar" / "Rechazar" si tiene permiso `agenda.aprobar_bloqueo`.
+- Fila de bloqueo aprobado: badge verde + botón "Eliminar".
+
+**Visualización en la vista de agenda:** los bloqueos aprobados aparecen como franjas grises en el calendario (igual que citas ocupadas). Badge distinto para bloqueos vs citas.
+
+**Definition of done F26:**
+- [ ] Panel de bloqueos accesible desde la agenda
+- [ ] Creación de bloqueo: estado inicial según permiso del usuario
+- [ ] Aprobar/rechazar con permiso `agenda.aprobar_bloqueo`
+- [ ] Bloqueos aprobados visibles como franjas en el calendario
+- [ ] Slots disponibles no incluyen rangos bloqueados (garantizado por backend)
+- [ ] Cross-ref backend: **H34**
+
+---
+
+### Fase F27 — Modificar plazos de cuotas de cartera (hito 5)
+
+**Depende de backend:** H35
+
+**Motivación:** en el detalle de cartera, el administrador debe poder editar la fecha de vencimiento de una cuota pendiente sin tener que anular y recrear la cartera.
+
+**Cambios en la página de detalle de cartera (`/cartera/[id]`):**
+
+En la tabla de cuotas, cada fila con `estado='pendiente'` y con permiso `cartera.modificar_plazo` muestra:
+- Icono de lápiz junto a la fecha de vencimiento
+- Click → input `<input type="date">` inline con el valor actual
+- `onBlur` o confirmación → `PATCH /cartera/cuotas/{id}/` con `{ fecha_vencimiento: "..." }`
+- Toast de éxito; invalidar query de la cartera
+
+**Tipos a agregar — `src/types/cartera.ts`:**
+```typescript
+export interface CuotaCartera {
+  // ... campos existentes ...
+  // Sin nuevos campos en el tipo — el PATCH usa los campos ya existentes
+}
+```
+
+**Definition of done F27:**
+- [ ] Edición inline de fecha de vencimiento en cuotas pendientes
+- [ ] Solo visible con permiso `cartera.modificar_plazo`
+- [ ] PATCH exitoso invalida query y muestra toast
+- [ ] 400 si la cuota ya está pagada → toast de error
+- [ ] Cross-ref backend: **H35**
+
+---
+
+### Fase F28 — Firma electrónica de asistencia vía Documenso (hito 3firma)
+
+**Depende de backend:** H36
+
+**Motivación:** en la pantalla de atención el profesional o recepción genera el registro de asistencia con un clic. El backend produce el PDF, lo sube a Documenso y devuelve un `signing_token`. El frontend abre el widget de firma embedded de Documenso para que el paciente firme en el momento (tablet del local). No hay selector de plantilla ni configuración extra: el PDF se construye automáticamente con los datos de la cita.
+
+> **Decisión de arquitectura:** no se usa `enviar_firma_asistencia` (flujo de template). El nuevo endpoint es `POST /agenda/citas/{id}/iniciar_registro_asistencia/` que retorna `{ signing_token, document_id }`. Ver H36 para detalles del backend.
+
+---
+
+#### F28.1 — Tipos
+
+**Archivo:** `frontend/src/types/agenda.ts`
+
+Los campos `firma_asistencia_estado` y `firma_asistencia_documento_id` ya deben existir en `Cita`. Verificar que estén, si no agregarlos:
+
+```typescript
+export type FirmaAsistenciaEstado = 'sin_firma' | 'enviada' | 'firmada' | 'rechazada'
+
+// En la interfaz Cita:
+firma_asistencia_estado: FirmaAsistenciaEstado
+firma_asistencia_documento_id?: string | null
+```
+
+---
+
+#### F28.2 — API client
+
+**Archivo:** `frontend/src/lib/api/agenda.ts` (o donde vivan las funciones de agenda)
+
+```typescript
+export async function iniciarRegistroAsistencia(citaId: string): Promise<{
+  signing_token: string
+  document_id: string
+}> {
+  const res = await apiFetch(`/agenda/citas/${citaId}/iniciar_registro_asistencia/`, {
+    method: 'POST',
+  })
+  if (!res.ok) throw new Error('Error al iniciar firma de asistencia')
+  return res.json()
+}
+```
+
+---
+
+#### F28.3 — Componente de firma embedded
+
+**Archivo nuevo:** `frontend/src/components/atenciones/RegistroAsistenciaSheet.tsx`
+
+Este componente es un `Sheet` (panel lateral) que:
+
+1. Tiene un botón trigger: **"Firma de asistencia"** — visible solo si `firma_asistencia_estado === 'sin_firma'` o `'rechazada'`. Badge de estado si ya está `'enviada'` o `'firmada'`.
+
+2. Al abrir el Sheet:
+   - Muestra el estado actual del badge.
+   - Si `sin_firma` o `rechazada`: botón **"Generar y firmar"** (con loading spinner).
+   - Si `enviada`: muestra el widget de Documenso embedded (ver abajo).
+   - Si `firmada`: confirmación visual en verde, sin acciones.
+
+3. Al hacer clic en **"Generar y firmar"**:
+   ```typescript
+   const { signing_token } = await iniciarRegistroAsistencia(cita.id)
+   setSigningToken(signing_token)   // activa el widget
+   invalidateQuery(['cita', cita.id])
+   ```
+
+4. Widget de firma embedded — usar el componente `EmbedSignDocument` del paquete `@documenso/embed-react`:
+   ```tsx
+   import { EmbedSignDocument } from '@documenso/embed-react'
+
+   {signingToken && (
+     <div style={{ height: '600px', width: '100%' }}>
+       <EmbedSignDocument
+         token={signingToken}
+         host={process.env.NEXT_PUBLIC_DOCUMENSO_URL}
+         onDocumentCompleted={() => {
+           setSigningToken(null)
+           invalidateQuery(['cita', cita.id])
+           toast.success('Documento firmado correctamente')
+         }}
+         onDocumentError={(err) => {
+           toast.error('Error al firmar: ' + err)
+         }}
+       />
+     </div>
+   )}
+   ```
+
+**Badge de estado:**
+```tsx
+const BADGE: Record<FirmaAsistenciaEstado, { label: string; variant: string }> = {
+  sin_firma: { label: 'Sin firma',  variant: 'secondary' },
+  enviada:   { label: 'Pendiente',  variant: 'warning'   },
+  firmada:   { label: 'Firmada',    variant: 'success'   },
+  rechazada: { label: 'Rechazada',  variant: 'destructive' },
+}
+```
+
+---
+
+#### F28.4 — Integrar en la pantalla de atención
+
+**Archivo:** `frontend/src/app/(authenticated)/atenciones/[citaId]/page.tsx`
+
+Agregar `<RegistroAsistenciaSheet cita={cita} />` en la sección de acciones de la cita, junto a los botones existentes (iniciar atención, cobros, consentimientos). Visible solo si el usuario tiene permiso `agenda.citas.editar`.
+
+---
+
+#### F28.5 — Variables de entorno
+
+Verificar que `NEXT_PUBLIC_DOCUMENSO_URL` esté definido en `.env.local` y en los env de Dokploy:
+```
+NEXT_PUBLIC_DOCUMENSO_URL=https://firma.2asoft.tech   # o la URL de tu instancia Documenso
+```
+
+---
+
+**Definition of done F28:**
+- [ ] `Cita.firma_asistencia_estado` y `firma_asistencia_documento_id` en tipos
+- [ ] `iniciarRegistroAsistencia()` en el API client
+- [ ] Componente `RegistroAsistenciaSheet` con estados sin_firma / pendiente / firmada / rechazada
+- [ ] Widget `EmbedSignDocument` abre y firma en la misma pantalla
+- [ ] `onDocumentCompleted` invalida la query de la cita y muestra toast
+- [ ] Integrado en `/atenciones/[citaId]/page.tsx` con guard de permiso
+- [ ] `NEXT_PUBLIC_DOCUMENSO_URL` configurado en Dokploy
+- [ ] Cross-ref backend: **H36**
+
+---
+
+### Fase F30 — Log de acciones transversal (hito 6)
+
+**Depende de backend:** H38
+
+**Motivación:** los administradores necesitan ver un historial auditable de quién hizo qué y cuándo, para soporte, auditoría y resolución de conflictos.
+
+**Nuevos tipos — `src/types/core.ts` (nuevo o existente):**
+```typescript
+export interface LogAccion {
+  id:          string
+  usuario_nombre: string
+  accion:      string
+  objeto_tipo: string
+  objeto_id:   string
+  detalle:     Record<string, unknown>
+  ip:          string | null
+  created_at:  string
+}
+```
+
+**Nueva ruta:** `/configuracion/log-acciones`
+
+**Componente `LogAccionesPage`:**
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  Log de acciones                                                             │
+│  Filtros: [Acción ▾]  [Usuario ▾]  [Desde ____]  [Hasta ____]  [Buscar]    │
+├────────────────┬──────────────────┬───────────────┬──────────────┬──────────┤
+│  Fecha/Hora    │  Usuario         │  Acción       │  Objeto      │  Detalle │
+├────────────────┼──────────────────┼───────────────┼──────────────┼──────────┤
+│  10 jun 10:32  │  Dra. García     │  cita.crear   │  Cita abc123 │  [Ver]   │
+│  10 jun 09:15  │  Recepción       │  cuota.cobrar │  Cuota xyz99 │  [Ver]   │
+└────────────────┴──────────────────┴───────────────┴──────────────┴──────────┘
+```
+
+- Paginación del servidor (cursor o page).
+- Click en [Ver] → Sheet/Dialog con el JSON de `detalle` formateado.
+- Filtro por acción: multiselect con las acciones registradas.
+- Solo visible con permiso `core.ver_log_acciones`.
+
+**API — agregar a `src/lib/api/core.ts`:**
+```typescript
+export const coreApi = {
+  logAcciones: {
+    list: (params?: { accion?: string; usuario?: string; fecha_desde?: string; fecha_hasta?: string; page?: number }) =>
+      apiClient.get<Paginated<LogAccion>>('/core/log-acciones/', { params }),
+  },
+}
+```
+
+**Definition of done F30:**
+- [ ] Ruta `/configuracion/log-acciones` con tabla paginada
+- [ ] Filtros por acción, usuario y rango de fechas
+- [ ] Dialog de detalle con JSON formateado
+- [ ] Solo visible con permiso `core.ver_log_acciones`
+- [ ] Enlace en el sidebar bajo Configuración
+- [ ] Cross-ref backend: **H38**
+
+---
+
+---
+
+## Fases futuras (no en el alcance actual)
+
+> Estas fases están definidas pero quedan fuera del orden de ejecución activo.
+
+---
+
+### Fase F29 — Historia clínica dinámica por tratamiento (hito 4)
+
+> **Estado:** pospuesto. El cliente tiene una cantidad limitada y conocida de tipos de tratamiento; los campos específicos de cada uno se cubren por ahora con los campos fijos de `NotaClinica`. Retomar cuando haya necesidad real de variabilidad de campos entre tratamientos.
+
+**Depende de backend:** H37
+
+**Motivación:** en la pantalla de atención, si el procedimiento de la cita tiene una plantilla de nota configurada, el profesional ve los campos específicos de ese tratamiento (zona tratada, intensidad, producto, etc.) además de los campos fijos.
+
+**Tipos previstos — `src/types/historia.ts`:**
+```typescript
+export type TipoCampoNota = 'texto' | 'numero' | 'booleano' | 'lista' | 'fecha'
+
+export interface CampoPlantillaNota {
+  id: string; nombre: string; tipo: TipoCampoNota
+  opciones: string[]; requerido: boolean; orden: number
+}
+
+export interface ValorCampoNota { campo: string; valor: string }
+
+// Extensión de NotaClinica:
+// plantilla_nota_id: string | null
+// plantilla_campos:  CampoPlantillaNota[]
+// valores_campos:    ValorCampoNota[]
+```
+
+**Componentes previstos:**
+- `CamposPlantillaNota` en pantalla de atención — renderiza campos por tipo con auto-save en `onBlur`
+- Card "Plantilla de nota" en `/configuracion/procedimientos/[id]/` tab Protocolo
+
+**Cross-ref backend:** **H37**
+
+---
+
 ## Rutas frontend prioritarias
 
 - `/login`
@@ -2678,6 +3183,408 @@ Antes de cerrar una pantalla, revisar:
 - formato de fechas
 - errores de validación
 - reglas de permisos por `permissions[]`
+
+---
+
+### Fase F31 — Store, tipos y API client de procedimientos
+
+**Depende de backend:** H40, H43, H44
+
+**Motivación:** base de datos y contratos de la UI del módulo de procedimientos. No hay cambios visuales todavía — solo infraestructura de tipos, store y cliente API que F32 consumirá.
+
+**Definition of done:**
+- [ ] `TabAtencion` incluye `'procedimientos'` y el tab aparece activado por defecto
+- [ ] `types/procedimientos.ts` tipea fielmente el contrato del serializer backend
+- [ ] `procedimientosApi` cubre todos los endpoints de H43
+- [ ] `CitaSerializer` expone `servicio_tipo_procedimiento_id` y el tipo frontend lo refleja
+
+---
+
+**1. `src/store/atencionConfigStore.ts`**
+
+Agregar `'procedimientos'` al tipo y al default:
+```typescript
+export type TabAtencion =
+  | 'datos-generales'
+  | 'motivo-consulta'
+  | 'antecedentes'
+  | 'examenes'
+  | 'plan-manejo'
+  | 'ordenes'
+  | 'fotos'
+  | 'procedimientos'   // ← nuevo
+
+const DEFAULT_TABS: Record<TabAtencion, boolean> = {
+  // ... existentes ...
+  procedimientos: true,   // ← nuevo
+}
+```
+
+---
+
+**2. `src/types/procedimientos.ts`** — nuevo archivo
+
+```typescript
+export type CategoriaProcedimiento = 'facial' | 'corporal' | 'equipos' | 'inyectable'
+
+export type VistaSVG =
+  | 'rostro_frontal'
+  | 'rostro_lateral'
+  | 'cuerpo_anterior'
+  | 'cuerpo_posterior'
+  | 'manos'
+
+export interface SchemaCampo {
+  key:       string
+  label:     string
+  type:      'text' | 'number' | 'boolean' | 'select' | 'date'
+  required?: boolean
+  opciones?: string[]   // para type === 'select'
+}
+
+export interface TipoProcedimiento {
+  id:               string
+  nombre:           string
+  categoria:        CategoriaProcedimiento
+  requiere_puntos:  boolean
+  requiere_zonas:   boolean
+  schema_campos:    SchemaCampo[]
+  es_global:        boolean
+  clinica:          string | null
+}
+
+export interface ZonaAnatomica {
+  id:        string
+  vista:     VistaSVG
+  path_id:   string
+  codigo:    string
+  nombre:    string
+  es_global: boolean
+  clinica:   string | null
+}
+
+export interface AplicacionPunto {
+  id?:          string
+  x:            number         // 0–1 normalizado
+  y:            number         // 0–1 normalizado
+  orden:        number
+  vista:        VistaSVG
+  cantidad?:    number | null
+  tecnica?:     string
+  profundidad?: string
+}
+
+export interface ProductoAplicado {
+  id?:              string
+  nombre:           string
+  registro_invima?: string
+  lote?:            string
+  vencimiento?:     string | null   // ISO date
+  cantidad_total?:  number | null
+  unidad?:          string
+  puntos:           AplicacionPunto[]
+}
+
+export interface ProcedimientoEstetico {
+  id:               string
+  nota_clinica:     string
+  tipo:             string          // UUID
+  tipo_nombre:      string
+  tipo_categoria:   CategoriaProcedimiento
+  tipo_schema:      SchemaCampo[]
+  requiere_puntos:  boolean
+  requiere_zonas:   boolean
+  zonas:            string[]        // array de UUIDs de ZonaAnatomica
+  datos:            Record<string, unknown>
+  profesional:      string
+  observaciones:    string
+  productos:        ProductoAplicado[]
+  created_at:       string
+  updated_at:       string
+}
+
+export interface CreateProcedimientoPayload {
+  nota_clinica:  string
+  tipo:          string
+  zonas?:        string[]
+  datos?:        Record<string, unknown>
+  profesional:   string
+  observaciones?: string
+  productos?:    Omit<ProductoAplicado, 'id'>[]
+}
+
+export type UpdateProcedimientoPayload = Partial<Omit<CreateProcedimientoPayload, 'nota_clinica'>>
+```
+
+**Actualizar** `src/types/agenda.ts` — extender `Cita` con los campos nuevos de H44:
+```typescript
+export interface Cita {
+  // ... campos existentes ...
+  servicio_tipo_procedimiento_id?:     string | null
+  servicio_tipo_procedimiento_nombre?: string | null
+  servicio_tipo_requiere_puntos?:      boolean
+  servicio_tipo_requiere_zonas?:       boolean
+}
+```
+
+---
+
+**3. `src/lib/api/procedimientos.ts`** — nuevo archivo
+
+```typescript
+import apiClient from './client'
+import type {
+  TipoProcedimiento, ZonaAnatomica,
+  ProcedimientoEstetico, CreateProcedimientoPayload, UpdateProcedimientoPayload,
+} from '@/types/procedimientos'
+
+export const procedimientosApi = {
+  tipos: {
+    list: () =>
+      apiClient.get<{ results: TipoProcedimiento[] }>('/procedimientos/tipos/').then(r => r.data),
+    get:  (id: string) =>
+      apiClient.get<TipoProcedimiento>(`/procedimientos/tipos/${id}/`).then(r => r.data),
+  },
+  zonas: {
+    list: (params?: { vista?: string }) =>
+      apiClient.get<{ results: ZonaAnatomica[] }>('/procedimientos/zonas/', { params }).then(r => r.data),
+  },
+  procedimientos: {
+    create: (data: CreateProcedimientoPayload) =>
+      apiClient.post<ProcedimientoEstetico>('/procedimientos/procedimientos/', data).then(r => r.data),
+    get:    (id: string) =>
+      apiClient.get<ProcedimientoEstetico>(`/procedimientos/procedimientos/${id}/`).then(r => r.data),
+    update: (id: string, data: UpdateProcedimientoPayload) =>
+      apiClient.patch<ProcedimientoEstetico>(`/procedimientos/procedimientos/${id}/`, data).then(r => r.data),
+    // Lectura desde la nota (acción en NotaClinicaViewSet)
+    getByNota: (notaId: string) =>
+      apiClient.get<ProcedimientoEstetico | null>(
+        `/historia-clinica/notas/${notaId}/procedimiento/`
+      ).then(r => r.data),
+  },
+}
+```
+
+**Entregable:** infraestructura lista; ningún cambio visible en la UI aún.
+
+---
+
+### Fase F32 — Tab de procedimientos en la atención
+
+**Depende de backend:** H40, H41, H42, H43, H44
+**Depende de frontend:** F31
+
+**Motivación:** implementar el tab "Procedimientos" en `/atenciones/[citaId]`. El tab aparece solo si el servicio de la cita tiene un `TipoProcedimiento` configurado. Dentro, muestra el formulario dinámico generado desde `schema_campos` del tipo, el mapa corporal de zonas (si `requiere_zonas`), y la sección de productos + puntos de inyección (si `requiere_puntos`).
+
+**Definition of done:**
+- [ ] Tab "Procedimientos" visible en la atención solo si `cita.servicio_tipo_procedimiento_id != null`
+- [ ] El formulario renderiza dinámicamente los campos de `tipo.schema_campos`
+- [ ] Si `requiere_zonas`: muestra `<MapaCorporal>` en modo zonas; las zonas seleccionadas se incluyen en el payload
+- [ ] Si `requiere_puntos`: muestra sección de productos + `<MapaCorporal>` en modo puntos
+- [ ] Guardar crea el procedimiento (`POST`); si ya existe, actualiza (`PATCH`)
+- [ ] Formulario deshabilitado (read-only) si `nota.estado === 'completada'`
+- [ ] `tieneContenido` en `handleCompletar` incluye la existencia del procedimiento
+- [ ] `<select>` de `TipoProcedimiento` en `/configuracion/clinica/` → form de Servicios
+- [ ] Los SVG base son placeholders rectangulares funcionales (coordenadas normalizadas OK)
+
+---
+
+**1. `src/app/(authenticated)/atenciones/[citaId]/page.tsx`**
+
+Agregar tab al array `tabs`:
+```typescript
+{ value: 'procedimientos', label: 'Procedimientos',
+  show: (tabsActivos.procedimientos ?? true) && Boolean(cita.servicio_tipo_procedimiento_id) },
+```
+
+El `show` tiene doble condición: el tab debe estar activado en config **y** el servicio debe tener tipo configurado.
+
+Agregar `TabsContent`:
+```tsx
+{(tabsActivos.procedimientos ?? true) && cita.servicio_tipo_procedimiento_id && historia && notaId && (
+  <TabsContent value="procedimientos" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
+    <TabProcedimientos
+      notaId={notaId}
+      tipoProcedimientoId={cita.servicio_tipo_procedimiento_id}
+      profesionalId={cita.profesional}
+      modoLectura={false}
+    />
+  </TabsContent>
+)}
+```
+
+Agregar al check `tieneContenido` en `handleCompletar`:
+```typescript
+// Dentro del bloque try, después de obtener la nota:
+const tieneProcedimiento = Boolean(await procedimientosApi.procedimientos
+  .getByNota(notaId).catch(() => null))
+
+const tieneContenido =
+  nota.motivo_consulta?.trim() ||
+  nota.plan_manejo?.trim()     ||
+  (nota.examenes?.length ?? 0) > 0 ||
+  (nota.ordenes?.length ?? 0) > 0  ||
+  (nota.fotos?.length ?? 0) > 0    ||
+  tieneProcedimiento              // ← nuevo
+```
+
+Agregar import:
+```typescript
+import { TabProcedimientos } from '@/components/historia/TabProcedimientos'
+import { procedimientosApi } from '@/lib/api/procedimientos'
+```
+
+---
+
+**2. `src/components/historia/TabProcedimientos.tsx`** — nuevo componente
+
+Props:
+```typescript
+interface Props {
+  notaId:               string
+  tipoProcedimientoId:  string
+  profesionalId:        string
+  modoLectura:          boolean
+}
+```
+
+Lógica:
+1. `useQuery(['procedimiento-por-nota', notaId], () => procedimientosApi.procedimientos.getByNota(notaId))`
+2. `useQuery(['tipo-procedimiento', tipoProcedimientoId], () => procedimientosApi.tipos.get(tipoProcedimientoId))`
+3. Si tipo tiene `requiere_zonas`: `useQuery(['zonas-anatomicas'], () => procedimientosApi.zonas.list())`
+4. Form con React Hook Form; el schema Zod se construye dinámicamente desde `tipo.schema_campos`
+5. Al submit: si `procedimiento` existe → `PATCH`; si no → `POST`
+6. En `modoLectura === true` (o cuando `nota.estado === 'completada'`): todos los inputs deshabilitados
+
+Estructura visual del componente:
+```
+┌──────────────────────────────────────────┐
+│  Procedimiento: {tipo.nombre}  [badge cat]│
+├──────────────────────────────────────────┤
+│  CAMPOS DINÁMICOS (schema_campos)         │
+│  ─────────────────────────────────────   │
+│  [Campo 1]  [Campo 2]  ...               │
+│                                          │
+│  ZONAS TRATADAS (si requiere_zonas)       │
+│  ─────────────────────────────────────   │
+│  <MapaCorporal modo="zonas" />           │
+│                                          │
+│  PRODUCTOS Y PUNTOS (si requiere_puntos)  │
+│  ─────────────────────────────────────   │
+│  [+ Agregar producto]                    │
+│  Por cada producto:                      │
+│    Nombre / INVIMA / Lote / Venc / Cant  │
+│    <MapaCorporal modo="puntos" />        │
+│                                          │
+│  Observaciones (textarea)                │
+│                                          │
+│  [Guardar procedimiento]                 │
+└──────────────────────────────────────────┘
+```
+
+Generación dinámica del formulario desde `schema_campos`:
+```typescript
+// SchemaCampo → campo React Hook Form
+function renderCampo(campo: SchemaCampo, control: Control) {
+  switch (campo.type) {
+    case 'text':    return <Input {...register(`datos.${campo.key}`)} />
+    case 'number':  return <Input type="number" {...register(`datos.${campo.key}`, { valueAsNumber: true })} />
+    case 'boolean': return <Switch ... />
+    case 'select':  return <Select options={campo.opciones} ... />
+    case 'date':    return <Input type="date" ... />
+  }
+}
+```
+
+---
+
+**3. `src/components/procedimientos/MapaCorporal.tsx`** — nuevo componente
+
+Props:
+```typescript
+interface Props {
+  modo:          'zonas' | 'puntos'
+  vista:         VistaSVG
+  // modo zonas:
+  zonasDisponibles?:  ZonaAnatomica[]
+  zonasSeleccionadas?: string[]          // array de path_ids
+  onZonasChange?:     (zonas: string[]) => void
+  // modo puntos:
+  puntos?:       AplicacionPunto[]
+  onPuntosChange?: (puntos: AplicacionPunto[]) => void
+  disabled?:     boolean
+}
+```
+
+**Modo "zonas":** click sobre un `<path>` SVG → toggle en `zonasSeleccionadas`. Path seleccionado: `fill` cambia a color accent. Implementar con `onMouseEnter` para hover highlight.
+
+**Modo "puntos":** click en cualquier punto del SVG → calcular coordenadas normalizadas con `getScreenCTM().inverse()` y agregar un punto al array. Los puntos existentes se muestran como círculos numerados. Click sobre un círculo existente → eliminar.
+
+**Coordenadas normalizadas:**
+```typescript
+function svgCoordsFromClick(e: React.MouseEvent<SVGSVGElement>): { x: number; y: number } {
+  const svg = e.currentTarget
+  const pt  = svg.createSVGPoint()
+  pt.x = e.clientX
+  pt.y = e.clientY
+  const svgPt = pt.matrixTransform(svg.getScreenCTM()!.inverse())
+  const bbox  = svg.viewBox.baseVal
+  return {
+    x: (svgPt.x - bbox.x) / bbox.width,
+    y: (svgPt.y - bbox.y) / bbox.height,
+  }
+}
+```
+
+**SVGs placeholder** — `public/svgs/rostro_frontal.svg`, `cuerpo_anterior.svg`, etc.
+
+Por ahora, cada SVG es un rectángulo con paths rectangulares nombrados que representan zonas:
+```svg
+<svg viewBox="0 0 400 600" xmlns="http://www.w3.org/2000/svg">
+  <!-- Placeholder: reemplazar por SVG anatómico real -->
+  <rect width="400" height="600" fill="#f5f5f5" rx="8"/>
+  <path id="frente" d="M100,20 h200 v80 h-200 Z" fill="#e0e0e0" stroke="#ccc"/>
+  <path id="entrecejo" d="M170,100 h60 v40 h-60 Z" fill="#e0e0e0" stroke="#ccc"/>
+  <!-- ... más paths ... -->
+</svg>
+```
+
+El componente carga el SVG con `<img>` + `<svg>` inline según necesidad. Para interactividad (click en paths, hover, fill dinámico) el SVG debe estar **inline** en el DOM, no como `<img>`. Usar `fetch` + `dangerouslySetInnerHTML` o un loader de SVG.
+
+Nota: los SVGs anatómicos finales reemplazan los placeholders sin cambiar el componente — solo cambian los archivos en `public/svgs/`.
+
+---
+
+**4. Configuración de Servicios — selector de `TipoProcedimiento`**
+
+**Archivo:** el form de creación/edición de Servicios en `/configuracion/clinica/` (o la página de servicios equivalente).
+
+Agregar campo:
+```tsx
+// En el form de Servicio:
+<FormField name="tipo_procedimiento" label="Tipo de procedimiento (opcional)">
+  <Select
+    options={tiposProcedimiento.map(t => ({ value: t.id, label: `${t.nombre} — ${t.categoria}` }))}
+    isClearable
+    placeholder="Sin procedimiento asociado"
+    value={field.value}
+    onChange={field.onChange}
+  />
+</FormField>
+```
+
+Query para el selector:
+```typescript
+useQuery(['tipos-procedimiento'], () => procedimientosApi.tipos.list())
+```
+
+Agregar `tipo_procedimiento` al schema Zod del form de Servicio como `z.string().uuid().nullable().optional()`.
+
+Al guardar, incluir `tipo_procedimiento: valor | null` en el payload del `PATCH /clinicas/servicios/{id}/`.
+
+**Entregable UX:** el profesional abre la atención de una cita con servicio configurado y ve el tab "Procedimientos" con el formulario listo para llenar. Los campos son exactamente los que el admin definió en `TipoProcedimiento.schema_campos`. Si el tipo requiere zonas, el mapa SVG se muestra para seleccionarlas. Si requiere puntos, puede hacer click sobre el SVG para marcar las aplicaciones. Al guardar, todo queda registrado en la nota clínica de esa atención.
+
+---
 
 ## Riesgos frontend a vigilar
 

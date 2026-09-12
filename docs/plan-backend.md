@@ -6046,6 +6046,1287 @@ Ambas FKs son `null=True` para retrocompatibilidad con registros existentes.
 
 ---
 
+---
+
+## Hitos pendientes — orden de ejecución: 0.1 → 2 → 3 → 1 → 0 → 5 → 3firma → 6
+
+> **0.1** (frontend only — ver plan-frontend.md F22) no tiene cambios de backend.
+
+---
+
+### H31 — Precios fijos de procedimientos (hito 2)
+
+**Motivación:** hoy el precio de un ítem de cotización lo escribe libremente el recepcionista. Con este hito, el precio base viene del catálogo (`Procedimiento.precio_base` / `TratamientoCatalogo.precio_estimado`) y no puede modificarse en la cotización a menos que el usuario tenga el permiso `cotizaciones.cambiar_precio`.
+
+**Cambios en el modelo:**
+
+```python
+# apps/clinicas/models.py
+class Procedimiento(models.Model):
+    # ... campos existentes ...
+    precio_base = DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+
+class TratamientoCatalogo(models.Model):
+    # precio_estimado ya existe — se usa como precio_base del ítem
+```
+
+**Cambios en `ItemCotizacion`:**
+
+```python
+class ItemCotizacion(models.Model):
+    # Agregar:
+    precio_bloqueado = BooleanField(default=False)
+    # Si True, el valor_unitario fue fijado desde el catálogo y no puede editarse
+    # sin permiso cotizaciones.cambiar_precio
+```
+
+**Cambios en el serializer de creación/edición de ítems:**
+- Al crear ítem con `procedimiento` o `tratamiento`, copiar `precio_base` / `precio_estimado` como `valor_unitario` y poner `precio_bloqueado=True`.
+- `PATCH` de `valor_unitario` con `precio_bloqueado=True` → verificar permiso `cotizaciones.cambiar_precio`; si no tiene el permiso → `403`.
+
+**Nuevo permiso:** `cotizaciones.cambiar_precio` — separado de `cotizaciones.editar`.
+
+**Endpoint de lectura — campo nuevo en `ItemCotizacionSerializer`:**
+```json
+{ "precio_bloqueado": true, "valor_unitario": "350000.00" }
+```
+
+**Definition of done H31:**
+- [x] Migración: `Procedimiento.precio_base` (nullable), `ItemCotizacion.precio_bloqueado`
+- [x] Al crear ítem con procedimiento/tratamiento, `valor_unitario` se pre-llena desde el catálogo
+- [x] `precio_bloqueado=True` → PATCH de `valor_unitario` rechazado sin permiso `cotizaciones.cambiar_precio`
+- [x] `ItemCotizacionSerializer` expone `precio_bloqueado`
+- [x] Permiso `cotizaciones.cambiar_precio` disponible y documentado en `api.md`
+- [ ] Ver frontend: **F23**
+
+---
+
+### H31.1 — Precio fijo al cobrar cita por servicio
+
+**Motivación:** cuando se agenda una cita por servicio directo (sin cotización), el monto a cobrar debe venir de `Procedimiento.precio_base` y no ser editable libremente por recepción. Solo usuarios con permiso `cobros.cambiar_precio` pueden modificarlo.
+
+**Cambios en el flujo de cobro:**
+
+Al crear un cobro asociado a una cita con `servicio` (y sin `item_cotizacion`):
+- El serializer de cobro lee `cita.servicio.precio_base` y lo usa como `monto` por defecto.
+- Si el request intenta enviar un `monto` diferente al `precio_base`, verificar permiso `cobros.cambiar_precio`; si no lo tiene → `403`.
+- Si `precio_base` es `null` en el servicio → el campo `monto` es libre (sin restricción).
+
+**Campo nuevo en `CitaSerializer` (lectura):**
+```json
+{ "servicio_precio_base": "150000.00" }
+```
+El frontend lo usa para pre-llenar y bloquear el campo de monto en el formulario de cobro.
+
+**Nuevo permiso:** `cobros.cambiar_precio`
+
+**Definition of done H31.1:**
+- [x] `CitaSerializer` expone `servicio_precio_base` (null si el servicio no tiene precio o la cita viene de cotización)
+- [x] Crear cobro con monto distinto al `precio_base` sin permiso → 403
+- [x] Con permiso `cobros.cambiar_precio` → monto editable
+- [x] Citas sin servicio directo (de cotización) → sin restricción de precio en este endpoint
+- [x] Permiso `cobros.cambiar_precio` disponible y documentado
+- [ ] Ver frontend: **F23.1**
+
+---
+
+### H32 — Módulo de campañas (hito 3)
+
+**Motivación:** la clínica necesita configurar campañas con precio especial para un conjunto de procedimientos/tratamientos, con fechas de vigencia y sedes aplicables. Al cotizar, si hay una campaña activa para el ítem, el precio de campaña se propone automáticamente.
+
+**Nuevo modelo:**
+
+```python
+# apps/clinicas/models.py
+class Campana(models.Model):
+    clinica        = FK(Clinica)
+    nombre         = CharField(max_length=200)
+    descripcion    = TextField(blank=True)
+    fecha_inicio   = DateField()
+    fecha_fin      = DateField()
+    activo         = BooleanField(default=True)
+    sedes          = M2MField(Sede, blank=True)  # vacío = todas las sedes
+    created_at     = DateTimeField(auto_now_add=True)
+    updated_at     = DateTimeField(auto_now=True)
+
+class CampanaItem(models.Model):
+    campana        = FK(Campana, related_name='items')
+    procedimiento  = FK(Procedimiento, null=True, blank=True)
+    tratamiento    = FK(TratamientoCatalogo, null=True, blank=True)
+    precio_campana = DecimalField(max_digits=12, decimal_places=2)
+    # Exactamente uno de procedimiento/tratamiento debe ser no-null
+
+    class Meta:
+        constraints = [
+            CheckConstraint(
+                check=(Q(procedimiento__isnull=False) | Q(tratamiento__isnull=False)),
+                name='campana_item_requires_target'
+            )
+        ]
+```
+
+**Endpoints:**
+- `GET/POST /clinicas/campanas/`
+- `GET/PATCH/DELETE /clinicas/campanas/{id}/`
+- `POST /clinicas/campanas/{id}/items/`
+- `PATCH/DELETE /clinicas/campanas/{id}/items/{item_id}/`
+- `GET /clinicas/campanas/activas/` — campanas vigentes hoy (filtradas por sede si se pasa `sede_id`)
+
+**Integración con cotizaciones:** al crear `ItemCotizacion` con `procedimiento` o `tratamiento`, el backend busca si existe una `CampanaItem` activa para la sede de la cotización → si existe, devuelve en la respuesta:
+```json
+{ "precio_campana_disponible": "280000.00", "campana_id": "uuid", "campana_nombre": "Campaña Verano" }
+```
+El frontend decide si aplicar el precio de campaña (ver F24).
+
+**Definition of done H32:**
+- [x] Modelos `Campana` y `CampanaItem` con migraciones
+- [x] CRUD completo en `/clinicas/campanas/`
+- [x] `GET /clinicas/campanas/activas/` filtra por fecha y sede
+- [x] Al crear ítem de cotización, el serializer anota `precio_campana_disponible` si aplica
+- [x] Scoping por clínica; permiso `campanas.gestionar`
+- [ ] Ver frontend: **F24**
+
+---
+
+### H33 — Bloqueo por cuotas vencidas (hito 1)
+
+**Motivación:** si un paciente tiene cuotas de cartera vencidas (más de N días), el sistema debe impedir crear nuevas citas hasta que regularice o un administrador apruebe una excepción.
+
+**Cambios en `POST /agenda/citas/`:**
+
+```python
+# En perform_create / validate del serializer de cita:
+def _validar_deuda_paciente(paciente, clinica):
+    dias_gracia = clinica.config.dias_gracia_deuda  # nuevo campo en configuración
+    vencidas = CuotaCartera.objects.filter(
+        cartera__paciente=paciente,
+        cartera__clinica=clinica,
+        estado='vencida',
+        fecha_vencimiento__lt=date.today() - timedelta(days=dias_gracia),
+    ).exists()
+    return vencidas
+```
+
+Si el paciente tiene cuotas vencidas → `400`:
+```json
+{
+  "error": "El paciente tiene cuotas vencidas. No se puede agendar una nueva cita.",
+  "code": "PACIENTE_CON_DEUDA",
+  "detalle": { "cuotas_vencidas": 3, "monto_total": "450000.00" }
+}
+```
+
+**Excepción administrativa:** nuevo campo `CuotaCartera.excepcion_aprobada` (`BooleanField`, default False). Si todas las cuotas vencidas tienen `excepcion_aprobada=True`, se permite agendar.
+
+**Nuevo endpoint:** `POST /cartera/cuotas/{id}/aprobar_excepcion/` — requiere permiso `cartera.aprobar_excepcion`.
+
+**Nuevo campo en configuración de clínica:**
+```python
+class ClinicaConfig(models.Model):
+    dias_gracia_deuda = IntegerField(default=0)
+    bloquear_agenda_por_deuda = BooleanField(default=False)
+```
+
+**Definition of done H33:**
+- [x] Migración: `excepcion_aprobada` en `CuotaCartera`, `dias_gracia_deuda` y `bloquear_agenda_por_deuda` en config de clínica
+- [x] `POST /agenda/citas/` valida deuda si `bloquear_agenda_por_deuda=True`
+- [x] Error `PACIENTE_CON_DEUDA` con detalle de cuotas vencidas
+- [x] `POST /cartera/cuotas/{id}/aprobar_excepcion/` con permiso `cartera.aprobar_excepcion`
+- [ ] Ver frontend: **F25**
+
+---
+
+### H34 — Bloqueo de espacios de agenda con aprobación (hito 0)
+
+**Motivación:** recepción puede marcar un rango de la agenda como "bloqueado" (ej. vacaciones, reunión). Los bloqueos creados por recepción quedan en estado `pendiente` hasta que un administrador los apruebe. Los bloqueos aprobados por el admin se crean directamente como `aprobado`.
+
+**Nuevo modelo:**
+
+```python
+# apps/agenda/models.py
+class BloqueoAgenda(models.Model):
+    ESTADO_CHOICES = [('pendiente','Pendiente'),('aprobado','Aprobado'),('rechazado','Rechazado')]
+    clinica         = FK(Clinica)
+    sede            = FK(Sede, null=True, blank=True)
+    profesional     = FK(Colaborador, null=True, blank=True)  # null = bloqueo global de sede
+    fecha_inicio    = DateTimeField()
+    fecha_fin       = DateTimeField()
+    motivo          = CharField(max_length=500, blank=True)
+    estado          = CharField(choices=ESTADO_CHOICES, default='pendiente')
+    creado_por      = FK(User, related_name='bloqueos_creados')
+    aprobado_por    = FK(User, null=True, blank=True, related_name='bloqueos_aprobados')
+    aprobado_en     = DateTimeField(null=True, blank=True)
+    created_at      = DateTimeField(auto_now_add=True)
+```
+
+**Endpoints:**
+- `GET/POST /agenda/bloqueos/`
+- `GET/PATCH/DELETE /agenda/bloqueos/{id}/`
+- `POST /agenda/bloqueos/{id}/aprobar/` — requiere `agenda.aprobar_bloqueo`
+- `POST /agenda/bloqueos/{id}/rechazar/` — requiere `agenda.aprobar_bloqueo`
+
+**Integración con slots:** `GET /agenda/citas/slots_disponibles/` excluye slots que caen dentro de un `BloqueoAgenda` con `estado='aprobado'`.
+
+**Permisos:**
+- `agenda.crear_bloqueo` — recepción puede crear (queda pendiente)
+- `agenda.aprobar_bloqueo` — admin puede crear directamente en aprobado y aprobar/rechazar los de recepción
+
+**Definition of done H34:**
+- [x] Modelo `BloqueoAgenda` con migraciones
+- [x] CRUD en `/agenda/bloqueos/`
+- [x] `aprobar/` y `rechazar/` con permisos diferenciados
+- [x] Al crear sin permiso `aprobar_bloqueo` → estado `pendiente`; con permiso → estado `aprobado`
+- [x] `slots_disponibles` excluye bloqueos aprobados
+- [ ] Ver frontend: **F26**
+
+---
+
+### H35 — Modificar plazos de cuotas de cartera (hito 5)
+
+**Motivación:** cuando un paciente necesita extender o reprogramar el pago de una cuota, el administrador debe poder cambiar la `fecha_vencimiento` de cuotas individuales sin necesidad de eliminar y recrear la cartera.
+
+**Cambios en `PATCH /cartera/cuotas/{id}/`:**
+- Actualmente no existe este endpoint individual.
+- Crear `CuotaCarteraViewSet` con acción de detalle.
+- Campos modificables: `fecha_vencimiento`, `monto` (solo si la cuota está `pendiente`).
+- Permiso requerido: `cartera.modificar_plazo`.
+- Restricción: no se puede modificar una cuota ya `pagada` o `vencida_aprobada`.
+
+**Nuevo endpoint:**
+```
+PATCH /cartera/cuotas/{id}/
+Body: { "fecha_vencimiento": "2026-09-30" }
+```
+
+**Auditoría:** guardar en un `CuotaCarteraLog` el valor anterior, el nuevo valor, quién modificó y cuándo.
+
+```python
+class CuotaCarteraLog(models.Model):
+    cuota           = FK(CuotaCartera, related_name='logs')
+    campo           = CharField(max_length=50)  # 'fecha_vencimiento' | 'monto'
+    valor_anterior  = TextField()
+    valor_nuevo     = TextField()
+    modificado_por  = FK(User)
+    created_at      = DateTimeField(auto_now_add=True)
+```
+
+**Definition of done H35:**
+- [x] `PATCH /cartera/cuotas/{id}/` acepta `fecha_vencimiento` y `monto` (cuotas pendientes)
+- [x] Permiso `cartera.modificar_plazo`
+- [x] Registro en `CuotaCarteraLog`
+- [x] 400 si la cuota ya está pagada
+- [ ] Ver frontend: **F27**
+
+---
+
+### H36 — Firma electrónica de asistencia vía Documenso (hito 3firma)
+
+**Motivación:** al llegar el paciente, recepción genera desde la pantalla de atención un documento de registro de asistencia con los datos de la cita. El paciente lo firma electrónicamente en el momento (tablet del local) usando Documenso embedded. El documento firmado queda como prueba legal de asistencia voluntaria.
+
+> **Decisión de arquitectura:** el PDF se genera en nuestro backend (WeasyPrint) con contenido dinámico (nombre, fecha, procedimiento, sesión N/M). No se usan templates de Documenso porque el contenido es variable. Se sube el PDF directamente a Documenso y se posicionan los campos de firma calculando las coordenadas desde el PDF renderizado.
+
+---
+
+#### H36.1 — Dependencia nueva
+
+Agregar `pdfplumber` a `requirements.txt`. Se usa para leer las coordenadas del marcador invisible en el PDF renderizado.
+
+```
+pdfplumber>=0.11
+```
+
+---
+
+#### H36.2 — Ajuste al template HTML del PDF
+
+**Archivo:** `backend/apps/agenda/templates/agenda/pdf_registro_asistencia.html`
+
+Dos cambios respecto al template actual:
+
+**1. Bloque de firmas con `position: fixed`** — ancla las firmas siempre al mismo lugar del A4 sin importar la longitud del contenido:
+
+```css
+.sig-section {
+  position: fixed;
+  bottom: 20mm;
+  left: 14mm;
+  right: 14mm;
+}
+```
+
+**2. Marcador invisible** — texto blanco 1px dentro del bloque de firmas para que `pdfplumber` encuentre la posición exacta en el PDF renderizado:
+
+```html
+<div class="sig-section">
+  <span style="color:white;font-size:1px;line-height:0;">__SIG_PACIENTE__</span>
+  <!-- resto del bloque de firmas igual que ahora -->
+</div>
+```
+
+---
+
+#### H36.3 — Utilidad de extracción de coordenadas
+
+**Archivo nuevo:** `backend/apps/agenda/pdf_coords.py`
+
+```python
+import io
+import pdfplumber
+
+A4_WIDTH_MM  = 210.0
+A4_HEIGHT_MM = 297.0
+
+def extraer_coordenadas_firma(pdf_bytes: bytes) -> dict:
+    """
+    Abre el PDF renderizado, busca el marcador __SIG_PACIENTE__ y calcula
+    las coordenadas del campo de firma del paciente en porcentaje de página
+    (formato que espera Documenso: pageX, pageY, pageWidth, pageHeight).
+
+    Retorna también pageNumber (siempre 1 dado el diseño de una página).
+    """
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        page = pdf.pages[0]
+        words = page.extract_words()
+        marker = next(
+            (w for w in words if '__SIG_PACIENTE__' in w.get('text', '')),
+            None,
+        )
+        if marker is None:
+            # Fallback: coordenadas calibradas para A4 con margen 20mm bottom
+            return _coordenadas_fallback(page)
+
+        page_w = page.width   # puntos PDF (1pt = 1/72 inch)
+        page_h = page.height
+
+        # El área de firma empieza en X del marcador, ancho 45% de página
+        x_pct = (marker['x0'] / page_w) * 100
+        y_pct = (marker['top'] / page_h) * 100
+        w_pct = 45.0
+        h_pct = 8.0   # altura del área de firma
+
+        return {
+            'pageNumber': 1,
+            'pageX': round(x_pct, 2),
+            'pageY': round(y_pct, 2),
+            'pageWidth': w_pct,
+            'pageHeight': h_pct,
+        }
+
+
+def _coordenadas_fallback(page) -> dict:
+    """Coordenadas calculadas para firma en bottom 20mm de A4."""
+    # 20mm bottom margin → top de firma ≈ (297-20-18)/297 * 100 ≈ 87%
+    return {
+        'pageNumber': 1,
+        'pageX': 5.0,
+        'pageY': 72.0,
+        'pageWidth': 45.0,
+        'pageHeight': 8.0,
+    }
+```
+
+---
+
+#### H36.4 — Servicio principal: subir PDF y crear documento en Documenso
+
+**Archivo:** `backend/apps/consentimientos/services.py` — nueva función `iniciar_registro_asistencia_documenso(cita)`
+
+Flujo completo:
+
+```
+1. render_registro_asistencia_pdf(cita)  →  pdf_bytes
+       (apps/agenda/pdf.py — ya implementado)
+
+2. extraer_coordenadas_firma(pdf_bytes)  →  coords
+       (apps/agenda/pdf_coords.py — H36.3)
+
+3. POST /api/v1/documents  (multipart/form-data)
+       field "file": pdf_bytes, filename="registro_asistencia.pdf"
+   →  { "documentId": int, "uploadUrl": "https://..." }
+
+4. PUT  uploadUrl  (bytes del PDF — presigned S3/MinIO de Documenso)
+
+5. POST /api/v1/documents/{documentId}/recipients
+       { "name": paciente.nombre_completo,
+         "email": _obtener_email_destinatario(cita),
+         "role": "SIGNER" }
+   →  { "recipientId": int }
+
+6. POST /api/v1/documents/{documentId}/fields
+       { "recipientId": recipientId,
+         "type": "SIGNATURE",
+         "pageNumber": coords["pageNumber"],
+         "pageX": coords["pageX"],
+         "pageY": coords["pageY"],
+         "pageWidth": coords["pageWidth"],
+         "pageHeight": coords["pageHeight"] }
+
+7. POST /api/v1/documents/{documentId}/send
+       { "sendEmail": false }   ← firma presencial, no necesita email
+
+8. GET  /api/v1/documents/{documentId}
+   →  recipients[0].token  (signing_token para embedded)
+
+9. Guardar en Cita:
+       firma_asistencia_documento_id = str(documentId)
+       firma_asistencia_estado       = "enviada"
+       save(update_fields=[...])
+
+10. Retornar { "signing_token": token, "document_id": str(documentId) }
+```
+
+**Helpers reutilizables de `historia_clinica/services.py` que se siguen usando:**
+- `_documenso_headers()` — autenticación
+- `_fetch_documenso_json()` — peticiones JSON (pasos 5, 6, 7, 8)
+- `_obtener_email_destinatario()` — email del paciente con fallback
+
+**Helper nuevo para multipart** (en `consentimientos/services.py`):
+```python
+def _upload_pdf_a_documenso(pdf_bytes: bytes, nombre: str) -> tuple[int, str]:
+    """
+    Crea el documento en Documenso y sube el PDF al presigned URL.
+    Retorna (documentId, uploadUrl).
+    """
+    import requests
+    from apps.historia_clinica.services import _documenso_api_key, DocumensoIntegrationError
+
+    base = settings.DOCUMENSO_API_URL.rstrip('/')
+    resp = requests.post(
+        f"{base}/api/v1/documents",
+        headers={"Authorization": _documenso_api_key()},
+        files={"file": (nombre, pdf_bytes, "application/pdf")},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    data = resp.json()
+    document_id = data.get("documentId") or data.get("id")
+    upload_url  = data.get("uploadUrl")
+    if not document_id:
+        raise DocumensoIntegrationError("Documenso no devolvió documentId al crear el documento.")
+    if upload_url:
+        put = requests.put(upload_url, data=pdf_bytes,
+                           headers={"Content-Type": "application/pdf"}, timeout=30)
+        put.raise_for_status()
+    return document_id, upload_url or ""
+```
+
+---
+
+#### H36.5 — Endpoint nuevo en CitaViewSet
+
+**Archivo:** `backend/apps/agenda/views.py`
+
+```python
+@action(detail=True, methods=["post"], url_path="iniciar_registro_asistencia")
+def iniciar_registro_asistencia(self, request, pk=None):
+    from apps.consentimientos.services import iniciar_registro_asistencia_documenso
+    from apps.historia_clinica.services import DocumensoIntegrationError
+
+    cita = self.get_object()
+    try:
+        result = iniciar_registro_asistencia_documenso(cita)
+    except DocumensoIntegrationError as exc:
+        return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"},
+                        status=status.HTTP_502_BAD_GATEWAY)
+    return Response(result, status=status.HTTP_200_OK)
+```
+
+Agregar en `get_permissions`:
+```python
+elif self.action == "iniciar_registro_asistencia":
+    permission_classes = (RequirePermission("agenda.citas.editar"),)
+```
+
+**Contrato de respuesta:**
+```json
+{ "signing_token": "abc123...", "document_id": "4567" }
+```
+
+**Errores:**
+- `502 DOCUMENSO_ERROR` — Documenso no disponible o rechazó la petición
+- `404` — cita no encontrada o no pertenece a la clínica
+
+---
+
+#### H36.6 — Webhook Documenso
+
+**Archivo:** `backend/apps/historia_clinica/webhooks.py`
+
+Ya existe y maneja `document.completed`. Ampliar para identificar documentos de asistencia por `externalId`:
+
+> El paso 7 (send) debe incluir `externalId: f"asistencia:{cita.id}"` en el payload. El webhook ya distingue por `externalId` — agregar rama:
+
+```python
+if external_id and external_id.startswith("asistencia:"):
+    cita_id = external_id.split(":", 1)[1]
+    Cita.objects.filter(id=cita_id).update(
+        firma_asistencia_estado="firmada" if event == "document.completed" else "rechazada"
+    )
+    return
+```
+
+---
+
+#### H36.7 — Endpoint de impresión (ya implementado)
+
+`GET /agenda/citas/{id}/registro_asistencia_pdf/` — devuelve el PDF para imprimir. Ya está en `views.py` y `agenda/pdf.py`. No requiere cambios.
+
+---
+
+#### Campos de Cita ya implementados (no tocar)
+
+```python
+firma_asistencia_estado        # CharField — ya en el modelo
+firma_asistencia_documento_id  # CharField — ya en el modelo
+```
+
+`CitaSerializer` ya los expone.
+
+---
+
+**Definition of done H36 (revisado):**
+- [x] `Cita.firma_asistencia_estado` y `firma_asistencia_documento_id` en modelo y serializer
+- [x] `GET /agenda/citas/{id}/registro_asistencia_pdf/` devuelve PDF imprimible
+- [x] `POST /agenda/citas/{id}/enviar_firma_asistencia/` (flujo con template — mantener para otros usos)
+- [ ] `pdfplumber` en `requirements.txt`
+- [ ] Template HTML actualizado: `position: fixed` en `.sig-section` + marcador `__SIG_PACIENTE__`
+- [ ] `backend/apps/agenda/pdf_coords.py` con `extraer_coordenadas_firma()`
+- [ ] `iniciar_registro_asistencia_documenso(cita)` en `consentimientos/services.py` — flujo completo de 10 pasos
+- [ ] `POST /agenda/citas/{id}/iniciar_registro_asistencia/` en `CitaViewSet`
+- [ ] Webhook distingue `externalId: "asistencia:{cita_id}"` y actualiza `firma_asistencia_estado`
+- [ ] Ver frontend: **F28**
+
+---
+
+### H38 — Log de acciones transversal (hito 6)
+
+**Motivación:** para auditoría y soporte, todas las acciones de negocio relevantes (crear cita, cobrar cuota, modificar historia, firmar consentimiento, etc.) deben quedar registradas con usuario, timestamp y contexto. El log debe ser consultable desde la UI de administración.
+
+**Nuevo modelo:**
+
+```python
+# apps/core/models.py
+class LogAccion(models.Model):
+    clinica     = FK(Clinica, null=True)
+    usuario     = FK(User, null=True, on_delete=SET_NULL)
+    accion      = CharField(max_length=100)  # ej: 'cita.crear', 'cuota.cobrar', 'nota.completar'
+    objeto_tipo = CharField(max_length=100)  # ej: 'Cita', 'CuotaCartera'
+    objeto_id   = CharField(max_length=100)
+    detalle     = JSONField(default=dict)    # payload relevante (no datos sensibles)
+    ip          = GenericIPAddressField(null=True, blank=True)
+    created_at  = DateTimeField(auto_now_add=True)
+
+    class Meta:
+        indexes = [
+            Index(fields=['clinica', 'created_at']),
+            Index(fields=['clinica', 'accion']),
+            Index(fields=['objeto_tipo', 'objeto_id']),
+        ]
+```
+
+**Helper de registro:**
+
+```python
+# apps/core/logging.py
+def registrar_accion(request, accion: str, objeto, detalle: dict = None):
+    LogAccion.objects.create(
+        clinica=getattr(request.user, 'clinica', None),
+        usuario=request.user,
+        accion=accion,
+        objeto_tipo=objeto.__class__.__name__,
+        objeto_id=str(objeto.pk),
+        detalle=detalle or {},
+        ip=get_client_ip(request),
+    )
+```
+
+**Acciones a registrar (primera iteración):**
+- `cita.crear`, `cita.cancelar`, `cita.completar`
+- `cuota.cobrar`, `cuota.modificar_plazo`
+- `nota.completar`
+- `consentimiento.firmar`
+- `historia.ver` (acceso a historia del paciente)
+
+**Endpoint de consulta:**
+```
+GET /core/log-acciones/
+?clinica=uuid&accion=cita.crear&usuario=uuid&fecha_desde=&fecha_hasta=
+→ Paginated<LogAccion>
+```
+Requiere permiso `core.ver_log_acciones`.
+
+**Definition of done H38:**
+- [ ] Modelo `LogAccion` con migraciones e índices
+- [ ] Helper `registrar_accion` integrado en los 5 flujos de primera iteración
+- [ ] `GET /core/log-acciones/` con filtros por acción, usuario, fecha; paginado
+- [ ] Permiso `core.ver_log_acciones`
+- [ ] Ver frontend: **F30**
+
+---
+
+### H39 — Estados extendidos de cotización: descartada y reversión a borrador
+
+**Motivación:** el flujo comercial necesita poder descartar cotizaciones en borrador sin eliminarlas, y permitir que un admin revierta una cotización aceptada a borrador cuando no haya uso real (sin cobros ni citas agendadas).
+
+**Cambios en modelo:**
+
+```python
+# apps/cotizaciones/models.py
+class Cotizacion(models.Model):
+    ESTADO_CHOICES = [
+        ('borrador',   'Borrador'),
+        ('aceptada',   'Aceptada'),
+        ('vencida',    'Vencida'),
+        ('descartada', 'Descartada'),   # ← nuevo
+    ]
+```
+
+**Cambios en `cambiar_estado` action:**
+
+Transiciones válidas a agregar:
+
+| Desde      | Hacia       | Quién puede         | Validaciones backend                                          |
+|------------|-------------|---------------------|---------------------------------------------------------------|
+| `borrador` | `descartada`| `cotizaciones.gestionar` | ninguna adicional                                        |
+| `aceptada` | `borrador`  | `admin` / `superadmin`  | sin cobros activos (estado ≠ `anulado`) + sin citas agendadas |
+
+Errores a devolver si las validaciones fallan:
+
+```json
+{ "error": "La cotización tiene cobros activos. Anúlalos primero.", "code": "COTIZACION_CON_COBROS" }
+{ "error": "La cotización tiene citas agendadas. Cancélalas primero.", "code": "COTIZACION_CON_CITAS" }
+```
+
+**Cambios en filtros:**
+
+`GET /cotizaciones/?estado=descartada` debe funcionar (agregar `descartada` a los valores aceptados por el filtro).
+
+**Comportamiento de edición:** `PATCH /cotizaciones/{id}/` y `DELETE /cotizaciones/{id}/` solo permitidos en `borrador` — sin cambios, `descartada` ya queda bloqueada por la regla existente (`COTIZACION_NO_EDITABLE`).
+
+**Checklist:**
+- [ ] Agregar `'descartada'` a `ESTADO_CHOICES` del modelo y generar migración
+- [ ] Agregar transición `borrador → descartada` en `cambiar_estado` (permiso `cotizaciones.gestionar`)
+- [ ] Agregar transición `aceptada → borrador` en `cambiar_estado` (solo `admin`/`superadmin`)
+- [ ] Validar en `aceptada → borrador`: no hay cobros activos vinculados
+- [ ] Validar en `aceptada → borrador`: no hay citas agendadas en ningún ítem (`SesionProcedimiento` activa o `Cita` vinculada no cancelada)
+- [ ] Aceptar `estado=descartada` en el filtro del `list`
+- [ ] Actualizar `api.md` con las nuevas transiciones y códigos de error
+
+**Ver frontend:** cambios ya implementados en `CotizacionForm`, `CotizacionEstadoBadge` y la página de listado.
+
+---
+
+## Hitos futuros (no en el alcance actual)
+
+> Estos hitos están definidos pero quedan fuera del orden de ejecución activo, ya sea por decisión del cliente, complejidad técnica que requiere más análisis, o dependencias no resueltas.
+
+---
+
+### H37 — Historia clínica dinámica por tratamiento (hito 4)
+
+> **Estado:** pospuesto. El cliente tiene una cantidad limitada y conocida de tipos de tratamiento; los campos específicos de cada uno se cubren por ahora con los campos fijos de `NotaClinica`. Retomar cuando haya necesidad real de variabilidad de campos entre tratamientos.
+
+**Motivación:** cada tipo de tratamiento puede necesitar campos distintos en la nota clínica (ej. Radiofrecuencia pide "zona tratada" e "intensidad"; Mesoterapia pide "producto" y "dosis"). El admin configura las secciones/campos de la nota y el profesional los llena durante la atención.
+
+**Modelos previstos:**
+
+```python
+# apps/historia_clinica/models.py
+class PlantillaNota(models.Model):
+    clinica        = FK(Clinica)
+    procedimiento  = FK(Procedimiento, null=True, blank=True)  # null = plantilla global
+    nombre         = CharField(max_length=200)
+    activo         = BooleanField(default=True)
+
+class CampoPlantillaNota(models.Model):
+    TIPO_CHOICES = [
+        ('texto','Texto libre'),('numero','Número'),('booleano','Sí/No'),
+        ('lista','Lista de opciones'),('fecha','Fecha'),
+    ]
+    plantilla      = FK(PlantillaNota, related_name='campos')
+    nombre         = CharField(max_length=100)
+    tipo           = CharField(choices=TIPO_CHOICES)
+    opciones       = JSONField(default=list, blank=True)
+    requerido      = BooleanField(default=False)
+    orden          = IntegerField(default=0)
+
+class ValorCampoNota(models.Model):
+    nota           = FK(NotaClinica, related_name='valores_campos')
+    campo          = FK(CampoPlantillaNota)
+    valor          = TextField(blank=True)
+```
+
+**Endpoints previstos:**
+- `GET/POST /historia-clinica/plantillas-nota/`
+- `GET/PATCH/DELETE /historia-clinica/plantillas-nota/{id}/`
+- `POST /historia-clinica/plantillas-nota/{id}/campos/`
+- `PATCH/DELETE /historia-clinica/plantillas-nota/{id}/campos/{campo_id}/`
+- `GET/POST /historia-clinica/notas/{id}/valores/`
+
+**Puntos de diseño a resolver antes de implementar:**
+- `valor` como `TextField` universal pierde tipado; evaluar `JSONField` o columnas específicas.
+- Versionado de plantilla: si se eliminan campos, las notas históricas quedan con referencias huérfanas. Los campos solo deben desactivarse, nunca borrarse.
+- Una sola plantilla por procedimiento puede no cubrir variantes por sede o período.
+
+**Ver frontend:** **F29**
+
+---
+
+---
+
+### H40 — Nueva app `procedimientos`: modelos catálogo
+
+**Motivación:** base estructural del módulo de procedimientos estéticos. Introduce el catálogo de tipos de procedimiento y zonas anatómicas con soporte de catálogo global más extensión por tenant, y enlaza los servicios con el tipo de procedimiento que ejecutan.
+
+**Nueva app:** `backend/apps/procedimientos/`
+
+Estructura mínima:
+```
+apps/procedimientos/
+├── __init__.py
+├── apps.py          (name = 'procedimientos')
+├── models.py
+├── serializers.py
+├── views.py
+├── urls.py
+├── admin.py
+└── migrations/
+    └── __init__.py
+```
+
+Registrar en `backend/config/settings/base.py` bajo `INSTALLED_APPS`:
+```python
+'apps.procedimientos',
+```
+
+**Modelos:**
+
+```python
+# apps/procedimientos/models.py
+
+class TipoProcedimiento(BaseModel):
+    class Categoria(models.TextChoices):
+        FACIAL     = 'facial',     'Facial'
+        CORPORAL   = 'corporal',   'Corporal'
+        EQUIPOS    = 'equipos',    'Equipos'
+        INYECTABLE = 'inyectable', 'Inyectable / Invasivo'
+
+    clinica          = models.ForeignKey('clinicas.Clinica', null=True, blank=True,
+                           on_delete=models.CASCADE, related_name='tipos_procedimiento')
+    es_global        = models.BooleanField(default=False)
+    nombre           = models.CharField(max_length=200)
+    categoria        = models.CharField(max_length=20, choices=Categoria.choices)
+    requiere_puntos  = models.BooleanField(default=False,
+                           help_text='Si True, el formulario exige al menos un punto con producto+lote')
+    requiere_zonas   = models.BooleanField(default=False,
+                           help_text='Si True, el formulario muestra el mapa corporal de zonas')
+    schema_campos    = models.JSONField(default=list, blank=True,
+                           help_text='Array de {key, label, type, required, opciones?}')
+
+    class Meta:
+        db_table = 'procedimientos_tipos'
+        ordering = ['categoria', 'nombre']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(es_global=True,  clinica__isnull=True) |
+                    models.Q(es_global=False, clinica__isnull=False)
+                ),
+                name='tipo_procedimiento_global_xor_clinica',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.nombre} ({self.get_categoria_display()})'
+
+
+class ZonaAnatomica(BaseModel):
+    class Vista(models.TextChoices):
+        ROSTRO_FRONTAL   = 'rostro_frontal',   'Rostro — Vista frontal'
+        ROSTRO_LATERAL   = 'rostro_lateral',   'Rostro — Vista lateral'
+        CUERPO_ANTERIOR  = 'cuerpo_anterior',  'Cuerpo — Vista anterior'
+        CUERPO_POSTERIOR = 'cuerpo_posterior', 'Cuerpo — Vista posterior'
+        MANOS            = 'manos',            'Manos'
+
+    clinica   = models.ForeignKey('clinicas.Clinica', null=True, blank=True,
+                    on_delete=models.CASCADE, related_name='zonas_anatomicas')
+    es_global = models.BooleanField(default=False)
+    vista     = models.CharField(max_length=30, choices=Vista.choices)
+    path_id   = models.CharField(max_length=100,
+                    help_text='id del <path> SVG, ej: "frente", "menton-izq"')
+    codigo    = models.CharField(max_length=50,
+                    help_text='Código corto para reports, ej: "FRO", "LAB-SUP"')
+    nombre    = models.CharField(max_length=150)
+
+    class Meta:
+        db_table = 'procedimientos_zonas'
+        ordering = ['vista', 'nombre']
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(es_global=True,  clinica__isnull=True) |
+                    models.Q(es_global=False, clinica__isnull=False)
+                ),
+                name='zona_anatomica_global_xor_clinica',
+            )
+        ]
+
+    def __str__(self):
+        return f'{self.nombre} ({self.get_vista_display()})'
+```
+
+**Cambio en modelo existente** — `apps/clinicas/models.py`:
+```python
+# Agregar FK en clase Servicio, después del campo 'consentimientos_requeridos':
+tipo_procedimiento = models.ForeignKey(
+    'procedimientos.TipoProcedimiento',
+    null=True,
+    blank=True,
+    on_delete=models.SET_NULL,
+    related_name='servicios',
+    help_text='Si se configura, activa el tab de procedimientos en la atención',
+)
+```
+
+**Migraciones:**
+1. `makemigrations procedimientos` — crea tablas `procedimientos_tipos` y `procedimientos_zonas`
+2. `makemigrations clinicas` — agrega `tipo_procedimiento_id` a `servicios`
+
+**Fixtures de catálogo base** — `apps/procedimientos/fixtures/tipos_procedimiento.json` y `zonas_anatomicas.json`:
+- Tipos globales iniciales: al menos uno por categoría (Botox, Radiofrecuencia Facial, Cavitación, Mesoterapia)
+- Zonas globales: set completo por cada vista SVG (ROSTRO_FRONTAL mínimo 10 zones: frente, entrecejo, patas-de-gallo-izq/der, surco-naso-izq/der, labio-sup, labio-inf, menton, cuello)
+- Todos con `es_global=true`, `clinica=null`
+
+Cargar con: `python manage.py loaddata tipos_procedimiento zonas_anatomicas`
+
+**Definition of done:**
+- [ ] App `procedimientos` registrada y sin errores en `check`
+- [ ] Migraciones sin conflictos (incluyendo la de `clinicas`)
+- [ ] Constraint `global_xor_clinica` presente en ambas tablas
+- [ ] Fixtures cargan sin error; `TipoProcedimiento.objects.filter(es_global=True).count() >= 4`
+- [ ] `Servicio.tipo_procedimiento` es nullable y no rompe ningún test existente
+
+---
+
+### H41 — Modelos de registro clínico: procedimiento, productos y puntos
+
+**Motivación:** modelos que almacenan la instancia concreta de un procedimiento realizado durante una atención: el formulario llenado, los productos aplicados con trazabilidad y los puntos de inyección georeferenciados sobre el SVG.
+
+**Modelos** — añadir a `apps/procedimientos/models.py`:
+
+```python
+class ProcedimientoEstetico(BaseModel):
+    nota_clinica  = models.OneToOneField(
+        'historia_clinica.NotaClinica',
+        on_delete=models.CASCADE,
+        related_name='procedimiento',
+    )
+    tipo          = models.ForeignKey(
+        TipoProcedimiento,
+        on_delete=models.PROTECT,
+        related_name='procedimientos',
+    )
+    zonas         = models.ManyToManyField(
+        ZonaAnatomica,
+        blank=True,
+        related_name='procedimientos',
+    )
+    datos         = models.JSONField(default=dict, blank=True,
+                        help_text='Valores de los campos definidos en tipo.schema_campos')
+    profesional   = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name='procedimientos_realizados',
+        limit_choices_to={'es_profesional': True},
+    )
+    observaciones = models.TextField(blank=True)
+
+    class Meta:
+        db_table = 'procedimientos_esteticos'
+
+    def __str__(self):
+        return f'Procedimiento {self.tipo.nombre} — nota {self.nota_clinica_id}'
+
+
+class ProductoAplicado(BaseModel):
+    procedimiento     = models.ForeignKey(
+        ProcedimientoEstetico,
+        on_delete=models.CASCADE,
+        related_name='productos',
+    )
+    nombre            = models.CharField(max_length=200)
+    registro_invima   = models.CharField(max_length=100, blank=True)
+    lote              = models.CharField(max_length=100, blank=True)
+    vencimiento       = models.DateField(null=True, blank=True)
+    cantidad_total    = models.DecimalField(max_digits=10, decimal_places=3,
+                            null=True, blank=True)
+    unidad            = models.CharField(max_length=30, blank=True,
+                            help_text='ej: mL, UI, mg')
+
+    class Meta:
+        db_table = 'procedimientos_productos'
+        ordering = ['created_at']
+
+    def __str__(self):
+        return f'{self.nombre} (lote {self.lote or "—"})'
+
+
+class AplicacionPunto(BaseModel):
+    producto_aplicado = models.ForeignKey(
+        ProductoAplicado,
+        on_delete=models.CASCADE,
+        related_name='puntos',
+    )
+    x           = models.FloatField(help_text='Coordenada X normalizada [0–1] sobre el SVG')
+    y           = models.FloatField(help_text='Coordenada Y normalizada [0–1] sobre el SVG')
+    orden       = models.PositiveSmallIntegerField(default=1)
+    vista       = models.CharField(max_length=30, choices=ZonaAnatomica.Vista.choices)
+    cantidad    = models.DecimalField(max_digits=8, decimal_places=3,
+                      null=True, blank=True,
+                      help_text='Cantidad de producto en este punto específico')
+    tecnica     = models.CharField(max_length=100, blank=True,
+                      help_text='ej: bolus, abanico, lineal')
+    profundidad = models.CharField(max_length=50, blank=True,
+                      help_text='ej: subdérmico, intradérmico, supraperióstico')
+
+    class Meta:
+        db_table = 'procedimientos_puntos'
+        ordering = ['orden']
+
+    def __str__(self):
+        return f'Punto ({self.x:.2f},{self.y:.2f}) — {self.producto_aplicado}'
+```
+
+**Migración:** `makemigrations procedimientos` — crea las 3 tablas + tabla M2M `procedimientos_esteticos_zonas`.
+
+**Definition of done:**
+- [ ] Migración aplica sin errores
+- [ ] `ProcedimientoEstetico` tiene constraint `OneToOne` (la DB rechaza un segundo procedimiento para la misma nota)
+- [ ] `AplicacionPunto.x` y `.y` con validators `MinValueValidator(0)` y `MaxValueValidator(1)` (agregar en el campo o en `clean()`)
+- [ ] Los 3 modelos aparecen en Django admin básico
+
+---
+
+### H42 — Serializers y validación
+
+**Motivación:** serializers writable nested siguiendo el patrón de `CotizacionSerializer`. Un solo `POST /procedimientos/` crea el procedimiento, sus productos y sus puntos de inyección en una transacción.
+
+**Archivo:** `apps/procedimientos/serializers.py`
+
+```python
+class AplicacionPuntoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AplicacionPunto
+        fields = ['id', 'x', 'y', 'orden', 'vista', 'cantidad', 'tecnica', 'profundidad']
+
+
+class ProductoAplicadoSerializer(serializers.ModelSerializer):
+    puntos = AplicacionPuntoSerializer(many=True, required=False)
+
+    class Meta:
+        model = ProductoAplicado
+        fields = ['id', 'nombre', 'registro_invima', 'lote', 'vencimiento',
+                  'cantidad_total', 'unidad', 'puntos']
+
+
+class ProcedimientoEsteticoSerializer(serializers.ModelSerializer):
+    productos = ProductoAplicadoSerializer(many=True, required=False)
+    zonas     = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=ZonaAnatomica.objects.all(),
+        required=False,
+    )
+    # Campos de solo lectura para el frontend
+    tipo_nombre      = serializers.CharField(source='tipo.nombre', read_only=True)
+    tipo_categoria   = serializers.CharField(source='tipo.categoria', read_only=True)
+    tipo_schema      = serializers.JSONField(source='tipo.schema_campos', read_only=True)
+    requiere_puntos  = serializers.BooleanField(source='tipo.requiere_puntos', read_only=True)
+    requiere_zonas   = serializers.BooleanField(source='tipo.requiere_zonas', read_only=True)
+
+    class Meta:
+        model = ProcedimientoEstetico
+        fields = [
+            'id', 'nota_clinica', 'tipo', 'tipo_nombre', 'tipo_categoria',
+            'tipo_schema', 'requiere_puntos', 'requiere_zonas',
+            'zonas', 'datos', 'profesional', 'observaciones',
+            'productos', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+    def validate(self, attrs):
+        tipo = attrs.get('tipo') or (self.instance.tipo if self.instance else None)
+        productos = attrs.get('productos', [])
+
+        if tipo and tipo.requiere_puntos:
+            # Al menos un producto con lote y al menos un punto
+            tiene_puntos = any(
+                p.get('lote') and p.get('puntos')
+                for p in productos
+            )
+            if not tiene_puntos:
+                raise serializers.ValidationError(
+                    'Este tipo de procedimiento requiere al menos un producto con lote y un punto de aplicación.'
+                )
+        return attrs
+
+    def create(self, validated_data):
+        productos_data = validated_data.pop('productos', [])
+        zonas_data     = validated_data.pop('zonas', [])
+
+        procedimiento = ProcedimientoEstetico.objects.create(**validated_data)
+        procedimiento.zonas.set(zonas_data)
+
+        for prod_data in productos_data:
+            puntos_data = prod_data.pop('puntos', [])
+            producto = ProductoAplicado.objects.create(
+                procedimiento=procedimiento, **prod_data
+            )
+            AplicacionPunto.objects.bulk_create([
+                AplicacionPunto(producto_aplicado=producto, **p)
+                for p in puntos_data
+            ])
+
+        return procedimiento
+
+    def update(self, instance, validated_data):
+        # Solo permitido si nota_clinica.estado == BORRADOR
+        if instance.nota_clinica.estado != 'borrador':
+            raise serializers.ValidationError(
+                'No se puede modificar un procedimiento de una nota completada.'
+            )
+
+        productos_data = validated_data.pop('productos', None)
+        zonas_data     = validated_data.pop('zonas', None)
+
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        instance.save()
+
+        if zonas_data is not None:
+            instance.zonas.set(zonas_data)
+
+        if productos_data is not None:
+            # Replace strategy: soft-delete anteriores, crear nuevos
+            instance.productos.filter(activo=True).update(activo=False)
+            for prod_data in productos_data:
+                puntos_data = prod_data.pop('puntos', [])
+                producto = ProductoAplicado.objects.create(
+                    procedimiento=instance, **prod_data
+                )
+                AplicacionPunto.objects.bulk_create([
+                    AplicacionPunto(producto_aplicado=producto, **p)
+                    for p in puntos_data
+                ])
+
+        return instance
+
+
+class TipoProcedimientoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = TipoProcedimiento
+        fields = [
+            'id', 'nombre', 'categoria', 'requiere_puntos', 'requiere_zonas',
+            'schema_campos', 'es_global', 'clinica',
+        ]
+        read_only_fields = ['id']
+
+
+class ZonaAnatomicaSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ZonaAnatomica
+        fields = ['id', 'vista', 'path_id', 'codigo', 'nombre', 'es_global', 'clinica']
+        read_only_fields = ['id']
+```
+
+**Definition of done:**
+- [ ] `POST /procedimientos/` con `productos` y `puntos` anidados crea todos los registros en una transacción
+- [ ] Validación `requiere_puntos` lanza 400 si no hay producto con lote+punto
+- [ ] `PATCH /procedimientos/{id}/` con nota en estado `completada` lanza 400
+- [ ] `update()` con `productos` reemplaza (soft-delete + bulk_create), no acumula
+- [ ] Tests unitarios de `validate()` en `apps/procedimientos/tests.py`
+
+---
+
+### H43 — ViewSets, endpoints y acción en NotaClinica
+
+**Motivación:** exponer los modelos del módulo como API REST, siguiendo el patrón flat del proyecto (sin nested routing). Agregar una acción de lectura en `NotaClinicaViewSet` para consultar el procedimiento de una nota sin salir del namespace de historia clínica.
+
+**Archivo:** `apps/procedimientos/views.py`
+
+```python
+from django.db.models import Q
+from rest_framework import viewsets, mixins
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from .models import TipoProcedimiento, ZonaAnatomica, ProcedimientoEstetico
+from .serializers import (TipoProcedimientoSerializer, ZonaAnatomicaSerializer,
+                          ProcedimientoEsteticoSerializer)
+
+
+class TipoProcedimientoViewSet(mixins.ListModelMixin,
+                                mixins.RetrieveModelMixin,
+                                mixins.CreateModelMixin,
+                                viewsets.GenericViewSet):
+    serializer_class = TipoProcedimientoSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = TipoProcedimiento.objects.filter(activo=True)
+        if user.rol == 'superadmin':
+            return qs
+        return qs.filter(Q(es_global=True) | Q(clinica=user.clinica))
+
+    def perform_create(self, serializer):
+        # Los tenants solo crean tipos propios; los globales son solo fixtures/admin
+        serializer.save(clinica=self.request.user.clinica, es_global=False)
+
+
+class ZonaAnatomicaViewSet(mixins.ListModelMixin,
+                            mixins.RetrieveModelMixin,
+                            viewsets.GenericViewSet):
+    serializer_class = ZonaAnatomicaSerializer
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = ZonaAnatomica.objects.filter(activo=True)
+        if user.rol == 'superadmin':
+            return qs
+        return qs.filter(Q(es_global=True) | Q(clinica=user.clinica))
+
+
+class ProcedimientoEsteticoViewSet(mixins.CreateModelMixin,
+                                    mixins.RetrieveModelMixin,
+                                    mixins.UpdateModelMixin,
+                                    viewsets.GenericViewSet):
+    serializer_class = ProcedimientoEsteticoSerializer
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
+
+    def get_queryset(self):
+        user = self.request.user
+        qs = ProcedimientoEstetico.objects.select_related(
+            'tipo', 'nota_clinica', 'profesional'
+        ).prefetch_related('zonas', 'productos__puntos')
+        if user.rol == 'superadmin':
+            return qs
+        return qs.filter(nota_clinica__historia__clinica=user.clinica)
+
+    def perform_create(self, serializer):
+        serializer.save()
+```
+
+**Archivo:** `apps/procedimientos/urls.py`
+
+```python
+from rest_framework.routers import DefaultRouter
+from .views import TipoProcedimientoViewSet, ZonaAnatomicaViewSet, ProcedimientoEsteticoViewSet
+
+router = DefaultRouter()
+router.register('tipos',          TipoProcedimientoViewSet,  basename='tipoprocedimiento')
+router.register('zonas',          ZonaAnatomicaViewSet,       basename='zonaanatomica')
+router.register('procedimientos', ProcedimientoEsteticoViewSet, basename='procedimientoEstetico')
+
+urlpatterns = router.urls
+```
+
+**Registro en** `backend/config/urls.py`:
+```python
+path('api/v1/procedimientos/', include('apps.procedimientos.urls')),
+```
+
+**Endpoints resultantes:**
+```
+GET  /api/v1/procedimientos/tipos/
+GET  /api/v1/procedimientos/tipos/{id}/
+POST /api/v1/procedimientos/tipos/              ← solo crea tipos propios del tenant
+
+GET  /api/v1/procedimientos/zonas/
+GET  /api/v1/procedimientos/zonas/{id}/
+
+POST  /api/v1/procedimientos/procedimientos/
+GET   /api/v1/procedimientos/procedimientos/{id}/
+PATCH /api/v1/procedimientos/procedimientos/{id}/
+```
+
+**Acción de lectura en NotaClinicaViewSet** — `apps/historia_clinica/views.py`:
+```python
+@action(detail=True, methods=['get'], url_path='procedimiento')
+def procedimiento(self, request, pk=None):
+    nota = self.get_object()
+    try:
+        proc = nota.procedimiento  # OneToOne reverse
+    except nota.__class__.procedimiento.RelatedObjectDoesNotExist:
+        return Response(None, status=200)  # null si no tiene aún
+    from apps.procedimientos.serializers import ProcedimientoEsteticoSerializer
+    return Response(ProcedimientoEsteticoSerializer(proc).data)
+```
+
+Endpoint resultante:
+```
+GET /api/v1/historia-clinica/notas/{id}/procedimiento/
+```
+
+**Permisos:** usar los guards existentes del proyecto (`IsAuthenticated` + filtro por clinica en queryset). No se requieren permisos específicos nuevos en esta iteración.
+
+**Definition of done:**
+- [ ] `GET /procedimientos/tipos/` devuelve globales + propios del tenant; no devuelve de otros tenants
+- [ ] `GET /procedimientos/zonas/` ídem
+- [ ] `POST /procedimientos/procedimientos/` crea procedimiento con productos y puntos anidados
+- [ ] `PATCH /procedimientos/procedimientos/{id}/` actualiza (guard de estado en serializer)
+- [ ] `GET /historia-clinica/notas/{id}/procedimiento/` devuelve `null` o el objeto completo
+- [ ] Un tenant no puede leer ni escribir procedimientos de otra clínica (test de aislamiento)
+
+---
+
+### H44 — Integración con Servicio y Cita: exponer tipo en el serializer de cita
+
+**Motivación:** el frontend necesita saber, al abrir una atención, si el servicio agendado tiene un `TipoProcedimiento` configurado para activar el tab. El serializer de `Cita` debe exponer ese dato sin forzar al frontend a hacer una consulta extra.
+
+**Cambios en** `apps/agenda/serializers.py`:
+
+En `CitaSerializer` agregar campos de solo lectura:
+```python
+servicio_tipo_procedimiento_id   = serializers.UUIDField(
+    source='servicio.tipo_procedimiento_id', read_only=True, default=None
+)
+servicio_tipo_procedimiento_nombre = serializers.CharField(
+    source='servicio.tipo_procedimiento.nombre', read_only=True, default=None
+)
+servicio_tipo_requiere_puntos = serializers.BooleanField(
+    source='servicio.tipo_procedimiento.requiere_puntos', read_only=True, default=False
+)
+servicio_tipo_requiere_zonas = serializers.BooleanField(
+    source='servicio.tipo_procedimiento.requiere_zonas', read_only=True, default=False
+)
+```
+
+Agregar al `fields` de `CitaSerializer`.
+
+Asegurarse de que el queryset en `CitaViewSet` incluya `select_related('servicio__tipo_procedimiento')` para evitar N+1.
+
+**Cambios en** `apps/clinicas/serializers.py`:
+
+`ServicioSerializer` debe incluir `tipo_procedimiento` como campo writable (FK por ID):
+```python
+tipo_procedimiento = serializers.PrimaryKeyRelatedField(
+    queryset=TipoProcedimiento.objects.filter(activo=True),
+    required=False,
+    allow_null=True,
+)
+```
+
+El queryset debe filtrar `Q(es_global=True) | Q(clinica=request.user.clinica)` igual que el ViewSet de tipos. Implementar en `get_fields()` o en el ViewSet con `get_serializer_context`.
+
+**Definition of done:**
+- [ ] `GET /agenda/citas/{id}/` incluye `servicio_tipo_procedimiento_id` (puede ser `null`)
+- [ ] `GET /agenda/citas/hoy/` ídem (sin N+1 adicional)
+- [ ] `PATCH /clinicas/servicios/{id}/` acepta `tipo_procedimiento` (UUID o `null`)
+- [ ] El campo `tipo_procedimiento` en Servicio solo acepta tipos del propio tenant o globales
+- [ ] Tests en `apps/agenda/tests.py` y `apps/clinicas/tests.py` cubren el nuevo campo
+
+**Ver frontend:** **F31**, **F32**
+
+---
+
 ## Riesgos backend a vigilar
 
 - No introducir reglas de borrado que contradigan trazabilidad clínica.

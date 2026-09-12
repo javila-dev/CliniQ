@@ -1,8 +1,11 @@
 import { apiClient } from './client'
 import type {
-  AdminTenant, CreateTenantRequest, UpdateTenantRequest,
+  AdminTenant, AdminTenantUsuario, AdminTenantLogAccion, AdminTenantHistorialGrupo,
+  CrearAdminResult,
+  CreateTenantRequest, UpdateTenantRequest,
   DiagramaCorporal,
   Plan, CreatePlanRequest, UpdatePlanRequest,
+  ConsoleUsuario, CreateConsoleUsuarioRequest,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
@@ -29,6 +32,29 @@ export const adminApi = {
 
     update: async (id: string, data: UpdateTenantRequest): Promise<AdminTenant> => {
       const res = await apiClient.patch<AdminTenant>(`/admin/tenants/${id}/`, data)
+      return res.data
+    },
+
+    usuarios: async (id: string): Promise<AdminTenantUsuario[]> => {
+      const res = await apiClient.get<AdminTenantUsuario[]>(`/admin/tenants/${id}/usuarios/`)
+      return res.data
+    },
+
+    crearAdmin: async (id: string, email: string): Promise<CrearAdminResult> => {
+      const res = await apiClient.post<CrearAdminResult>(`/admin/tenants/${id}/crear-admin/`, { email })
+      return res.data
+    },
+
+    historial: async (
+      id: string,
+      params?: { grupo?: AdminTenantHistorialGrupo; page?: number },
+    ): Promise<Paginated<AdminTenantLogAccion>> => {
+      const res = await apiClient.get<Paginated<AdminTenantLogAccion>>(`/admin/tenants/${id}/historial/`, {
+        params: {
+          grupo: params?.grupo && params.grupo !== 'todo' ? params.grupo : undefined,
+          page: params?.page,
+        },
+      })
       return res.data
     },
   },
@@ -91,6 +117,29 @@ export const adminApi = {
 
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/clinicas/diagramas-corporales/${id}/`)
+    },
+  },
+
+  // Usuarios de plataforma (superadmin / equipo interno), sin clínica.
+  usuarios: {
+    list: async (params?: { search?: string }): Promise<Paginated<ConsoleUsuario>> => {
+      const res = await apiClient.get<Paginated<ConsoleUsuario>>('/admin/usuarios/', { params })
+      return res.data
+    },
+
+    create: async (data: CreateConsoleUsuarioRequest): Promise<ConsoleUsuario> => {
+      const res = await apiClient.post<ConsoleUsuario>('/admin/usuarios/', data)
+      return res.data
+    },
+
+    setActivo: async (id: string, activo: boolean): Promise<ConsoleUsuario> => {
+      const res = await apiClient.patch<ConsoleUsuario>(`/admin/usuarios/${id}/`, { activo })
+      return res.data
+    },
+
+    reenviarInvitacion: async (id: string): Promise<{ ok: boolean; email_enviado: boolean }> => {
+      const res = await apiClient.post(`/admin/usuarios/${id}/reenviar_invitacion/`)
+      return res.data
     },
   },
 }

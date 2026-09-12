@@ -1,3 +1,8 @@
+export interface ConfiguracionGlobal {
+  centro_ayuda_habilitado: boolean
+  updated_at: string
+}
+
 export interface LogAccion {
   id:             string
   usuario_nombre: string

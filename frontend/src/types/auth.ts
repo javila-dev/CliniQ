@@ -15,6 +15,9 @@ export interface AuthUser {
   sede_id: string | null
   es_profesional: boolean
   es_admin: boolean
+  is_staff: boolean
+  /** Flag global (no por clínica): true cuando un superadmin activó el centro de ayuda. */
+  centro_ayuda_habilitado: boolean
   telefono: string | null
   foto_perfil: string | null
   firma_digital_url: string | null

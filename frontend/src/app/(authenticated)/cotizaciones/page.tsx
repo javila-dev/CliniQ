@@ -239,6 +239,7 @@ export default function CotizacionesPage() {
       <PageHeader
         title="Cotizaciones"
         description="Gestiona las propuestas comerciales para los pacientes"
+        helpSlug="crear-y-enviar-una-cotizacion"
         action={
           canGestionar ? (
             <Button onClick={abrirNueva} disabled={loadingNueva}>

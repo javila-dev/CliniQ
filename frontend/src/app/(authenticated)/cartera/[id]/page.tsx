@@ -6,11 +6,17 @@ import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ArrowLeft, CheckCircle2, Clock, AlertCircle, CreditCard, Pencil } from 'lucide-react'
+import {
+  ArrowLeft, CheckCircle2, Clock, AlertCircle, CreditCard, Pencil,
+  FileSignature, Ban, Send, RefreshCw, Loader2, HandCoins,
+} from 'lucide-react'
 import { carteraApi } from '@/lib/api/cartera'
+import { consentimientosApi } from '@/lib/api/consentimientos'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
+import { NuevoAcuerdoPagoModal } from '@/components/cartera/NuevoAcuerdoPagoModal'
+import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -268,13 +274,51 @@ function RegistrarPagoModal({
 
 export default function DetalleCarteraPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const canModificarPlazo = hasPermission(user, PERM.CARTERA_MODIFICAR_PLAZO)
   const [cuotaSeleccionada, setCuotaSeleccionada] = useState<CuotaCartera | null>(null)
+  const [showNuevoAcuerdo, setShowNuevoAcuerdo] = useState(false)
+  const [showFirmaAcuerdo, setShowFirmaAcuerdo] = useState(false)
 
   const { data: cartera, isLoading } = useQuery({
     queryKey: ['cartera', id],
     queryFn: () => carteraApi.get(id),
+  })
+
+  const acuerdoPendiente = cartera?.acuerdo_pendiente ?? null
+
+  const anularAcuerdo = useMutation({
+    mutationFn: () => {
+      const motivo = window.prompt('Motivo de la cancelación del acuerdo:')?.trim()
+      if (!motivo) return Promise.reject(new Error('cancelado'))
+      return carteraApi.anularAcuerdo(acuerdoPendiente!.id, motivo)
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cartera', id] })
+      toast.success('Acuerdo cancelado', 'Puedes crear uno nuevo o registrar pagos normalmente.')
+    },
+    onError: (e: any) => { if (e?.message !== 'cancelado') toast.error('No se pudo cancelar', e?.response?.data?.error ?? 'Intenta de nuevo.') },
+  })
+
+  const verificarFirma = useMutation({
+    mutationFn: () => carteraApi.verificarFirmaAcuerdo(acuerdoPendiente!.id),
+    onSuccess: (a) => {
+      queryClient.invalidateQueries({ queryKey: ['cartera', id] })
+      if (a.estado === 'vigente') toast.success('Acuerdo vigente', 'El plan de cartera fue actualizado.')
+      else if (a.estado === 'requiere_revision') toast.error('Requiere revisión', 'El saldo cambió respecto a la propuesta. Cancela el acuerdo y crea uno nuevo.')
+      else toast({ title: 'Todavía sin firmar', description: 'El paciente aún no ha firmado el acta.' })
+    },
+    onError: () => toast.error('No se pudo verificar', 'Intenta de nuevo en un momento.'),
+  })
+
+  const reenviarLink = useMutation({
+    mutationFn: () => consentimientosApi.enviarLinkDocumenso(acuerdoPendiente!.documento!.id),
+    onSuccess: (info) => toast.success(
+      info.enviado ? 'Link reenviado' : 'Link listo',
+      info.enviado ? `Se envió por WhatsApp a ${info.telefono}.` : 'El paciente no tiene teléfono; abre "Firmar" para copiar el enlace.',
+    ),
+    onError: (e: any) => toast.error('No se pudo reenviar', e?.response?.data?.error ?? 'Intenta de nuevo.'),
   })
 
   if (isLoading) return <div className="p-8"><LoadingState rows={8} /></div>
@@ -283,6 +327,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
   const saldoPct = cartera.total !== '0'
     ? Math.round((Number(cartera.total_pagado) / Number(cartera.total)) * 100)
     : 100
+  const puedeCrearAcuerdo = canModificarPlazo && Number(cartera.saldo_pendiente) > 0 && !acuerdoPendiente
 
   return (
     <div className="space-y-6">
@@ -342,13 +387,53 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
         </Card>
       </div>
 
+      {/* Banner: acuerdo de pago pendiente de firma */}
+      {acuerdoPendiente && (
+        <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-2.5">
+          <div className="flex items-start gap-2.5">
+            <Clock className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-amber-900">
+                Acuerdo de pago N.&deg;{acuerdoPendiente.numero} pendiente de firma
+              </p>
+              <p className="text-xs text-amber-800 mt-0.5">
+                Creado el {formatDate(acuerdoPendiente.created_at)}
+                {acuerdoPendiente.creado_por_nombre ? ` por ${acuerdoPendiente.creado_por_nombre}` : ''}.
+                El plan de abajo <span className="font-medium">sigue siendo el vigente</span>. Hasta que el paciente
+                firme el acta y Documenso lo confirme: no se pueden registrar pagos ni mover cuotas, y la mora sigue activa.
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2 pl-6">
+            <Button size="sm" onClick={() => setShowFirmaAcuerdo(true)}>
+              <FileSignature className="h-3.5 w-3.5 mr-1.5" /> Firmar / ver acta
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => reenviarLink.mutate()} disabled={reenviarLink.isPending}>
+              <Send className="h-3.5 w-3.5 mr-1.5" /> Reenviar link
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => verificarFirma.mutate()} disabled={verificarFirma.isPending}>
+              {verificarFirma.isPending ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5 mr-1.5" />}
+              Verificar en Documenso
+            </Button>
+            <Button size="sm" variant="ghost" className="text-amber-800" onClick={() => anularAcuerdo.mutate()} disabled={anularAcuerdo.isPending}>
+              <Ban className="h-3.5 w-3.5 mr-1.5" /> Cancelar acuerdo
+            </Button>
+          </div>
+        </div>
+      )}
+
       {/* Cuotas */}
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
           <CardTitle className="text-base flex items-center gap-2">
             <CreditCard className="h-4 w-4 text-muted-foreground" />
             Cuotas y pagos
           </CardTitle>
+          {puedeCrearAcuerdo && (
+            <Button size="sm" variant="outline" onClick={() => setShowNuevoAcuerdo(true)}>
+              <HandCoins className="h-4 w-4 mr-1.5" /> Nuevo acuerdo de pago
+            </Button>
+          )}
         </CardHeader>
         <CardContent className="p-0">
           {!cartera.cuotas?.length ? (
@@ -363,12 +448,17 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-medium">{cuota.descripcion || cuota.tipo}</p>
                         <CuotaBadge cuota={cuota} />
+                        {cuota.acuerdo_numero != null && (
+                          <Badge variant="secondary" className="text-[10px] gap-1">
+                            <HandCoins className="h-2.5 w-2.5" />Acuerdo N.&deg;{cuota.acuerdo_numero}
+                          </Badge>
+                        )}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1 space-y-0.5">
                         {(cuota.fecha_esperada || (estado === 'pendiente' && canModificarPlazo)) && (
                           <p>
                             Vencimiento:{' '}
-                            {estado === 'pendiente' && canModificarPlazo ? (
+                            {estado === 'pendiente' && canModificarPlazo && !acuerdoPendiente ? (
                               <FechaVencimientoEditor cuota={cuota} carteraId={id} />
                             ) : (
                               cuota.fecha_esperada ? formatDate(cuota.fecha_esperada) : '—'
@@ -399,6 +489,8 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
                           variant={estado === 'vencida' ? 'destructive' : 'outline'}
                           className="mt-2 text-xs h-7"
                           onClick={() => setCuotaSeleccionada(cuota)}
+                          disabled={Boolean(acuerdoPendiente)}
+                          title={acuerdoPendiente ? 'Bloqueado: hay un acuerdo de pago pendiente de firma' : undefined}
                         >
                           {Number(cuota.valor_pagado ?? 0) > 0 ? 'Cobrar saldo' : 'Registrar pago'}
                         </Button>
@@ -412,6 +504,48 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
         </CardContent>
       </Card>
 
+      {/* Historial de acuerdos de pago */}
+      {(cartera.acuerdos?.length ?? 0) > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <HandCoins className="h-4 w-4 text-muted-foreground" />
+              Acuerdos de pago
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0 divide-y">
+            {cartera.acuerdos!.map((a) => (
+              <div key={a.id} className="px-6 py-3 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">Acuerdo N.&deg;{a.numero}</p>
+                    <Badge
+                      variant={
+                        a.estado === 'vigente' ? 'success'
+                          : a.estado === 'pendiente_firma' ? 'warning'
+                          : a.estado === 'requiere_revision' ? 'destructive'
+                          : 'secondary'
+                      }
+                      className="text-[10px]"
+                    >
+                      {a.estado_display}
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-0.5">{a.motivo}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {formatDate(a.created_at)}
+                    {a.creado_por_nombre ? ` · ${a.creado_por_nombre}` : ''}
+                    {a.vigente_desde ? ` · vigente desde ${formatDate(a.vigente_desde)}` : ''}
+                    {a.estado === 'anulado' && a.motivo_anulacion ? ` · cancelado: ${a.motivo_anulacion}` : ''}
+                  </p>
+                </div>
+                <span className="text-sm font-semibold tabular-nums shrink-0">{formatCOP(a.saldo_al_proponer)}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {cuotaSeleccionada && (
         <RegistrarPagoModal
           cuota={cuotaSeleccionada}
@@ -419,6 +553,35 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
           onOpenChange={(v) => { if (!v) setCuotaSeleccionada(null) }}
           carteraId={id}
         />
+      )}
+
+      {showNuevoAcuerdo && (
+        <NuevoAcuerdoPagoModal
+          cartera={cartera}
+          open={showNuevoAcuerdo}
+          onOpenChange={setShowNuevoAcuerdo}
+          onCreado={() => queryClient.invalidateQueries({ queryKey: ['cartera', id] })}
+        />
+      )}
+
+      {showFirmaAcuerdo && acuerdoPendiente?.documento && (
+        <Dialog open={showFirmaAcuerdo} onOpenChange={setShowFirmaAcuerdo}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Acta de acuerdo de pago N.&deg;{acuerdoPendiente.numero}</DialogTitle>
+            </DialogHeader>
+            <CompromisoPagoFirmaContent
+              consentimientoId={acuerdoPendiente.documento.id}
+              initialSigningToken={acuerdoPendiente.documento.documenso_signing_token || undefined}
+              documentoLabel="Acta de acuerdo de pago"
+              onFirmado={() => {
+                queryClient.invalidateQueries({ queryKey: ['cartera', id] })
+                setShowFirmaAcuerdo(false)
+              }}
+              onCancel={() => setShowFirmaAcuerdo(false)}
+            />
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   )

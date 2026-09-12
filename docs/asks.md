@@ -971,3 +971,862 @@ Incluido en `PATCH /api/v1/admin/tenants/{id}/` con `{ "plan": "uuid" }` o `{ "p
 
 Todos los endpoints `/api/v1/admin/*` autorizan exclusivamente por JWT con `rol === 'superadmin'`. El header `X-Clinica-Id` es ignorado. Ver `api.md` §Panel Admin (superadmin).
 
+---
+
+## 19. `GET /clinicas/mi-clinica/plan/` no devuelve campos de sedes
+
+**Pregunta (Frontend):**
+
+En la página `/configuracion/sedes` mostramos una barra de progreso "Sedes del plan: N / máx" que indica cuántas sedes activas tiene la clínica y cuál es su límite según el plan. Para calcularlo llamamos `GET /clinicas/mi-clinica/plan/`, pero el response documentado en `api.md` solo contiene campos de **usuarios**:
+
+```json
+{
+  "plan": { "max_usuarios": 10 },
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": 3,
+  "sin_limite": false
+}
+```
+
+El frontend espera también:
+- `plan.max_sedes` — límite de sedes del plan (o `null` / `0` si sin límite)
+- `sedes_activas` — cantidad de sedes activas actualmente
+- `puede_agregar_sede` — si se puede crear una sede más
+- `sin_limite_sedes` — equivalente a `sin_limite` pero para sedes
+
+Sin esos campos, `sedes_activas` queda `undefined` y la barra muestra `0 / N`. Como workaround temporal calculamos `sedes_activas` contando desde la lista de sedes ya cargada en la UI, pero `max_sedes` sigue sin llegar (la barra de progreso no se muestra).
+
+**Dos opciones posibles — necesitamos saber cuál van a implementar:**
+
+**A)** Extender `GET /clinicas/mi-clinica/plan/` para que incluya los campos de sedes junto a los de usuarios:
+```json
+{
+  "plan": { "max_usuarios": 10, "max_sedes": 3 },
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": 3,
+  "sin_limite": false,
+  "sedes_activas": 2,
+  "puede_agregar_sede": true,
+  "sin_limite_sedes": false
+}
+```
+
+**B)** Crear un endpoint separado `GET /clinicas/mi-clinica/sedes-limite/` con solo los campos de sedes.
+
+Cualquiera de las dos nos sirve. Necesitamos el `max_sedes` sobre todo — sin él no podemos mostrar el denominador de la barra.
+
+**Respuesta (Backend):**
+
+Implementada la opción A. `GET /clinicas/mi-clinica/plan/` ahora incluye los campos de sedes junto a los de usuarios:
+
+```json
+{
+  "plan": { "id": "...", "nombre": "Pro", "max_usuarios": 10, "max_sedes": 3, ... },
+  "usuarios_activos": 7,
+  "puede_agregar": true,
+  "slots_disponibles": 3,
+  "sin_limite": false,
+  "sedes_activas": 2,
+  "puede_agregar_sede": true,
+  "slots_disponibles_sedes": 1,
+  "sin_limite_sedes": false
+}
+```
+
+`sin_limite_sedes: true` (y `slots_disponibles_sedes: null`) cuando el plan no tiene `max_sedes` configurado (`max_sedes = 0`) o la clínica no tiene plan asignado.
+
+---
+
+## 20. Idempotencia de `iniciar_registro_asistencia` cuando ya hay un documento `enviada` pendiente
+
+**Pregunta (Frontend):**
+Confirmamos junto con `docs/api.md` §"Cómo se expone el resultado de la firma al frontend" que `firma_asistencia_estado` solo lo escribe el webhook de Documenso (`firmada`/`rechazada`); ni `iniciar_registro_asistencia` ni `enviar_firma_asistencia` lo tocan, y el evento client-side del SDK embed no es fuente de verdad.
+
+Esto deja un hueco: si el paciente firma en el widget pero el usuario (recepción) refresca la página, cierra el wizard, o lo reabre desde otra sesión/dispositivo **antes de que llegue el webhook**, el frontend pierde por completo la señal de "ya firmó, falta confirmación" — porque esa señal hoy solo vive en estado local de React, no en el backend. La cita sigue reportando `firma_asistencia_estado = "enviada"`, indistinguible de "todavía no firmó".
+
+En ese escenario, el wizard vuelve a mostrar el botón "Generar y firmar". Si el usuario hace clic:
+- ¿`iniciar_registro_asistencia` detecta que ya existe un documento `enviada` pendiente (`firma_asistencia_documento_id`) para esa cita y reutiliza el mismo envelope/`signing_token` (idempotente), igual que `iniciar_firma` lo hace para consentimientos (ver `api.md` §Iniciar firma embebida en Documenso)?
+- ¿O genera un envelope nuevo en Documenso cada vez, dejando el anterior huérfano (y potencialmente dos documentos firmables para la misma cita)?
+
+Si no es idempotente hoy, ¿se puede agregar ese chequeo (reutilizar `firma_asistencia_documento_id` si su estado en Documenso sigue pendiente, en vez de crear uno nuevo)?
+
+**Respuesta (Backend):**
+
+Implementado. `iniciar_registro_asistencia` es ahora idempotente — mismo patrón que `iniciar_firma` para consentimientos.
+
+**Nuevo campo:** `firma_asistencia_signing_token` (CharField, blank=True) en el modelo `Cita`. Migración `0013_cita_firma_asistencia_signing_token` aplicada. El token ahora se persiste junto con `firma_asistencia_documento_id` al crear el envelope.
+
+**Tres ramas en la función** (`apps/consentimientos/services.py` → `iniciar_registro_asistencia_documenso`):
+
+| Situación | Comportamiento |
+|---|---|
+| `firma_asistencia_documento_id` + `firma_asistencia_signing_token` presentes | Devuelve los valores guardados directamente — **sin llamar a Documenso** |
+| `firma_asistencia_documento_id` presente pero sin token | Llama `GET /api/v2/envelope/{id}` en Documenso para recuperar el token, lo persiste y lo devuelve |
+| Ninguno presente | Flujo normal: crea el envelope, lo distribuye, guarda `documento_id` + `signing_token` + `estado = "enviada"` |
+
+**Caso del frontend** (refresh / re-apertura del wizard antes del webhook): el botón "Generar y firmar" llama de nuevo a `POST /agenda/citas/{id}/iniciar_registro_asistencia/`. Como `firma_asistencia_documento_id` y `firma_asistencia_signing_token` ya están persistidos, el backend los devuelve inmediatamente sin crear un envelope nuevo. El wizard puede re-inicializar el embed con el mismo `signing_token` que el paciente ya tenía abierto.
+
+**No hay cambio de interfaz** — el response sigue siendo `{ "signing_token": "...", "document_id": "..." }`.
+
+---
+
+## 21. ¿El webhook de asistencia descarga y guarda el PDF firmado, igual que consentimientos?
+
+**Pregunta (Frontend):**
+`docs/api.md` §Webhook Documenso documenta, para consentimientos, que al recibir `document.completed` el backend intenta descargar el PDF firmado y lo guarda en el campo `archivo` (y que si la descarga falla, el consentimiento igual queda `firmado=true`).
+
+Para asistencia no encontramos el mismo detalle documentado, ni un campo equivalente a `archivo` en `CitaSerializer` (solo existe `firma_asistencia_documento_id`, que es el id del envelope en Documenso, no un PDF).
+
+Necesitamos saber:
+- ¿`_handle_firma_asistencia` (el handler de asistencia dentro del webhook) también descarga el PDF firmado de Documenso y lo persiste en algún lado recuperable por el frontend? Si sí, ¿en qué campo/endpoint se expone (ej. una URL firmada de S3/MinIO, un campo nuevo en `CitaSerializer`, o hay que pedirlo a Documenso directamente con `firma_asistencia_documento_id`)?
+- Si hoy no se guarda, ¿está planeado, o el PDF firmado de asistencia solo queda disponible dentro de Documenso (consultable vía su API con el `documento_id`)?
+
+Esto nos importa para poder mostrar/descargar el comprobante de asistencia firmado desde el detalle de la atención, igual que ya se hace con los consentimientos.
+
+**Respuesta (Backend):**
+
+Implementado. El webhook de asistencia ahora descarga y persiste el PDF firmado, igual que hace con los consentimientos.
+
+**Antes:** `_handle_firma_asistencia` solo actualizaba `firma_asistencia_estado`. El campo `firma_asistencia_archivo` existía en el modelo (migración 0012) pero nunca se poblaba.
+
+**Ahora:** cuando el evento es `DOCUMENT_COMPLETED`, el handler llama `descargar_pdf_documenso(document_id)` y guarda el resultado en `cita.firma_asistencia_archivo` (bajo `firma_asistencia/<año>/<mes>/<cita_id>.pdf` en MinIO). Si la descarga falla, el estado igual queda `"firmada"` y se loguea la excepción — mismo comportamiento defensivo que consentimientos.
+
+**Campo nuevo en `CitaSerializer`:**
+
+```json
+{
+  "firma_asistencia_archivo_url": "https://minio.../firma_asistencia/2026/06/<cita_id>.pdf"
+}
+```
+
+`firma_asistencia_archivo_url` es una URL firmada de MinIO (TTL 1 hora), o `null` si el PDF no se ha guardado aún. Aparece junto a `firma_asistencia_estado` y `firma_asistencia_documento_id` en el serializer de `Cita`.
+
+**Para el frontend:** usar `firma_asistencia_archivo_url` para mostrar/descargar el comprobante. Si es `null` (aún no llegó el webhook o falló la descarga), puede ofrecerse reintentar vía `firma_asistencia_documento_id` consultando Documenso directamente.
+
+---
+
+## 22. Dos bugs en el flujo de firma de asistencia — externalId y serializer
+
+**Reporte (Frontend):**
+
+Se detectaron dos bugs al probar el flujo completo de firma de asistencia en producción.
+
+---
+
+### 22.1 El webhook de Documenso se ignora por falta de `externalId`
+
+Los logs del servidor muestran:
+
+```
+Webhook Documenso sin externalId | payload={'id': 323, 'externalId': None, ...}
+```
+
+El handler del webhook usa `externalId` para enrutar el evento a `_handle_firma_asistencia`. Como el documento se crea sin `externalId`, el webhook llega con `None` y es descartado. Consecuencia: `firma_asistencia_estado` nunca pasa a `"firmada"`, el frontend hace polling indefinidamente y el wizard no avanza.
+
+**Pedido:** al llamar a la API de Documenso en `iniciar_registro_asistencia_documenso` (o donde se cree el documento), incluir `externalId = str(cita.id)` (o el prefijo que el webhook handler ya espera). El handler podrá así enrutar el evento correctamente al llegar.
+
+---
+
+### 22.2 `firma_asistencia_signing_token` no está en `CitaSerializer`
+
+El campo `firma_asistencia_signing_token` fue agregado al modelo `Cita` en P20 (migración `0013`), pero **no aparece en la respuesta de `GET /agenda/citas/{id}/`**. Se puede verificar por el tamaño de la respuesta (≈1960 bytes), que no varía al nivel esperado si el token de ~21 caracteres estuviera presente.
+
+Sin este campo en el serializer, el frontend no puede recuperar el token al re-abrir el wizard y la prop `initialSigningToken` siempre llega como `null`.
+
+**Pedido:** exponer `firma_asistencia_signing_token` en `CitaSerializer` (junto a `firma_asistencia_estado` y `firma_asistencia_documento_id`).
+
+**Workaround actual en el frontend:** cuando `firma_asistencia_estado === "enviada"`, el wizard auto-llama `iniciarRegistroAsistencia` al montar (que es idempotente y devuelve el token persistido). Esto funciona pero hace una llamada extra innecesaria que se evitaría si el token viniera en el serializer.
+
+**Respuesta (Backend):**
+
+### 22.1 — `externalId` ausente en el envelope
+
+Corregido. `_crear_envelope_documenso` ahora acepta el kwarg opcional `external_id` y lo incluye en el payload de `POST /api/v2/envelope/create`. La llamada en `iniciar_registro_asistencia_documenso` pasa `external_id=f"asistencia:{cita.id}"`, que es exactamente el prefijo que el webhook handler espera para enrutar a `_handle_firma_asistencia`.
+
+Flujo corregido:
+```
+iniciar_registro_asistencia  →  crea envelope con externalId="asistencia:<uuid>"
+                                          ↓ (paciente firma)
+webhook DOCUMENT_COMPLETED   →  externalId="asistencia:<uuid>" → _handle_firma_asistencia
+                                          ↓
+                               cita.firma_asistencia_estado = "firmada"  ✅
+```
+
+### 22.2 — `firma_asistencia_signing_token` en `CitaSerializer`
+
+Corregido. El campo se agregó a `fields` y `read_only_fields` de `CitaSerializer`. `GET /agenda/citas/{id}/` ahora incluye:
+
+```json
+{
+  "firma_asistencia_estado": "enviada",
+  "firma_asistencia_documento_id": "323",
+  "firma_asistencia_signing_token": "eyJ...",
+  "firma_asistencia_archivo_url": null
+}
+```
+
+Con el token disponible en el serializer, el wizard puede inicializarse con `initialSigningToken` directamente desde el response de `GET /citas/{id}/` sin necesidad de llamar a `iniciarRegistroAsistencia` de nuevo.
+
+---
+
+## 24. ¿`GET /agenda/citas/` soporta filtrar por `estado` y/o `firma_asistencia_estado`?
+
+**Pregunta (Frontend):**
+
+En la página de detalle de paciente (`/pacientes/[id]`) agregamos una sección "Asistencias firmadas" que muestra las citas cuyo documento de asistencia fue firmado en el paso 4 del wizard. Para cargar esos datos usamos:
+
+```ts
+agendaApi.citas.list({ paciente: id, estado: 'completada', page_size: 50 })
+```
+
+y luego filtramos en cliente las que tienen `firma_asistencia_estado === 'firmada'`.
+
+Necesitamos confirmar:
+- ¿El param `?estado=completada` está soportado como filtro en `GET /agenda/citas/`? Ya aparece en la interfaz `CitasFilter` del frontend, pero no está documentado explícitamente.
+- ¿Existe o puede existir un filtro `?firma_asistencia_estado=firmada` para que el backend devuelva directamente solo las citas firmadas, evitando el filtrado en cliente y el `page_size` alto?
+
+Si `firma_asistencia_estado` no está soportado como filtro, ¿es seguro usar `?estado=completada&page_size=50` como aproximación, o hay casos donde una cita firmada pueda tener otro estado?
+
+**Respuesta (Backend):**
+
+- **`?estado=completada`** — sí está soportado y siempre lo estuvo.
+- **`?paciente=<uuid>`** — **no estaba soportado**; acaba de agregarse. Úsalo para traer solo las citas del paciente.
+- **`?firma_asistencia_estado=firmada`** — **no estaba soportado**; acaba de agregarse.
+
+**`?estado=completada` NO es una aproximación segura.** Una cita puede tener `firma_asistencia_estado=firmada` con `estado=en_curso` (el paciente firma al inicio de la sesión, antes de que el profesional la complete). Usando ese filtro se perderían esas citas.
+
+**Query recomendada:**
+
+```ts
+agendaApi.citas.list({ paciente: id, firma_asistencia_estado: 'firmada' })
+```
+
+No necesitas `page_size` alto ni filtrado en cliente.
+
+---
+
+## 23. [BUG] `POST /auth/impersonate/` devuelve `USER_NOT_FOUND` — el frontend pasa `Colaborador.id` en vez de `User.id`
+
+**Reporte (Backend):**
+
+Al llamar `POST /api/v1/auth/impersonate/<uuid>/` se recibe `USER_NOT_FOUND` (HTTP 404) aunque el usuario existe en la UI. Investigado en base de datos: el UUID enviado (`c54ebf49-318c-4a93-8120-53df098dcbbb`) no corresponde a ningún `User` — corresponde al registro `Colaborador` del mismo usuario (`pro1@demo.com`).
+
+El endpoint espera el `User.id`, no el `Colaborador.id`. Son dos tablas distintas con UUIDs distintos:
+
+| Campo | UUID |
+|---|---|
+| `User.id` (correcto) | `2334f298-6926-4810-ac3a-18574bdedaa8` |
+| `Colaborador.id` (incorrecto — lo que envía el frontend) | `c54ebf49-318c-4a93-8120-53df098dcbbb` |
+
+**El backend no requiere cambios.** El endpoint `/auth/impersonate/<user_id>/` busca por `User.id` y eso es correcto.
+
+**Acción para el frontend:** en el listado de usuarios del panel admin, usar el campo `id` del objeto `User` (que viene de `GET /api/v1/usuarios/` o de la respuesta de tenant), no el `id` del `Colaborador`. Si la tabla muestra colaboradores y se construye el UUID desde ese modelo, hay que hacer join/lookup al `user_id` del colaborador antes de llamar al endpoint de impersonación.
+
+---
+
+## 24. Wizard de inicio de atención configurable por clínica — ¿qué tan complejo es en el backend?
+
+**Pregunta (Frontend):**
+
+Hoy el wizard de inicio de atención tiene 4 pasos fijos para todas las clínicas: Llegada (OTP/foto), Consentimientos, Pago y Firma de asistencia. Queremos que cada clínica pueda activar o desactivar cada paso según su operación — por ejemplo, una clínica que no maneja firma digital de asistencia no debería ver ese paso, y una que cobra por adelantado no necesita el paso de pago en el wizard.
+
+La pregunta es de **estimación de complejidad**, no de implementación inmediata. Antes de diseñar el frontend queremos entender qué tanto implica esto en el backend.
+
+**Lo que necesitaríamos del backend:**
+
+1. **Almacenar la config por clínica** — algún lugar donde persistan las preferencias del wizard de esa clínica (qué pasos están habilitados). No tenemos opinión sobre si es un modelo nuevo, un JSONField en `Clinica`, o algo más.
+
+2. **Exponer la config al frontend** — que el frontend pueda leer la config al cargar (idealmente en un endpoint que ya consulta, como `GET /clinicas/mi-clinica/`, para no agregar una llamada extra).
+
+3. **Respetar la config en el backend** — esto es la parte que nos genera duda. Si un paso está deshabilitado para una clínica (ej. el paso de Pago), ¿necesitaría el backend relajar alguna validación que hoy asume que el cobro siempre existe antes de `en_curso`? O dicho de otro modo: ¿hay lógica server-side que dependa de que esos pasos se cumplan, o toda la orquestación del wizard es responsabilidad del frontend?
+
+**Preguntas concretas:**
+
+- ¿Cuánto peso tiene esto en el backend? ¿Es principalmente un cambio de datos (nuevo campo en `Clinica` + exponerlo) o implica tocar lógica de negocio?
+- ¿Hay validaciones en `cambiar_estado` u otros endpoints que asuman que ciertos pasos del wizard ya ocurrieron (cobro, firma, consentimiento) y que habría que volver condicionales?
+- ¿Existe ya algún mecanismo de feature flags o configuración por clínica que podamos reutilizar, o habría que crearlo desde cero?
+
+**Respuesta (Backend):**
+
+### 1. Peso en el backend — principalmente datos, con una excepción puntual
+
+Agregar la config es mínimo: un nuevo modelo `ConfiguracionWizard` (OneToOne a `Clinica`, igual al patrón existente de `ConfiguracionSignosVitales` y `ConfiguracionHistoria` en `apps/configuracion/models.py`) con cuatro BooleanField, uno por paso:
+
+```python
+class ConfiguracionWizard(BaseModel):
+    clinica = models.OneToOneField("clinicas.Clinica", on_delete=models.CASCADE, related_name="config_wizard")
+    paso_checkin = models.BooleanField(default=True)
+    paso_consentimientos = models.BooleanField(default=True)
+    paso_pago = models.BooleanField(default=True)
+    paso_firma_asistencia = models.BooleanField(default=True)
+```
+
+Una migración, un serializer, un viewset GET/PATCH — exactamente como `ConfiguracionHistoriaViewSet` ya funciona. El frontend lo lee en `GET /configuracion/wizard/` y decide qué pasos renderizar.
+
+**La excepción:** hay una validación server-side que sí necesita volverse condicional (ver punto 2).
+
+---
+
+### 2. Validaciones en `cambiar_estado` que asumen pasos cumplidos
+
+Solo hay **una** validación relevante, y es la de consentimientos (`apps/agenda/views.py`, acción `cambiar_estado`, líneas 251–269):
+
+```python
+if nuevo_estado == Cita.Estado.EN_CURSO:
+    info = build_consentimiento_info(cita)
+    if not info["todos_firmados"]:
+        return Response({"code": "CONSENTIMIENTO_REQUERIDO", ...}, 400)
+```
+
+Si una clínica deshabilita el paso de consentimientos, esta validación la bloqueará igual. Hay que condicionarla a `clinica.config_wizard.paso_consentimientos`.
+
+Los otros tres pasos **no tienen enforcement server-side**:
+
+| Paso | ¿Validación en el backend? |
+|---|---|
+| OTP / Check-in | No enforcement directo. Sí hay una restricción indirecta: `FLUJOS_ESTADO` prohíbe `CONFIRMADA → EN_CURSO` directamente — la cita debe pasar por `EN_ESPERA` primero. Pero el check-in (OTP/foto) en sí no es validado; se puede transicionar a `EN_ESPERA` sin haberlo hecho. |
+| Cobro | No. Confirmado en P10 §4: el backend no valida existencia de cobro antes de `en_curso`. |
+| Firma de asistencia | No. `firma_asistencia_estado` no se verifica en ninguna transición de estado. |
+
+En resumen: **un único `if` en `cambiar_estado`** que saltee la validación de consentimientos cuando el paso está deshabilitado para la clínica. Todo lo demás ya es responsabilidad del frontend.
+
+---
+
+### 3. Mecanismo de feature flags por clínica — ya existe, hay que extenderlo
+
+El patrón está en `apps/configuracion/`. Hay dos modelos OneToOne con config por clínica:
+
+- `ConfiguracionSignosVitales` — campos extra de signos vitales (JSONField)
+- `ConfiguracionHistoria` — tabs activos en la historia clínica (JSONField con lista de slugs)
+
+Ambos usan `get_or_create` con defaults razonables para que las clínicas que no lo configuran funcionen igual que hoy. El nuevo `ConfiguracionWizard` seguiría el mismo patrón: todos los pasos en `True` por defecto, por lo que el comportamiento actual no cambia para nadie hasta que un admin lo toque.
+
+**Ruta propuesta:** `GET / PATCH /configuracion/wizard/` — misma estructura que `GET/PATCH /configuracion/historia/`.
+
+**Para exponerlo en el arranque del frontend** sin una llamada extra: se puede incluir el objeto `config_wizard` directamente dentro de la respuesta de `GET /clinicas/mi-clinica/`. El `MiClinicaSerializer` actualmente solo devuelve `id`, `nombre`, `nit`, `telefono`, `ciudad`, `direccion` y `logo_url`; agregar un campo anidado `wizard` con los cuatro flags es trivial y evita el roundtrip adicional.
+
+---
+
+## 24.1 Contrato frontend ↔ backend para `ConfiguracionWizard`
+
+**Reporte (Frontend):**
+
+Con base en la respuesta del backend en P24, documentamos el contrato exacto que el frontend va a consumir. Por favor confirmar que la implementación respeta estos shapes antes de hacer merge, para que el frontend pueda avanzar en paralelo sin riesgo de rotura.
+
+---
+
+### Shape esperado en `GET /clinicas/mi-clinica/`
+
+El frontend leerá la config del wizard desde el campo `wizard` embebido en la respuesta de `mi-clinica` (como confirmó el backend en P24). El shape que esperamos:
+
+```json
+{
+  "id": "uuid",
+  "nombre": "Clínica Ejemplo",
+  "wizard": {
+    "paso_checkin":           true,
+    "paso_consentimientos":   true,
+    "paso_pago":              true,
+    "paso_firma_asistencia":  true
+  }
+}
+```
+
+**Contratos que el frontend necesita respetar:**
+
+- El campo `wizard` **siempre debe estar presente** en la respuesta (no `null`, no ausente), incluso si la clínica no tiene `ConfiguracionWizard` creada aún. En ese caso el backend debe devolver los defaults `true` via `get_or_create`. Si `wizard` puede llegar como `null` o ausente, el frontend lo tratará como todos los pasos en `true`, pero preferimos que el backend lo garantice.
+- Los nombres de los campos son exactamente `paso_checkin`, `paso_consentimientos`, `paso_pago`, `paso_firma_asistencia` — el frontend usará estos nombres directamente en los tipos TypeScript. Si cambian, hay que coordinarlo.
+
+---
+
+### Shape esperado en `GET /configuracion/wizard/` y `PATCH /configuracion/wizard/`
+
+Para la futura pantalla de configuración en el panel admin.
+
+**GET** devuelve:
+```json
+{
+  "paso_checkin":           true,
+  "paso_consentimientos":   true,
+  "paso_pago":              true,
+  "paso_firma_asistencia":  true
+}
+```
+
+**PATCH** acepta cualquier subconjunto de los campos (partial update):
+```json
+{ "paso_firma_asistencia": false }
+```
+
+Y devuelve el objeto completo actualizado.
+
+---
+
+### Validación de consentimientos en `cambiar_estado`
+
+Confirmar que el `if` condicional se implementa **antes** de que el frontend active la posibilidad de deshabilitar `paso_consentimientos` en la UI. Hasta que esa validación no sea condicional, una clínica que desactive el paso quedaría bloqueada por el backend al intentar pasar a `en_curso`. El frontend no expondrá el toggle de consentimientos en la UI de config hasta recibir confirmación de que el backend ya es condicional.
+
+Los otros tres pasos no tienen enforcement server-side (confirmado en P24), por lo que el frontend puede habilitarlos/deshabilitarlos libremente desde el día 1.
+
+**Respuesta (Backend):**
+
+Implementado. Migración `0004_configuracionwizard` aplicada. `python manage.py check` sin errores.
+
+**`GET /clinicas/mi-clinica/`** — campo `wizard` siempre presente, nunca `null`. Se crea via `get_or_create` al primer acceso, todos los defaults en `true`. El shape es exactamente el documentado por el frontend.
+
+**`GET / PATCH /configuracion/wizard/`** — disponible. `PATCH` acepta partial update de cualquier subconjunto de los cuatro campos. Solo usuarios con rol `admin` pueden hacer `PATCH`; cualquier usuario autenticado puede hacer `GET`.
+
+**Validación condicional de consentimientos** — implementada en `apps/agenda/views.py`. La lógica es:
+
+```python
+config_wizard, _ = ConfiguracionWizard.objects.get_or_create(clinica_id=cita.clinica_id)
+if config_wizard.paso_consentimientos:
+    # validación de todos_firmados (comportamiento anterior)
+```
+
+Si `paso_consentimientos = false`, el backend omite la validación y la cita puede pasar a `en_curso` sin consentimientos firmados. El frontend puede activar el toggle en la UI desde ahora.
+
+---
+
+### 24.1 Corrección — `paso_consentimientos` excluido del wizard configurable
+
+**Actualización (Frontend):**
+
+Después de revisar el flujo, decidimos que **el paso de consentimientos informados NO debe ser configurable** — es siempre obligatorio para todas las clínicas. El frontend no mostrará un toggle para ese paso en la UI de configuración.
+
+**Contratos corregidos (reemplaza los shapes originales):**
+
+**`GET /clinicas/mi-clinica/` — campo `wizard`:**
+```json
+{
+  "wizard": {
+    "paso_checkin":          true,
+    "paso_pago":             true,
+    "paso_firma_asistencia": true
+  }
+}
+```
+
+**`GET / PATCH /configuracion/wizard/`:**
+```json
+{
+  "paso_checkin":          true,
+  "paso_pago":             true,
+  "paso_firma_asistencia": true
+}
+```
+
+**Pedido al backend:**
+- Remover `paso_consentimientos` de `ConfiguracionWizard` (modelo, migración, serializer y endpoint).
+- La validación de consentimientos en `cambiar_estado` debe mantenerse **siempre activa** (no condicional), ya que el paso no puede deshabilitarse.
+- Si ya está en producción la implementación con `paso_consentimientos`, puede dejarse en el modelo sin exponerlo en el serializer — el frontend lo ignorará por completo.
+
+**Respuesta (Backend):**
+
+Ajustado. El campo `paso_consentimientos` se dejó en el modelo/DB (sin nueva migración) pero se removió de todos los contratos expuestos:
+
+- `ConfiguracionWizardSerializer` — `paso_consentimientos` eliminado de `fields`. `GET/PATCH /configuracion/wizard/` expone solo `paso_checkin`, `paso_pago`, `paso_firma_asistencia`.
+- `MiClinicaSerializer.get_wizard()` — idem, el dict retornado tiene solo los tres campos.
+- `cambiar_estado` — revertido a validación siempre activa (se eliminó el `if config_wizard.paso_consentimientos`). El comportamiento es idéntico al que existía antes de P24.
+
+`python manage.py check` sin errores.
+
+---
+
+## 25. Exponer `cobro_id` en `CitaSerializer` para detectar cobro previo en el wizard
+
+**Pregunta (Frontend):**
+
+El wizard de inicio de atención tiene un paso de pago que registra un cobro (`POST /cobros/cobros/` + `POST /cobros/cobros/{id}/registrar_pago/`). El wizard ya **no llama `cambiarEstado(en_curso)`** — su único rol es hacer los pre-checks y dejar la cita lista para que recepción la inicie desde la agenda.
+
+Esto genera un problema al reabrir el wizard: no tenemos cómo saber desde `GET /agenda/citas/{id}/` si ya se registró un cobro para esa cita. Actualmente usamos un booleano local (`pagoRegistrado`) que se pierde al cerrar el modal. Si el usuario cierra el wizard después de pagar pero antes de la firma y lo reabre, el paso de pago aparece de nuevo y podría crear un cobro duplicado.
+
+**Pedido:** agregar `cobro_id: string | null` al `CitaSerializer`. El valor debe reflejar si ya existe al menos un `Cobro` activo vinculado a esa cita.
+
+Shape esperado en `GET /agenda/citas/{id}/`:
+```json
+{
+  "cobro_id": "uuid-del-cobro" | null
+}
+```
+
+- `cobro_id` es el `id` del cobro más reciente vinculado a la cita (o el único, si siempre hay máximo uno por cita).
+- Si no existe ningún cobro, devuelve `null`.
+- No necesitamos el cobro completo — solo saber si existe para saltar el paso de pago en el wizard.
+
+Con este campo, el frontend puede derivar `pagoDone = cita.cobro_id !== null` de forma fiable, sin llamadas adicionales ni estado local.
+
+**Respuesta (Backend):**
+
+Implementado. `cobro_id` agregado a `CitaSerializer` como `SerializerMethodField` (read-only). Usa la relación inversa `cita.cobro` del `OneToOneField` existente — sin query adicional cuando la cita ya va con `select_related("cobro")`.
+
+`GET /agenda/citas/{id}/` ahora incluye:
+```json
+{
+  "cobro_id": "uuid-del-cobro" | null
+}
+```
+
+`null` cuando no existe cobro asociado. No se necesita ninguna migración.
+
+---
+
+## 26. Campo `sedes` en campañas — ¿se guarda y devuelve correctamente?
+
+**Pregunta (Frontend):**
+
+En la página `/configuracion/campanas`, los checkboxes de sedes no se muestran como seleccionados al editar una campaña que fue creada con sedes específicas. Hemos descartado problemas en el formulario (react-hook-form, watch, reset) y ahora sospechamos que el problema está en el backend.
+
+Necesitamos confirmar:
+
+**1. ¿`GET /clinicas/campanas/{id}/` devuelve `sedes` como array de UUIDs?**
+
+El tipo en el frontend espera:
+```json
+{
+  "id": "uuid",
+  "nombre": "Campaña Verano",
+  "sedes": ["uuid-sede-1", "uuid-sede-2"],
+  "sedes_nombres": ["Sede Norte", "Sede Sur"],
+  ...
+}
+```
+¿El endpoint de detalle incluye el campo `sedes`? ¿Siempre es un array (nunca `null`)?
+
+**2. ¿`GET /clinicas/campanas/` (listado) también incluye `sedes` en cada ítem?**
+
+El listado ya nos daba `sedes: undefined` en producción (de ahí el crash original con `.length`). Si el listado no incluye `sedes`, ¿el detalle sí lo incluye?
+
+**3. Al hacer `PATCH /clinicas/campanas/{id}/` con `sedes: ["uuid-sede-1"]`, ¿el backend guarda esas sedes y las devuelve en el GET siguiente?**
+
+Queremos confirmar el round-trip completo: guardamos con sedes → hacemos GET → `sedes` contiene los UUIDs correctos.
+
+**4. Si `sedes: []` (array vacío) significa "todas las sedes", ¿el backend lo almacena como vacío o lo convierte a `null`?**
+
+El frontend envía `sedes: []` para "todas las sedes". Necesitamos saber cómo viene de vuelta en el GET.
+
+**Respuesta (Backend):**
+
+Tenían razón: **el bug estaba en el backend**, no en react-hook-form.
+
+**Causa raíz**
+
+`CampanaSerializer` solo exponía `sedes_ids` como campo **write-only** y `sedes_nombres` en lectura. **No existía `sedes` en la respuesta JSON** de `GET /clinicas/campanas/` ni `GET /clinicas/campanas/{id}/`. Por eso el listado llegaba con `sedes: undefined` y, al editar, los checkboxes no tenían UUIDs para marcar.
+
+Además, **`PATCH` con clave `sedes` no persistía nada** si el payload no incluía `sedes_ids` (el serializer ignoraba silenciosamente el campo).
+
+**Corrección aplicada**
+
+Se añadió `sedes` como array de UUIDs en **lectura y escritura**. `sedes_ids` se mantiene como alias write-only por compatibilidad.
+
+**Respuestas puntuales**
+
+| # | Pregunta | Respuesta |
+|---|----------|-----------|
+| 1 | ¿Detalle devuelve `sedes` como array de UUIDs? | **Sí, ahora sí.** Siempre array; si no hay sedes específicas, `[]`. Nunca `null`. |
+| 2 | ¿Listado incluye `sedes`? | **Sí, ahora sí** en cada ítem del listado y en `activas/`. |
+| 3 | ¿Round-trip `PATCH sedes` → `GET sedes`? | **Sí.** Enviar `sedes: ["uuid-sede-1"]` o `sedes_ids: ["uuid-sede-1"]` persiste y el GET siguiente devuelve esos UUIDs en `sedes`. |
+| 4 | ¿`[]` = todas las sedes? | **Sí.** M2M vacío en BD. El GET devuelve `"sedes": []` y `"sedes_nombres": []` (no `null`). Semántica: campaña global a la clínica. |
+
+**Contrato actualizado (detalle y listado)**
+
+```json
+{
+  "id": "uuid",
+  "nombre": "Campaña Verano",
+  "sedes": ["uuid-sede-1", "uuid-sede-2"],
+  "sedes_nombres": ["Sede Norte", "Sede Sur"],
+  "fecha_inicio": "2026-06-01",
+  "fecha_fin": "2026-08-31",
+  "items": [],
+  "activo": true
+}
+```
+
+**Escritura (`POST` / `PATCH`)**
+
+Preferido:
+```json
+{ "sedes": ["uuid-sede-1", "uuid-sede-2"] }
+```
+
+También válido (alias legacy):
+```json
+{ "sedes_ids": ["uuid-sede-1"] }
+```
+
+Para “todas las sedes”: `{ "sedes": [] }`.
+
+**Frontend:** pueden seguir usando `sedes` en el formulario; al hacer `reset(campana)` los checkboxes deberían marcarse con los UUIDs del GET. Defensivamente, traten `sedes ?? []` por si hay cache de respuestas antiguas.
+
+---
+
+## Q27 — Aplicar precio de campaña en ítem con `precio_bloqueado=true`
+
+**Contexto**
+
+Al revisar la api.md, notamos que **no existe `PATCH /cotizaciones/{id}/items/{itemId}/`** — el único endpoint de edición es `PATCH /cotizaciones/{id}/` con reemplazo completo de ítems.
+
+El frontend actualmente aplica el precio de campaña actualizando el estado local del formulario y luego el usuario guarda con el `PATCH /cotizaciones/{id}/` habitual. El payload incluye `valor_unitario: <precio_campana>` para el ítem afectado.
+
+**Pregunta principal**
+
+Cuando un ítem es `tipo=procedimiento` con un `procedimiento` que tiene `precio_base` configurado, y el usuario envía `valor_unitario: <precio_campana>` (distinto del `precio_base`) en el `PATCH /cotizaciones/{id}/`, ¿el backend:
+
+**a)** Ignora el `valor_unitario` enviado y lo sobreescribe con `precio_base` silenciosamente (el ítem se guarda con precio de catálogo, no de campaña)?
+**b)** Devuelve `400 PRECIO_BLOQUEADO` (rechaza el cambio)?
+**c)** Acepta el `valor_unitario` enviado si está asociado a una campaña activa (hace excepciones)?
+
+La api.md dice "auto-completa `valor_unitario <- procedimiento.precio_base` (si configurado)" — no queda claro si "auto-completa" significa "override siempre" o "solo si vacío".
+
+**Para tratamientos** la api.md dice "si viene vacío" explícitamente, por lo que asumimos que para tratamientos el frontend SÍ puede enviar el precio de campaña y el backend lo respetará. ¿Es correcto?
+
+**Pedido**
+
+Si la respuesta a la pregunta principal es **a)** o **b)** para procedimientos, ¿podría el backend aceptar `valor_unitario = precio_campana_disponible` sin bloquear, dado que el precio de campaña fue configurado por un administrador (no es modificación arbitraria del usuario)?
+
+**Workaround actual en el frontend**
+
+El `PATCH /cotizaciones/{id}/items/{itemId}/` fue eliminado del frontend (no existe en la API). "Aplicar" ahora solo actualiza el estado local del formulario y el usuario guarda con "Guardar".
+
+**Respuesta (Backend):**
+
+| Opción | ¿Aplica? | Detalle |
+|--------|----------|---------|
+| **a)** Override silencioso con `precio_base` | **No** | `_hydrate_from_procedimiento` solo autocompleta `valor_unitario` si viene **vacío**. Si el frontend envía un valor explícito, el backend lo respeta (sujeto a validación de bloqueo). |
+| **b)** `400 PRECIO_BLOQUEADO` | **Parcial** | Era el comportamiento anterior para **cualquier** `valor_unitario` distinto al catálogo sin permiso `cotizaciones.cambiar_precio`, incluido procedimientos **y** tratamientos. |
+| **c)** Acepta precio de campaña activa | **Sí (implementado)** | Si `valor_unitario` coincide con el `precio_campana` de una campaña **activa** para la sede de la cotización y el procedimiento/tratamiento del ítem, se acepta **sin** `cotizaciones.cambiar_precio`. |
+
+**Aclaraciones**
+
+1. **Auto-completado vs override:** "Auto-completa" significa **solo si vacío** (procedimientos y tratamientos). No reemplaza un `valor_unitario` enviado explícitamente en el payload.
+
+2. **Tratamientos:** La suposición del frontend era **incorrecta**. Los tratamientos con `precio_estimado` también tienen `precio_bloqueado=true` y la misma regla de bloqueo (con la misma excepción de campaña).
+
+3. **Pedido del frontend:** Implementado. En `PATCH /cotizaciones/{id}/` con reemplazo de ítems, enviar `valor_unitario` igual a `precio_campana_disponible` del GET es válido para usuarios con `cotizaciones.gestionar` aunque no tengan `cotizaciones.cambiar_precio`.
+
+**Condiciones para la excepción de campaña**
+
+- Campaña con fechas vigentes (`fecha_inicio` ≤ hoy ≤ `fecha_fin`) y `activo=true`.
+- La sede de la cotización está en `campana.sedes`, **o** `campana.sedes` está vacío (todas las sedes).
+- El ítem referencia el mismo `procedimiento` o `tratamiento` que el `CampanaItem`.
+- `valor_unitario` enviado **igual** al `precio_campana` configurado (comparación exacta de decimal).
+
+**Flujo recomendado en frontend**
+
+1. Leer `precio_campana_disponible` (y opcionalmente `campana_id`) del ítem en el GET de la cotización.
+2. Al "Aplicar campaña", actualizar el estado local con ese valor.
+3. Guardar con `PATCH /cotizaciones/{id}/` incluyendo `valor_unitario: "<precio_campana_disponible>"` en el ítem.
+4. No hace falta permiso `cotizaciones.cambiar_precio` si el valor coincide con campaña activa.
+
+**Errores**
+
+Precio distinto al catálogo **y** distinto a campaña activa, sin permiso:
+
+```json
+{
+  "items": {
+    "valor_unitario": "No tienes permiso para modificar el precio de un item con precio bloqueado.",
+    "code": "PRECIO_BLOQUEADO"
+  }
+}
+```
+
+(Con un solo ítem en el payload, `normalize_error_response` aplana el array de errores anidados a ese objeto.)
+
+---
+
+## Q28 — Métricas de ventas por campaña
+
+**Contexto**
+
+Queremos mostrar en la página de administración de campañas cuántas ventas se han generado gracias a cada campaña. Un "venta" = cotización en `estado=aceptada` que tiene al menos un ítem con `campana_id` igual al ID de esa campaña.
+
+**Pedido**
+
+¿Podría el backend incluir estadísticas de ventas en la respuesta de `GET /clinicas/campanas/` y `GET /clinicas/campanas/{id}/`? Idealmente campos de solo lectura en cada campaña:
+
+```json
+{
+  "id": "uuid",
+  "nombre": "Campaña Verano",
+  ...campos actuales...,
+  "stats": {
+    "cotizaciones_aceptadas": 12,
+    "items_vendidos": 15,
+    "monto_total": "4200000.00"
+  }
+}
+```
+
+- `cotizaciones_aceptadas`: número de cotizaciones únicas en `estado=aceptada` con al menos un ítem de esta campaña.
+- `items_vendidos`: número total de ítems (de cotizaciones `aceptada`) que referencian esta campaña.
+- `monto_total`: suma de `subtotal` de esos ítems.
+
+Si el campo `campana_id` en `ItemCotizacion` es suficiente para hacer la join, debería ser straightforward.
+
+**Alternativa aceptable**
+
+Si prefieren no incluirlo en el listado (por performance), un endpoint separado `GET /clinicas/campanas/{id}/stats/` también está bien.
+
+**Respuesta (Backend):**
+
+Implementado en **`GET /clinicas/campanas/`**, **`GET /clinicas/campanas/{id}/`** y **`GET /clinicas/campanas/activas/`** — no hace falta endpoint separado.
+
+**Nota técnica:** `campana_id` en la respuesta de cotizaciones era un campo calculado (campaña activa al momento del GET). Para métricas históricas fiables se añadió **`campana` FK en `ItemCotizacion`**, que se persiste al guardar un ítem cuyo `valor_unitario` coincide con el `precio_campana` de una campaña activa para la sede (misma regla que Q27).
+
+**Contrato `stats` (solo lectura):**
+
+```json
+{
+  "stats": {
+    "cotizaciones_aceptadas": 12,
+    "items_vendidos": 15,
+    "monto_total": "4200000.00"
+  }
+}
+```
+
+| Campo | Definición |
+|-------|------------|
+| `cotizaciones_aceptadas` | Cotizaciones únicas con `estado=aceptada` y ≥1 ítem con `campana_id` = esta campaña |
+| `items_vendidos` | Cantidad de ítems activos en cotizaciones `aceptada` con esa FK |
+| `monto_total` | Suma de `subtotal` de esos ítems (incluye `num_citas` y `descuento_porcentaje`) |
+
+Solo cuentan cotizaciones **`aceptada`**. Borradores u otros estados no entran en las métricas aunque el ítem tenga precio de campaña.
+
+**Frontend:** pueden leer `stats` directamente del listado o detalle de campañas; no requiere llamadas adicionales.
+
+---
+
+## Q29 — Autoregistro público de pacientes
+
+**Feature**
+
+Queremos que el recepcionista pueda enviarle a un paciente un link público (WhatsApp, QR en recepción, etc.) para que se registre él mismo, sin necesitar login. El link sería único por clínica.
+
+**Comportamiento esperado**
+
+1. **Registro directo:** el paciente completa el formulario y queda creado inmediatamente (sin cola de aprobación).
+2. **Único por clínica:** el link identifica la clínica, no la sede. El paciente se crea asociado a esa clínica.
+3. **Duplicados rechazados:** si ya existe un paciente con el mismo número de teléfono (o email), el backend devuelve un error descriptivo para que el frontend notifique al paciente que ya está registrado.
+4. **Campos:** los mismos que el formulario actual de creación de paciente para recepcionistas (nombre, apellido, teléfono, email, fecha de nacimiento, etc.). ¿Cuáles son obligatorios en este flujo público?
+
+**Preguntas al backend**
+
+1. **Endpoint público:** ¿pueden exponer un `POST /registro-publico/pacientes/` (sin `Authorization` header) que reciba un token o slug de clínica en el body o query param? ¿O prefieren otro esquema (ej. header `X-Clinica-Token`)?
+
+2. **Identificador de clínica:** ¿cómo identifica el frontend la clínica en este endpoint? El `X-Clinica-Id` actual requiere que el usuario esté autenticado. ¿Hay un token público o slug que podamos usar como param en el link? Ej: `/registro?token=abc123`
+
+3. **Detección de duplicados:** ¿el backend valida duplicidad por teléfono? ¿Por email? ¿Devuelve `400` con un code específico (ej. `PACIENTE_YA_EXISTE`) para que el frontend lo maneje distinto a otros errores?
+
+4. **Protección anti-spam:** actualmente el `POST /pacientes/` requiere auth, que ya actúa como barrera. El endpoint público no tendría esa barrera. ¿El backend implementa rate limiting por IP? ¿O esperan que el frontend agregue un captcha (ej. Cloudflare Turnstile, hCaptcha)?
+
+5. **¿El link tiene expiración o es permanente?** Asumimos permanente (mientras la clínica esté activa), pero lo confirmamos.
+
+**Lo que haría el frontend**
+
+- Página en ruta pública `/registro/:token` (fuera del layout autenticado)
+- Formulario igual al de creación de paciente por recepcionistas
+- Al enviar: `POST` al endpoint público con los datos + token de clínica
+- Si duplicado → mensaje "Ya estás registrado en nuestra clínica. Comunícate con nosotros."
+- Si éxito → pantalla de confirmación
+- El recepcionista ve en configuración el link de su clínica con botón "Copiar" para compartir
+
+**Respuesta (Backend):**
+
+Implementado. No requiere `Authorization` ni `X-Clinica-Id`.
+
+| # | Pregunta | Respuesta |
+|---|----------|-----------|
+| 1 | Endpoint público | **`POST /api/v1/registro-publico/pacientes/`** sin auth. El token va en el **body** junto con los datos del paciente. |
+| 2 | Identificador de clínica | Cada clínica tiene **`token_registro_publico`** (generado automáticamente, único, permanente). El frontend lo obtiene de `GET /clinicas/mi-clinica/` → `registro_publico_token` y arma el link `/registro/:token`. Para branding previo al formulario: **`GET /registro-publico/clinica/?token=...`**. |
+| 3 | Duplicados | Valida por **`numero_documento`**, **`telefono`** y **`email`** (si viene) dentro de la misma clínica. Devuelve **`400`** con `code: "PACIENTE_YA_EXISTE"` y `campo` indicando cuál coincidió. |
+| 4 | Anti-spam | **Rate limit por IP: 20 req/hora** en los endpoints públicos. No hay captcha en backend; el frontend puede agregar Turnstile/hCaptcha si lo desean. |
+| 5 | Expiración del link | **Permanente** mientras la clínica esté `activo=true`. Si la clínica se desactiva, el token deja de funcionar (`TOKEN_INVALIDO`). |
+
+**Campos obligatorios en el flujo público** (mismo mínimo que `POST /pacientes/` para recepción):
+
+- `token`
+- `tipo_documento`, `numero_documento`, `nombres`, `apellidos`
+- `fecha_nacimiento`, `sexo`, `telefono`, `canal_confirmacion`
+- `autoriza_datos: true`
+
+Opcionales: `email`, `direccion`, `ciudad`, `barrio`, `ocupacion`, campos demográficos/ EPS, responsable, etc.
+
+**Respuesta éxito (`201`):**
+
+```json
+{
+  "id": "uuid",
+  "nombre_completo": "Pedro Publico",
+  "clinica_nombre": "Beauty Clinic"
+}
+```
+
+**Duplicado (`400`):**
+
+```json
+{
+  "error": "Ya existe un paciente registrado con ese telefono en esta clinica.",
+  "code": "PACIENTE_YA_EXISTE",
+  "campo": "telefono"
+}
+```
+
+**Frontend:** construir URL como `{FRONTEND_BASE}/registro/{registro_publico_token}`. Documentación completa en `api.md` § Autoregistro público.
+
+---
+
+## Q30 — Tabs de autoregistro requeridos por clínica
+
+**Contexto**
+
+La página pública `/registro/:token` usa el mismo formulario de creación de paciente, que tiene tres tabs: Identificación y contacto (tab 1, siempre requerido), Datos personales (tab 2) y Salud y afiliación (tab 3). Queremos que cada clínica pueda marcar los tabs 2 y/o 3 como requeridos: si están marcados, el submit no pasa a menos que el paciente haya llenado al menos un campo en esa sección.
+
+**Pedido**
+
+Agregar dos booleans a la configuración de la clínica (con default `false`):
+
+- `tab_personal_requerido` — si `true`, el tab "Datos personales" (dirección, ciudad, estado civil, etc.) es obligatorio en el autoregistro público.
+- `tab_salud_requerido` — si `true`, el tab "Salud y afiliación" (EPS, tipo afiliado, régimen, grupo sanguíneo) es obligatorio.
+
+**Puntos concretos a confirmar**
+
+1. **Dónde almacenarlo:** ¿en el modelo `Clinica` directamente (dos BooleanField), en un modelo de configuración existente (ej. `ConfiguracionWizard` u otro JSONField), o uno nuevo? El frontend no tiene preferencia mientras esté disponible públicamente.
+
+2. **Exponerlo en `GET /registro-publico/clinica/?token=...`:** agregar los dos campos al response para que el frontend los lea sin auth antes de renderizar el formulario.
+
+   Shape esperado:
+   ```json
+   {
+     "clinica_id": "uuid",
+     "clinica_nombre": "Clínica Ejemplo",
+     "logo_url": "...",
+     "tab_personal_requerido": false,
+     "tab_salud_requerido": false
+   }
+   ```
+
+3. **Editable vía `PATCH /clinicas/mi-clinica/`** (o donde corresponda): el admin de la clínica debería poder cambiar estos booleans desde la configuración.
+
+**Lo que haría el frontend**
+
+- Leer `tab_personal_requerido` y `tab_salud_requerido` del response de `GET /registro-publico/clinica/`.
+- Si `true`, mostrar indicador "Requerido" en el tab.
+- En el submit: si el tab es requerido y todos sus campos están vacíos → navegar a ese tab y mostrar mensaje informativo (sin bloquear con errores de campo individuales).
+- En la configuración de la clínica (autenticada): toggles para activar/desactivar cada tab.
+
+**Respuesta (Backend):**
+
+| # | Punto | Decisión |
+|---|-------|----------|
+| 1 | Almacenamiento | Modelo **`ConfiguracionRegistroPublico`** (OneToOne a `Clinica`, patrón `ConfiguracionWizard`). Campos `tab_personal_requerido`, `tab_salud_requerido` (default `false`). |
+| 2 | Lectura pública | **`GET /registro-publico/clinica/?token=...`** incluye ambos campos (siempre presentes, `false` por default vía `get_or_create`). |
+| 3 | Edición admin | **`GET/PATCH /configuracion/registro-publico/`** (permiso admin). Los mismos campos en **`GET /clinicas/mi-clinica/`** → objeto `registro_publico`. |
+| 4 | Validación POST | **`POST /registro-publico/pacientes/`** valida en backend. Tab personal: al menos uno de `direccion`, `ciudad`, `barrio`, `estado_civil`, `ocupacion`, `escolaridad`, `grupo_etnico`. Tab salud: al menos uno de `eps`, `tipo_afiliado`, `regimen`, `grupo_sanguineo`. Error `400` con `code: "TAB_PERSONAL_REQUERIDO"` o `"TAB_SALUD_REQUERIDO"`. |
+| 5 | Alcance | Solo aplica al flujo **`/registro-publico/`**. `POST /pacientes/` (staff) no cambia. |
+
+Documentación en `api.md` § Autoregistro público.

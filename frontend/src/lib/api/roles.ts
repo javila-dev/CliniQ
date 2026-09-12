@@ -1,5 +1,7 @@
 import { apiClient } from './client'
-import type { Rol, CreateRolRequest, UpdateRolRequest, PermisoGrupo } from '@/types/usuarios'
+import type {
+  Rol, CreateRolRequest, UpdateRolRequest, PermisoGrupo, CapacidadesResponse,
+} from '@/types/usuarios'
 
 export const rolesApi = {
   list: async (): Promise<Rol[]> => {
@@ -33,6 +35,11 @@ export const rolesApi = {
 
   listarPermisos: async (): Promise<PermisoGrupo[]> => {
     const res = await apiClient.get<PermisoGrupo[]>('/usuarios/permisos/')
+    return res.data
+  },
+
+  listarCapacidades: async (): Promise<CapacidadesResponse> => {
+    const res = await apiClient.get<CapacidadesResponse>('/usuarios/capacidades/')
     return res.data
   },
 }

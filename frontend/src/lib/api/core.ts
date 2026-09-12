@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { LogAccion } from '@/types/core'
+import type { ConfiguracionGlobal, LogAccion } from '@/types/core'
 import type { Paginated } from '@/types/common'
 
 export const coreApi = {
@@ -13,6 +13,18 @@ export const coreApi = {
       page_size?: number
     }): Promise<Paginated<LogAccion>> => {
       const res = await apiClient.get<Paginated<LogAccion>>('/core/log-acciones/', { params })
+      return res.data
+    },
+  },
+
+  // Flags de plataforma (fila única). Ver/activar el centro de ayuda para todas las clínicas.
+  configuracionGlobal: {
+    get: async (): Promise<ConfiguracionGlobal> => {
+      const res = await apiClient.get<ConfiguracionGlobal>('/core/configuracion-global/')
+      return res.data
+    },
+    update: async (data: Partial<Pick<ConfiguracionGlobal, 'centro_ayuda_habilitado'>>): Promise<ConfiguracionGlobal> => {
+      const res = await apiClient.patch<ConfiguracionGlobal>('/core/configuracion-global/', data)
       return res.data
     },
   },

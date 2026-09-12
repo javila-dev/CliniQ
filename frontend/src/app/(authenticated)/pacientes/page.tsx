@@ -16,6 +16,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 import type { Paciente } from '@/types/pacientes'
 
 // ─── helpers ──────────────────────────────────────────────────
@@ -281,7 +282,10 @@ export default function PacientesPage() {
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Pacientes</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-bold text-foreground">Pacientes</h1>
+            <HelpButton slug="registrar-un-paciente-nuevo" />
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isLoading ? 'Cargando...' : `${total} paciente${total !== 1 ? 's' : ''} registrados`}
           </p>

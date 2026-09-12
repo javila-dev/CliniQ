@@ -22,6 +22,14 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     }
   }, [hasCheckedAuth, isLoading, isAuthenticated, router])
 
+  // Equipo interno (is_staff, sin clínica) no opera dentro de una clínica —
+  // su lugar es /console. No es un error de datos como el caso de abajo.
+  useEffect(() => {
+    if (hasCheckedAuth && isAuthenticated && user && !isSuperAdmin(user) && !user.clinica_id && user.is_staff) {
+      router.replace('/console')
+    }
+  }, [hasCheckedAuth, isAuthenticated, user, router])
+
 
   // Escuchar el evento de sesión expirada del interceptor HTTP
   useEffect(() => {
@@ -57,6 +65,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!isAuthenticated) return null
+
+  // Redirigiendo a /console (ver el useEffect de arriba) — no mostrar el mensaje de error.
+  if (user && !isSuperAdmin(user) && !user.clinica_id && user.is_staff) return null
 
   if (!isSuperAdmin(user) && !user?.clinica_id) {
     return (

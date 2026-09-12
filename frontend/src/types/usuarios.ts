@@ -42,6 +42,27 @@ export interface PermisoGrupo {
   permisos: Permiso[]
 }
 
+// ── Capacidades (capa semántica del selector de roles) ────────────────────────
+
+export interface Capacidad {
+  clave: string
+  titulo: string
+  descripcion: string
+  permisos: string[]      // claves técnicas que expande
+  profesional: boolean    // implica atención clínica → Rol.es_profesional
+}
+
+export interface CapacidadArea {
+  area: string
+  titulo: string
+  capacidades: Capacidad[]
+}
+
+export interface CapacidadesResponse {
+  areas: CapacidadArea[]
+  permisos_tecnicos: PermisoGrupo[]
+}
+
 // ── Usuario administrado ──────────────────────────────────────────────────────
 
 export interface UsuarioAdmin {

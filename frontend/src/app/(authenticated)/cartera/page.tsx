@@ -288,6 +288,7 @@ export default function CarteraPage() {
       <PageHeader
         title="Cartera"
         description="Control de cuentas por cobrar y formas de pago acordadas"
+        helpSlug="registrar-un-pago"
       />
 
       {/* Cards resumen */}

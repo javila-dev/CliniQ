@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotizacion, HistorialSesionesCotizacion, SesionesCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotizacion, HistorialSesionesCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { Paginated } from '@/types/common'
 
@@ -23,6 +23,15 @@ export const cotizacionesApi = {
 
   get: async (id: string): Promise<Cotizacion> => {
     const res = await apiClient.get<Cotizacion>(`/cotizaciones/${id}/`)
+    return res.data
+  },
+
+  // Precios de campaña vigentes indexados por id de catálogo, para el formulario
+  // (el backend solo calcula precio_campana_disponible sobre ítems ya guardados).
+  preciosCampana: async (sede?: string | null): Promise<PreciosCampanaMap> => {
+    const res = await apiClient.get<PreciosCampanaMap>('/cotizaciones/precios_campana/', {
+      params: sede ? { sede } : undefined,
+    })
     return res.data
   },
 

@@ -18,10 +18,10 @@ import {
   Stethoscope,
   ClipboardList,
   Wallet,
-  ShieldCheck,
   Zap,
   Building2,
   PieChart,
+  HelpCircle,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -48,7 +48,7 @@ const NAV = {
   agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER            },
   pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
   cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER      },
-  cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.COBROS_VER            },
+  cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.CARTERA_VER           },
   consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER   },
   cobros:         { href: '/ingresos',       label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER            },
   resultados:     { href: '/resultados',     label: 'Resultados',      icon: PieChart,        perm: PERM.REPORTES_VER_FINANCIEROS },
@@ -74,15 +74,20 @@ function buildNav(user: AuthUser | null): NavEntry[] {
 
   const entries: NavEntry[] = []
 
-  if (isSuperAdmin(user)) {
-    entries.push({ section: 'Admin', items: [{ href: '/admin', label: 'Panel admin', icon: ShieldCheck }] })
-  }
+  // La gestión de plataforma (clínicas, planes, usuarios internos) vive en
+  // /console, fuera de este sidebar — ver AuthGuard/defaultRoute.
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
   if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems })
   if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems   })
   if (finanzasItems.length) entries.push({ section: 'Finanzas', items: finanzasItems })
   if (vis(n.configuracion)) entries.push(n.configuracion)
+
+  // Centro de ayuda: sin permiso propio, pero solo visible si el flag global está
+  // activo (o si el usuario lo gestiona, para poder entrar a preparar contenido).
+  if (canAccess.ayudaCentro(user)) {
+    entries.push({ href: '/ayuda', label: 'Centro de ayuda', icon: HelpCircle })
+  }
 
   return entries
 }
@@ -229,10 +234,10 @@ function SuperadminClinicaGuard({ children }: { children: React.ReactNode }) {
   const router = useRouter()
 
   // Wait for Zustand persist to hydrate from localStorage before deciding to redirect
-  const shouldRedirect = _hydrated && isSuperAdmin(user) && clinicaActiva === null && !pathname.startsWith('/admin')
+  const shouldRedirect = _hydrated && isSuperAdmin(user) && clinicaActiva === null && !pathname.startsWith('/console')
 
   useEffect(() => {
-    if (shouldRedirect) router.replace('/admin')
+    if (shouldRedirect) router.replace('/console')
   }, [shouldRedirect, router])
 
   if (shouldRedirect) return null
@@ -249,7 +254,7 @@ function SuperadminClinicaBanner() {
 
   function handleSalir() {
     salirClinica()
-    router.replace('/admin')
+    router.replace('/console')
   }
 
   return (

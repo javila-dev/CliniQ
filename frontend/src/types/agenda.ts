@@ -79,7 +79,15 @@ export interface Cita {
   firma_asistencia_signing_token?: string | null
   firma_asistencia_archivo_url?: string | null
   cobro_id?: string | null
+  /** Presente solo si la clínica bloquea por deuda y el paciente tiene cuotas vencidas. */
+  deuda_info?: DeudaInfo | null
   created_at: string
+}
+
+export interface DeudaInfo {
+  cuotas_vencidas: number
+  monto_total: string
+  cuota_ids: string[]
 }
 
 export interface CreateCitaRequest {

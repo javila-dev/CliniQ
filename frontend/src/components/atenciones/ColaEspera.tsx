@@ -16,6 +16,8 @@ import { agendaApi } from '@/lib/api/agenda'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion } from '@/lib/permissions'
 import { formatTime } from '@/lib/utils'
+import { mensajeErrorDeuda } from '@/lib/deuda'
+import { toast } from '@/hooks/use-toast'
 import type { Cita } from '@/types/agenda'
 
 interface ColaEsperaProps {
@@ -74,8 +76,10 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
         await agendaApi.citas.cambiarEstado(cita.id, { estado: 'en_curso' })
       }
       router.push(`/atenciones/${cita.id}`)
-    } catch {
+    } catch (err) {
       setIniciandoCitaId(null)
+      const deuda = mensajeErrorDeuda(err)
+      if (deuda) toast.error('Atención bloqueada por mora', deuda)
     }
   }
 
