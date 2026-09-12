@@ -379,7 +379,9 @@ function DashboardContent() {
   // KPIs financieros/comerciales de dueño: cartera agregada, P&L 30 días,
   // ingresos por servicio, conversión de cotizaciones, tasa de completado por
   // profesional. Recepción / profesional ven un dashboard operativo sin esto.
-  const canVerFinanzas = isAdminOrSuperAdmin(user)
+  // Debe coincidir con el gate del backend (DashboardView.get: "reportes.ver_financieros"),
+  // que es el que decide si el payload trae `cobros_hoy`/`ingresos_semana`.
+  const canVerFinanzas = hasPermission(user, PERM.REPORTES_VER_FINANCIEROS)
   const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
   // `sedeId` = elección explícita del usuario. Sin elección, cae en la sede por
   // defecto de su scope: acotado a una sola sede -> esa sede; all-sedes -> null
@@ -573,15 +575,17 @@ function DashboardContent() {
         iconColor="text-blue-500"
         loading={kpisViewLoading}
       />
-      <KPICard
-        label={periodo === 'hoy' ? 'Ingresos hoy' : `Ingresos ${periodoSufijo}`}
-        value={kpisView ? COP.format(Number(kpisView.cobros_hoy.total_cop)) : '—'}
-        sub={`${kpisView?.cobros_hoy.pagados ?? 0} cobros pagados`}
-        icon={DollarSign}
-        iconBg="bg-emerald-50"
-        iconColor="text-emerald-500"
-        loading={kpisViewLoading}
-      />
+      {canVerFinanzas && (
+        <KPICard
+          label={periodo === 'hoy' ? 'Ingresos hoy' : `Ingresos ${periodoSufijo}`}
+          value={kpisView?.cobros_hoy ? COP.format(Number(kpisView.cobros_hoy.total_cop)) : '—'}
+          sub={`${kpisView?.cobros_hoy?.pagados ?? 0} cobros pagados`}
+          icon={DollarSign}
+          iconBg="bg-emerald-50"
+          iconColor="text-emerald-500"
+          loading={kpisViewLoading}
+        />
+      )}
       <KPICard
         label="Completadas"
         value={completadasKpi}
@@ -965,23 +969,22 @@ function DashboardContent() {
       )}
 
       {/* Gráfica + Cobros por medio de pago */}
+      {canVerFinanzas && (
       <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-3')}>
-        {canVerFinanzas && (
-          <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <h2 className="font-semibold text-sm">
-                  {periodo === 'hoy' ? 'Ingresos últimos 30 días' : `Ingresos ${periodoSufijo}`}
-                </h2>
-                <p className="text-xs text-muted-foreground mt-0.5">
-                  Cobros vs gastos{periodo === 'hoy' || periodo === 'mes' ? ' por día' : ingRango.agrupar === 'mes' ? ' por mes' : ' por semana'}
-                </p>
-              </div>
-              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <h2 className="font-semibold text-sm">
+                {periodo === 'hoy' ? 'Ingresos últimos 30 días' : `Ingresos ${periodoSufijo}`}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Cobros vs gastos{periodo === 'hoy' || periodo === 'mes' ? ' por día' : ingRango.agrupar === 'mes' ? ' por mes' : ' por semana'}
+              </p>
             </div>
-            <GraficaIngresos data={ingresos ?? []} loading={ingresosLoading} />
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
           </div>
-        )}
+          <GraficaIngresos data={ingresos ?? []} loading={ingresosLoading} />
+        </div>
 
         <div className="bg-white rounded-xl border shadow-sm p-5 space-y-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <h2 className="font-semibold text-sm">Cobros de hoy por medio</h2>
@@ -989,7 +992,7 @@ function DashboardContent() {
             <div className="space-y-2">
               {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
             </div>
-          ) : !kpis?.cobros_hoy.por_medio_pago.length ? (
+          ) : !kpis?.cobros_hoy?.por_medio_pago.length ? (
             <p className="text-sm text-muted-foreground">Sin cobros registrados hoy</p>
           ) : (
             <div className="space-y-2">
@@ -1007,6 +1010,7 @@ function DashboardContent() {
           )}
         </div>
       </div>
+      )}
 
       {/* Tablas: servicios + ocupación */}
       <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-2')}>
