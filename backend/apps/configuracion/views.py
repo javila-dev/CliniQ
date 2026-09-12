@@ -36,7 +36,7 @@ from apps.configuracion.serializers import (
     PlantillaCamposSerializer,
 )
 from apps.pacientes.models import ConfiguracionFacial
-from apps.users.permissions import IsAdmin, get_clinica_activa
+from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
 
 class PlantillaConsentimientoViewSet(GenericViewSet):
@@ -47,7 +47,11 @@ class PlantillaConsentimientoViewSet(GenericViewSet):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_permissions(self):
-        return [IsAdmin()]
+        if self.action in {"list", "get_pdf"}:
+            permission_classes = (RequirePermission("consentimientos.plantillas.ver"),)
+        else:
+            permission_classes = (RequirePermission("consentimientos.plantillas.gestionar"),)
+        return [permission() for permission in permission_classes]
 
     def _get_clinica(self):
         clinica = get_clinica_activa(self.request)

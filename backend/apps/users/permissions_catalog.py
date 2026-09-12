@@ -235,6 +235,12 @@ CAPABILITY_CATALOG = [
                 "permisos": ["consentimientos.generar"],
             },
             {
+                "clave": "consentimientos.plantillas.ver",
+                "titulo": "Ver plantillas de consentimiento",
+                "descripcion": "Consultar las plantillas de consentimiento de la clinica.",
+                "permisos": ["consentimientos.plantillas.ver"],
+            },
+            {
                 "clave": "consentimientos.plantillas",
                 "titulo": "Gestionar plantillas de consentimiento",
                 "descripcion": "Crear y editar las plantillas de consentimiento.",
