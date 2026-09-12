@@ -36,6 +36,20 @@ class IsAdmin(BasePermission):
         return user_is_tenant_admin(request.user)
 
 
+class PuedeGestionarAyuda(BasePermission):
+    """Editar el centro de ayuda: superadmin o equipo interno (is_staff de Django)."""
+
+    message = "Solo el equipo interno puede editar el centro de ayuda."
+
+    def has_permission(self, request, view):
+        user = request.user
+        return bool(
+            user
+            and user.is_authenticated
+            and (user.rol == "superadmin" or user.is_staff)
+        )
+
+
 class IsProfesional(BasePermission):
     message = "Solo un profesional puede realizar esta accion."
 

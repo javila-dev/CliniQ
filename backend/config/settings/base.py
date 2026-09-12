@@ -64,6 +64,7 @@ LOCAL_APPS = [
     "apps.cartera",
     "apps.protocolos",
     "apps.obesidad",
+    "apps.ayuda",
     "apps.migracion",
 ]
 

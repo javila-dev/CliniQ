@@ -1,6 +1,13 @@
 from rest_framework import serializers
 
-from apps.core.models import LogAccion
+from apps.core.models import ConfiguracionGlobal, LogAccion
+
+
+class ConfiguracionGlobalSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConfiguracionGlobal
+        fields = ["centro_ayuda_habilitado", "updated_at"]
+        read_only_fields = ["updated_at"]
 
 
 class LogAccionSerializer(serializers.ModelSerializer):

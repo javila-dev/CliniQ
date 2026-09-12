@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from apps.core.models import ConfiguracionGlobal
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file, read_public_file
 from apps.users.authorization import get_user_permission_keys
 from apps.users.models import Permiso, Rol
@@ -226,6 +227,8 @@ class UserSerializer(serializers.ModelSerializer):
     sede_id = serializers.SerializerMethodField()
     clinica_nombre = serializers.CharField(source="clinica.nombre", read_only=True)
     nombre_completo = serializers.CharField(read_only=True)
+    is_staff = serializers.BooleanField(read_only=True)
+    centro_ayuda_habilitado = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -241,6 +244,8 @@ class UserSerializer(serializers.ModelSerializer):
             "permissions",
             "es_profesional",
             "es_admin",
+            "is_staff",
+            "centro_ayuda_habilitado",
             "clinica_id",
             "sede_id",
             "clinica",
@@ -261,6 +266,8 @@ class UserSerializer(serializers.ModelSerializer):
             "role_nombre",
             "permissions",
             "es_profesional",
+            "is_staff",
+            "centro_ayuda_habilitado",
             "clinica_id",
             "sede_id",
             "clinica",
@@ -290,6 +297,9 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_sede_id(self, obj):
         return user_sede_id(obj)
+
+    def get_centro_ayuda_habilitado(self, obj):
+        return ConfiguracionGlobal.get_solo().centro_ayuda_habilitado
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
@@ -399,6 +409,8 @@ def build_auth_user_payload(user) -> dict:
         "permissions": sorted(get_user_permission_keys(user)),
         "es_profesional": user.es_profesional,
         "es_admin": user.es_admin,
+        "is_staff": user.is_staff,
+        "centro_ayuda_habilitado": ConfiguracionGlobal.get_solo().centro_ayuda_habilitado,
         "clinica_id": str(user.clinica_id) if user.clinica_id else None,
         "sede_id": user_sede_id(user),
         "clinica_nombre": user.clinica.nombre if user.clinica_id else None,

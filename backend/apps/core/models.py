@@ -43,3 +43,38 @@ class LogAccion(models.Model):
             models.Index(fields=["objeto_tipo", "objeto_id"]),
         ]
         ordering = ["-created_at"]
+
+
+class ConfiguracionGlobal(models.Model):
+    """Fila única con flags de plataforma (no por clínica). Se edita desde /admin.
+
+    Nuevas funcionalidades en construcción nacen apagadas (default=False) y las
+    activa un superadmin cuando están listas para todas las clínicas.
+    """
+
+    id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
+    centro_ayuda_habilitado = models.BooleanField(default=False)
+    actualizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True, blank=True,
+        on_delete=models.SET_NULL,
+        related_name="+",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "configuracion_global"
+        verbose_name = "configuración global"
+        verbose_name_plural = "configuración global"
+
+    def __str__(self):
+        return "Configuración global"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_solo(cls) -> "ConfiguracionGlobal":
+        obj, _ = cls.objects.get_or_create(pk=1)
+        return obj

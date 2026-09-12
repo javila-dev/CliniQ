@@ -1,9 +1,12 @@
 from rest_framework.mixins import ListModelMixin
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
-from apps.core.models import LogAccion
-from apps.core.serializers import LogAccionSerializer
-from apps.users.permissions import RequirePermission
+from apps.core.models import ConfiguracionGlobal, LogAccion
+from apps.core.serializers import ConfiguracionGlobalSerializer, LogAccionSerializer
+from apps.users.permissions import IsSuperAdmin, RequirePermission
 
 
 class LogAccionViewSet(ListModelMixin, GenericViewSet):
@@ -32,3 +35,25 @@ class LogAccionViewSet(ListModelMixin, GenericViewSet):
             queryset = queryset.filter(created_at__date__lte=fecha_hasta)
 
         return queryset
+
+
+class ConfiguracionGlobalView(APIView):
+    """
+    GET   /api/v1/core/configuracion-global/  — cualquier usuario autenticado
+    PATCH /api/v1/core/configuracion-global/  — solo superadmin
+    """
+
+    def get_permissions(self):
+        if self.request.method == "PATCH":
+            return [IsSuperAdmin()]
+        return [IsAuthenticated()]
+
+    def get(self, request):
+        return Response(ConfiguracionGlobalSerializer(ConfiguracionGlobal.get_solo()).data)
+
+    def patch(self, request):
+        instance = ConfiguracionGlobal.get_solo()
+        serializer = ConfiguracionGlobalSerializer(instance, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(actualizado_por=request.user)
+        return Response(serializer.data)
