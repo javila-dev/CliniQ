@@ -23,13 +23,15 @@ from apps.clinicas.models import Clinica
 from apps.core.logging import registrar_accion
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
-from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions import IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
     CAPABILITY_PERMISSIONS,
     role_is_professional_from_keys,
 )
 from apps.users.serializers import (
+    ConsoleUsuarioCreateSerializer,
+    ConsoleUsuarioSerializer,
     InvitationRequestSerializer,
     LoginSerializer,
     MeUpdateSerializer,
@@ -1032,3 +1034,88 @@ class UserViewSet(GenericViewSet):
             clinica=user.clinica,
         )
         return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)
+
+
+class ConsoleUsuarioViewSet(GenericViewSet):
+    """
+    Usuarios de plataforma (superadmin / equipo interno) — sin clinica.
+    Se gestionan desde /console, no desde la app de una clinica. Solo superadmin.
+
+    GET    /api/v1/admin/usuarios/
+    POST   /api/v1/admin/usuarios/                       {email, first_name, last_name, es_superadmin}
+    PATCH  /api/v1/admin/usuarios/{id}/                   {activo}
+    POST   /api/v1/admin/usuarios/{id}/reenviar_invitacion/
+    """
+
+    permission_classes = [IsSuperAdmin]
+    serializer_class = ConsoleUsuarioSerializer
+    search_fields = ("first_name", "last_name", "email")
+
+    def get_queryset(self):
+        return User.objects.filter(clinica__isnull=True).order_by("-created_at")
+
+    def list(self, request):
+        qs = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(qs)
+        data = ConsoleUsuarioSerializer(page if page is not None else qs, many=True).data
+        return self.get_paginated_response(data) if page is not None else Response(data)
+
+    def create(self, request):
+        serializer = ConsoleUsuarioCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        va = serializer.validated_data
+        es_superadmin = va["es_superadmin"]
+
+        user = User(
+            email=va["email"],
+            first_name=va["first_name"].strip(),
+            last_name=va.get("last_name", "").strip(),
+            clinica=None,
+            rol=User.Role.SUPERADMIN if es_superadmin else User.Role.RECEPCION,
+            is_staff=True,
+            is_superuser=es_superadmin,
+        )
+        user.set_unusable_password()
+        user.save()
+
+        _, _url, email_enviado = services.generar_link_invitacion(user)
+        registrar_accion(
+            request, "console_usuario.crear", user,
+            {
+                "resumen": f"Usuario de consola {user.email} creado",
+                "usuario_email": user.email,
+                "es_superadmin": es_superadmin,
+                "email_enviado": email_enviado,
+            },
+        )
+        return Response(ConsoleUsuarioSerializer(user).data, status=status.HTTP_201_CREATED)
+
+    def partial_update(self, request, pk=None):
+        user = self.get_object()
+        if "activo" not in request.data:
+            return error_response("Solo se puede editar 'activo'.", "INVALID_FIELD", status.HTTP_400_BAD_REQUEST)
+        nuevo_activo = bool(request.data["activo"])
+        if user == request.user and not nuevo_activo:
+            return error_response("No puedes desactivarte a ti mismo.", "SELF_DEACTIVATE", status.HTTP_400_BAD_REQUEST)
+        user.activo = nuevo_activo
+        user.save(update_fields=["activo"])
+        registrar_accion(
+            request, "console_usuario.activar" if nuevo_activo else "console_usuario.desactivar", user,
+            {"resumen": f"Usuario de consola {user.email} {'activado' if nuevo_activo else 'desactivado'}"},
+        )
+        return Response(ConsoleUsuarioSerializer(user).data)
+
+    @action(detail=True, methods=["post"], url_path="reenviar_invitacion")
+    def reenviar_invitacion(self, request, pk=None):
+        user = self.get_object()
+        if user.last_login is not None:
+            return error_response(
+                "El usuario ya activó su cuenta y no necesita una nueva invitación.",
+                "USER_ALREADY_ACTIVATED", status.HTTP_400_BAD_REQUEST,
+            )
+        _, _url, email_enviado = services.generar_link_invitacion(user)
+        registrar_accion(
+            request, "console_usuario.reenviar_invitacion", user,
+            {"resumen": f"Invitación reenviada a {user.email}", "email_enviado": email_enviado},
+        )
+        return Response({"ok": True, "email_enviado": email_enviado})

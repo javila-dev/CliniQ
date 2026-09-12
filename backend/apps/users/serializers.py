@@ -505,3 +505,39 @@ class RolPermisosUpdateSerializer(serializers.Serializer):
                 "Permisos inexistentes o inactivos: " + ", ".join(faltantes)
             )
         return keys
+
+
+# ── Usuarios de consola (superadmin / staff, sin clinica) ────────────────────
+
+class ConsoleUsuarioSerializer(serializers.ModelSerializer):
+    nombre_completo = serializers.CharField(read_only=True)
+    es_superadmin = serializers.SerializerMethodField()
+    invitacion_pendiente = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = (
+            "id", "email", "first_name", "last_name", "nombre_completo",
+            "es_superadmin", "is_staff", "activo", "invitacion_pendiente",
+            "last_login", "created_at",
+        )
+        read_only_fields = fields
+
+    def get_es_superadmin(self, obj) -> bool:
+        return obj.rol == "superadmin"
+
+    def get_invitacion_pendiente(self, obj) -> bool:
+        return obj.last_login is None
+
+
+class ConsoleUsuarioCreateSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    first_name = serializers.CharField(max_length=150)
+    last_name = serializers.CharField(max_length=150, required=False, allow_blank=True)
+    es_superadmin = serializers.BooleanField(default=False)
+
+    def validate_email(self, value):
+        value = value.strip().lower()
+        if User.objects.filter(email__iexact=value).exists():
+            raise serializers.ValidationError("Ya existe un usuario con ese correo.")
+        return value
