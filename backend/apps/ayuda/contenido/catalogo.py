@@ -74,9 +74,9 @@ ocho sesiones: da ocho paquetes cobrados.
         "slug": "configurar-un-procedimiento",
         "categoria": "catalogo",
         "titulo": "Configurar un procedimiento",
-        "resumen": "Los campos de un procedimiento y qué efecto tiene cada uno: duración, precio de lista, descuento máximo, consentimientos, protocolo de pasos y diagramas de zonas.",
+        "resumen": "Los campos de un procedimiento y qué efecto tiene cada uno: duración, precio de lista, descuento máximo, consentimientos y diagramas de zonas.",
         "area": "configuracion",
-        "keywords": "procedimiento, crear, duración, precio, consentimiento, protocolo, pasos, catálogo, diagrama",
+        "keywords": "procedimiento, crear, duración, precio, consentimiento, catálogo, diagrama",
         "destacado": False,
         "contenido": """
 Los procedimientos se administran en **Configuración → Procedimientos**. Cada
@@ -93,7 +93,6 @@ campo tiene un efecto concreto en la operación diaria.
 | **Precio de lista** | Fija el precio en cotizaciones y lo bloquea ante cambios manuales |
 | **Descuento máximo** | Hasta cuánto se puede rebajar sobre el precio de lista |
 | **Vigencia en meses** | Cada cuánto se considera que hay que repetir la venta |
-| **Tiene protocolo** | Habilita definir los pasos del procedimiento |
 
 ## Duración realista
 
@@ -106,13 +105,6 @@ profesionales corriendo todo el día.
 Asocia al procedimiento los consentimientos que exige. A partir de ahí, cada vez
 que se agende, CliniQ pedirá esas firmas antes de atender, sin que nadie tenga que
 recordarlo. Puedes asociar más de uno y definir su orden.
-
-## Protocolo de pasos
-
-Si el procedimiento se ejecuta en varias etapas, actívale el protocolo y define
-los pasos, con su orden y, si aplica, la semana en la que va cada uno. Un paso se
-puede marcar como **control**, que es una visita de seguimiento y no una sesión de
-tratamiento.
 
 ## Diagramas y zonas
 

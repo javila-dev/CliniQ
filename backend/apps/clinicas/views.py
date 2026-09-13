@@ -364,13 +364,14 @@ class AdminTenantViewSet(ModelViewSet):
     # Campos de la clinica cuyo cambio queda registrado en el historial (LogAccion).
     _TENANT_TRACKED_FIELDS = (
         "nombre", "nit", "email", "telefono", "activo", "plan_id",
-        "facial_verificacion_habilitada", "modulo_estetico_habilitado",
-        "modulo_obesidad_habilitado", "modo_puesta_en_marcha",
+        "facial_verificacion_override", "modulo_estetico_override",
+        "modulo_obesidad_override", "otp_checkin_override", "modo_puesta_en_marcha",
     )
     _MODULO_LABELS = {
-        "facial_verificacion_habilitada": "Verificación facial",
-        "modulo_estetico_habilitado": "Módulo estético",
-        "modulo_obesidad_habilitado": "Módulo obesidad",
+        "facial_verificacion_override": "Verificación facial",
+        "modulo_estetico_override": "Módulo estético",
+        "modulo_obesidad_override": "Módulo obesidad",
+        "otp_checkin_override": "Check-in por OTP",
         "modo_puesta_en_marcha": "Modo puesta en marcha",
     }
 
@@ -438,13 +439,17 @@ class AdminTenantViewSet(ModelViewSet):
 
         for f in [c for c in cambios if c in self._MODULO_LABELS]:
             cambios.pop(f)
-            habilitado = bool(getattr(clinica, f))
+            valor = getattr(clinica, f)
+            if f == "modo_puesta_en_marcha":
+                estado_texto = "activado" if valor else "desactivado"
+            else:
+                estado_texto = "según el plan" if valor is None else ("forzado activado" if valor else "forzado desactivado")
             registrar_accion(
                 request, "tenant.modulo", clinica,
                 {
-                    "resumen": f"Add-on «{self._MODULO_LABELS[f]}» {'activado' if habilitado else 'desactivado'}",
+                    "resumen": f"Add-on «{self._MODULO_LABELS[f]}» {estado_texto}",
                     "modulo": f,
-                    "habilitado": habilitado,
+                    "habilitado": valor,
                 },
                 clinica=clinica,
             )

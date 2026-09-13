@@ -61,6 +61,22 @@ class Plan(BaseModel):
         blank=True,
         help_text="Precio mensual del plan. Null si es gratuito o no aplica.",
     )
+    facial_verificacion_habilitada = models.BooleanField(
+        default=False,
+        help_text="Addon: verificación facial biométrica incluida en este plan.",
+    )
+    modulo_estetico_habilitado = models.BooleanField(
+        default=True,
+        help_text="Addon: módulo estético (procedimientos, zonas corporales) incluido en este plan.",
+    )
+    modulo_obesidad_habilitado = models.BooleanField(
+        default=False,
+        help_text="Addon: módulo de obesidad (tratamientos, sesiones, control de peso) incluido en este plan.",
+    )
+    otp_checkin_habilitado = models.BooleanField(
+        default=True,
+        help_text="Addon: check-in de llegada por código OTP de WhatsApp incluido en este plan.",
+    )
 
     class Meta:
         db_table = "planes"
@@ -114,17 +130,29 @@ class Clinica(BaseModel):
         default=False,
         help_text="True cuando el admin completa el wizard de configuración inicial.",
     )
-    facial_verificacion_habilitada = models.BooleanField(
-        default=False,
-        help_text="Habilita el módulo de verificación facial biométrica. Add-on de pago activado por superadmin.",
+    facial_verificacion_override = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Anula el addon de verificación facial del plan para esta clínica. Null = hereda del plan.",
     )
-    modulo_estetico_habilitado = models.BooleanField(
-        default=True,
-        help_text="Habilita el módulo estético (procedimientos, zonas corporales). Activado por defecto.",
+    modulo_estetico_override = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Anula el addon de módulo estético del plan para esta clínica. Null = hereda del plan.",
     )
-    modulo_obesidad_habilitado = models.BooleanField(
-        default=False,
-        help_text="Habilita el módulo de obesidad (tratamientos, sesiones, control de peso). Activado por superadmin.",
+    modulo_obesidad_override = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Anula el addon de módulo obesidad del plan para esta clínica. Null = hereda del plan.",
+    )
+    otp_checkin_override = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Anula el addon de check-in por OTP del plan para esta clínica. Null = hereda del plan.",
     )
     modo_puesta_en_marcha = models.BooleanField(
         default=False,
@@ -141,6 +169,27 @@ class Clinica(BaseModel):
 
     def __str__(self) -> str:
         return self.nombre
+
+    def _addon_efectivo(self, override, plan_field):
+        if override is not None:
+            return override
+        return bool(self.plan and getattr(self.plan, plan_field))
+
+    @property
+    def facial_verificacion_habilitada(self):
+        return self._addon_efectivo(self.facial_verificacion_override, "facial_verificacion_habilitada")
+
+    @property
+    def modulo_estetico_habilitado(self):
+        return self._addon_efectivo(self.modulo_estetico_override, "modulo_estetico_habilitado")
+
+    @property
+    def modulo_obesidad_habilitado(self):
+        return self._addon_efectivo(self.modulo_obesidad_override, "modulo_obesidad_habilitado")
+
+    @property
+    def otp_checkin_habilitado(self):
+        return self._addon_efectivo(self.otp_checkin_override, "otp_checkin_habilitado")
 
 
 class Sede(BaseModel):

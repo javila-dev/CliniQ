@@ -87,20 +87,26 @@ cumple, y el asistente avanza solo hasta el siguiente pendiente.
 
 ### 1. Llegada
 
-Registra que el paciente está físicamente en la clínica. Hay dos formas de
-dejarlo verificado:
+Registra que el paciente está físicamente en la clínica. Es un **addon de
+pago**: solo aparece en el asistente si tu plan lo incluye. Si no lo tiene, el
+paso completo se salta y la cita pasa directo a los siguientes.
 
-- **Código por WhatsApp**: se envía un código al teléfono del paciente y él lo
-  dicta en el mostrador.
-- **Foto presencial**: se toma una foto en recepción como constancia de la
-  llegada.
+El mecanismo principal es un **código por WhatsApp**: se envía un código de 6
+dígitos al teléfono del paciente y él lo dicta en el mostrador para
+confirmarlo.
+
+Si el envío del código falla, se habilita como respaldo la opción de **foto**:
+se toma una foto en recepción como constancia de la llegada. No es una
+alternativa libre, solo aparece disponible cuando el WhatsApp no pudo enviarse,
+y no existe si tu clínica ya tiene activo el paso de **Identidad**: al haber
+verificación facial más adelante, ese respaldo por foto deja de ser necesario.
 
 Con la llegada registrada, la cita pasa a **en espera**.
 
 ### 2. Identidad
 
-Verificación facial del paciente contra su foto de control. Es un paso opcional
-que solo aparece si tu clínica tiene habilitado el módulo.
+Verificación facial del paciente contra su foto de control. Es otro addon de
+pago: el paso solo aparece si tu clínica lo tiene habilitado.
 
 ### 3. Consentimiento
 
@@ -131,8 +137,8 @@ En **Configuración** cada clínica decide qué pasos exigir:
 
 | Paso | ¿Se puede desactivar? |
 |---|---|
-| Llegada | Sí |
-| Identidad | Sí, y viene desactivado por defecto |
+| Llegada | Sí, y requiere el addon de check-in por OTP |
+| Identidad | Sí, y requiere el addon de verificación facial |
 | Consentimiento | No |
 | Pago | Sí |
 | Firma de asistencia | Sí |

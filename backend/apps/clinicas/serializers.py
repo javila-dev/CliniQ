@@ -30,7 +30,12 @@ from apps.consentimientos.models import PlantillaAsistencia
 class PlanSerializer(serializers.ModelSerializer):
     class Meta:
         model = Plan
-        fields = ("id", "nombre", "descripcion", "max_usuarios", "max_sedes", "precio", "activo", "created_at", "updated_at")
+        fields = (
+            "id", "nombre", "descripcion", "max_usuarios", "max_sedes", "precio", "activo",
+            "facial_verificacion_habilitada", "modulo_estetico_habilitado",
+            "modulo_obesidad_habilitado", "otp_checkin_habilitado",
+            "created_at", "updated_at",
+        )
         read_only_fields = ("id", "created_at", "updated_at")
 
     def validate_max_usuarios(self, value):
@@ -164,6 +169,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
+            "otp_checkin_habilitado",
             "modo_puesta_en_marcha",
         )
         read_only_fields = fields
@@ -186,10 +192,10 @@ class MiClinicaSerializer(serializers.ModelSerializer):
         from apps.configuracion.models import ConfiguracionWizard
         config, _ = ConfiguracionWizard.objects.get_or_create(clinica=obj)
         return {
-            "paso_checkin": config.paso_checkin,
+            "paso_checkin": config.paso_checkin and obj.otp_checkin_habilitado,
             "paso_pago": config.paso_pago,
             "paso_firma_asistencia": config.paso_firma_asistencia,
-            "paso_verificacion_facial": config.paso_verificacion_facial,
+            "paso_verificacion_facial": config.paso_verificacion_facial and obj.facial_verificacion_habilitada,
         }
 
     def get_registro_publico(self, obj):
@@ -830,6 +836,11 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
+            "otp_checkin_habilitado",
+            "facial_verificacion_override",
+            "modulo_estetico_override",
+            "modulo_obesidad_override",
+            "otp_checkin_override",
             "modo_puesta_en_marcha",
             "total_usuarios",
             "usuarios_activos",
@@ -883,8 +894,15 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Clinica
-        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_habilitada", "modulo_estetico_habilitado", "modulo_obesidad_habilitado", "modo_puesta_en_marcha")
-        extra_kwargs = {"nit": {"required": False}, "facial_verificacion_habilitada": {"required": False}, "modulo_estetico_habilitado": {"required": False}, "modulo_obesidad_habilitado": {"required": False}, "modo_puesta_en_marcha": {"required": False}}
+        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_override", "modulo_estetico_override", "modulo_obesidad_override", "otp_checkin_override", "modo_puesta_en_marcha")
+        extra_kwargs = {
+            "nit": {"required": False},
+            "facial_verificacion_override": {"required": False, "allow_null": True},
+            "modulo_estetico_override": {"required": False, "allow_null": True},
+            "modulo_obesidad_override": {"required": False, "allow_null": True},
+            "otp_checkin_override": {"required": False, "allow_null": True},
+            "modo_puesta_en_marcha": {"required": False},
+        }
 
     def validate_nit(self, value):
         queryset = Clinica.objects.filter(nit=value)

@@ -381,6 +381,8 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
         "[checkin_otp] iniciar | cita_id=%s | estado=%s | paciente_id=%s | telefono=%s",
         cita.id, cita.estado, cita.paciente_id, cita.paciente.telefono,
     )
+    if not cita.sede.clinica.otp_checkin_habilitado:
+        raise AgendaError("Esta clínica no tiene el addon de check-in por OTP.", code="OTP_NO_HABILITADO")
     if cita.estado not in estados_validos:
         raise AgendaError("La cita no esta en estado valido para iniciar checkin", code="ESTADO_INVALIDO")
 
@@ -403,6 +405,8 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
 
 
 def verificar_otp_cita(cita: Cita, codigo: str, request_ip: str):
+    if not cita.sede.clinica.otp_checkin_habilitado:
+        raise AgendaError("Esta clínica no tiene el addon de check-in por OTP.", code="OTP_NO_HABILITADO")
     otp = CitaCheckinOTP.objects.filter(cita=cita).first()
     if otp is None:
         raise AgendaError("No hay codigo activo", code="OTP_NOT_FOUND")
