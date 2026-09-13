@@ -796,20 +796,25 @@ class UserViewSet(GenericViewSet):
         )
         clinica_activa = get_clinica_activa(self.request)
         if clinica_activa is not None:
-            acciones_sobre_usuario = {
-                "retrieve", "update", "partial_update", "destroy",
+            # Acciones de panel: el superadmin opera sobre un usuario concreto por
+            # id (p. ej. reenviar la invitacion del admin de un tenant, o resetear
+            # su password) sin relacion con la clinica que este impersonando.
+            acciones_globales_superadmin = {
                 "reenviar_invitacion", "activar", "desactivar", "cambiar_password",
             }
-            if self.request.user.rol == "superadmin" and self.action in acciones_sobre_usuario:
-                # El superadmin es global: al operar sobre un usuario concreto por
-                # id (p. ej. reenviar la invitacion del admin de un tenant desde el
-                # panel), no lo limita la clinica que este impersonando. Sin esto,
-                # el filtro por clinica activa provoca un 404 falso.
+            # Acciones sobre un usuario individual: deben seguir exigiendo que
+            # pertenezca a la clinica activa, salvo que sea el propio superadmin
+            # editando su perfil (no pertenece a ninguna clinica, clinica=None).
+            acciones_sobre_usuario = {"retrieve", "update", "partial_update", "destroy"}
+            if self.request.user.rol == "superadmin" and self.action in acciones_globales_superadmin:
                 pass
-            elif self.action in {"retrieve", "update", "partial_update", "destroy"}:
-                # Un superadmin no pertenece a ninguna clinica (clinica=None), asi
-                # que el filtro por clinica activa lo excluia de su propio registro
-                # al editar su perfil mientras impersona una clinica (404 falso).
+            elif self.action in acciones_sobre_usuario:
+                # Sin el `Q(id=...)`, el filtro por clinica activa excluia al
+                # superadmin de su propio registro al editar su perfil mientras
+                # impersona una clinica (404 falso). Para cualquier OTRO usuario
+                # sigue exigiendo pertenecer a la clinica activa: de lo contrario
+                # un superadmin podria editar o eliminar usuarios de una clinica
+                # distinta a la que esta impersonando.
                 qs = qs.filter(Q(clinica=clinica_activa) | Q(id=self.request.user.id))
             else:
                 qs = qs.filter(clinica=clinica_activa)
