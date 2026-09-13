@@ -1,16 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Plus, MoreHorizontal, Crown, Pencil, Trash2 } from 'lucide-react'
+import { Plus, MoreHorizontal, Crown, Pencil, Trash2, Sparkles } from 'lucide-react'
 import { adminApi } from '@/lib/api/admin'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
@@ -63,6 +64,18 @@ function PlanDialog({
     } : undefined,
   })
 
+  const [facialHabilitado, setFacialHabilitado] = useState(plan?.facial_verificacion_habilitada ?? false)
+  const [moduloEstetico, setModuloEstetico]     = useState(plan?.modulo_estetico_habilitado ?? true)
+  const [moduloObesidad, setModuloObesidad]     = useState(plan?.modulo_obesidad_habilitado ?? false)
+  const [otpCheckin, setOtpCheckin]             = useState(plan?.otp_checkin_habilitado ?? true)
+
+  useEffect(() => {
+    setFacialHabilitado(plan?.facial_verificacion_habilitada ?? false)
+    setModuloEstetico(plan?.modulo_estetico_habilitado ?? true)
+    setModuloObesidad(plan?.modulo_obesidad_habilitado ?? false)
+    setOtpCheckin(plan?.otp_checkin_habilitado ?? true)
+  }, [plan?.id])
+
   const mutation = useMutation({
     mutationFn: (data: PlanFormValues) => {
       const payload = {
@@ -71,6 +84,10 @@ function PlanDialog({
         max_usuarios: parseInt(data.max_usuarios, 10),
         max_sedes:    parseInt(data.max_sedes, 10),
         precio:       parseFloat(data.precio),
+        facial_verificacion_habilitada: facialHabilitado,
+        modulo_estetico_habilitado: moduloEstetico,
+        modulo_obesidad_habilitado: moduloObesidad,
+        otp_checkin_habilitado: otpCheckin,
       }
       return isEdit ? adminApi.planes.update(plan!.id, payload) : adminApi.planes.create(payload)
     },
@@ -142,6 +159,34 @@ function PlanDialog({
               className={cn(errors.precio && 'border-red-400')}
             />
             {errors.precio && <p className="text-xs text-red-500">{errors.precio.message}</p>}
+          </div>
+
+          <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-4 space-y-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700">
+              <Sparkles className="h-3.5 w-3.5" />
+              Add-ons incluidos en este plan
+            </div>
+
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-700">Verificación facial biométrica</p>
+              <Switch checked={facialHabilitado} onCheckedChange={setFacialHabilitado} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-700">Módulo estético</p>
+              <Switch checked={moduloEstetico} onCheckedChange={setModuloEstetico} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-700">Módulo obesidad</p>
+              <Switch checked={moduloObesidad} onCheckedChange={setModuloObesidad} />
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-sm text-gray-700">Check-in por OTP (WhatsApp)</p>
+              <Switch checked={otpCheckin} onCheckedChange={setOtpCheckin} />
+            </div>
+            <p className="text-[11px] text-violet-600/70">
+              Una clínica puede anular individualmente cualquiera de estos addons desde su
+              detalle, sin necesidad de cambiar de plan.
+            </p>
           </div>
 
           {mutation.isError && (

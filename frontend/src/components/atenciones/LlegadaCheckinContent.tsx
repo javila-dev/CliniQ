@@ -74,9 +74,13 @@ type FotoUIState = 'idle' | 'preview' | 'subiendo' | 'ok'
 interface Props {
   cita: Cita
   onCheckinSuccess: () => void
+  /** Si la clínica tiene activo el paso de Identidad (verificación facial), la
+   *  foto de respaldo del check-in de llegada no aplica: esa verificación ya
+   *  cubre confirmar presencia/identidad con foto. */
+  facialActivo?: boolean
 }
 
-export function LlegadaCheckinContent({ cita, onCheckinSuccess }: Props) {
+export function LlegadaCheckinContent({ cita, onCheckinSuccess, facialActivo = false }: Props) {
   const [mode, setMode]           = useState<CheckinMode>('otp')
   const [otpState, setOtpState]   = useState<OtpUIState>('idle')
   const [fotoState, setFotoState] = useState<FotoUIState>('idle')
@@ -116,8 +120,12 @@ export function LlegadaCheckinContent({ cita, onCheckinSuccess }: Props) {
     },
     onError: () => {
       setOtpState('idle')
-      setFotoHabilitada(true)
-      setErrorMsg('No se pudo enviar el código. Usa la foto de respaldo.')
+      if (facialActivo) {
+        setErrorMsg('No se pudo enviar el código. Verifica el número del paciente e inténtalo de nuevo.')
+      } else {
+        setFotoHabilitada(true)
+        setErrorMsg('No se pudo enviar el código. Usa la foto de respaldo.')
+      }
     },
   })
 
@@ -154,31 +162,34 @@ export function LlegadaCheckinContent({ cita, onCheckinSuccess }: Props) {
 
   return (
     <div className="space-y-5">
-      {/* Selector de modo */}
-      <div className="flex rounded-lg border p-1 gap-1">
-        <button
-          className={cn('flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors',
-            mode === 'otp' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
-          onClick={() => { setMode('otp'); setFotoState('idle'); setFotoPreview(null); setFotoFile(null) }}
-        >
-          <Smartphone className="h-4 w-4" />
-          Código WhatsApp
-        </button>
-        <button
-          disabled={!fotoHabilitada}
-          className={cn('flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors',
-            !fotoHabilitada
-              ? 'text-muted-foreground/40 cursor-not-allowed'
-              : mode === 'foto'
-                ? 'bg-primary text-primary-foreground'
-                : 'text-muted-foreground hover:text-foreground'
-          )}
-          onClick={() => { if (fotoHabilitada) { setMode('foto'); setErrorMsg(null) } }}
-        >
-          <Camera className="h-4 w-4" />
-          Foto de respaldo
-        </button>
-      </div>
+      {/* Selector de modo — la foto de respaldo no aplica si la clínica ya
+          verifica identidad por reconocimiento facial en el paso siguiente. */}
+      {!facialActivo && (
+        <div className="flex rounded-lg border p-1 gap-1">
+          <button
+            className={cn('flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors',
+              mode === 'otp' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground')}
+            onClick={() => { setMode('otp'); setFotoState('idle'); setFotoPreview(null); setFotoFile(null) }}
+          >
+            <Smartphone className="h-4 w-4" />
+            Código WhatsApp
+          </button>
+          <button
+            disabled={!fotoHabilitada}
+            className={cn('flex-1 flex items-center justify-center gap-2 py-2 rounded-md text-sm font-medium transition-colors',
+              !fotoHabilitada
+                ? 'text-muted-foreground/40 cursor-not-allowed'
+                : mode === 'foto'
+                  ? 'bg-primary text-primary-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+            )}
+            onClick={() => { if (fotoHabilitada) { setMode('foto'); setErrorMsg(null) } }}
+          >
+            <Camera className="h-4 w-4" />
+            Foto de respaldo
+          </button>
+        </div>
+      )}
 
       {/* ── Modo OTP ── */}
       {mode === 'otp' && (

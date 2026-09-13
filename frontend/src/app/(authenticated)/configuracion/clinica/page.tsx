@@ -37,12 +37,15 @@ const WIZARD_STEPS: {
   icon: React.ElementType
   toggleBloqueado?: boolean
   esAddon?: boolean
+  addonKey?: 'facial_verificacion_habilitada' | 'otp_checkin_habilitado'
 }[] = [
   {
     key: 'paso_checkin',
     label: 'Verificación de llegada',
     description: 'Confirma la presencia del paciente vía código OTP por WhatsApp o foto.',
     icon: ScanFace,
+    esAddon: true,
+    addonKey: 'otp_checkin_habilitado',
   },
   {
     key: 'paso_verificacion_facial',
@@ -50,6 +53,7 @@ const WIZARD_STEPS: {
     description: 'Compara la foto en vivo del paciente con su foto de control registrada.',
     icon: ShieldCheck,
     esAddon: true,
+    addonKey: 'facial_verificacion_habilitada',
   },
   {
     key: 'paso_pago',
@@ -259,7 +263,7 @@ export default function ClinicaConfigPage() {
   if (!clinicaId) {
     return (
       <div className="max-w-2xl">
-        <PageHeader title="Configuración" />
+        <PageHeader helpSlug="sedes-horarios-y-turnos" title="Configuración" />
         <div className="rounded-xl border bg-white p-8 text-center text-sm text-gray-400">No tienes una clínica asignada.</div>
       </div>
     )
@@ -267,7 +271,7 @@ export default function ClinicaConfigPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Configuración de la clínica" backHref="/configuracion" />
+      <PageHeader helpSlug="sedes-horarios-y-turnos" title="Configuración de la clínica" backHref="/configuracion" />
 
       <div className="flex gap-6 items-start">
 
@@ -547,7 +551,7 @@ export default function ClinicaConfigPage() {
                     const Icon = step.icon
                     const enabled = effectiveWizard[step.key]
                     const bloqueado = step.toggleBloqueado
-                    const addonNoHabilitado = step.esAddon && !miClinica?.facial_verificacion_habilitada
+                    const addonNoHabilitado = step.esAddon && !(step.addonKey && miClinica?.[step.addonKey])
                     return (
                       <div
                         key={step.key}
@@ -579,7 +583,7 @@ export default function ClinicaConfigPage() {
                             {step.esAddon && (
                               <span className={cn(
                                 'inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                                miClinica?.facial_verificacion_habilitada ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-400',
+                                step.addonKey && miClinica?.[step.addonKey] ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-400',
                               )}>
                                 <Sparkles className="h-2.5 w-2.5" />Add-on
                               </span>

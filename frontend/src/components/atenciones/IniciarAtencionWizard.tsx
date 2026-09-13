@@ -369,6 +369,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
               <LlegadaCheckinContent
                 cita={cita}
                 onCheckinSuccess={() => confirmarLlegada()}
+                facialActivo={activeSteps.includes('verificacion')}
               />
             </div>
           ) : displayStep === 'verificacion' ? (

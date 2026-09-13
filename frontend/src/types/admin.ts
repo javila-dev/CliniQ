@@ -6,6 +6,10 @@ export interface Plan {
   max_sedes: number
   precio: string  // decimal como string (DRF)
   activo: boolean
+  facial_verificacion_habilitada: boolean
+  modulo_estetico_habilitado: boolean
+  modulo_obesidad_habilitado: boolean
+  otp_checkin_habilitado: boolean
   created_at: string
   updated_at: string
 }
@@ -18,9 +22,16 @@ export interface AdminTenant {
   telefono: string | null
   activo: boolean
   plan: Plan | null
+  // Valores efectivos (override si existe, si no el default del plan)
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
   modulo_obesidad_habilitado: boolean
+  otp_checkin_habilitado: boolean
+  // Anulación explícita por clínica. null = sigue al plan.
+  facial_verificacion_override: boolean | null
+  modulo_estetico_override: boolean | null
+  modulo_obesidad_override: boolean | null
+  otp_checkin_override: boolean | null
   modo_puesta_en_marcha: boolean
   total_usuarios: number
   usuarios_activos: number
@@ -83,9 +94,10 @@ export interface CreateTenantRequest {
 export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email'>> & {
   activo?: boolean
   plan?: string | null
-  facial_verificacion_habilitada?: boolean
-  modulo_estetico_habilitado?: boolean
-  modulo_obesidad_habilitado?: boolean
+  facial_verificacion_override?: boolean | null
+  modulo_estetico_override?: boolean | null
+  modulo_obesidad_override?: boolean | null
+  otp_checkin_override?: boolean | null
   modo_puesta_en_marcha?: boolean
 }
 
@@ -95,6 +107,10 @@ export interface CreatePlanRequest {
   max_usuarios: number
   max_sedes: number
   precio: number
+  facial_verificacion_habilitada?: boolean
+  modulo_estetico_habilitado?: boolean
+  modulo_obesidad_habilitado?: boolean
+  otp_checkin_habilitado?: boolean
 }
 
 export type UpdatePlanRequest = Partial<CreatePlanRequest> & { activo?: boolean }

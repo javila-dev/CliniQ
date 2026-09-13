@@ -32,6 +32,7 @@ export interface Clinica {
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean
+  otp_checkin_habilitado?: boolean
   modo_puesta_en_marcha?: boolean
   created_at: string
   updated_at: string

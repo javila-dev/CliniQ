@@ -5,11 +5,10 @@ import { useForm, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, LayoutTemplate, Maximize2, Minimize2, CheckCircle2, ChevronDown, X } from 'lucide-react'
+import { Loader2, ChevronDown, X } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { configuracionApi } from '@/lib/api/configuracion'
-import { DiagramasProcedimiento } from './DiagramasProcedimiento'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -18,7 +17,6 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn } from '@/lib/utils'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
 
@@ -57,10 +55,6 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
   const target = procedimiento ?? servicio ?? null
   const qc = useQueryClient()
   const isEdit = !!target
-  const [createdId, setCreatedId] = useState<string | null>(null)
-  const procedimientoId = target?.id ?? createdId
-  const [tab, setTab] = useState<'datos' | 'zonas'>('datos')
-  const [expanded, setExpanded] = useState(false)
 
   // Un solo precio: precio_base (con fallbacks legacy).
   function getPrecio(p: Procedimiento | null): number | null {
@@ -158,264 +152,210 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] })
       qc.invalidateQueries({ queryKey: ['procedimiento', result.id] })
       qc.invalidateQueries({ queryKey: ['servicios', 'all'] }) // backward compat
-      if (!isEdit) {
-        setCreatedId(result.id)
-        setTab('zonas')
-        setExpanded(true)
-        onCreated?.(result)
-      } else {
-        onCreated?.(result)
-      }
+      onCreated?.(result)
+      handleClose()
     },
   })
 
   function handleClose() {
     onOpenChange(false)
-    setTimeout(() => { setCreatedId(null); setTab('datos'); setExpanded(false); reset(DEFAULT_VALUES); mut.reset() }, 200)
+    setTimeout(() => { reset(DEFAULT_VALUES); mut.reset() }, 200)
   }
 
   const serverError = mut.error as any
-  const justCreated = !isEdit && !!createdId
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
-      <DialogContent className={cn(
-        'flex flex-col p-0 gap-0 overflow-hidden transition-all duration-200 max-h-[90vh]',
-        expanded ? 'max-w-4xl w-full' : 'sm:max-w-xl w-full',
-      )}>
-        <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b shrink-0 space-y-0">
+      <DialogContent className="flex flex-col p-0 gap-0 overflow-hidden sm:max-w-xl w-full max-h-[90vh]">
+        <DialogHeader className="px-6 py-4 border-b shrink-0 space-y-0">
           <DialogTitle className="text-base">
-            {justCreated ? 'Procedimiento creado · Diagramas' : isEdit ? 'Editar procedimiento' : 'Nuevo procedimiento'}
+            {isEdit ? 'Editar procedimiento' : 'Nuevo procedimiento'}
           </DialogTitle>
-          <button type="button" onClick={() => setExpanded((v) => !v)}
-            className="ml-auto mr-8 text-muted-foreground hover:text-foreground transition-colors"
-            title={expanded ? 'Reducir' : 'Expandir'}>
-            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-          </button>
         </DialogHeader>
 
-        <Tabs value={tab} onValueChange={(v) => setTab(v as 'datos' | 'zonas')} className="flex flex-col flex-1 overflow-hidden">
-          <TabsList className="shrink-0 rounded-none border-b bg-gray-50/70 h-10 px-6 justify-start gap-1">
-            <TabsTrigger value="datos" className="rounded-md text-xs px-3 h-7">Datos</TabsTrigger>
-            <TabsTrigger value="zonas" disabled={!procedimientoId}
-              className={cn('rounded-md text-xs px-3 h-7', !procedimientoId && 'opacity-40 cursor-not-allowed')}>
-              <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />Zonas
-              {!procedimientoId && <span className="ml-1.5 text-[10px] text-muted-foreground">(guarda primero)</span>}
-            </TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="datos" className="flex-1 overflow-y-auto mt-0 focus-visible:outline-none">
-            {justCreated ? (
-              <div className="px-6 py-8 flex flex-col items-center text-center gap-3">
-                <CheckCircle2 className="h-10 w-10 text-green-500" />
-                <p className="font-semibold">¡Procedimiento creado correctamente!</p>
-                <p className="text-sm text-muted-foreground">
-                  Asigna diagramas corporales desde el tab <strong>Zonas</strong>, o cierra si no los necesitas ahora.
-                </p>
-                <Button variant="outline" size="sm" className="mt-1" onClick={() => setTab('zonas')}>
-                  <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />Ir a zonas
-                </Button>
+        <div className="flex-1 overflow-y-auto">
+          <form id="procedimiento-form" onSubmit={handleSubmit((d) => mut.mutate(d))} className="px-6 py-5 space-y-4">
+            <div className="space-y-1.5">
+              <Label>Nombre *</Label>
+              <Input {...register('nombre')} placeholder="Ej: Limpieza Facial" autoFocus />
+              {errors.nombre && <p className="text-xs text-destructive">{errors.nombre.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Descripción</Label>
+              <Textarea {...register('descripcion')} placeholder="Descripción opcional..." rows={2} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Duración (min) *</Label>
+                <Controller name="duracion_min" control={control} render={({ field }) => (
+                  <Input type="number" min={5} step={5} value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
+                )} />
+                {errors.duracion_min && <p className="text-xs text-destructive">{errors.duracion_min.message}</p>}
               </div>
-            ) : (
-              <form id="procedimiento-form" onSubmit={handleSubmit((d) => mut.mutate(d))} className="px-6 py-5 space-y-4">
-                <div className="space-y-1.5">
-                  <Label>Nombre *</Label>
-                  <Input {...register('nombre')} placeholder="Ej: Limpieza Facial" autoFocus />
-                  {errors.nombre && <p className="text-xs text-destructive">{errors.nombre.message}</p>}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Descripción</Label>
-                  <Textarea {...register('descripcion')} placeholder="Descripción opcional..." rows={2} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label>Duración (min) *</Label>
-                    <Controller name="duracion_min" control={control} render={({ field }) => (
-                      <Input type="number" min={5} step={5} value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
-                    )} />
-                    {errors.duracion_min && <p className="text-xs text-destructive">{errors.duracion_min.message}</p>}
+              <div className="space-y-1.5">
+                <Label>Precio</Label>
+                <Controller name="precio_base" control={control} render={({ field }) => (
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
+                    <Input inputMode="numeric" className="pl-7" placeholder="0"
+                      value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
+                      onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); field.onChange(raw ? Number(raw) : null) }}
+                    />
                   </div>
-                  <div className="space-y-1.5">
-                    <Label>Precio</Label>
-                    <Controller name="precio_base" control={control} render={({ field }) => (
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
-                        <Input inputMode="numeric" className="pl-7" placeholder="0"
-                          value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
-                          onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); field.onChange(raw ? Number(raw) : null) }}
-                        />
+                )} />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <Label>Flexibilidad de precio</Label>
+                <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
+                  <Select
+                    value={String(field.value ?? 0)}
+                    onValueChange={(v) => field.onChange(Number(v))}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="0">Firme — no se puede cambiar</SelectItem>
+                      <SelectItem value="5">Hasta 5% de descuento</SelectItem>
+                      <SelectItem value="10">Hasta 10% de descuento</SelectItem>
+                      <SelectItem value="15">Hasta 15% de descuento</SelectItem>
+                      <SelectItem value="20">Hasta 20% de descuento</SelectItem>
+                      <SelectItem value="25">Hasta 25% de descuento</SelectItem>
+                      <SelectItem value="30">Hasta 30% de descuento</SelectItem>
+                      <SelectItem value="50">Hasta 50% de descuento</SelectItem>
+                      <SelectItem value="100">Libre — precio sugerido, editable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )} />
+                <p className="text-xs text-muted-foreground">
+                  Controla cuánto se puede bajar el precio al armar una cotización.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Profesionales que lo realizan</Label>
+              <Controller name="profesionales" control={control} render={({ field }) => {
+                const selected = field.value ?? []
+                const toggle = (id: string) =>
+                  field.onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+                const opciones = profesionales ?? []
+                const seleccionados = opciones.filter((p) => selected.includes(p.colaborador_id))
+                return (
+                  <div className="space-y-2">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button type="button" variant="outline" className="w-full justify-between font-normal">
+                          <span className={cn(!seleccionados.length && 'text-muted-foreground')}>
+                            {seleccionados.length
+                              ? `${seleccionados.length} profesional${seleccionados.length > 1 ? 'es' : ''} seleccionado${seleccionados.length > 1 ? 's' : ''}`
+                              : 'Seleccionar profesionales…'}
+                          </span>
+                          <ChevronDown className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="start"
+                        className="w-[var(--radix-dropdown-menu-trigger-width)] max-h-64 overflow-y-auto">
+                        {opciones.length === 0 ? (
+                          <div className="px-2 py-3 text-xs text-muted-foreground">No hay profesionales registrados.</div>
+                        ) : opciones.map((p) => (
+                          <DropdownMenuCheckboxItem
+                            key={p.colaborador_id}
+                            checked={selected.includes(p.colaborador_id)}
+                            onCheckedChange={() => toggle(p.colaborador_id)}
+                            onSelect={(e) => e.preventDefault()}
+                          >
+                            {p.nombre_completo}
+                          </DropdownMenuCheckboxItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                    {seleccionados.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5">
+                        {seleccionados.map((p) => (
+                          <Badge key={p.colaborador_id} variant="secondary" className="gap-1 pr-1">
+                            {p.nombre_completo}
+                            <button type="button" onClick={() => toggle(p.colaborador_id)}
+                              className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${p.nombre_completo}`}>
+                              <X className="h-3 w-3" />
+                            </button>
+                          </Badge>
+                        ))}
                       </div>
-                    )} />
+                    )}
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label>Flexibilidad de precio</Label>
-                    <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
-                      <Select
-                        value={String(field.value ?? 0)}
-                        onValueChange={(v) => field.onChange(Number(v))}
-                      >
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="0">Firme — no se puede cambiar</SelectItem>
-                          <SelectItem value="5">Hasta 5% de descuento</SelectItem>
-                          <SelectItem value="10">Hasta 10% de descuento</SelectItem>
-                          <SelectItem value="15">Hasta 15% de descuento</SelectItem>
-                          <SelectItem value="20">Hasta 20% de descuento</SelectItem>
-                          <SelectItem value="25">Hasta 25% de descuento</SelectItem>
-                          <SelectItem value="30">Hasta 30% de descuento</SelectItem>
-                          <SelectItem value="50">Hasta 50% de descuento</SelectItem>
-                          <SelectItem value="100">Libre — precio sugerido, editable</SelectItem>
-                        </SelectContent>
-                      </Select>
+                )
+              }} />
+              <p className="text-xs text-muted-foreground">También se puede editar desde cada perfil de personal.</p>
+            </div>
+            <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+              <div className="space-y-0.5">
+                <p className="text-sm font-medium">Requiere consentimiento</p>
+                <p className="text-xs text-muted-foreground">El paciente debe firmar antes del procedimiento</p>
+              </div>
+              <Controller name="requiere_consentimiento" control={control} render={({ field }) => (
+                <input type="checkbox" checked={field.value} onChange={(e) => {
+                  field.onChange(e.target.checked)
+                  if (!e.target.checked) { setValue('documenso_template_id', null); setValue('documenso_template_nombre', null) }
+                }} className="h-4 w-4 accent-primary" />
+              )} />
+            </div>
+            {requiereConsentimiento && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Plantilla de consentimiento</Label>
+                  {templateOptions.length === 0 ? (
+                    <p className="text-xs text-muted-foreground rounded-lg border px-3 py-2.5">No hay plantillas de consentimiento configuradas. <a href="/configuracion/consentimientos" className="underline">Crear una</a></p>
+                  ) : (
+                    <Controller name="documenso_template_id" control={control} render={({ field }) => (
+                      <select value={field.value ?? ''} onChange={(e) => {
+                        const v = e.target.value; field.onChange(v || null)
+                        setValue('documenso_template_nombre', templateOptions.find((t) => t.id === v)?.label ?? null)
+                      }} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
+                        <option value="">Seleccionar plantilla…</option>
+                        {templateOptions.map((t) => <option key={t.id} value={t.id}>{t.label || t.nombre}</option>)}
+                      </select>
                     )} />
-                    <p className="text-xs text-muted-foreground">
-                      Controla cuánto se puede bajar el precio al armar una cotización.
-                    </p>
-                  </div>
+                  )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label>Profesionales que lo realizan</Label>
-                  <Controller name="profesionales" control={control} render={({ field }) => {
-                    const selected = field.value ?? []
-                    const toggle = (id: string) =>
-                      field.onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
-                    const opciones = profesionales ?? []
-                    const seleccionados = opciones.filter((p) => selected.includes(p.colaborador_id))
-                    return (
-                      <div className="space-y-2">
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button type="button" variant="outline" className="w-full justify-between font-normal">
-                              <span className={cn(!seleccionados.length && 'text-muted-foreground')}>
-                                {seleccionados.length
-                                  ? `${seleccionados.length} profesional${seleccionados.length > 1 ? 'es' : ''} seleccionado${seleccionados.length > 1 ? 's' : ''}`
-                                  : 'Seleccionar profesionales…'}
-                              </span>
-                              <ChevronDown className="h-4 w-4 opacity-50" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="start"
-                            className="w-[var(--radix-dropdown-menu-trigger-width)] max-h-64 overflow-y-auto">
-                            {opciones.length === 0 ? (
-                              <div className="px-2 py-3 text-xs text-muted-foreground">No hay profesionales registrados.</div>
-                            ) : opciones.map((p) => (
-                              <DropdownMenuCheckboxItem
-                                key={p.colaborador_id}
-                                checked={selected.includes(p.colaborador_id)}
-                                onCheckedChange={() => toggle(p.colaborador_id)}
-                                onSelect={(e) => e.preventDefault()}
-                              >
-                                {p.nombre_completo}
-                              </DropdownMenuCheckboxItem>
-                            ))}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
-                        {seleccionados.length > 0 && (
-                          <div className="flex flex-wrap gap-1.5">
-                            {seleccionados.map((p) => (
-                              <Badge key={p.colaborador_id} variant="secondary" className="gap-1 pr-1">
-                                {p.nombre_completo}
-                                <button type="button" onClick={() => toggle(p.colaborador_id)}
-                                  className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${p.nombre_completo}`}>
-                                  <X className="h-3 w-3" />
-                                </button>
-                              </Badge>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  }} />
-                  <p className="text-xs text-muted-foreground">También se puede editar desde cada perfil de personal.</p>
-                </div>
-                <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-                  <div className="space-y-0.5">
-                    <p className="text-sm font-medium">Requiere consentimiento</p>
-                    <p className="text-xs text-muted-foreground">El paciente debe firmar antes del procedimiento</p>
-                  </div>
-                  <Controller name="requiere_consentimiento" control={control} render={({ field }) => (
-                    <input type="checkbox" checked={field.value} onChange={(e) => {
-                      field.onChange(e.target.checked)
-                      if (!e.target.checked) { setValue('documenso_template_id', null); setValue('documenso_template_nombre', null) }
-                    }} className="h-4 w-4 accent-primary" />
+                  <Label>Vigencia (meses) *</Label>
+                  <Controller name="vigencia_meses" control={control} render={({ field }) => (
+                    <div className="flex items-center gap-2">
+                      <Input type="number" min={1} max={120} className="w-24" value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
+                      <span className="text-sm text-muted-foreground">meses</span>
+                    </div>
                   )} />
                 </div>
-                {requiereConsentimiento && (
-                  <>
-                    <div className="space-y-1.5">
-                      <Label>Plantilla de consentimiento</Label>
-                      {templateOptions.length === 0 ? (
-                        <p className="text-xs text-muted-foreground rounded-lg border px-3 py-2.5">No hay plantillas de consentimiento configuradas. <a href="/configuracion/consentimientos" className="underline">Crear una</a></p>
-                      ) : (
-                        <Controller name="documenso_template_id" control={control} render={({ field }) => (
-                          <select value={field.value ?? ''} onChange={(e) => {
-                            const v = e.target.value; field.onChange(v || null)
-                            setValue('documenso_template_nombre', templateOptions.find((t) => t.id === v)?.label ?? null)
-                          }} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2">
-                            <option value="">Seleccionar plantilla…</option>
-                            {templateOptions.map((t) => <option key={t.id} value={t.id}>{t.label || t.nombre}</option>)}
-                          </select>
-                        )} />
-                      )}
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Vigencia (meses) *</Label>
-                      <Controller name="vigencia_meses" control={control} render={({ field }) => (
-                        <div className="flex items-center gap-2">
-                          <Input type="number" min={1} max={120} className="w-24" value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
-                          <span className="text-sm text-muted-foreground">meses</span>
-                        </div>
-                      )} />
-                    </div>
-                  </>
-                )}
-                {isEdit && (
-                  <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-                    <div className="space-y-0.5">
-                      <p className="text-sm font-medium">Activo</p>
-                      <p className="text-xs text-muted-foreground">Los procedimientos inactivos no aparecen en nuevas citas</p>
-                    </div>
-                    <Controller name="activo" control={control} render={({ field }) => (
-                      <input type="checkbox" checked={!!field.value} onChange={(e) => field.onChange(e.target.checked)} className="h-4 w-4 accent-primary" />
-                    )} />
-                  </div>
-                )}
-                {serverError && (
-                  <div className="rounded-lg bg-destructive/8 border border-destructive/15 px-3.5 py-2.5">
-                    <p className="text-sm text-destructive">{serverError?.response?.data?.detail || 'Ocurrió un error.'}</p>
-                  </div>
-                )}
-              </form>
+              </>
             )}
-          </TabsContent>
-
-          <TabsContent value="zonas" className="flex-1 overflow-y-auto mt-0 focus-visible:outline-none">
-            {procedimientoId
-              ? <div className="p-5"><DiagramasProcedimiento servicioId={procedimientoId} /></div>
-              : <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-                  <LayoutTemplate className="h-8 w-8 text-muted-foreground/30 mb-3" />
-                  <p className="text-sm text-muted-foreground">Guarda el procedimiento primero para asignar diagramas.</p>
+            {isEdit && (
+              <div className="flex items-center justify-between rounded-lg border px-4 py-3">
+                <div className="space-y-0.5">
+                  <p className="text-sm font-medium">Activo</p>
+                  <p className="text-xs text-muted-foreground">Los procedimientos inactivos no aparecen en nuevas citas</p>
                 </div>
-            }
-          </TabsContent>
-        </Tabs>
+                <Controller name="activo" control={control} render={({ field }) => (
+                  <input type="checkbox" checked={!!field.value} onChange={(e) => field.onChange(e.target.checked)} className="h-4 w-4 accent-primary" />
+                )} />
+              </div>
+            )}
+            {serverError && (
+              <div className="rounded-lg bg-destructive/8 border border-destructive/15 px-3.5 py-2.5">
+                <p className="text-sm text-destructive">{serverError?.response?.data?.detail || 'Ocurrió un error.'}</p>
+              </div>
+            )}
+          </form>
+        </div>
 
-        <div className="shrink-0 border-t px-6 py-4 flex justify-between items-center bg-white">
-          {tab === 'zonas' && procedimientoId
-            ? <p className="text-xs text-muted-foreground">Los cambios se guardan automáticamente.</p>
-            : <span />}
+        <div className="shrink-0 border-t px-6 py-4 flex justify-end items-center bg-white">
           <div className="flex gap-3">
             <Button variant="outline" onClick={handleClose} disabled={mut.isPending}>
-              {justCreated ? 'Cerrar' : 'Cancelar'}
+              Cancelar
             </Button>
-            {!justCreated && (
-              <Button form="procedimiento-form" type="submit" disabled={mut.isPending}>
-                {mut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-                {isEdit ? 'Guardar cambios' : 'Crear procedimiento'}
-              </Button>
-            )}
+            <Button form="procedimiento-form" type="submit" disabled={mut.isPending}>
+              {mut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              {isEdit ? 'Guardar cambios' : 'Crear procedimiento'}
+            </Button>
           </div>
         </div>
       </DialogContent>
