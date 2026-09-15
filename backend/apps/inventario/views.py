@@ -1,9 +1,13 @@
+from django.db.models import Prefetch
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
-from apps.inventario.models import CategoriaInsumo, Insumo, MovimientoInventario
+from apps.clinicas.models import Sede
+from apps.inventario.models import CategoriaInsumo, Insumo, MovimientoInventario, StockInsumoSede
 from apps.inventario.serializers import (
     AjusteStockSerializer,
     CategoriaInsumoSerializer,
@@ -11,7 +15,18 @@ from apps.inventario.serializers import (
     MovimientoInventarioSerializer,
 )
 from apps.inventario.services import registrar_ajuste
-from apps.users.permissions import HasClinicamente, RequirePermission
+from apps.users.authorization import user_has_permission
+from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
+
+
+class PuedeListarInsumos(BasePermission):
+    """Permite listar/ver insumos a quien puede gestionar inventario o solo registrar consumo en atencion."""
+
+    def has_permission(self, request, view):
+        return (
+            user_has_permission(request.user, "inventario.ver", request=request)
+            or user_has_permission(request.user, "inventario.consumo.registrar", request=request)
+        )
 
 
 class CategoriaInsumoViewSet(HasClinicamente, ModelViewSet):
@@ -25,12 +40,18 @@ class CategoriaInsumoViewSet(HasClinicamente, ModelViewSet):
             return [RequirePermission("inventario.categorias.gestionar")()]
         return [RequirePermission("inventario.ver")()]
 
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa."})
+        serializer.save(clinica=clinica)
+
 
 class InsumoViewSet(HasClinicamente, ModelViewSet):
     serializer_class = InsumoSerializer
     queryset = Insumo.objects.select_related("clinica", "categoria").all()
     search_fields = ("nombre", "descripcion")
-    ordering_fields = ("nombre", "stock_actual", "created_at")
+    ordering_fields = ("nombre", "created_at")
     filterset_fields = ("es_consumo_interno", "es_venta_retail", "categoria", "activo")
 
     def get_permissions(self):
@@ -38,14 +59,57 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
             return [RequirePermission("inventario.insumos.gestionar")()]
         if self.action == "ajustar_stock":
             return [RequirePermission("inventario.ajustar_stock")()]
+        if self.action in {"list", "retrieve"}:
+            return [PuedeListarInsumos()]
         return [RequirePermission("inventario.ver")()]
+
+    def _sede_en_contexto(self):
+        """Sede cuyo stock se muestra: la pedida por query param, o la primera
+        sede activa de la clinica si no se especifico ninguna."""
+        sede_id = self.request.query_params.get("sede")
+        if sede_id:
+            return Sede.objects.filter(pk=sede_id).select_related("clinica").first()
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            return None
+        return Sede.objects.filter(clinica=clinica, activo=True).order_by("created_at").first()
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        sede = self._sede_en_contexto()
+        if sede is not None:
+            queryset = queryset.prefetch_related(
+                Prefetch(
+                    "stocks_por_sede",
+                    queryset=StockInsumoSede.objects.filter(sede=sede),
+                    to_attr="_stock_prefetched",
+                )
+            )
+        return queryset
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        context["sede"] = self._sede_en_contexto()
+        return context
+
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa."})
+        serializer.save(clinica=clinica)
 
     @action(detail=False, methods=["get"], url_path="alertas_stock", pagination_class=None)
     def alertas_stock(self, request):
+        sede = self._sede_en_contexto()
+        if sede is None:
+            return Response(
+                {"error": "No hay una sede para consultar alertas de stock.", "code": "SEDE_REQUERIDA"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         qs = self.get_queryset().filter(activo=True)
-        alertas = [i for i in qs if i.stock_bajo]
-        serializer = self.get_serializer(alertas, many=True)
-        return Response(serializer.data)
+        serializer = self.get_serializer(qs, many=True)
+        alertas = [item for item in serializer.data if item["stock_bajo"]]
+        return Response(alertas)
 
     @action(detail=True, methods=["post"], url_path="ajustar_stock")
     def ajustar_stock(self, request, pk=None):
@@ -55,6 +119,7 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
 
         movimiento = registrar_ajuste(
             insumo=insumo,
+            sede=serializer.validated_data["sede"],
             cantidad_nueva=serializer.validated_data["cantidad_nueva"],
             user=request.user,
             motivo=serializer.validated_data["motivo"],
@@ -68,12 +133,13 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
 class KardexViewSet(ReadOnlyModelViewSet):
     serializer_class = MovimientoInventarioSerializer
     permission_classes = (RequirePermission("inventario.kardex.ver"),)
-    filterset_fields = ("tipo", "origen", "insumo")
+    filterset_fields = ("tipo", "origen", "insumo", "sede")
+    search_fields = ("motivo", "realizado_por__first_name", "realizado_por__last_name")
     ordering_fields = ("fecha",)
 
     def get_queryset(self):
         qs = MovimientoInventario.objects.select_related(
-            "insumo", "realizado_por"
+            "insumo", "sede", "realizado_por"
         ).order_by("-fecha")
         user = self.request.user
         if user.rol != "superadmin":

@@ -9,9 +9,60 @@ from django.utils import timezone
 from apps.agenda.confirmacion import generar_token, get_url_confirmacion
 from apps.agenda.models import Cita
 from apps.core.storage import get_public_url, upload_public_file
+from apps.notificaciones.models import EnvioWhatsApp
 
 
 logger = logging.getLogger(__name__)
+
+
+class WhatsAppNoDisponibleError(Exception):
+    """La clinica no puede enviar WhatsApp: addon desactivado o cupo mensual agotado."""
+
+    def __init__(self, message, *, code):
+        super().__init__(message)
+        self.code = code
+
+
+def verificar_disponibilidad_whatsapp(clinica) -> None:
+    """Valida el addon de WhatsApp antes de disparar un envio. No hace la llamada:
+    solo gatea. Levanta WhatsAppNoDisponibleError si la clinica no puede enviar."""
+    if not clinica.whatsapp_habilitado:
+        raise WhatsAppNoDisponibleError(
+            "WhatsApp no está habilitado para esta clínica.", code="WHATSAPP_NO_HABILITADO",
+        )
+    cupo = clinica.whatsapp_envios_incluidos
+    if cupo:
+        hoy = timezone.now()
+        usados = EnvioWhatsApp.objects.filter(
+            clinica=clinica, created_at__year=hoy.year, created_at__month=hoy.month,
+        ).count()
+        if usados >= cupo:
+            raise WhatsAppNoDisponibleError(
+                "Se agotó el cupo de envíos de WhatsApp de este mes.", code="WHATSAPP_CUPO_AGOTADO",
+            )
+
+
+def registrar_envio_whatsapp(clinica, tipo: str, paciente=None) -> None:
+    """Registra un envio de WhatsApp exitoso. Llamar solo despues de que el envio
+    real haya tenido exito (para no descontar cupo por intentos fallidos)."""
+    EnvioWhatsApp.objects.create(clinica=clinica, tipo=tipo, paciente=paciente)
+
+
+def uso_whatsapp_mes_actual(clinica) -> dict:
+    """Resumen de consumo del addon de WhatsApp para el mes calendario actual."""
+    hoy = timezone.now()
+    envios_incluidos = clinica.whatsapp_envios_incluidos
+    envios_realizados = EnvioWhatsApp.objects.filter(
+        clinica=clinica, created_at__year=hoy.year, created_at__month=hoy.month,
+    ).count()
+    sin_limite = envios_incluidos == 0
+    return {
+        "habilitado": clinica.whatsapp_habilitado,
+        "envios_incluidos": envios_incluidos,
+        "envios_realizados": envios_realizados,
+        "envios_restantes": None if sin_limite else max(0, envios_incluidos - envios_realizados),
+        "sin_limite": sin_limite,
+    }
 
 
 def get_whatsapp_outbound_webhook_url() -> str:

@@ -83,20 +83,26 @@ Los pagos se registran **sobre una cuota concreta** de la cartera del paciente,
 no sobre la deuda en general. Elegir bien la cuota es lo que mantiene el plan de
 pago ordenado.
 
+Al abrir un paciente en **Cartera** ves su plan completo: cuánto cotizó, cuánto
+ha abonado, qué cuotas están vencidas y cuánto falta.
+
+![Cartera de un paciente con sus cuotas y el aviso de mora](/img/ayuda/registrar-un-pago/01-cuotas-de-la-cartera.png)
+
 ## Paso a paso
 
 1. Entra a **Cartera** y abre el paciente.
 2. Ubica la **cuota** que está pagando. Normalmente es la más antigua con saldo.
-3. Presiona **Registrar pago**.
-4. Completa:
-   - **Valor recibido**.
+3. Presiona **Registrar pago** en esa cuota.
+4. Completa el formulario:
+   - **Valor pagado**. Viene sugerido con el valor de la cuota y puedes bajarlo
+     si el abono es parcial.
+   - **Fecha de pago**.
    - **Medio de pago**: efectivo, transferencia, tarjeta débito, tarjeta crédito
      u otro.
-   - **Fecha del pago**.
-   - **Referencia**, cuando aplique: número de transacción, últimos dígitos del
-     comprobante.
-   - **Observaciones**, si hay algo que explicar.
+   - **Observaciones**, si hay algo que explicar, como el número del comprobante.
 5. Guarda.
+
+![Formulario para registrar el pago de una cuota](/img/ayuda/registrar-un-pago/02-formulario-de-pago.png)
 
 ## Pagos parciales
 

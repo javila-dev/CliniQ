@@ -40,7 +40,9 @@ class Insumo(BaseModel):
     )
     categoria = models.ForeignKey(
         CategoriaInsumo,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="insumos",
     )
     nombre = models.CharField(max_length=200)
@@ -48,11 +50,13 @@ class Insumo(BaseModel):
     es_consumo_interno = models.BooleanField(default=True)
     es_venta_retail = models.BooleanField(default=False)
     unidad_medida = models.CharField(max_length=20, choices=UnidadMedida.choices)
-    stock_actual = models.DecimalField(max_digits=10, decimal_places=3, default=0)
     stock_minimo = models.DecimalField(max_digits=10, decimal_places=3, default=0)
-    costo_promedio = models.DecimalField(max_digits=12, decimal_places=2, default=0)
     precio_venta = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     requiere_lote = models.BooleanField(default=False)
+    permite_stock_negativo = models.BooleanField(
+        default=False,
+        help_text="Permite registrar salidas (consumo o venta) aunque el stock disponible no alcance.",
+    )
 
     class Meta:
         db_table = "insumos"
@@ -66,9 +70,32 @@ class Insumo(BaseModel):
         if not self.es_consumo_interno and not self.es_venta_retail:
             raise ValidationError("El insumo debe ser de consumo interno, venta retail, o ambos.")
 
+
+class StockInsumoSede(BaseModel):
+    """Existencias reales de un insumo en una sede concreta.
+
+    El insumo (catalogo, precio de venta, stock_minimo) se comparte entre
+    todas las sedes de la clinica; lo que NO se comparte es el stock fisico
+    ni el costo promedio ponderado, porque cada sede recibe y consume por
+    su cuenta.
+    """
+
+    insumo = models.ForeignKey(Insumo, on_delete=models.PROTECT, related_name="stocks_por_sede")
+    sede = models.ForeignKey("clinicas.Sede", on_delete=models.PROTECT, related_name="stocks_insumos")
+    stock_actual = models.DecimalField(max_digits=10, decimal_places=3, default=0)
+    costo_promedio = models.DecimalField(max_digits=12, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "stock_insumo_sede"
+        unique_together = (("insumo", "sede"),)
+        ordering = ["insumo__nombre"]
+
+    def __str__(self) -> str:
+        return f"{self.insumo.nombre} @ {self.sede.nombre}: {self.stock_actual}"
+
     @property
     def stock_bajo(self) -> bool:
-        return self.stock_actual <= self.stock_minimo
+        return self.stock_actual <= self.insumo.stock_minimo
 
     @property
     def valor_stock(self):
@@ -95,6 +122,11 @@ class MovimientoInventario(models.Model):
         Insumo,
         on_delete=models.PROTECT,
         related_name="movimientos",
+    )
+    sede = models.ForeignKey(
+        "clinicas.Sede",
+        on_delete=models.PROTECT,
+        related_name="movimientos_inventario",
     )
     tipo = models.CharField(max_length=20, choices=TipoMovimiento.choices)
     cantidad = models.DecimalField(max_digits=10, decimal_places=3)

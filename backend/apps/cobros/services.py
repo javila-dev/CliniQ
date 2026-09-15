@@ -31,9 +31,9 @@ def agregar_item_cobro(cobro: Cobro, item_data: dict, user) -> ItemCobro:
             )
         if not descripcion:
             descripcion = insumo.nombre
-        costo_unitario = insumo.costo_promedio
 
-        from apps.inventario.services import registrar_salida
+        from apps.inventario.services import get_or_crear_stock, registrar_salida
+        costo_unitario = get_or_crear_stock(insumo, cobro.sede).costo_promedio
         origen = (
             MovimientoInventario.OrigenMovimiento.CONSUMO_CITA
             if tipo == ItemCobro.TipoItem.INSUMO_CONSUMO
@@ -41,6 +41,7 @@ def agregar_item_cobro(cobro: Cobro, item_data: dict, user) -> ItemCobro:
         )
         registrar_salida(
             insumo=insumo,
+            sede=cobro.sede,
             cantidad=item_data["cantidad"],
             origen=origen,
             referencia_id=cobro.id,

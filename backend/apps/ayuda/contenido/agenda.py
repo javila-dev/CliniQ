@@ -21,32 +21,35 @@ formulario pide:
 
 1. **Paciente**. Búscalo por nombre o documento. Si es la primera vez que viene,
    créalo sin salir de la agenda.
-2. **Sede** y **profesional**. La lista de profesionales muestra a quienes
+2. **Tipo de cita**. Es lo más importante del formulario y lo explicamos abajo.
+3. **Sede** y **profesional**. La lista de profesionales muestra a quienes
    atienden en esa sede.
-3. **Fecha y hora de inicio**. La rejilla usa la frecuencia de turnos que
-   configuró la clínica, normalmente de 15 minutos.
-4. **Motivo de la cita**, que puede ser de tres tipos, y esto es lo importante
-   del formulario.
-5. **Canal de origen**: presencial, teléfono, web o redes. Sirve después para
-   saber de dónde llegan tus pacientes.
+4. **Servicio**, **fecha** y **horario disponible**. La rejilla de horarios usa
+   la frecuencia de turnos que configuró la clínica, normalmente de 15 minutos.
+5. **Cómo agendó el paciente**: presencial, teléfono, web o redes. Sirve después
+   para saber de dónde llegan tus pacientes.
+
+![Buscador de pacientes dentro del formulario de nueva cita](/img/ayuda/agendar-una-cita/01-buscar-paciente.png)
 
 ## Los tres tipos de cita
 
+![Selector de tipo de cita con las opciones Sesión de cotización, Por servicio y Consulta libre](/img/ayuda/agendar-una-cita/02-tipo-de-cita.png)
+
 | Tipo | Cuándo se usa | Qué implica |
 |---|---|---|
-| **Por procedimiento** | Una sesión suelta del catálogo | Toma la duración y el precio del procedimiento |
-| **Por tratamiento** | Una sesión de un tratamiento ya vendido | Descuenta una sesión de la cotización aceptada; el cobro va por la cartera |
-| **Libre** | Valoración, control, cita comercial | Escribes el motivo y defines la duración a mano |
+| **Por servicio** | Una sesión suelta del catálogo | Toma la duración y el precio del procedimiento |
+| **Sesión de cotización** | Una sesión de un tratamiento ya vendido | Descuenta una sesión de la cotización aceptada; el cobro va por la cartera |
+| **Consulta libre** | Valoración, control, cita comercial | Escribes el motivo y defines la duración a mano |
 
 Elegir bien el tipo es lo que hace que después todo cuadre solo: el cobro, el
 consentimiento que se exige y el descuento de sesiones del tratamiento.
 
 ## La duración
 
-- En una cita **por procedimiento**, la duración sale del catálogo y puedes
-  ajustarla si ese paciente necesita más tiempo.
-- En una cita **por tratamiento**, sale de la configuración del tipo de sesión.
-- En una cita **libre**, la escribes tú.
+- En una cita **por servicio**, la duración sale del catálogo y puedes ajustarla
+  si ese paciente necesita más tiempo.
+- En una **sesión de cotización**, sale de la configuración del tipo de sesión.
+- En una **consulta libre**, la escribes tú.
 
 Cambiar la duración en una cita concreta no cambia el catálogo; solo afecta a esa
 cita.

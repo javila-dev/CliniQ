@@ -136,9 +136,12 @@ class MedicionAntropometricaViewSet(
 
         clinica_filter = {} if request.user.rol == "superadmin" else {"paciente__clinica_id": _clinica_id(request)}
 
+        # El peso es opcional en el registro general de seguimiento (no todo
+        # tratamiento lo requiere), pero esta grafica es especificamente de
+        # progreso de peso: solo tiene sentido con mediciones que lo traigan.
         mediciones = (
             MedicionAntropometrica.objects
-            .filter(paciente_id=paciente_id, activo=True, **clinica_filter)
+            .filter(paciente_id=paciente_id, activo=True, peso_kg__isnull=False, **clinica_filter)
             .order_by("fecha")
         )
         objetivo = (

@@ -73,9 +73,34 @@ class Plan(BaseModel):
         default=False,
         help_text="Addon: módulo de obesidad (tratamientos, sesiones, control de peso) incluido en este plan.",
     )
-    otp_checkin_habilitado = models.BooleanField(
+    whatsapp_habilitado = models.BooleanField(
         default=True,
-        help_text="Addon: check-in de llegada por código OTP de WhatsApp incluido en este plan.",
+        help_text=(
+            "Addon: envío de mensajes de WhatsApp (documentos, firma, OTP de "
+            "check-in, recordatorios) incluido en este plan."
+        ),
+    )
+    whatsapp_envios_incluidos = models.PositiveIntegerField(
+        default=0,
+        help_text="Envíos de WhatsApp incluidos por mes en este plan. 0 significa sin límite.",
+    )
+    mostrar_publico = models.BooleanField(
+        default=False,
+        help_text="Si esta activo, el plan aparece en la tabla de precios publica de la landing.",
+    )
+    precio_usuario_adicional = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Costo mensual por cada usuario por encima de max_usuarios. Null si no aplica (ej. plan a medida).",
+    )
+    precio_sede_adicional = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Costo mensual por cada sede por encima de max_sedes. Null si no aplica (ej. plan a medida).",
     )
 
     class Meta:
@@ -148,11 +173,20 @@ class Clinica(BaseModel):
         default=None,
         help_text="Anula el addon de módulo obesidad del plan para esta clínica. Null = hereda del plan.",
     )
-    otp_checkin_override = models.BooleanField(
+    whatsapp_override = models.BooleanField(
         null=True,
         blank=True,
         default=None,
-        help_text="Anula el addon de check-in por OTP del plan para esta clínica. Null = hereda del plan.",
+        help_text="Anula el addon de WhatsApp del plan para esta clínica. Null = hereda del plan.",
+    )
+    whatsapp_envios_incluidos_override = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Anula el cupo mensual de envíos de WhatsApp para esta clínica. "
+            "Null = hereda del plan. 0 = sin límite."
+        ),
     )
     modo_puesta_en_marcha = models.BooleanField(
         default=False,
@@ -188,8 +222,24 @@ class Clinica(BaseModel):
         return self._addon_efectivo(self.modulo_obesidad_override, "modulo_obesidad_habilitado")
 
     @property
-    def otp_checkin_habilitado(self):
-        return self._addon_efectivo(self.otp_checkin_override, "otp_checkin_habilitado")
+    def whatsapp_habilitado(self):
+        if self.whatsapp_override is not None:
+            return self.whatsapp_override
+        # A diferencia de los demas addons, WhatsApp nunca estuvo gateado para
+        # nadie antes de este addon (ni siquiera para clinicas en trial sin plan
+        # asignado). Sin plan se hereda "habilitado, sin limite" para no cortarle
+        # WhatsApp a una clinica en trial el dia del deploy.
+        if self.plan is None:
+            return True
+        return self.plan.whatsapp_habilitado
+
+    @property
+    def whatsapp_envios_incluidos(self):
+        if self.whatsapp_envios_incluidos_override is not None:
+            return self.whatsapp_envios_incluidos_override
+        if self.plan is None:
+            return 0
+        return self.plan.whatsapp_envios_incluidos
 
 
 class Sede(BaseModel):

@@ -4,7 +4,11 @@ from urllib.parse import urlparse
 import requests
 from django.conf import settings
 from django.core.files.base import ContentFile
+from django.db import transaction
 from django.utils import timezone
+
+from apps.inventario.models import MovimientoInventario
+from apps.inventario.services import registrar_ajuste, registrar_salida
 
 
 logger = logging.getLogger(__name__)
@@ -345,3 +349,58 @@ def guardar_pdf_firmado(consentimiento, pdf_bytes: bytes, *, filename: str | Non
     consentimiento.archivo.save(filename, ContentFile(pdf_bytes), save=False)
     consentimiento.save(update_fields=["archivo", "updated_at"])
     return consentimiento
+
+
+@transaction.atomic
+def registrar_consumo_insumo(*, nota, insumo, cantidad, user, notas: str = "", sede=None):
+    from apps.historia_clinica.models import ConsumoInsumo
+    from rest_framework.exceptions import ValidationError
+
+    sede_consumo = nota.cita.sede if nota.cita_id else sede
+    if sede_consumo is None:
+        raise ValidationError(
+            {"error": "Esta nota no tiene una cita asociada: indica la sede del consumo.", "code": "SEDE_REQUERIDA"}
+        )
+
+    movimiento = registrar_salida(
+        insumo=insumo,
+        sede=sede_consumo,
+        cantidad=cantidad,
+        origen=MovimientoInventario.OrigenMovimiento.CONSUMO_CITA,
+        referencia_id=nota.id,
+        referencia_tipo="nota_clinica",
+        user=user,
+    )
+    return ConsumoInsumo.objects.create(
+        nota=nota,
+        insumo=insumo,
+        cantidad=cantidad,
+        movimiento=movimiento,
+        notas=notas,
+        registrado_por=user,
+    )
+
+
+@transaction.atomic
+def eliminar_consumo_insumo(consumo, user):
+    from apps.clinicas.models import Sede
+    from apps.inventario.services import get_or_crear_stock
+
+    sede = consumo.movimiento.sede if consumo.movimiento_id else (
+        Sede.objects.filter(clinica_id=consumo.insumo.clinica_id, activo=True).order_by("created_at").first()
+    )
+    if sede is None:
+        from rest_framework.exceptions import ValidationError
+        raise ValidationError(
+            {"error": "No se pudo determinar la sede de este consumo.", "code": "SEDE_REQUERIDA"}
+        )
+    stock_actual = get_or_crear_stock(consumo.insumo, sede).stock_actual
+    registrar_ajuste(
+        insumo=consumo.insumo,
+        sede=sede,
+        cantidad_nueva=stock_actual + consumo.cantidad,
+        user=user,
+        motivo=f"Reversion de consumo en atencion (nota {consumo.nota_id})",
+    )
+    consumo.activo = False
+    consumo.save(update_fields=["activo", "updated_at"])

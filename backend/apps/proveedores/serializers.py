@@ -17,6 +17,9 @@ class ProveedorSerializer(serializers.ModelSerializer):
             "nombre",
             "nombre_clinica",
             "nit",
+            "razon_social",
+            "direccion",
+            "regimen_tributario",
             "contacto",
             "telefono",
             "email",
@@ -25,14 +28,7 @@ class ProveedorSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at")
-
-    def validate_clinica(self, value):
-        request = self.context.get("request")
-        if request and request.user.is_authenticated and request.user.rol != "superadmin":
-            if value.id != request.user.clinica_id:
-                raise serializers.ValidationError("No puedes asignar proveedores a otra clinica.")
-        return value
+        read_only_fields = ("id", "clinica", "created_at", "updated_at")
 
 
 class ItemOrdenCompraSerializer(serializers.ModelSerializer):
@@ -94,6 +90,8 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             "fecha_entrega_esperada",
             "estado",
             "notas",
+            "numero_factura_proveedor",
+            "fecha_factura_proveedor",
             "created_by",
             "created_by_nombre",
             "total",
@@ -216,3 +214,5 @@ class RecepcionItemSerializer(serializers.Serializer):
 
 class RecepcionOrdenSerializer(serializers.Serializer):
     items_recibidos = RecepcionItemSerializer(many=True)
+    numero_factura_proveedor = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    fecha_factura_proveedor = serializers.DateField(required=False, allow_null=True, default=None)

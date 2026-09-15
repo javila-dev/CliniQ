@@ -288,7 +288,13 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
     Sirve para compromiso de pago y para cualquier consentimiento con flujo
     Documenso."""
     from apps.historia_clinica.services import DocumensoIntegrationError, url_firma_documenso
-    from apps.notificaciones.services import enviar_link_firma_whatsapp
+    from apps.notificaciones.models import EnvioWhatsApp
+    from apps.notificaciones.services import (
+        WhatsAppNoDisponibleError,
+        enviar_link_firma_whatsapp,
+        registrar_envio_whatsapp,
+        verificar_disponibilidad_whatsapp,
+    )
 
     result = iniciar_firma_compromiso_pago_documenso(consentimiento)
     signing_token = result.get("signing_token") or ""
@@ -302,6 +308,7 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
 
     if telefono:
         try:
+            verificar_disponibilidad_whatsapp(paciente.clinica)
             enviar_link_firma_whatsapp(
                 paciente=paciente,
                 documento_tipo=_documento_tipo_consentimiento(consentimiento),
@@ -312,10 +319,13 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
                     "cita_id": str(consentimiento.cita_id) if consentimiento.cita_id else "",
                 },
             )
+            registrar_envio_whatsapp(paciente.clinica, EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO, paciente=paciente)
             enviado = True
         except ValueError:
             # Webhook no configurado: devolvemos el link igual para copiar.
             logger.warning("[enviar_link_firma_consentimiento] webhook no configurado | consentimiento_id=%s", consentimiento.id)
+        except WhatsAppNoDisponibleError:
+            logger.info("[enviar_link_firma_consentimiento] whatsapp no disponible | consentimiento_id=%s", consentimiento.id)
 
     return {"enviado": enviado, "signing_url": signing_url, "telefono": telefono}
 

@@ -32,8 +32,10 @@ class PlanSerializer(serializers.ModelSerializer):
         model = Plan
         fields = (
             "id", "nombre", "descripcion", "max_usuarios", "max_sedes", "precio", "activo",
+            "precio_usuario_adicional", "precio_sede_adicional",
             "facial_verificacion_habilitada", "modulo_estetico_habilitado",
-            "modulo_obesidad_habilitado", "otp_checkin_habilitado",
+            "modulo_obesidad_habilitado",
+            "whatsapp_habilitado", "whatsapp_envios_incluidos", "mostrar_publico",
             "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
@@ -47,6 +49,20 @@ class PlanSerializer(serializers.ModelSerializer):
         if value < 0:
             raise serializers.ValidationError("El numero maximo de sedes no puede ser negativo.")
         return value
+
+
+class PlanPublicoSerializer(serializers.ModelSerializer):
+    """Subconjunto seguro de Plan para la tabla de precios publica de la landing."""
+
+    class Meta:
+        model = Plan
+        fields = (
+            "id", "nombre", "descripcion", "precio", "max_usuarios", "max_sedes",
+            "precio_usuario_adicional", "precio_sede_adicional",
+            "facial_verificacion_habilitada", "modulo_estetico_habilitado",
+            "modulo_obesidad_habilitado",
+            "whatsapp_habilitado", "whatsapp_envios_incluidos",
+        )
 
 
 class PlanUsageSerializer(serializers.Serializer):
@@ -152,6 +168,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     wizard = serializers.SerializerMethodField()
     registro_publico = serializers.SerializerMethodField()
     registro_publico_token = serializers.CharField(source="token_registro_publico", read_only=True)
+    whatsapp_uso = serializers.SerializerMethodField()
 
     class Meta:
         model = Clinica
@@ -169,7 +186,8 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
-            "otp_checkin_habilitado",
+            "whatsapp_habilitado",
+            "whatsapp_uso",
             "modo_puesta_en_marcha",
         )
         read_only_fields = fields
@@ -192,7 +210,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
         from apps.configuracion.models import ConfiguracionWizard
         config, _ = ConfiguracionWizard.objects.get_or_create(clinica=obj)
         return {
-            "paso_checkin": config.paso_checkin and obj.otp_checkin_habilitado,
+            "paso_checkin": config.paso_checkin and obj.whatsapp_habilitado,
             "paso_pago": config.paso_pago,
             "paso_firma_asistencia": config.paso_firma_asistencia,
             "paso_verificacion_facial": config.paso_verificacion_facial and obj.facial_verificacion_habilitada,
@@ -201,6 +219,10 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     def get_registro_publico(self, obj):
         from apps.configuracion.registro_publico import registro_publico_config_as_dict
         return registro_publico_config_as_dict(obj)
+
+    def get_whatsapp_uso(self, obj):
+        from apps.notificaciones.services import uso_whatsapp_mes_actual
+        return uso_whatsapp_mes_actual(obj)
 
 
 class SedeSerializer(serializers.ModelSerializer):
@@ -799,6 +821,11 @@ class AdminTenantSerializer(serializers.ModelSerializer):
     total_sedes = serializers.IntegerField(read_only=True, default=0)
     admin_usuario_pendiente = serializers.SerializerMethodField()
     sin_admin = serializers.SerializerMethodField()
+    whatsapp_uso = serializers.SerializerMethodField()
+
+    def get_whatsapp_uso(self, obj):
+        from apps.notificaciones.services import uso_whatsapp_mes_actual
+        return uso_whatsapp_mes_actual(obj)
 
     def get_sin_admin(self, obj):
         # Tenant huerfano: ningun usuario con rol admin. Requiere annotate
@@ -836,11 +863,14 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada",
             "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
-            "otp_checkin_habilitado",
+            "whatsapp_habilitado",
+            "whatsapp_envios_incluidos",
+            "whatsapp_uso",
             "facial_verificacion_override",
             "modulo_estetico_override",
             "modulo_obesidad_override",
-            "otp_checkin_override",
+            "whatsapp_override",
+            "whatsapp_envios_incluidos_override",
             "modo_puesta_en_marcha",
             "total_usuarios",
             "usuarios_activos",
@@ -894,13 +924,19 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Clinica
-        fields = ("nombre", "nit", "email", "telefono", "activo", "plan", "facial_verificacion_override", "modulo_estetico_override", "modulo_obesidad_override", "otp_checkin_override", "modo_puesta_en_marcha")
+        fields = (
+            "nombre", "nit", "email", "telefono", "activo", "plan",
+            "facial_verificacion_override", "modulo_estetico_override", "modulo_obesidad_override",
+            "whatsapp_override", "whatsapp_envios_incluidos_override",
+            "modo_puesta_en_marcha",
+        )
         extra_kwargs = {
             "nit": {"required": False},
             "facial_verificacion_override": {"required": False, "allow_null": True},
             "modulo_estetico_override": {"required": False, "allow_null": True},
             "modulo_obesidad_override": {"required": False, "allow_null": True},
-            "otp_checkin_override": {"required": False, "allow_null": True},
+            "whatsapp_override": {"required": False, "allow_null": True},
+            "whatsapp_envios_incluidos_override": {"required": False, "allow_null": True},
             "modo_puesta_en_marcha": {"required": False},
         }
 

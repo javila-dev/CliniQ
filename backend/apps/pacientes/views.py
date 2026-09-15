@@ -48,7 +48,9 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         elif self.action in {"consentimientos", "subir_pdf_consentimiento", "verificar_consentimientos"}:
             permission_classes = (RequirePermission("pacientes.ver"),)
         elif self.action == "enrollment":
-            permission_classes = (RequirePermission("pacientes.editar"),)
+            permission_classes = (RequirePermission("pacientes.foto_control.cambiar"),)
+        elif self.action == "eliminar_foto_control":
+            permission_classes = (RequirePermission("pacientes.foto_control.eliminar"),)
         elif self.action == "checkin":
             permission_classes = (RequirePermission("pacientes.ver"),)
         else:
@@ -313,6 +315,23 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["delete"], url_path="foto-control")
+    def eliminar_foto_control(self, request, pk=None):
+        paciente = self.get_object()
+
+        if not paciente.foto_control:
+            return Response(
+                {"error": "El paciente no tiene foto de control registrada.", "code": "FOTO_CONTROL_INEXISTENTE"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        paciente.foto_control.delete(save=False)
+        paciente.embedding_facial = None
+        paciente.embedding_actualizado_en = None
+        paciente.save(update_fields=["foto_control", "embedding_facial", "embedding_actualizado_en", "updated_at"])
+
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(
         detail=True,

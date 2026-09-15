@@ -51,6 +51,8 @@ PERMISSION_CATALOG = [
     ("historia.ver", "historia", "ver", "Ver historia clinica", True),
     ("inventario.ajustar_stock", "inventario", "ajustar_stock", "Ajustar stock", False),
     ("inventario.categorias.gestionar", "inventario", "categorias.gestionar", "Gestionar categorias de insumos", False),
+    ("inventario.consumo.eliminar", "inventario", "consumo.eliminar", "Revertir consumo de insumos en atencion", False),
+    ("inventario.consumo.registrar", "inventario", "consumo.registrar", "Registrar consumo de insumos en atencion", True),
     ("inventario.insumos.gestionar", "inventario", "insumos.gestionar", "Gestionar insumos", False),
     ("inventario.kardex.ver", "inventario", "kardex.ver", "Ver kardex", True),
     ("inventario.ver", "inventario", "ver", "Ver inventario", True),
@@ -63,6 +65,8 @@ PERMISSION_CATALOG = [
     ("pacientes.datos_sensibles.ver", "pacientes", "datos_sensibles.ver", "Ver datos sensibles del paciente sin enmascarar (documento, telefono, email, direccion, fecha de nacimiento)", False),
     ("pacientes.editar", "pacientes", "editar", "Editar pacientes", True),
     ("pacientes.eliminar", "pacientes", "eliminar", "Eliminar pacientes", False),
+    ("pacientes.foto_control.cambiar", "pacientes", "foto_control.cambiar", "Tomar o reemplazar la foto de control facial del paciente", True),
+    ("pacientes.foto_control.eliminar", "pacientes", "foto_control.eliminar", "Eliminar la foto de control facial del paciente", False),
     ("pacientes.ver", "pacientes", "ver", "Ver pacientes", True),
     ("proveedores.gestionar", "proveedores", "gestionar", "Gestionar proveedores", False),
     ("proveedores.ordenes.gestionar", "proveedores", "ordenes.gestionar", "Gestionar ordenes de compra", False),
@@ -178,6 +182,18 @@ CAPABILITY_CATALOG = [
                 "permisos": ["pacientes.datos_sensibles.ver"],
             },
             {
+                "clave": "pacientes.foto_control.cambiar",
+                "titulo": "Tomar o cambiar foto de control facial",
+                "descripcion": "Registrar o reemplazar la foto de control usada para verificacion de identidad.",
+                "permisos": ["pacientes.foto_control.cambiar"],
+            },
+            {
+                "clave": "pacientes.foto_control.eliminar",
+                "titulo": "Eliminar foto de control facial",
+                "descripcion": "Borrar la foto de control del paciente. El paciente queda sin verificacion facial hasta registrar una nueva.",
+                "permisos": ["pacientes.foto_control.eliminar"],
+            },
+            {
                 "clave": "pacientes.historia",
                 "titulo": "Ver historia clinica y antecedentes",
                 "descripcion": "Leer evoluciones, antecedentes y consentimientos del paciente.",
@@ -197,8 +213,16 @@ CAPABILITY_CATALOG = [
             {
                 "clave": "clinica.escribir_historia",
                 "titulo": "Realizar atenciones y escribir en la historia",
-                "descripcion": "Registrar notas de evolucion y editar antecedentes durante la atencion.",
-                "permisos": ["historia.notas.crear", "pacientes.antecedentes.editar"],
+                "descripcion": (
+                    "Registrar notas de evolucion, editar antecedentes y registrar los "
+                    "insumos consumidos durante la atencion."
+                ),
+                "permisos": [
+                    "historia.notas.crear",
+                    "pacientes.antecedentes.editar",
+                    "inventario.consumo.registrar",
+                    "inventario.ver",
+                ],
                 "profesional": True,
             },
             {
@@ -220,6 +244,13 @@ CAPABILITY_CATALOG = [
                 "titulo": "Gestionar consentimientos durante la atencion",
                 "descripcion": "Adjuntar y marcar consentimientos informados en la atencion.",
                 "permisos": ["historia.consentimientos.gestionar"],
+                "profesional": True,
+            },
+            {
+                "clave": "clinica.eliminar_consumo_insumos",
+                "titulo": "Revertir consumo de insumos",
+                "descripcion": "Anular un registro de consumo de insumos y devolver el stock.",
+                "permisos": ["inventario.consumo.eliminar"],
                 "profesional": True,
             },
         ],
@@ -428,8 +459,8 @@ CAPABILITY_CATALOG = [
         "capacidades": [
             {
                 "clave": "proveedores.ver",
-                "titulo": "Ver proveedores y ordenes",
-                "descripcion": "Consultar proveedores y ordenes de compra.",
+                "titulo": "Ver proveedores y compras",
+                "descripcion": "Consultar proveedores y el historial de compras de insumos.",
                 "permisos": ["proveedores.ver", "proveedores.ordenes.ver"],
             },
             {
@@ -440,14 +471,14 @@ CAPABILITY_CATALOG = [
             },
             {
                 "clave": "proveedores.ordenes_gestionar",
-                "titulo": "Gestionar ordenes de compra",
-                "descripcion": "Crear y editar ordenes de compra.",
+                "titulo": "Registrar compras",
+                "descripcion": "Crear y editar compras de insumos en estado borrador.",
                 "permisos": ["proveedores.ordenes.gestionar"],
             },
             {
                 "clave": "proveedores.ordenes_recibir",
-                "titulo": "Recibir ordenes de compra",
-                "descripcion": "Registrar la recepcion de mercaderia contra una orden.",
+                "titulo": "Recibir compras",
+                "descripcion": "Marcar una compra como recibida — actualiza el stock y queda inmutable.",
                 "permisos": ["proveedores.ordenes.recibir"],
             },
         ],
@@ -657,6 +688,7 @@ ROLE_PERMISSION_DEFAULTS = {
         "notificaciones.email.ver_config",
         "pacientes.crear",
         "pacientes.editar",
+        "pacientes.foto_control.cambiar",
         "pacientes.ver",
         "proveedores.ordenes.ver",
         "proveedores.ver",
@@ -683,12 +715,14 @@ ROLE_PERMISSION_DEFAULTS = {
         "historia.fotos.subir",
         "historia.notas.crear",
         "historia.ver",
+        "inventario.consumo.registrar",
         "inventario.kardex.ver",
         "inventario.ver",
         "pacientes.antecedentes.editar",
         "pacientes.antecedentes.ver",
         "pacientes.crear",
         "pacientes.editar",
+        "pacientes.foto_control.cambiar",
         "pacientes.ver",
         "proveedores.ordenes.ver",
         "proveedores.ver",

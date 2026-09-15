@@ -127,7 +127,7 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
         extra_kwargs = {"tomado_por": {"required": False}}
 
     def validate_peso_kg(self, value):
-        if value <= 0 or value > 500:
+        if value is not None and (value <= 0 or value > 500):
             raise serializers.ValidationError("Peso fuera de rango válido.")
         return value
 

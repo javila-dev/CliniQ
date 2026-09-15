@@ -15,6 +15,7 @@ from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.inventario.models import Insumo
+from apps.notificaciones.services import uso_whatsapp_mes_actual
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
@@ -108,6 +109,21 @@ class DashboardView(APIView):
                 "no_asistio": estados["no_asistio"],
             },
         }
+
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is not None:
+            uso = uso_whatsapp_mes_actual(clinica_activa)
+            payload["whatsapp_uso"] = {
+                "envios_realizados": uso["envios_realizados"],
+                "envios_incluidos": uso["envios_incluidos"],
+                # Solo tiene sentido "cerca del limite" con paquete finito; "sin
+                # limite" (0) nunca dispara el aviso.
+                "cerca_del_limite": (
+                    not uso["sin_limite"]
+                    and uso["envios_incluidos"] > 0
+                    and uso["envios_realizados"] >= 0.8 * uso["envios_incluidos"]
+                ),
+            }
 
         if user_has_permission(user, "reportes.ver_financieros", request=request):
             # Los datos previos cargados por el asistente de puesta en marcha no

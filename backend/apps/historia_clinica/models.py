@@ -344,6 +344,40 @@ class OrdenMedicaAuditoria(BaseModel):
         return f"{self.accion} - {self.orden_id}"
 
 
+class ConsumoInsumo(BaseModel):
+    nota = models.ForeignKey(
+        NotaClinica,
+        on_delete=models.PROTECT,
+        related_name="consumos_insumo",
+    )
+    insumo = models.ForeignKey(
+        "inventario.Insumo",
+        on_delete=models.PROTECT,
+        related_name="consumos_atencion",
+    )
+    cantidad = models.DecimalField(max_digits=10, decimal_places=3)
+    movimiento = models.OneToOneField(
+        "inventario.MovimientoInventario",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="consumo_atencion",
+    )
+    notas = models.TextField(blank=True)
+    registrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        related_name="consumos_insumo_registrados",
+    )
+
+    class Meta:
+        db_table = "consumos_insumo"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.nota_id} - {self.insumo.nombre} x{self.cantidad}"
+
+
 class AnotacionZona(BaseModel):
     class TipoAplicacion(models.TextChoices):
         EQUIPO     = "equipo",     "Equipo"

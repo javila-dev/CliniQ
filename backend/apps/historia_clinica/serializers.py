@@ -1,12 +1,16 @@
 from datetime import date
+from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.clinicas.models import Sede
 from apps.core.storage import get_signed_url
+from apps.inventario.models import Insumo
 from apps.users.permissions import get_clinica_activa
 from apps.historia_clinica.models import (
     AnotacionZona,
     ConsentimientoInformado,
+    ConsumoInsumo,
     FotoClinica,
     HistoriaClinica,
     NotaClinica,
@@ -502,6 +506,43 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
                 usuario=request.user,
             )
         return orden
+
+
+class ConsumoInsumoSerializer(serializers.ModelSerializer):
+    insumo_nombre = serializers.CharField(source="insumo.nombre", read_only=True)
+    unidad_medida = serializers.CharField(source="insumo.unidad_medida", read_only=True)
+
+    class Meta:
+        model = ConsumoInsumo
+        fields = (
+            "id", "nota", "insumo", "insumo_nombre", "unidad_medida",
+            "cantidad", "notas", "registrado_por", "activo", "created_at",
+        )
+        read_only_fields = fields
+
+
+class RegistrarConsumoInsumoSerializer(serializers.Serializer):
+    nota = serializers.PrimaryKeyRelatedField(queryset=NotaClinica.objects.all())
+    insumo = serializers.PrimaryKeyRelatedField(queryset=Insumo.objects.all())
+    cantidad = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))
+    notas = serializers.CharField(required=False, allow_blank=True, default="")
+    # Solo obligatoria si la nota no tiene cita asociada (se deriva cita.sede si la hay).
+    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.all(), required=False, allow_null=True)
+
+    def validate(self, attrs):
+        request = self.context["request"]
+        nota = attrs["nota"]
+        insumo = attrs["insumo"]
+        if request.user.rol != "superadmin":
+            if nota.historia.clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError({"nota": "La nota no pertenece a tu clinica."})
+            if insumo.clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError({"insumo": "El insumo no pertenece a tu clinica."})
+        if not nota.cita_id and not attrs.get("sede"):
+            raise serializers.ValidationError(
+                {"sede": "Esta nota no tiene una cita asociada: indica la sede del consumo.", "code": "SEDE_REQUERIDA"}
+            )
+        return attrs
 
 
 class AnotacionZonaSerializer(serializers.ModelSerializer):

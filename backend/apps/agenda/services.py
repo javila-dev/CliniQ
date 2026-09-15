@@ -10,7 +10,13 @@ from rest_framework.exceptions import ValidationError
 from apps.agenda.models import BloqueoAgenda, Cita, CitaCheckinOTP
 from apps.clinicas.models import Sede
 from apps.colaboradores.models import HorarioColaborador
-from apps.notificaciones.services import get_whatsapp_outbound_webhook_url
+from apps.notificaciones.models import EnvioWhatsApp
+from apps.notificaciones.services import (
+    WhatsAppNoDisponibleError,
+    get_whatsapp_outbound_webhook_url,
+    registrar_envio_whatsapp,
+    verificar_disponibilidad_whatsapp,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +177,16 @@ def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion
         return servicio.duracion_min, servicio.nombre
 
     if item_cotizacion:
-        nombre = item_cotizacion.descripcion
+        # Si el item viene de un tratamiento de catalogo, usamos su nombre limpio
+        # (sin el sufijo "(N sesiones)" que arma el frontend para la cotizacion)
+        # en vez de item_cotizacion.descripcion -- ese texto es para la cotizacion/PDF,
+        # no para el recordatorio de una cita individual. .title() normaliza mayusculas/
+        # minusculas porque el catalogo se llena a mano y no es consistente.
+        nombre = (
+            item_cotizacion.tratamiento.nombre.strip().title()
+            if item_cotizacion.tratamiento_id
+            else item_cotizacion.descripcion
+        )
         logger.debug(
             "[_resolver_duracion] item_cotizacion=%s, tratamiento=%s, servicio=%s",
             item_cotizacion.id, item_cotizacion.tratamiento_id, item_cotizacion.servicio_id,
@@ -381,8 +396,10 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
         "[checkin_otp] iniciar | cita_id=%s | estado=%s | paciente_id=%s | telefono=%s",
         cita.id, cita.estado, cita.paciente_id, cita.paciente.telefono,
     )
-    if not cita.sede.clinica.otp_checkin_habilitado:
-        raise AgendaError("Esta clínica no tiene el addon de check-in por OTP.", code="OTP_NO_HABILITADO")
+    try:
+        verificar_disponibilidad_whatsapp(cita.sede.clinica)
+    except WhatsAppNoDisponibleError as exc:
+        raise AgendaError(str(exc), code=exc.code) from exc
     if cita.estado not in estados_validos:
         raise AgendaError("La cita no esta en estado valido para iniciar checkin", code="ESTADO_INVALIDO")
 
@@ -401,12 +418,15 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
     except Exception:
         otp.delete()
         raise
+    registrar_envio_whatsapp(cita.sede.clinica, EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=cita.paciente)
     return otp, True
 
 
 def verificar_otp_cita(cita: Cita, codigo: str, request_ip: str):
-    if not cita.sede.clinica.otp_checkin_habilitado:
-        raise AgendaError("Esta clínica no tiene el addon de check-in por OTP.", code="OTP_NO_HABILITADO")
+    # Solo valida que el addon siga habilitado, no el cupo: verificar un codigo ya
+    # enviado no dispara un envio nuevo, asi que no debe fallar por falta de cupo.
+    if not cita.sede.clinica.whatsapp_habilitado:
+        raise AgendaError("WhatsApp no está habilitado para esta clínica.", code="WHATSAPP_NO_HABILITADO")
     otp = CitaCheckinOTP.objects.filter(cita=cita).first()
     if otp is None:
         raise AgendaError("No hay codigo activo", code="OTP_NOT_FOUND")

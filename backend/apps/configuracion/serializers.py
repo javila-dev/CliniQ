@@ -151,9 +151,9 @@ class ConfiguracionWizardSerializer(serializers.ModelSerializer):
     def validate(self, data):
         clinica = self.instance.clinica if self.instance else None
         paso_checkin = data.get("paso_checkin", self.instance.paso_checkin if self.instance else False)
-        if paso_checkin and clinica is not None and not clinica.otp_checkin_habilitado:
+        if paso_checkin and clinica is not None and not clinica.whatsapp_habilitado:
             raise serializers.ValidationError(
-                {"paso_checkin": "Esta clínica no tiene el addon de check-in por OTP."}
+                {"paso_checkin": "Esta clínica no tiene el addon de WhatsApp."}
             )
         paso_verificacion_facial = data.get(
             "paso_verificacion_facial",
@@ -167,7 +167,7 @@ class ConfiguracionWizardSerializer(serializers.ModelSerializer):
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        data["paso_checkin"] = bool(data["paso_checkin"] and instance.clinica.otp_checkin_habilitado)
+        data["paso_checkin"] = bool(data["paso_checkin"] and instance.clinica.whatsapp_habilitado)
         data["paso_verificacion_facial"] = bool(
             data["paso_verificacion_facial"] and instance.clinica.facial_verificacion_habilitada
         )
@@ -189,6 +189,7 @@ class ConfiguracionFacialSerializer(serializers.ModelSerializer):
             "max_pitch",
             "max_roll",
             "min_face_area_pct",
+            "min_resolution",
             "updated_at",
         )
         read_only_fields = ("updated_at",)

@@ -202,6 +202,7 @@ class ConfiguracionFacial(BaseModel):
     max_pitch = models.FloatField(default=20.0)
     max_roll = models.FloatField(default=25.0)
     min_face_area_pct = models.FloatField(default=8.0)
+    min_resolution = models.FloatField(default=400.0)
 
     class Meta:
         db_table = "configuracion_facial"

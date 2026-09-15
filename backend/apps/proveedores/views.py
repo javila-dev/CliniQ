@@ -1,5 +1,6 @@
 from rest_framework import status
 from rest_framework.decorators import action
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -10,7 +11,7 @@ from apps.proveedores.serializers import (
     RecepcionOrdenSerializer,
 )
 from apps.proveedores.services import recibir_orden
-from apps.users.permissions import HasClinicamente, RequirePermission
+from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
 class ProveedorViewSet(HasClinicamente, ModelViewSet):
@@ -24,6 +25,12 @@ class ProveedorViewSet(HasClinicamente, ModelViewSet):
         if self.action in {"create", "update", "partial_update", "destroy"}:
             return [RequirePermission("proveedores.gestionar")()]
         return [RequirePermission("proveedores.ver")()]
+
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa.", "code": "CLINICA_REQUERIDA"})
+        serializer.save(clinica=clinica)
 
     def perform_destroy(self, instance):
         instance.activo = False
@@ -85,6 +92,8 @@ class OrdenCompraViewSet(ModelViewSet):
             orden_id=orden.id,
             items_recibidos=serializer.validated_data["items_recibidos"],
             user=request.user,
+            numero_factura_proveedor=serializer.validated_data.get("numero_factura_proveedor", ""),
+            fecha_factura_proveedor=serializer.validated_data.get("fecha_factura_proveedor"),
         )
         data = self.get_serializer(orden).data
         return Response(data, status=status.HTTP_200_OK)

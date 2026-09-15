@@ -104,7 +104,7 @@ class MedicionAntropometrica(BaseModel):
         related_name="mediciones_antropometricas",
     )
     fecha             = models.DateTimeField(default=timezone.now)
-    peso_kg           = models.DecimalField(max_digits=5, decimal_places=2)
+    peso_kg           = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     talla_cm          = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)
     imc               = models.DecimalField(max_digits=4, decimal_places=2, null=True, blank=True)
     cintura_cm        = models.DecimalField(max_digits=5, decimal_places=1, null=True, blank=True)

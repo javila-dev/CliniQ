@@ -20,6 +20,7 @@ from weasyprint import HTML
 from apps.historia_clinica.models import (
     AnotacionZona,
     ConsentimientoInformado,
+    ConsumoInsumo,
     FotoClinica,
     HistoriaClinica,
     NotaClinica,
@@ -30,6 +31,7 @@ from apps.historia_clinica.models import (
 from apps.historia_clinica.serializers import (
     AnotacionZonaSerializer,
     ConsentimientoInformadoSerializer,
+    ConsumoInsumoSerializer,
     FotoClinicaSerializer,
     HistoriaClinicaDetalleSerializer,
     HistoriaClinicaResumenSerializer,
@@ -37,6 +39,7 @@ from apps.historia_clinica.serializers import (
     NotaClinicaUpdateSerializer,
     OrdenMedicaSerializer,
     PlantillaOrdenSerializer,
+    RegistrarConsumoInsumoSerializer,
     ResultadoExamenSerializer,
     generar_url_firmada_storage,
 )
@@ -44,14 +47,23 @@ from apps.obesidad.models import MedicionAntropometrica
 from apps.historia_clinica.services import (
     DocumensoIntegrationError,
     descargar_pdf_documenso,
+    eliminar_consumo_insumo,
     guardar_pdf_firmado,
     iniciar_firma_consentimiento,
     marcar_consentimiento_firmado,
+    registrar_consumo_insumo,
     url_firma_documenso,
 )
 from apps.core.logging import registrar_accion
 from apps.core.storage import read_public_file
-from apps.notificaciones.services import enviar_documento_whatsapp_webhook, enviar_link_firma_whatsapp
+from apps.notificaciones.models import EnvioWhatsApp
+from apps.notificaciones.services import (
+    WhatsAppNoDisponibleError,
+    enviar_documento_whatsapp_webhook,
+    enviar_link_firma_whatsapp,
+    registrar_envio_whatsapp,
+    verificar_disponibilidad_whatsapp,
+)
 from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
@@ -759,14 +771,16 @@ class ConsentimientoInformadoViewSet(
         enviado = False
         if telefono:
             try:
+                verificar_disponibilidad_whatsapp(paciente.clinica)
                 enviar_link_firma_whatsapp(
                     paciente=paciente,
                     documento_tipo=consentimiento.documenso_template_nombre or "consentimiento informado",
                     link=link,
                     metadata={"consentimiento_informado_id": str(consentimiento.id)},
                 )
+                registrar_envio_whatsapp(paciente.clinica, EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO, paciente=paciente)
                 enviado = True
-            except ValueError:
+            except (ValueError, WhatsAppNoDisponibleError):
                 pass
 
         return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
@@ -920,6 +934,10 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 {"error": "Webhook no configurado", "code": "WEBHOOK_NOT_CONFIGURED"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
+        try:
+            verificar_disponibilidad_whatsapp(orden.historia.clinica)
+        except WhatsAppNoDisponibleError as exc:
+            return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
 
         pdf_bytes = render_order_pdf(orden)
         try:
@@ -947,6 +965,7 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+        registrar_envio_whatsapp(orden.historia.clinica, EnvioWhatsApp.Tipo.ENVIO_FORMULA, paciente=orden.historia.paciente)
         return Response({"enviado": True}, status=status.HTTP_200_OK)
 
 
@@ -981,3 +1000,46 @@ class AnotacionZonaViewSet(
     def perform_destroy(self, instance):
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
+
+
+class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, GenericViewSet):
+    serializer_class = ConsumoInsumoSerializer
+    queryset = ConsumoInsumo.objects.select_related(
+        "nota", "nota__historia", "nota__historia__clinica", "insumo"
+    ).all()
+    http_method_names = ["get", "post", "delete"]
+
+    def get_permissions(self):
+        if self.action == "create":
+            return [RequirePermission("inventario.consumo.registrar")()]
+        if self.action == "destroy":
+            return [RequirePermission("inventario.consumo.eliminar")()]
+        return [RequirePermission("historia.ver")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        user = self.request.user
+        if user.rol != "superadmin":
+            queryset = queryset.filter(nota__historia__clinica=user.clinica)
+        nota_id = self.request.query_params.get("nota")
+        if self.action == "list":
+            if not nota_id:
+                return queryset.none()
+            queryset = queryset.filter(nota_id=nota_id, activo=True)
+        return queryset
+
+    def create(self, request, *args, **kwargs):
+        serializer = RegistrarConsumoInsumoSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        consumo = registrar_consumo_insumo(
+            nota=serializer.validated_data["nota"],
+            insumo=serializer.validated_data["insumo"],
+            cantidad=serializer.validated_data["cantidad"],
+            user=request.user,
+            notas=serializer.validated_data.get("notas", ""),
+            sede=serializer.validated_data.get("sede"),
+        )
+        return Response(ConsumoInsumoSerializer(consumo).data, status=status.HTTP_201_CREATED)
+
+    def perform_destroy(self, instance):
+        eliminar_consumo_insumo(instance, self.request.user)

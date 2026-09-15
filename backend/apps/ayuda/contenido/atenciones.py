@@ -25,6 +25,8 @@ Cada paciente en la cola aparece con:
 
 El primero de la lista queda resaltado: es el siguiente en pasar.
 
+![Pantalla de atenciones con el resumen del día y la cola de espera](/img/ayuda/como-funciona-la-cola-de-atencion/01-cola-de-espera.png)
+
 ## Los dos roles de esta pantalla
 
 - **Recepción** prepara al paciente: registra la llegada, resuelve los
@@ -83,6 +85,11 @@ Antes de que el paciente pase al consultorio, CliniQ abre un asistente con los
 pasos que tu clínica haya decidido exigir. Cada paso se marca en verde cuando se
 cumple, y el asistente avanza solo hasta el siguiente pendiente.
 
+Los puntos de colores del encabezado son el recorrido completo. Al pasar el
+cursor por encima se despliegan con su nombre y su estado.
+
+![Recorrido del asistente: Llegada, Consentimiento, Pago y Firma](/img/ayuda/asistente-de-inicio-de-atencion/02-pasos-del-asistente.png)
+
 ## Los pasos
 
 ### 1. Llegada
@@ -100,6 +107,8 @@ se toma una foto en recepción como constancia de la llegada. No es una
 alternativa libre, solo aparece disponible cuando el WhatsApp no pudo enviarse,
 y no existe si tu clínica ya tiene activo el paso de **Identidad**: al haber
 verificación facial más adelante, ese respaldo por foto deja de ser necesario.
+
+![Paso de llegada con el envío del código por WhatsApp](/img/ayuda/asistente-de-inicio-de-atencion/01-paso-llegada.png)
 
 Con la llegada registrada, la cita pasa a **en espera**.
 

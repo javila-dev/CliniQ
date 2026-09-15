@@ -7,7 +7,7 @@ User = get_user_model()
 from django.db import transaction
 from django.db.models import Prefetch
 from django.shortcuts import get_object_or_404
-from rest_framework import status
+from rest_framework import generics, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.permissions import IsAuthenticated
@@ -51,6 +51,7 @@ from apps.clinicas.serializers import (
     MiClinicaSerializer,
     PasoProtocoloSerializer,
     PlantillaAsistenciaSerializer,
+    PlanPublicoSerializer,
     PlanSerializer,
     PlanUsageSerializer,
     ProcedimientoSerializer,
@@ -365,13 +366,15 @@ class AdminTenantViewSet(ModelViewSet):
     _TENANT_TRACKED_FIELDS = (
         "nombre", "nit", "email", "telefono", "activo", "plan_id",
         "facial_verificacion_override", "modulo_estetico_override",
-        "modulo_obesidad_override", "otp_checkin_override", "modo_puesta_en_marcha",
+        "modulo_obesidad_override", "whatsapp_override", "whatsapp_envios_incluidos_override",
+        "modo_puesta_en_marcha",
     )
     _MODULO_LABELS = {
         "facial_verificacion_override": "Verificación facial",
         "modulo_estetico_override": "Módulo estético",
         "modulo_obesidad_override": "Módulo obesidad",
-        "otp_checkin_override": "Check-in por OTP",
+        "whatsapp_override": "WhatsApp",
+        "whatsapp_envios_incluidos_override": "Cupo de envíos de WhatsApp",
         "modo_puesta_en_marcha": "Modo puesta en marcha",
     }
 
@@ -1356,6 +1359,16 @@ class RegistroClinicaView(APIView):
             },
             status=status.HTTP_201_CREATED,
         )
+
+
+class PlanesPublicosView(generics.ListAPIView):
+    """Planes marcados para la tabla de precios publica de la landing. Sin auth."""
+
+    authentication_classes = []
+    permission_classes = []
+    serializer_class = PlanPublicoSerializer
+    pagination_class = None
+    queryset = Plan.objects.filter(activo=True, mostrar_publico=True).order_by("precio")
 
 
 class VerificarRegistroClinicaView(APIView):

@@ -23,6 +23,9 @@ class Proveedor(BaseModel):
     )
     nombre = models.CharField(max_length=200)
     nit = models.CharField(max_length=20)
+    razon_social = models.CharField(max_length=200, blank=True)
+    direccion = models.CharField(max_length=255, blank=True)
+    regimen_tributario = models.CharField(max_length=100, blank=True)
     contacto = models.CharField(max_length=100, blank=True)
     telefono = models.CharField(max_length=20)
     email = models.EmailField(blank=True)
@@ -63,6 +66,8 @@ class OrdenCompra(BaseModel):
         default=Estado.BORRADOR,
     )
     notas = models.TextField(blank=True)
+    numero_factura_proveedor = models.CharField(max_length=50)
+    fecha_factura_proveedor = models.DateField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.PROTECT,

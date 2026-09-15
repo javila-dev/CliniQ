@@ -12,6 +12,7 @@ class NotificacionFallida(models.Model):
         CHECKIN_OTP = "checkin_otp", "Codigo de check-in"
         ENVIO_COTIZACION = "envio_cotizacion", "Envio de cotizacion"
         ENVIO_FORMULA = "envio_formula", "Envio de orden medica"
+        FIRMA_DOCUMENTO = "firma_documento", "Firma de documento"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     clinica = models.ForeignKey(
@@ -47,3 +48,39 @@ class NotificacionFallida(models.Model):
 
     def __str__(self):
         return f"{self.tipo_notificacion} · {self.telefono}"
+
+
+class EnvioWhatsApp(models.Model):
+    """Registro de cada envio de WhatsApp exitoso disparado por la clinica.
+
+    Consume el cupo mensual del addon de WhatsApp (Plan.whatsapp_envios_incluidos /
+    Clinica.whatsapp_envios_incluidos_override). Distinto de NotificacionFallida:
+    ese modelo registra fallas reportadas por n8n; este registra cada intento de
+    envio que salio exitosamente de nuestro lado (lo que consume/factura contra Meta).
+    """
+
+    Tipo = NotificacionFallida.Tipo
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    clinica = models.ForeignKey(
+        "clinicas.Clinica",
+        on_delete=models.CASCADE,
+        related_name="envios_whatsapp",
+    )
+    paciente = models.ForeignKey(
+        "pacientes.Paciente",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="envios_whatsapp",
+    )
+    tipo = models.CharField(max_length=30, choices=NotificacionFallida.Tipo.choices)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "envios_whatsapp"
+        ordering = ["-created_at"]
+        indexes = [models.Index(fields=["clinica", "created_at"])]
+
+    def __str__(self):
+        return f"{self.tipo} · {self.clinica_id}"

@@ -26,7 +26,15 @@ from apps.cotizaciones.serializers import (
     EnviarCotizacionEmailSerializer,
     RegistrarEnvioCotizacionSerializer,
 )
-from apps.notificaciones.services import email_provider_config, enviar_documento_whatsapp_webhook, enviar_email
+from apps.notificaciones.models import EnvioWhatsApp
+from apps.notificaciones.services import (
+    WhatsAppNoDisponibleError,
+    email_provider_config,
+    enviar_documento_whatsapp_webhook,
+    enviar_email,
+    registrar_envio_whatsapp,
+    verificar_disponibilidad_whatsapp,
+)
 from apps.users.permissions import RequirePermission
 
 logger = logging.getLogger(__name__)
@@ -281,6 +289,13 @@ class CotizacionViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")
     def enviar_whatsapp(self, request, pk=None):
         cotizacion = self.get_object()
+        try:
+            verificar_disponibilidad_whatsapp(cotizacion.clinica)
+        except WhatsAppNoDisponibleError as exc:
+            return Response(
+                {"error": str(exc), "code": exc.code},
+                status=status.HTTP_403_FORBIDDEN,
+            )
         pdf_bytes = render_cotizacion_pdf(cotizacion)
         try:
             enviar_documento_whatsapp_webhook(
@@ -306,6 +321,7 @@ class CotizacionViewSet(ModelViewSet):
                 {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
+        registrar_envio_whatsapp(cotizacion.clinica, EnvioWhatsApp.Tipo.ENVIO_COTIZACION, paciente=cotizacion.paciente)
         envio = CotizacionEnvio.objects.create(
             cotizacion=cotizacion,
             canal=CotizacionEnvio.Canal.WHATSAPP,

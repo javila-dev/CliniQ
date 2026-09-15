@@ -5,12 +5,18 @@ from decimal import Decimal
 from django.db import transaction
 from rest_framework.exceptions import ValidationError
 
-from apps.inventario.models import MovimientoInventario
+from apps.inventario.models import MovimientoInventario, StockInsumoSede
 from apps.proveedores.models import ItemOrdenCompra, OrdenCompra
 
 
 @transaction.atomic
-def recibir_orden(orden_id, items_recibidos: list[dict], user) -> OrdenCompra:
+def recibir_orden(
+    orden_id,
+    items_recibidos: list[dict],
+    user,
+    numero_factura_proveedor: str = "",
+    fecha_factura_proveedor=None,
+) -> OrdenCompra:
     if not items_recibidos:
         raise ValidationError({"error": "Debes enviar al menos un item a recibir.", "code": "SIN_ITEMS"})
 
@@ -76,8 +82,9 @@ def recibir_orden(orden_id, items_recibidos: list[dict], user) -> OrdenCompra:
             )
 
         insumo = item.insumo
-        stock_anterior = insumo.stock_actual
-        costo_actual = insumo.costo_promedio
+        stock, _ = StockInsumoSede.objects.select_for_update().get_or_create(insumo=insumo, sede=orden.sede)
+        stock_anterior = stock.stock_actual
+        costo_actual = stock.costo_promedio
         nuevo_stock = stock_anterior + cantidad
 
         if nuevo_stock <= 0:
@@ -92,17 +99,18 @@ def recibir_orden(orden_id, items_recibidos: list[dict], user) -> OrdenCompra:
         item.cantidad_recibida += cantidad
         item.save(update_fields=["cantidad_recibida", "updated_at"])
 
-        insumo.stock_actual = nuevo_stock
-        insumo.costo_promedio = nuevo_costo.quantize(Decimal("0.01"))
-        insumo.save(update_fields=["stock_actual", "costo_promedio", "updated_at"])
+        stock.stock_actual = nuevo_stock
+        stock.costo_promedio = nuevo_costo.quantize(Decimal("0.01"))
+        stock.save(update_fields=["stock_actual", "costo_promedio", "updated_at"])
 
         MovimientoInventario.objects.create(
             insumo=insumo,
+            sede=orden.sede,
             tipo=MovimientoInventario.TipoMovimiento.ENTRADA,
             cantidad=cantidad,
             costo_unitario=item.precio_unitario,
-            costo_promedio_resultante=insumo.costo_promedio,
-            stock_resultante=insumo.stock_actual,
+            costo_promedio_resultante=stock.costo_promedio,
+            stock_resultante=stock.stock_actual,
             origen=MovimientoInventario.OrigenMovimiento.COMPRA,
             referencia_id=orden.id,
             referencia_tipo="orden_compra",
@@ -114,6 +122,14 @@ def recibir_orden(orden_id, items_recibidos: list[dict], user) -> OrdenCompra:
         orden.estado = OrdenCompra.Estado.RECIBIDA_TOTAL
     else:
         orden.estado = OrdenCompra.Estado.RECIBIDA_PARCIAL
-    orden.save(update_fields=["estado", "updated_at"])
+
+    update_fields = ["estado", "updated_at"]
+    if numero_factura_proveedor:
+        orden.numero_factura_proveedor = numero_factura_proveedor
+        update_fields.append("numero_factura_proveedor")
+    if fecha_factura_proveedor:
+        orden.fecha_factura_proveedor = fecha_factura_proveedor
+        update_fields.append("fecha_factura_proveedor")
+    orden.save(update_fields=update_fields)
 
     return orden

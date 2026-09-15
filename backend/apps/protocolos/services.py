@@ -5,7 +5,13 @@ import requests
 from django.db import transaction
 from django.utils import timezone
 
-from apps.notificaciones.services import get_whatsapp_outbound_webhook_url
+from apps.notificaciones.models import EnvioWhatsApp
+from apps.notificaciones.services import (
+    WhatsAppNoDisponibleError,
+    get_whatsapp_outbound_webhook_url,
+    registrar_envio_whatsapp,
+    verificar_disponibilidad_whatsapp,
+)
 from apps.protocolos.models import CheckinOTP, ConsentimientoPaciente, SesionProcedimiento, TratamientoPaciente
 
 
@@ -45,6 +51,12 @@ def iniciar_checkin_otp(sesion: SesionProcedimiento, request_ip: str):
     if otp_existente and otp_existente.esta_vigente():
         return otp_existente, False
 
+    paciente = sesion.tratamiento.paciente
+    try:
+        verificar_disponibilidad_whatsapp(paciente.clinica)
+    except WhatsAppNoDisponibleError as exc:
+        raise ProtocolosError(str(exc), code=exc.code) from exc
+
     CheckinOTP.objects.filter(sesion=sesion).delete()
     otp = CheckinOTP.objects.create(
         sesion=sesion,
@@ -52,10 +64,11 @@ def iniciar_checkin_otp(sesion: SesionProcedimiento, request_ip: str):
         expira_en=timezone.now() + timedelta(minutes=10),
     )
     try:
-        enviar_otp_whatsapp(sesion.tratamiento.paciente, otp.codigo)
+        enviar_otp_whatsapp(paciente, otp.codigo)
     except Exception:
         otp.delete()
         raise
+    registrar_envio_whatsapp(paciente.clinica, EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=paciente)
     return otp, True
 
 

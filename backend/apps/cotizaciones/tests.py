@@ -16,6 +16,7 @@ from apps.clinicas.models import Sede, Servicio, ServicioConsentimiento, TipoSes
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import build_cotizacion_pdf_html
+from apps.notificaciones.models import EnvioWhatsApp
 from apps.pacientes.models import Paciente
 
 
@@ -442,6 +443,26 @@ class CotizacionFlowTests(TestCase):
         envio = CotizacionEnvio.objects.get(id=send_response.json()["envio_id"])
         self.assertEqual(envio.canal, CotizacionEnvio.Canal.WHATSAPP)
         self.assertEqual(envio.destinatario, self.paciente.telefono)
+
+    @patch("apps.cotizaciones.views.enviar_documento_whatsapp_webhook")
+    def test_enviar_whatsapp_bloquea_al_agotar_cupo(self, mocked_send):
+        self.clinica.whatsapp_envios_incluidos_override = 1
+        self.clinica.save(update_fields=["whatsapp_envios_incluidos_override"])
+        EnvioWhatsApp.objects.create(
+            clinica=self.clinica, tipo=EnvioWhatsApp.Tipo.ENVIO_COTIZACION, paciente=self.paciente,
+        )
+        response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+        cotizacion = Cotizacion.objects.get(id=response.json()["id"])
+
+        send_response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion.id}/enviar_whatsapp/",
+            {},
+            format="json",
+        )
+
+        self.assertEqual(send_response.status_code, 403)
+        self.assertEqual(send_response.json()["code"], "WHATSAPP_CUPO_AGOTADO")
+        mocked_send.assert_not_called()
 
     @patch("apps.cotizaciones.views.email_provider_config")
     @patch("apps.cotizaciones.views.enviar_email")
