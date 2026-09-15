@@ -410,7 +410,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   : ''
                 const puedeCambiarProf =
                   (cita.estado === 'confirmada' || cita.estado === 'en_espera') && hasPermission(user, PERM.AGENDA_EDITAR)
-                const hayOtrasAcciones = accionesModal.length > 0 || tieneRecordatorio || puedeCambiarProf
+                // Sin otra accion primaria (p. ej. una cita pendiente, donde lo
+                // esperable es confirmarla), la primera accion del modal pasa a
+                // ser el boton principal en vez de quedar escondida dentro de
+                // "Otras acciones" — que de lo contrario aparecia sola, sin
+                // ningun botón rosa junto a ella.
+                const accionModalEsPrimaria = accionesModal.length > 0 && !necesitaAccion
+                const hayOtrasAcciones = (accionesModal.length > 0 && !accionModalEsPrimaria) || tieneRecordatorio || puedeCambiarProf
                 return (
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
@@ -418,6 +424,12 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                         <Button size="sm" onClick={() => setWizardCitaId(cita.id)}>
                           <UserCheck className="h-3.5 w-3.5 mr-1.5" />
                           {soloCheckin ? 'Registrar llegada' : 'Iniciar atención'}
+                        </Button>
+                      )}
+                      {accionModalEsPrimaria && (
+                        <Button size="sm" onClick={() => handleOpenModal(accionesModal)}>
+                          <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+                          {accionModalLabel}
                         </Button>
                       )}
                       {hayOtrasAcciones && (
@@ -429,7 +441,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {accionesModal.length > 0 && (
+                            {accionesModal.length > 0 && !accionModalEsPrimaria && (
                               <DropdownMenuItem onClick={() => handleOpenModal(accionesModal)}>
                                 <MessageSquare className="h-4 w-4 mr-2" />
                                 {accionModalLabel}

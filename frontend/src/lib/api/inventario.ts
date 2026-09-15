@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import type {
-  CategoriaInsumo, Insumo, MovimientoInventario,
+  Insumo, MovimientoInventario,
   CreateInsumoRequest, AjusteStockRequest,
 } from '@/types/inventario'
 import type { Paginated } from '@/types/common'
@@ -9,33 +9,30 @@ export interface InsumosFilter {
   search?: string
   es_consumo_interno?: boolean
   es_venta_retail?: boolean
-  categoria?: string
   activo?: boolean
+  sede?: string
   page?: number
   page_size?: number
 }
 
 export interface KardexFilter {
   insumo?: string
+  sede?: string
   tipo?: string
   origen?: string
+  search?: string
   page?: number
   page_size?: number
 }
 
 export const inventarioApi = {
-  listCategorias: async (): Promise<Paginated<CategoriaInsumo>> => {
-    const res = await apiClient.get<Paginated<CategoriaInsumo>>('/inventario/categorias/')
-    return res.data
-  },
-
   listInsumos: async (params?: InsumosFilter): Promise<Paginated<Insumo>> => {
     const res = await apiClient.get<Paginated<Insumo>>('/inventario/insumos/', { params })
     return res.data
   },
 
-  getInsumo: async (id: string): Promise<Insumo> => {
-    const res = await apiClient.get<Insumo>(`/inventario/insumos/${id}/`)
+  getInsumo: async (id: string, sede?: string): Promise<Insumo> => {
+    const res = await apiClient.get<Insumo>(`/inventario/insumos/${id}/`, { params: { sede } })
     return res.data
   },
 
@@ -49,8 +46,8 @@ export const inventarioApi = {
     return res.data
   },
 
-  alertasStock: async (): Promise<Insumo[]> => {
-    const res = await apiClient.get<Insumo[]>('/inventario/insumos/alertas_stock/')
+  alertasStock: async (sede: string): Promise<Insumo[]> => {
+    const res = await apiClient.get<Insumo[]>('/inventario/insumos/alertas_stock/', { params: { sede } })
     return res.data
   },
 

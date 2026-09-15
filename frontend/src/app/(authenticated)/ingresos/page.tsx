@@ -24,6 +24,7 @@ import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import type { Cobro, EstadoCobro, MedioPago, OrigenCobro } from '@/types/cobros'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 
 // ─── constants ───────────────────────────────────────────────
 
@@ -501,7 +502,10 @@ function IngresosContent() {
 
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-bold text-foreground">Ingresos</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-bold text-foreground">Ingresos</h1>
+            <HelpButton slug="ingresos-cobros-y-pagos" />
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isLoading ? 'Cargando…' : `${total} registro${total !== 1 ? 's' : ''}`}
           </p>

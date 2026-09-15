@@ -2,7 +2,11 @@
 
 import { use, useState, useRef, useEffect, useTransition } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, CheckCircle, Clock, ChevronLeft, ChevronRight, XCircle, Loader2, AlertTriangle, Stethoscope } from 'lucide-react'
+import {
+  ArrowLeft, CheckCircle, Clock, ChevronLeft, ChevronRight, XCircle, Loader2, AlertTriangle, Stethoscope,
+  MessageSquare, ClipboardList, Activity, FlaskConical, ListChecks, FileText, Camera, Package,
+  PersonStanding, Microscope, Pill,
+} from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { agendaApi } from '@/lib/api/agenda'
@@ -16,7 +20,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { PanelPaciente } from '@/components/atenciones/PanelPaciente'
-import { TabDatosGenerales } from '@/components/historia/TabDatosGenerales'
 import { TabMotivoConsulta } from '@/components/historia/TabMotivoConsulta'
 import { TabAntecedentes } from '@/components/historia/TabAntecedentes'
 import { TabExamenes } from '@/components/historia/TabExamenes'
@@ -27,6 +30,7 @@ import { TabMediciones } from '@/components/obesidad/TabMediciones'
 import { TabLaboratorios } from '@/components/obesidad/TabLaboratorios'
 import { TabFarmacologico } from '@/components/obesidad/TabFarmacologico'
 import { TabZonas } from '@/components/historia/TabZonas'
+import { TabInsumos } from '@/components/historia/TabInsumos'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
 import { useAtencionConfig } from '@/store/atencionConfigStore'
 import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
@@ -277,8 +281,30 @@ export default function AtencionCitaPage({ params }: Props) {
     return () => { el.removeEventListener('scroll', check); ro.disconnect() }
   }, [isReady])
 
+  // Alinea al borde del tab siguiente/anterior en vez de saltar un valor fijo
+  // de píxeles, para no dejarlo cortado a la mitad. Nota: NO usar CSS
+  // scroll-snap acá — "mandatory" pelea con el scrollTo/scrollBy programático
+  // (el navegador reasienta a mitad de la animación) y el scroll se queda
+  // trabado sin moverse; por eso la alineación se calcula a mano.
   function scrollTabs(dir: 'left' | 'right') {
-    tabsScrollRef.current?.scrollBy({ left: dir === 'left' ? -160 : 160, behavior: 'smooth' })
+    const el = tabsScrollRef.current
+    if (!el) return
+    const tabEls = Array.from(el.querySelectorAll<HTMLElement>('[role="tab"]'))
+    if (tabEls.length === 0) {
+      el.scrollBy({ left: dir === 'left' ? -160 : 160, behavior: 'smooth' })
+      return
+    }
+    const visibleStart = Math.round(el.scrollLeft)
+    const visibleEnd = visibleStart + el.clientWidth
+    const maxScroll = el.scrollWidth - el.clientWidth
+    if (dir === 'right') {
+      const next = tabEls.find((t) => t.offsetLeft + t.offsetWidth > visibleEnd + 2)
+      const target = next ? next.offsetLeft - 4 : maxScroll
+      el.scrollTo({ left: Math.min(maxScroll, target), behavior: 'smooth' })
+    } else {
+      const prev = [...tabEls].reverse().find((t) => t.offsetLeft < visibleStart - 2)
+      el.scrollTo({ left: prev ? Math.max(0, prev.offsetLeft - 4) : 0, behavior: 'smooth' })
+    }
   }
 
   // ── Render guard ───────────────────────────────────────────────────────────
@@ -374,18 +400,20 @@ export default function AtencionCitaPage({ params }: Props) {
   const totalNotas = notas?.length ?? 0
   const totalFotos = notas?.reduce((acc, n) => acc + (n.fotos?.length ?? 0), 0) ?? 0
 
+  const mostrarDatosGenerales = tabsActivos['datos-generales'] ?? true
+
   const tabs = [
-    { value: 'datos-generales',  label: 'Datos Generales',    show: tabsActivos['datos-generales'] ?? true },
-    { value: 'motivo-consulta',  label: 'Motivo de Consulta', show: tabsActivos['motivo-consulta'] ?? true },
-    { value: 'antecedentes',     label: 'Antecedentes',       show: tabsActivos.antecedentes ?? true },
-    { value: 'mediciones',       label: 'Seguimiento',        show: tabsActivos.mediciones ?? true },
-    { value: 'examenes',         label: 'Exámenes',           show: tabsActivos.examenes ?? true },
-    { value: 'plan-manejo',      label: 'Plan de Manejo',     show: tabsActivos['plan-manejo'] ?? true },
-    { value: 'ordenes',          label: 'Órdenes Médicas',    show: tabsActivos.ordenes ?? true },
-    { value: 'fotos',            label: 'Fotos',              show: tabsActivos.fotos ?? true },
-    { value: 'zonas',            label: 'Zonas',              show: tieneZonas },
-    { value: 'laboratorios',     label: 'Laboratorios',       show: moduloObesidad },
-    { value: 'farmacologico',    label: 'Farmacológico',      show: moduloObesidad },
+    { value: 'motivo-consulta',  label: 'Motivo de Consulta', icon: MessageSquare,  show: tabsActivos['motivo-consulta'] ?? true },
+    { value: 'antecedentes',     label: 'Antecedentes',       icon: ClipboardList,  show: tabsActivos.antecedentes ?? true },
+    { value: 'mediciones',       label: 'Seguimiento',        icon: Activity,       show: tabsActivos.mediciones ?? true },
+    { value: 'examenes',         label: 'Exámenes',           icon: FlaskConical,   show: tabsActivos.examenes ?? true },
+    { value: 'plan-manejo',      label: 'Plan de Manejo',     icon: ListChecks,     show: tabsActivos['plan-manejo'] ?? true },
+    { value: 'ordenes',          label: 'Órdenes Médicas',    icon: FileText,       show: tabsActivos.ordenes ?? true },
+    { value: 'fotos',            label: 'Fotos',              icon: Camera,         show: tabsActivos.fotos ?? true },
+    { value: 'insumos',          label: 'Insumos',            icon: Package,        show: tabsActivos.insumos ?? true },
+    { value: 'zonas',            label: 'Zonas',              icon: PersonStanding, show: tieneZonas },
+    { value: 'laboratorios',     label: 'Laboratorios',       icon: Microscope,     show: moduloObesidad },
+    { value: 'farmacologico',    label: 'Farmacológico',      icon: Pill,           show: moduloObesidad },
   ].filter((t) => t.show)
 
   return (
@@ -447,8 +475,15 @@ export default function AtencionCitaPage({ params }: Props) {
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
         {/* Left — resumen clínico siempre visible */}
-        <div className="w-64 shrink-0 border-r overflow-y-auto bg-muted/20">
-          <PanelPaciente paciente={paciente} cita={cita} historia={historia} />
+        <div className="w-52 shrink-0 border-r overflow-y-auto bg-muted/20">
+          <PanelPaciente
+            paciente={paciente}
+            cita={cita}
+            historia={historia}
+            totalNotas={totalNotas}
+            totalFotos={totalFotos}
+            mostrarDatosGenerales={mostrarDatosGenerales}
+          />
         </div>
 
         {/* Main — tabs */}
@@ -458,39 +493,48 @@ export default function AtencionCitaPage({ params }: Props) {
             onValueChange={setTabActivo}
             className={['flex flex-col flex-1 overflow-hidden', ATENCION_TAB_CARD_SCOPE].join(' ')}
           >
-            {/* Tab bar con carousel */}
-            <div className="border-b bg-background flex items-center overflow-hidden min-w-0">
-              {canScrollLeft && (
-                <button onClick={() => scrollTabs('left')} className="shrink-0 h-10 w-8 flex items-center justify-center border-r text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                  <ChevronLeft className="h-4 w-4" />
-                </button>
-              )}
-              <div ref={tabsScrollRef} className="flex-1 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
-                <TabsList className="h-10 bg-transparent p-0 gap-0 w-max px-2">
+            {/* Tab bar con carousel — las flechas quedan siempre montadas (solo
+                se atenúan/deshabilitan) para que no empujen el layout al
+                aparecer o desaparecer; eso era lo que se sentía como un salto. */}
+            <div className="bg-muted/20 flex items-center gap-1.5 overflow-hidden min-w-0 px-3 py-2">
+              <button
+                type="button"
+                onClick={() => scrollTabs('left')}
+                disabled={!canScrollLeft}
+                className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center border bg-white text-muted-foreground transition-opacity duration-200 hover:text-foreground hover:bg-muted disabled:opacity-0 disabled:pointer-events-none"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <div
+                ref={tabsScrollRef}
+                className="flex-1 min-w-0 overflow-x-auto scroll-smooth"
+                style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+              >
+                <TabsList className="h-auto bg-white rounded-full p-1 gap-1 w-max">
                   {tabs.map((t) => (
                     <TabsTrigger
                       key={t.value}
                       value={t.value}
-                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none px-4 h-10 text-sm whitespace-nowrap"
+                      className="rounded-full px-3.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-200 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:font-semibold"
                     >
+                      <t.icon className="h-3.5 w-3.5 mr-1.5 -ml-0.5 inline-block align-[-2px]" />
                       {t.label}
                     </TabsTrigger>
                   ))}
                 </TabsList>
               </div>
-              {canScrollRight && (
-                <button onClick={() => scrollTabs('right')} className="shrink-0 h-10 w-8 flex items-center justify-center border-l text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors">
-                  <ChevronRight className="h-4 w-4" />
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={() => scrollTabs('right')}
+                disabled={!canScrollRight}
+                className="shrink-0 h-8 w-8 rounded-full flex items-center justify-center border bg-white text-muted-foreground transition-opacity duration-200 hover:text-foreground hover:bg-muted disabled:opacity-0 disabled:pointer-events-none"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
             </div>
 
-            {/* Datos Generales */}
-            {(tabsActivos['datos-generales'] ?? true) && historia && (
-              <TabsContent value="datos-generales" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
-                <TabDatosGenerales paciente={paciente} historia={historia} antecedentes={antecedentes ?? undefined} totalNotas={totalNotas} totalFotos={totalFotos} />
-              </TabsContent>
-            )}
+            {/* Datos Generales — se movió al botón "Datos generales" debajo
+                del nombre en el panel lateral (PanelPaciente); ya no es tab. */}
 
             {/* Motivo de Consulta — en atención: textarea que guarda en nota */}
             {(tabsActivos['motivo-consulta'] ?? true) && historia && (
@@ -538,6 +582,13 @@ export default function AtencionCitaPage({ params }: Props) {
             {(tabsActivos.fotos ?? true) && historia && (
               <TabsContent value="fotos" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
                 <TabFotos historia={historia} notas={notas ?? []} modoAtencion />
+              </TabsContent>
+            )}
+
+            {/* Insumos consumidos */}
+            {(tabsActivos.insumos ?? true) && notaId && (
+              <TabsContent value="insumos" className="flex-1 overflow-y-auto mt-0">
+                <TabInsumos notaId={notaId} />
               </TabsContent>
             )}
 

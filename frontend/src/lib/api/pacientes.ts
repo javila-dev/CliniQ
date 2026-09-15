@@ -72,6 +72,10 @@ export const pacientesApi = {
     return res.data
   },
 
+  eliminarFotoControl: async (id: string): Promise<void> => {
+    await apiClient.delete(`/pacientes/${id}/foto-control/`)
+  },
+
   checkins: async (id: string): Promise<CheckInRecord[]> => {
     const res = await apiClient.get<CheckInRecord[]>(`/pacientes/${id}/checkins/`)
     return res.data

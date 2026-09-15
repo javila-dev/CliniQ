@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { ShieldCheck, ShieldAlert, ShieldX, Loader2, RotateCcw, AlertTriangle, UserCheck, XCircle, Info, CheckCircle2 } from 'lucide-react'
 import { pacientesApi } from '@/lib/api/pacientes'
@@ -36,12 +36,25 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
   const [enrollWarnings, setEnrollWarnings] = useState<string[]>([])
   const [badgeVisible, setBadgeVisible] = useState(false)
 
-  const { data: paciente } = useQuery({
+  const { data: paciente, isLoading: cargandoPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
     queryFn: () => pacientesApi.get(pacienteId),
     staleTime: 60_000,
   })
   const fotoControlUrl: string | null = resolveMediaUrl((paciente as any)?.foto_control_url ?? null)
+
+  // Si el paciente ya sabemos que no tiene foto de control, saltar directo a
+  // pedirla en vez de intentar primero una verificación que va a fallar con
+  // 428 (ENROLLMENT_REQUIRED) y recién ahí pedir la foto — dos capturas en
+  // vez de una.
+  const enrollmentCheckDone = useRef(false)
+  useEffect(() => {
+    if (!paciente || enrollmentCheckDone.current) return
+    enrollmentCheckDone.current = true
+    // Comparación estricta: `null` significa que el addon no está habilitado
+    // para esta clínica (el backend pide ignorar el campo), no "sin foto".
+    if (paciente.tiene_foto_control === false) setState('sin_enrollment')
+  }, [paciente])
 
   useEffect(() => {
     if (state === 'resultado') {
@@ -282,6 +295,16 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
             <Button size="sm" onClick={onCompletado}>Continuar</Button>
           )}
         </div>
+      </div>
+    )
+  }
+
+  // ── Cargando datos del paciente (para saber si ya tiene foto de control) ──
+  // Si la consulta falla, no bloquear: seguir al flujo normal de cámara.
+  if (state === 'camara' && cargandoPaciente) {
+    return (
+      <div className="flex justify-center py-8">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
       </div>
     )
   }

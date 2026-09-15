@@ -13,6 +13,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 
 const ROL_CONFIG: Record<string, { label: string; className: string }> = {
   superadmin:  { label: 'Super Admin',   className: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200' },
@@ -116,7 +117,10 @@ export default function PerfilPage() {
   return (
     <div className="w-full space-y-5">
       <div>
-        <h1 className="text-xl font-bold">Mi perfil</h1>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-xl font-bold">Mi perfil</h1>
+          <HelpButton slug="tu-perfil-y-la-seguridad-de-tu-cuenta" />
+        </div>
         <p className="text-sm text-muted-foreground mt-0.5">Información de tu cuenta y preferencias</p>
       </div>
 

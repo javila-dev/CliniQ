@@ -34,7 +34,10 @@ const planSchema = z.object({
   descripcion:   z.string().optional(),
   max_usuarios:  z.string().min(1, 'Requerido'),
   max_sedes:     z.string().min(1, 'Requerido'),
-  precio:        z.string().min(1, 'Requerido'),
+  precio:                     z.string().optional(),
+  precio_usuario_adicional:   z.string().optional(),
+  precio_sede_adicional:      z.string().optional(),
+  whatsapp_envios_incluidos:  z.string().optional(),
 })
 
 type PlanFormValues = z.infer<typeof planSchema>
@@ -60,20 +63,25 @@ function PlanDialog({
       descripcion:  plan.descripcion ?? '',
       max_usuarios: String(plan.max_usuarios),
       max_sedes:    String(plan.max_sedes),
-      precio:       plan.precio,
+      precio:       plan.precio ?? '',
+      precio_usuario_adicional: plan.precio_usuario_adicional ?? '',
+      precio_sede_adicional:    plan.precio_sede_adicional ?? '',
+      whatsapp_envios_incluidos: plan.whatsapp_envios_incluidos ? String(plan.whatsapp_envios_incluidos) : '',
     } : undefined,
   })
 
   const [facialHabilitado, setFacialHabilitado] = useState(plan?.facial_verificacion_habilitada ?? false)
   const [moduloEstetico, setModuloEstetico]     = useState(plan?.modulo_estetico_habilitado ?? true)
   const [moduloObesidad, setModuloObesidad]     = useState(plan?.modulo_obesidad_habilitado ?? false)
-  const [otpCheckin, setOtpCheckin]             = useState(plan?.otp_checkin_habilitado ?? true)
+  const [whatsappHabilitado, setWhatsappHabilitado] = useState(plan?.whatsapp_habilitado ?? true)
+  const [mostrarPublico, setMostrarPublico]     = useState(plan?.mostrar_publico ?? false)
 
   useEffect(() => {
     setFacialHabilitado(plan?.facial_verificacion_habilitada ?? false)
     setModuloEstetico(plan?.modulo_estetico_habilitado ?? true)
     setModuloObesidad(plan?.modulo_obesidad_habilitado ?? false)
-    setOtpCheckin(plan?.otp_checkin_habilitado ?? true)
+    setWhatsappHabilitado(plan?.whatsapp_habilitado ?? true)
+    setMostrarPublico(plan?.mostrar_publico ?? false)
   }, [plan?.id])
 
   const mutation = useMutation({
@@ -83,11 +91,15 @@ function PlanDialog({
         descripcion:  data.descripcion || undefined,
         max_usuarios: parseInt(data.max_usuarios, 10),
         max_sedes:    parseInt(data.max_sedes, 10),
-        precio:       parseFloat(data.precio),
+        precio:       data.precio ? parseFloat(data.precio) : null,
+        precio_usuario_adicional: data.precio_usuario_adicional ? parseFloat(data.precio_usuario_adicional) : null,
+        precio_sede_adicional:    data.precio_sede_adicional ? parseFloat(data.precio_sede_adicional) : null,
         facial_verificacion_habilitada: facialHabilitado,
         modulo_estetico_habilitado: moduloEstetico,
         modulo_obesidad_habilitado: moduloObesidad,
-        otp_checkin_habilitado: otpCheckin,
+        whatsapp_habilitado: whatsappHabilitado,
+        whatsapp_envios_incluidos: data.whatsapp_envios_incluidos ? parseInt(data.whatsapp_envios_incluidos, 10) : 0,
+        mostrar_publico: mostrarPublico,
       }
       return isEdit ? adminApi.planes.update(plan!.id, payload) : adminApi.planes.create(payload)
     },
@@ -102,7 +114,7 @@ function PlanDialog({
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) handleClose() }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Editar plan' : 'Nuevo plan'}</DialogTitle>
         </DialogHeader>
@@ -149,16 +161,39 @@ function PlanDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label>Precio (COP) *</Label>
+            <Label>Precio (COP)</Label>
             <Input
               type="number"
               min={0}
               step={1000}
-              placeholder="299000"
+              placeholder="Vacío = cotización personalizada"
               {...register('precio')}
               className={cn(errors.precio && 'border-red-400')}
             />
             {errors.precio && <p className="text-xs text-red-500">{errors.precio.message}</p>}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>Usuario adicional (COP)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={500}
+                placeholder="9000"
+                {...register('precio_usuario_adicional')}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Sede adicional (COP)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={5000}
+                placeholder="180000"
+                {...register('precio_sede_adicional')}
+              />
+            </div>
           </div>
 
           <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-4 space-y-3">
@@ -180,13 +215,34 @@ function PlanDialog({
               <Switch checked={moduloObesidad} onCheckedChange={setModuloObesidad} />
             </div>
             <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-gray-700">Check-in por OTP (WhatsApp)</p>
-              <Switch checked={otpCheckin} onCheckedChange={setOtpCheckin} />
+              <p className="text-sm text-gray-700">WhatsApp (documentos, firma, check-in OTP, recordatorios)</p>
+              <Switch checked={whatsappHabilitado} onCheckedChange={setWhatsappHabilitado} />
             </div>
+            {whatsappHabilitado && (
+              <div className="space-y-1.5 pl-1">
+                <Label className="text-xs text-gray-600">Envíos de WhatsApp incluidos por mes</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="0 = sin límite"
+                  {...register('whatsapp_envios_incluidos')}
+                />
+              </div>
+            )}
             <p className="text-[11px] text-violet-600/70">
               Una clínica puede anular individualmente cualquiera de estos addons desde su
               detalle, sin necesidad de cambiar de plan.
             </p>
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-medium text-gray-900">Mostrar en la landing pública</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Aparece en la tabla de precios de la página pública para prospectos que aún no tienen cuenta.
+              </p>
+            </div>
+            <Switch checked={mostrarPublico} onCheckedChange={setMostrarPublico} />
           </div>
 
           {mutation.isError && (
@@ -251,7 +307,8 @@ function DeleteDialog({
 
 // ─── Página principal ─────────────────────────────────────────
 
-function formatPrecio(precio: string) {
+function formatPrecio(precio: string | null) {
+  if (precio === null) return 'Cotización'
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(precio))
 }
 
@@ -306,6 +363,7 @@ export default function PlanesPage() {
               <TableHead className="text-center">Máx. sedes</TableHead>
               <TableHead>Precio</TableHead>
               <TableHead>Estado</TableHead>
+              <TableHead>Público</TableHead>
               <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
@@ -319,12 +377,13 @@ export default function PlanesPage() {
                   <TableCell><div className="h-4 w-12 rounded bg-gray-100 mx-auto" /></TableCell>
                   <TableCell><div className="h-4 w-28 rounded bg-gray-100" /></TableCell>
                   <TableCell><div className="h-5 w-16 rounded-full bg-gray-100" /></TableCell>
+                  <TableCell><div className="h-5 w-16 rounded-full bg-gray-100" /></TableCell>
                   <TableCell><div className="h-8 w-8 rounded bg-gray-100" /></TableCell>
                 </TableRow>
               ))
             ) : planes.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-16 text-center">
+                <TableCell colSpan={8} className="py-16 text-center">
                   <Crown className="h-10 w-10 text-muted-foreground/20 mx-auto mb-2" />
                   <p className="text-sm text-muted-foreground">No hay planes creados</p>
                 </TableCell>
@@ -347,6 +406,11 @@ export default function PlanesPage() {
                   <TableCell>
                     <Badge variant={p.activo ? 'success' : 'muted'}>
                       {p.activo ? 'Activo' : 'Inactivo'}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={p.mostrar_publico ? 'success' : 'muted'}>
+                      {p.mostrar_publico ? 'Sí' : 'No'}
                     </Badge>
                   </TableCell>
                   <TableCell>

@@ -68,6 +68,7 @@ export default function ConfiguracionHistoriaClinicaPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="que-pestanas-mostrar-en-historia-y-atencion"
         title="Historia Clínica"
         description="Configura qué pestañas se muestran en la historia clínica de cada paciente."
         backHref="/configuracion"

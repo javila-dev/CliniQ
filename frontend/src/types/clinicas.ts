@@ -12,6 +12,14 @@ export interface ConfiguracionCartera {
   updated_at: string
 }
 
+export interface WhatsAppUso {
+  habilitado: boolean
+  envios_incluidos: number       // 0 = sin límite
+  envios_realizados: number      // del mes calendario actual
+  envios_restantes: number | null  // null si sin límite
+  sin_limite: boolean
+}
+
 export interface Clinica {
   id: string
   nombre: string
@@ -32,7 +40,8 @@ export interface Clinica {
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean
-  otp_checkin_habilitado?: boolean
+  whatsapp_habilitado?: boolean
+  whatsapp_uso?: WhatsAppUso
   modo_puesta_en_marcha?: boolean
   created_at: string
   updated_at: string
@@ -275,6 +284,7 @@ export interface ConfiguracionFacial {
   max_pitch: number
   max_roll: number
   min_face_area_pct: number
+  min_resolution: number
   updated_at: string
 }
 

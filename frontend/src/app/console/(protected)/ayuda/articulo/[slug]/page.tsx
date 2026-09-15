@@ -1,7 +1,6 @@
 'use client'
 
 import { use, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ExternalLink, Check, Loader2, Eye } from 'lucide-react'
@@ -43,7 +42,7 @@ interface Props {
   params: Promise<{ slug: string }>
 }
 
-export default function EditorArticuloPage({ params }: Props) {
+export default function EditorArticuloConsolePage({ params }: Props) {
   const { slug } = use(params)
   const esNuevo = slug === 'nuevo'
   const router = useRouter()
@@ -109,7 +108,7 @@ export default function EditorArticuloPage({ params }: Props) {
         qc.invalidateQueries({ queryKey: ['ayuda', 'gestion', 'categorias'] })
         if (!opts?.silencioso) toast({ title: 'Guardado' })
         if (esNuevo || resultSlug !== slug) {
-          router.replace(`/ayuda/gestion/articulo/${resultSlug}`)
+          router.replace(`/console/ayuda/articulo/${resultSlug}`)
         }
       } catch (e) {
         const data = (e as { response?: { data?: Record<string, unknown> } })?.response?.data
@@ -163,11 +162,11 @@ export default function EditorArticuloPage({ params }: Props) {
     <div className="mx-auto w-full max-w-7xl">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
         <button
-          onClick={() => navegarConGuardia(() => router.push('/ayuda/gestion'))}
+          onClick={() => navegarConGuardia(() => router.push('/console/ayuda'))}
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
-          Gestión del centro de ayuda
+          Centro de ayuda
         </button>
 
         <div className="flex items-center gap-3">

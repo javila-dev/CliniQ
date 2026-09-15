@@ -14,6 +14,7 @@ import type {
   AnotacionZona,
   ZonasNota,
   ZonasVisita,
+  ConsumoInsumo,
 } from '@/types/historia'
 import type { Paginated } from '@/types/common'
 
@@ -107,6 +108,20 @@ export const historiaClinicaApi = {
     },
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/historia-clinica/anotaciones-zona/${id}/`)
+    },
+  },
+
+  consumosInsumo: {
+    list: async (notaId: string): Promise<ConsumoInsumo[]> => {
+      const res = await apiClient.get<Paginated<ConsumoInsumo>>('/historia-clinica/consumos-insumo/', { params: { nota: notaId } })
+      return res.data.results
+    },
+    create: async (data: { nota: string; insumo: string; cantidad: number; notas?: string; sede?: string }): Promise<ConsumoInsumo> => {
+      const res = await apiClient.post<ConsumoInsumo>('/historia-clinica/consumos-insumo/', data)
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/historia-clinica/consumos-insumo/${id}/`)
     },
   },
 

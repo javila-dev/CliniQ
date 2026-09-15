@@ -2,20 +2,11 @@ export type UnidadMedida = 'unidad' | 'ml' | 'gr' | 'cm' | 'par' | 'caja'
 export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'baja'
 export type OrigenMovimiento = 'compra' | 'consumo_cita' | 'venta_retail' | 'ajuste_manual' | 'baja_vencimiento'
 
-export interface CategoriaInsumo {
-  id: string
-  clinica: string
-  nombre: string
-  descripcion: string
-  activa: boolean
-  created_at: string
-}
-
 export interface Insumo {
   id: string
   clinica: string
-  categoria: string
-  categoria_nombre?: string
+  categoria: string | null
+  categoria_nombre: string | null
   nombre: string
   descripcion: string
   es_consumo_interno: boolean
@@ -26,6 +17,7 @@ export interface Insumo {
   costo_promedio: string
   precio_venta: string | null
   requiere_lote: boolean
+  permite_stock_negativo: boolean
   activo: boolean
   stock_bajo: boolean
   valor_stock: string
@@ -33,10 +25,41 @@ export interface Insumo {
   updated_at: string
 }
 
+export interface ContextoOrdenCompra {
+  tipo: 'orden_compra'
+  orden_id: string
+  orden_numero: string
+  proveedor_nombre: string
+  numero_factura_proveedor: string | null
+}
+
+export interface ContextoNotaClinica {
+  tipo: 'nota_clinica'
+  paciente_id: string
+  paciente_nombre: string
+  cita_id: string | null
+  cita_fecha: string | null
+  servicio_nombre: string | null
+}
+
+export interface ContextoCobro {
+  tipo: 'cobro'
+  cobro_id: string
+  paciente_id: string
+  paciente_nombre: string
+  origen: 'cita' | 'cotizacion' | 'libre'
+  cotizacion_id: string | null
+  cotizacion_numero: string | null
+}
+
+export type MovimientoContexto = ContextoOrdenCompra | ContextoNotaClinica | ContextoCobro
+
 export interface MovimientoInventario {
   id: string
   insumo: string
   insumo_nombre?: string
+  sede: string
+  sede_nombre?: string
   tipo: TipoMovimiento
   cantidad: string
   costo_unitario: string
@@ -48,23 +71,24 @@ export interface MovimientoInventario {
   motivo: string
   realizado_por: string
   realizado_por_nombre?: string
+  contexto: MovimientoContexto | null
   fecha: string
 }
 
 export interface CreateInsumoRequest {
-  categoria: string
   nombre: string
   descripcion?: string
   es_consumo_interno: boolean
   es_venta_retail: boolean
   unidad_medida: UnidadMedida
   stock_minimo?: string
-  costo_promedio?: string
   precio_venta?: string
   requiere_lote?: boolean
+  permite_stock_negativo?: boolean
 }
 
 export interface AjusteStockRequest {
+  sede: string
   cantidad_nueva: string
   motivo: string
 }

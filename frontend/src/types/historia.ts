@@ -37,6 +37,19 @@ export interface ZonasVisita {
   diagramas: DiagramaConAnotaciones[]
   anotaciones: AnotacionZona[]
 }
+
+export interface ConsumoInsumo {
+  id: string
+  nota: string
+  insumo: string
+  insumo_nombre: string
+  unidad_medida: string
+  cantidad: string
+  notas: string
+  registrado_por: string
+  activo: boolean
+  created_at: string
+}
 export type TipoFitzpatrick = 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI'
 
 export interface HistoriaClinica {

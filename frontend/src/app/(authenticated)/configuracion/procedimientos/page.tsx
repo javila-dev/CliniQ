@@ -118,6 +118,7 @@ export default function ProcedimientosPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="configurar-un-procedimiento"
         title="Procedimientos"
         description="Configura los procedimientos clínicos: duración, protocolo de pasos y consentimientos"
         backHref="/configuracion"

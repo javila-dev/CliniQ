@@ -13,6 +13,7 @@ import {
   Menu,
   X,
   ChevronRight,
+  ChevronDown,
   Receipt,
   Settings2,
   Stethoscope,
@@ -22,6 +23,9 @@ import {
   Building2,
   PieChart,
   HelpCircle,
+  Package,
+  Truck,
+  ShoppingCart,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -37,7 +41,7 @@ import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
 
 type NavItem = { href: string; label: string; icon: React.ElementType }
-type NavGroup = { section: string; items: NavItem[] }
+type NavGroup = { section: string; items: NavItem[]; icon: React.ElementType }
 type NavEntry = NavItem | NavGroup
 
 // Definición de todos los items de nav con su clave de permiso requerida.
@@ -53,6 +57,9 @@ const NAV = {
   cobros:         { href: '/ingresos',       label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER            },
   resultados:     { href: '/resultados',     label: 'Resultados',      icon: PieChart,        perm: PERM.REPORTES_VER_FINANCIEROS },
   campanas:       { href: '/configuracion/campanas', label: 'Campañas', icon: Zap,            perm: PERM.CAMPANAS_GESTIONAR    },
+  insumos:        { href: '/inventario',     label: 'Insumos',         icon: Package,         perm: PERM.INVENTARIO_VER        },
+  compras:        { href: '/compras', label: 'Compras',    icon: ShoppingCart,    perm: PERM.PROVEEDORES_ORDENES_VER },
+  proveedores:    { href: '/proveedores',    label: 'Proveedores',     icon: Truck,           perm: PERM.PROVEEDORES_VER       },
   configuracion:  { href: '/configuracion',  label: 'Configuración',   icon: Settings2,       perm: PERM.CLINICAS_EDITAR       },
 }
 
@@ -70,6 +77,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
 
   const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
   const ventasItems: NavItem[]   = [n.cotizaciones, n.campanas].filter(vis)
+  const insumosItems: NavItem[]  = [n.insumos, n.compras, n.proveedores].filter(vis)
   const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
 
   const entries: NavEntry[] = []
@@ -78,29 +86,62 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   // /console, fuera de este sidebar — ver AuthGuard/defaultRoute.
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
-  if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems })
-  if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems   })
-  if (finanzasItems.length) entries.push({ section: 'Finanzas', items: finanzasItems })
+  if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems, icon: Stethoscope })
+  if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems,   icon: Zap         })
+  if (insumosItems.length)  entries.push({ section: 'Insumos',  items: insumosItems,  icon: Package     })
+  if (finanzasItems.length) entries.push({ section: 'Finanzas', items: finanzasItems, icon: Wallet      })
   if (vis(n.configuracion)) entries.push(n.configuracion)
-
-  // Centro de ayuda: sin permiso propio, pero solo visible si el flag global está
-  // activo (o si el usuario lo gestiona, para poder entrar a preparar contenido).
-  if (canAccess.ayudaCentro(user)) {
-    entries.push({ href: '/ayuda', label: 'Centro de ayuda', icon: HelpCircle })
-  }
 
   return entries
 }
 
-function NavLink({ href, label, icon: Icon, onClose }: NavItem & { onClose?: () => void }) {
+// Con muchos permisos el sidebar se satura (roles admin llegan a 12+ items) —
+// a partir de este umbral se agrupa por sección en un acordeón de un solo
+// panel abierto, en vez de listar todo siempre expandido.
+const COLLAPSE_THRESHOLD = 7
+
+function countItems(entries: NavEntry[]): number {
+  return entries.reduce((n, e) => n + ('section' in e ? e.items.length : 1), 0)
+}
+
+function isItemActive(pathname: string, href: string): boolean {
+  return pathname === href || pathname.startsWith(href + '/')
+}
+
+function activeSection(entries: NavEntry[], pathname: string): string | null {
+  for (const e of entries) {
+    if ('section' in e && e.items.some((item) => isItemActive(pathname, item.href))) {
+      return e.section
+    }
+  }
+  return null
+}
+
+function NavLink({ href, label, icon: Icon, onClose, compact }: NavItem & { onClose?: () => void; compact?: boolean }) {
   const pathname = usePathname()
   const active = pathname === href || pathname.startsWith(href + '/')
+
+  if (compact) {
+    return (
+      <Link
+        href={href}
+        onClick={onClose}
+        className={cn(
+          'flex items-center rounded-lg pl-2 pr-2.5 py-1.5 text-sm font-medium transition-colors duration-150',
+          active ? 'bg-white/[0.08] text-white' : 'text-white/60 hover:bg-white/[0.05] hover:text-white/90'
+        )}
+      >
+        {label}
+      </Link>
+    )
+  }
+
   return (
     <Link
       href={href}
       onClick={onClose}
       className={cn(
-        'flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-150 group',
+        'flex items-center gap-2.5 rounded-lg pl-2 pr-2.5 py-2 text-sm font-medium transition-all duration-150 group',
         active ? 'bg-white/[0.08] text-white' : 'text-white/60 hover:bg-white/[0.05] hover:text-white/90'
       )}
     >
@@ -118,12 +159,53 @@ function NavLink({ href, label, icon: Icon, onClose }: NavItem & { onClose?: () 
   )
 }
 
+function NavGroupHeader({
+  section, icon: Icon, open, active, onToggle,
+}: { section: string; icon: React.ElementType; open: boolean; active: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      className={cn(
+        'flex w-full items-center gap-2.5 rounded-lg pl-2 pr-2.5 py-2 text-sm font-medium transition-all duration-150 group',
+        active ? 'text-white' : 'text-white/60 hover:bg-white/[0.05] hover:text-white/90'
+      )}
+    >
+      <div className={cn(
+        'flex items-center justify-center h-7 w-7 rounded-md shrink-0 transition-all duration-150',
+        active ? 'bg-rose-500/25 ring-1 ring-rose-400/20' : 'group-hover:bg-white/[0.05]'
+      )}>
+        <Icon className={cn(
+          'h-3.5 w-3.5 transition-colors duration-150',
+          active ? 'text-rose-300' : 'text-white/50 group-hover:text-white/80'
+        )} />
+      </div>
+      <span className="flex-1 text-left">{section}</span>
+      <ChevronDown className={cn('h-3.5 w-3.5 text-white/30 transition-transform duration-200', open && 'rotate-180')} />
+    </button>
+  )
+}
+
 function Sidebar({ onClose }: { onClose?: () => void }) {
   const { user, logout } = useAuthStore()
   const { clinicaActiva, _hydrated: clinicaHydrated } = useSuperadminClinicaStore()
   const router = useRouter()
+  const pathname = usePathname()
 
   const allEntries = buildNav(user)
+  const showAyuda = canAccess.ayudaCentro(user)
+  const collapseSections = countItems(allEntries) + (showAyuda ? 1 : 0) > COLLAPSE_THRESHOLD
+
+  const [openSection, setOpenSection] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (collapseSections) setOpenSection(activeSection(allEntries, pathname))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pathname, collapseSections])
+
+  const toggleSection = (section: string) => {
+    setOpenSection((cur) => (cur === section ? null : section))
+  }
 
   const initials = user
     ? `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase()
@@ -171,12 +253,34 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
       <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent shrink-0" />
 
       {/* ── Nav ── */}
-      <nav className="sidebar-nav flex-1 overflow-y-auto px-3 py-3 space-y-4">
+      <nav className={cn('sidebar-nav flex-1 overflow-y-auto pl-2 pr-3 py-3', collapseSections ? 'space-y-0.5' : 'space-y-4')}>
         {allEntries.map((entry) => {
           if ('section' in entry) {
+            if (collapseSections) {
+              const open = openSection === entry.section
+              const sectionActive = entry.items.some((item) => isItemActive(pathname, item.href))
+              return (
+                <div key={entry.section}>
+                  <NavGroupHeader
+                    section={entry.section}
+                    icon={entry.icon}
+                    open={open}
+                    active={sectionActive}
+                    onToggle={() => toggleSection(entry.section)}
+                  />
+                  {open && (
+                    <div className="space-y-0.5 py-0.5 pl-9 pr-1">
+                      {entry.items.map((item) => (
+                        <NavLink key={item.href} {...item} onClose={onClose} compact />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )
+            }
             return (
               <div key={entry.section}>
-                <p className="px-2.5 pb-1.5 text-[10px] text-white/35 uppercase tracking-[0.12em] font-semibold">
+                <p className="pl-2 pr-2.5 pb-1.5 text-[10px] text-white/35 uppercase tracking-[0.12em] font-semibold">
                   {entry.section}
                 </p>
                 <div className="space-y-0.5">
@@ -190,6 +294,12 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
           return <NavLink key={entry.href} {...entry} onClose={onClose} />
         })}
       </nav>
+
+      {showAyuda && (
+        <div className="shrink-0 pl-2 pr-3 pb-1">
+          <NavLink href="/ayuda" label="Centro de ayuda" icon={HelpCircle} onClose={onClose} />
+        </div>
+      )}
 
       <div className="mx-4 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent shrink-0" />
 

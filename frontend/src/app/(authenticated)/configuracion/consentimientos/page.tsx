@@ -92,6 +92,7 @@ export default function ConsentimientosConfigPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="consentimientos-informados-como-funcionan"
         title="Plantillas de consentimiento"
         description="Sube tus PDFs de consentimiento, mapea los campos y asócialos a procedimientos."
         backHref="/configuracion"

@@ -6,6 +6,9 @@ export interface Proveedor {
   clinica: string
   nombre: string
   nit: string
+  razon_social: string
+  direccion: string
+  regimen_tributario: string
   contacto: string
   telefono: string
   email: string
@@ -38,6 +41,8 @@ export interface OrdenCompra {
   fecha_entrega_esperada: string | null
   estado: EstadoOrdenCompra
   notas: string
+  numero_factura_proveedor: string
+  fecha_factura_proveedor: string | null
   total: string
   items: ItemOrdenCompra[]
   created_by: string
@@ -49,6 +54,9 @@ export interface OrdenCompra {
 export interface CreateProveedorRequest {
   nombre: string
   nit: string
+  razon_social?: string
+  direccion?: string
+  regimen_tributario?: string
   contacto?: string
   telefono?: string
   email?: string
@@ -75,4 +83,6 @@ export interface RecibirOrdenRequest {
     item_id: string
     cantidad: string
   }[]
+  numero_factura_proveedor?: string
+  fecha_factura_proveedor?: string
 }

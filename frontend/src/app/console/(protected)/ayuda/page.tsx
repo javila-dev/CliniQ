@@ -2,22 +2,74 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
-import { Plus, Search, ArrowLeft } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { Plus, Search, ExternalLink, LifeBuoy } from 'lucide-react'
 
 import { ayudaApi, ayudaAdminApi } from '@/lib/api/ayuda'
 import { AREAS_AYUDA } from '@/types/ayuda'
+import { coreApi } from '@/lib/api/core'
+import { authApi } from '@/lib/api/auth'
+import { useAuthStore } from '@/store/authStore'
+import { useToast } from '@/hooks/use-toast'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Switch } from '@/components/ui/switch'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { CategoriaRail } from '@/components/ayuda/gestion/CategoriaRail'
 import { ArticulosTable } from '@/components/ayuda/gestion/ArticulosTable'
 
-export default function GestionAyudaPage() {
+function VisibilidadToggle() {
+  const qc = useQueryClient()
+  const { toast } = useToast()
+  const setUser = useAuthStore((s) => s.setUser)
+
+  const { data, isLoading } = useQuery({
+    queryKey: ['admin', 'configuracion-global'],
+    queryFn: coreApi.configuracionGlobal.get,
+  })
+
+  const mutation = useMutation({
+    mutationFn: (centro_ayuda_habilitado: boolean) =>
+      coreApi.configuracionGlobal.update({ centro_ayuda_habilitado }),
+    onSuccess: async (nuevo) => {
+      qc.setQueryData(['admin', 'configuracion-global'], nuevo)
+      toast({ title: nuevo.centro_ayuda_habilitado ? 'Centro de ayuda activado' : 'Centro de ayuda desactivado' })
+      // Refresca al superadmin actual para que su propio sidebar refleje el cambio ya mismo.
+      try {
+        setUser(await authApi.me())
+      } catch {
+        /* no crítico: el resto de las sesiones lo ven en su próximo /auth/me */
+      }
+    },
+    onError: () => toast({ title: 'No se pudo guardar el cambio', variant: 'destructive' }),
+  })
+
+  return (
+    <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-500">
+        <LifeBuoy className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold text-foreground">Visible para las clínicas</p>
+        <p className="text-xs text-muted-foreground">
+          Mientras está apagado, solo lo ven superadmin y el equipo interno (para preparar
+          contenido); al activarlo queda visible para todas las clínicas.
+        </p>
+      </div>
+      <Switch
+        checked={data?.centro_ayuda_habilitado ?? false}
+        onCheckedChange={(v) => mutation.mutate(v)}
+        disabled={isLoading || mutation.isPending}
+      />
+    </div>
+  )
+}
+
+export default function GestionAyudaConsolePage() {
   const [categoria, setCategoria] = useState<string | null>(null)
   const [area, setArea] = useState<string>('todas')
   const [estado, setEstado] = useState<string>('todos')
@@ -46,22 +98,29 @@ export default function GestionAyudaPage() {
   )
 
   return (
-    <div className="mx-auto w-full max-w-6xl">
-      <div className="mb-5 flex items-center justify-between gap-4">
+    <div className="mx-auto w-full max-w-6xl space-y-5">
+      <div className="flex items-center justify-between gap-4">
         <div>
-          <Link href="/ayuda" className="mb-1.5 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" />
-            Volver al centro de ayuda
-          </Link>
-          <h1 className="text-2xl font-bold tracking-tight">Gestión del centro de ayuda</h1>
+          <h1 className="text-2xl font-bold tracking-tight">Centro de ayuda</h1>
+          <p className="text-sm text-muted-foreground">FAQ y videos de ayuda dentro de la app.</p>
         </div>
-        <Button asChild>
-          <Link href="/ayuda/gestion/articulo/nuevo">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Nuevo artículo
-          </Link>
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button asChild variant="outline">
+            <Link href="/ayuda" target="_blank">
+              <ExternalLink className="mr-1.5 h-4 w-4" />
+              Ver centro de ayuda
+            </Link>
+          </Button>
+          <Button asChild>
+            <Link href="/console/ayuda/articulo/nuevo">
+              <Plus className="mr-1.5 h-4 w-4" />
+              Nuevo artículo
+            </Link>
+          </Button>
+        </div>
       </div>
+
+      <VisibilidadToggle />
 
       {categoriasQ.isLoading ? (
         <LoadingState rows={6} />

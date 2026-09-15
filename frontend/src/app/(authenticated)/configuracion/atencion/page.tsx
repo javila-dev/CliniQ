@@ -54,6 +54,11 @@ const TABS_CONFIG: TabConfig[] = [
     label: 'Seguimiento',
     description: 'Signos vitales y medidas corporales registradas en cada control.',
   },
+  {
+    value: 'insumos',
+    label: 'Insumos',
+    description: 'Insumos consumidos durante la atención, descontados del inventario.',
+  },
 ]
 
 export default function ConfiguracionAtencionPage() {
@@ -62,6 +67,7 @@ export default function ConfiguracionAtencionPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="que-pestanas-mostrar-en-historia-y-atencion"
         title="Pantalla de atención"
         description="Configura qué pestañas ve el profesional durante una atención."
         backHref="/configuracion"

@@ -53,6 +53,7 @@ function ConsentimientosContent() {
   return (
     <div>
       <PageHeader
+        helpSlug="consentimientos-informados-como-funcionan"
         title="Consentimientos"
         description={`${consentimientos.length} consentimiento${consentimientos.length !== 1 ? 's' : ''} en total`}
         action={

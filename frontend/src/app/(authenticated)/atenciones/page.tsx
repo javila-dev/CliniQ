@@ -16,6 +16,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Stethoscope, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { formatDate, formatTime, todayISO } from '@/lib/utils'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 
 export default function AtencionesPage() {
   return <RoleGuard check={canAccess.atenciones}><AtencionesContent /></RoleGuard>
@@ -80,7 +81,10 @@ function AtencionesContent() {
     return (
       <div className="space-y-6">
         <div>
-          <h1 className="text-2xl font-semibold">Atenciones</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-2xl font-semibold">Atenciones</h1>
+            <HelpButton slug="como-funciona-la-cola-de-atencion" />
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             Todas las atenciones en curso o sin cerrar de la clínica.
           </p>
@@ -94,7 +98,10 @@ function AtencionesContent() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Atenciones</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-2xl font-semibold">Atenciones</h1>
+            <HelpButton slug="como-funciona-la-cola-de-atencion" />
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5 capitalize">
             {new Date().toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>

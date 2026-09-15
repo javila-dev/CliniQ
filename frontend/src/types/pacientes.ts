@@ -52,6 +52,7 @@ export interface Paciente {
   telefono_responsable?: string
 
   tiene_foto_control?: boolean | null
+  foto_control_url?: string | null
 }
 
 export interface BusquedaPaciente {

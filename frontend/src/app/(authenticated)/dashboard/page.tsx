@@ -968,6 +968,20 @@ function DashboardContent() {
         </>
       )}
 
+      {/* Cupo mensual de WhatsApp cerca de agotarse */}
+      {kpis?.whatsapp_uso?.cerca_del_limite && (
+        <Link
+          href="/configuracion/clinica"
+          className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 hover:bg-amber-100 transition-colors"
+        >
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1 font-medium">
+            {kpis.whatsapp_uso.envios_realizados} de {kpis.whatsapp_uso.envios_incluidos} envíos de WhatsApp usados este mes — se está por agotar el cupo
+          </span>
+          <ArrowRight className="h-4 w-4 shrink-0" />
+        </Link>
+      )}
+
       {/* Gráfica + Cobros por medio de pago */}
       {canVerFinanzas && (
       <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-3')}>

@@ -1,14 +1,16 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import Image from 'next/image'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { ShieldCheck, Eye, EyeOff, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Loader2 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
 import { isSuperAdmin } from '@/lib/permissions'
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,7 +23,7 @@ const schema = z.object({
 type FormValues = z.infer<typeof schema>
 
 export default function ConsoleLoginPage() {
-  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, login, logout, user } = useAuthStore()
+  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, login, loginWithGoogle, logout, user } = useAuthStore()
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [serverError, setServerError] = useState<string | null>(null)
@@ -64,6 +66,30 @@ export default function ConsoleLoginPage() {
     }
   }
 
+  const handleGoogleCredential = useCallback(
+    async (credential: string) => {
+      setServerError(null)
+      try {
+        await loginWithGoogle(credential)
+        const freshUser = useAuthStore.getState().user
+        if (!freshUser || !(isSuperAdmin(freshUser) || freshUser.is_staff)) {
+          setServerError('Esta cuenta no tiene acceso a la consola.')
+          await logout()
+          return
+        }
+        setIsNavigating(true)
+        router.replace('/console')
+      } catch (err: any) {
+        const msg =
+          err?.response?.data?.error ||
+          err?.response?.data?.detail ||
+          'No pudimos iniciar sesión con Google. Intenta con tu correo y contraseña.'
+        setServerError(msg)
+      }
+    },
+    [loginWithGoogle, logout, router],
+  )
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0b0d12] px-4">
       <div aria-hidden className="pointer-events-none fixed -top-24 -left-24 h-96 w-96 rounded-full"
@@ -73,11 +99,11 @@ export default function ConsoleLoginPage() {
 
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-800 ring-1 ring-white/10">
-            <ShieldCheck className="h-5 w-5 text-slate-300" />
-          </div>
-          <h1 className="text-lg font-semibold text-slate-100">CliniQ Console</h1>
-          <p className="mt-1 text-sm text-slate-500">Acceso para superadmin y equipo interno</p>
+          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={140} height={46} className="mb-3 object-contain brightness-110" />
+          <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
+            Console
+          </span>
+          <p className="mt-2 text-sm text-slate-500">Acceso para superadmin y equipo interno</p>
         </div>
 
         <form
@@ -133,6 +159,20 @@ export default function ConsoleLoginPage() {
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Ingresando…</>
             ) : 'Ingresar'}
           </Button>
+
+          {process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID && (
+            <>
+              <div className="flex items-center gap-3">
+                <span className="h-px flex-1 bg-white/10" />
+                <span className="text-xs text-slate-600">o</span>
+                <span className="h-px flex-1 bg-white/10" />
+              </div>
+              <GoogleSignInButton
+                onCredential={handleGoogleCredential}
+                onError={(msg) => setServerError(msg)}
+              />
+            </>
+          )}
         </form>
 
         <p className="mt-5 text-center text-xs text-slate-600">

@@ -638,6 +638,7 @@ export default function TratamientosPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="configurar-un-tratamiento-y-sus-sesiones"
         title="Tratamientos"
         description="Agrupa procedimientos en planes con tipos de sesión y precio estimado"
         backHref="/configuracion"

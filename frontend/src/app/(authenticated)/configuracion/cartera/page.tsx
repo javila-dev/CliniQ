@@ -32,6 +32,7 @@ export default function ConfiguracionCarteraPage() {
   return (
     <div className="space-y-6 max-w-2xl">
       <PageHeader
+        helpSlug="el-compromiso-de-pago"
         title="Otros documentos"
         description="Configuración de los documentos adicionales que maneja la clínica."
         backHref="/configuracion"

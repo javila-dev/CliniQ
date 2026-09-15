@@ -65,7 +65,7 @@ export function ArticulosTable({ articulos, categoriaSlug }: Props) {
 
   const duplicar = useMutation({
     mutationFn: (a: ArticuloAyudaLista) => ayudaAdminApi.duplicarArticulo(a.slug),
-    onSuccess: (nuevo) => { invalidar(); router.push(`/ayuda/gestion/articulo/${nuevo.slug}`) },
+    onSuccess: (nuevo) => { invalidar(); router.push(`/console/ayuda/articulo/${nuevo.slug}`) },
     onError: () => toast({ title: 'No se pudo duplicar', variant: 'destructive' }),
   })
 
@@ -111,7 +111,7 @@ export function ArticulosTable({ articulos, categoriaSlug }: Props) {
             key={a.id}
             articulo={a}
             sortable={puedeReordenar}
-            onEditar={() => router.push(`/ayuda/gestion/articulo/${a.slug}`)}
+            onEditar={() => router.push(`/console/ayuda/articulo/${a.slug}`)}
             onPreview={() => window.open(`/ayuda/articulo/${a.slug}?preview=1`, '_blank')}
             onDuplicar={() => duplicar.mutate(a)}
             onTogglePublicar={() => togglePublicar.mutate(a)}

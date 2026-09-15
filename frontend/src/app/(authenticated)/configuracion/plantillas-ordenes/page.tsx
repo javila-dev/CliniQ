@@ -43,6 +43,7 @@ export default function PlantillasOrdenesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="ordenes-medicas-y-examenes"
         title="Plantillas de órdenes"
         description="Crea y gestiona las plantillas que los profesionales usarán para generar órdenes médicas."
         backHref="/configuracion"

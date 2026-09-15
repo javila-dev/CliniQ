@@ -715,6 +715,7 @@ export default function CampanasPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="campanas-y-precios-promocionales"
         title="Campañas"
         description="Precios especiales por período para procedimientos y tratamientos."
         action={

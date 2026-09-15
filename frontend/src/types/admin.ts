@@ -1,15 +1,21 @@
+import type { WhatsAppUso } from './clinicas'
+
 export interface Plan {
   id: string
   nombre: string
   descripcion: string | null
   max_usuarios: number
   max_sedes: number
-  precio: string  // decimal como string (DRF)
+  precio: string | null  // decimal como string (DRF); null = cotización personalizada
   activo: boolean
+  precio_usuario_adicional: string | null
+  precio_sede_adicional: string | null
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
   modulo_obesidad_habilitado: boolean
-  otp_checkin_habilitado: boolean
+  whatsapp_habilitado: boolean
+  whatsapp_envios_incluidos: number  // 0 = sin límite
+  mostrar_publico: boolean
   created_at: string
   updated_at: string
 }
@@ -26,12 +32,15 @@ export interface AdminTenant {
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
   modulo_obesidad_habilitado: boolean
-  otp_checkin_habilitado: boolean
+  whatsapp_habilitado: boolean
+  whatsapp_envios_incluidos: number  // 0 = sin límite
+  whatsapp_uso: WhatsAppUso
   // Anulación explícita por clínica. null = sigue al plan.
   facial_verificacion_override: boolean | null
   modulo_estetico_override: boolean | null
   modulo_obesidad_override: boolean | null
-  otp_checkin_override: boolean | null
+  whatsapp_override: boolean | null
+  whatsapp_envios_incluidos_override: number | null
   modo_puesta_en_marcha: boolean
   total_usuarios: number
   usuarios_activos: number
@@ -97,7 +106,8 @@ export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email
   facial_verificacion_override?: boolean | null
   modulo_estetico_override?: boolean | null
   modulo_obesidad_override?: boolean | null
-  otp_checkin_override?: boolean | null
+  whatsapp_override?: boolean | null
+  whatsapp_envios_incluidos_override?: number | null
   modo_puesta_en_marcha?: boolean
 }
 
@@ -106,11 +116,15 @@ export interface CreatePlanRequest {
   descripcion?: string
   max_usuarios: number
   max_sedes: number
-  precio: number
+  precio: number | null
+  precio_usuario_adicional?: number | null
+  precio_sede_adicional?: number | null
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean
-  otp_checkin_habilitado?: boolean
+  whatsapp_habilitado?: boolean
+  whatsapp_envios_incluidos?: number
+  mostrar_publico?: boolean
 }
 
 export type UpdatePlanRequest = Partial<CreatePlanRequest> & { activo?: boolean }

@@ -64,7 +64,7 @@ export default function RecordatoriosConfigPage() {
   if (!clinicaId) {
     return (
       <div className="max-w-2xl">
-        <PageHeader title="Recordatorios de citas" />
+        <PageHeader helpSlug="recordatorios-automaticos-de-citas" title="Recordatorios de citas" />
         <div className="rounded-xl border bg-white p-8 text-center text-sm text-gray-400">
           No tienes una clínica asignada.
         </div>
@@ -75,6 +75,7 @@ export default function RecordatoriosConfigPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="recordatorios-automaticos-de-citas"
         title="Recordatorios de citas"
         description="Configura cuándo y cómo se envían recordatorios automáticos a tus pacientes."
         backHref="/configuracion"

@@ -62,6 +62,7 @@ export default function EditarPacientePage({ params }: Props) {
   return (
     <div>
       <PageHeader
+        helpSlug="registrar-un-paciente-nuevo"
         title="Editar paciente"
         description={paciente.nombre_completo}
         action={

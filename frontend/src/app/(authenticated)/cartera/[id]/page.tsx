@@ -341,6 +341,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
       </div>
 
       <PageHeader
+        helpSlug="como-leer-la-cartera-de-un-paciente"
         title={cartera.paciente_nombre}
         description={`Cotización #${cartera.cotizacion_id.slice(0, 8)}`}
       />

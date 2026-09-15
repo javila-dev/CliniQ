@@ -258,7 +258,7 @@ export default function LogAccionesPage() {
   if (!canVer) {
     return (
       <div className="space-y-6">
-        <PageHeader title="Actividad" description="Historial de acciones del sistema." />
+        <PageHeader helpSlug="log-de-acciones-y-auditoria" title="Actividad" description="Historial de acciones del sistema." />
         <div className="rounded-xl border bg-white p-8 text-center text-sm text-muted-foreground">
           No tienes permiso para ver el log de acciones.
         </div>
@@ -269,6 +269,7 @@ export default function LogAccionesPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="log-de-acciones-y-auditoria"
         title="Actividad"
         description="Registro de todas las acciones realizadas en el sistema."
       />

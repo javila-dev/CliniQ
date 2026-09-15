@@ -9,7 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   ArrowLeft, Building2, Users, MapPin, Crown, Mail, Copy, Check, AlertCircle,
-  Sparkles, LogIn, History, ChevronLeft, ChevronRight, Power,
+  Sparkles, LogIn, History, ChevronLeft, ChevronRight, Power, MessageCircle,
 } from 'lucide-react'
 import { adminApi } from '@/lib/api/admin'
 import { usuariosApi } from '@/lib/api/usuarios'
@@ -283,27 +283,78 @@ function AddonOverrideRow({
   descripcion: string
   defaultDelPlan: boolean
   value: boolean | null
-  onChange: (v: boolean | null) => void
+  onChange: (v: boolean) => void
 }) {
+  const efectivo = value ?? defaultDelPlan
   return (
     <div className="flex items-center justify-between gap-3">
       <div>
         <p className="text-sm font-medium text-gray-800">{label}</p>
         <p className="text-xs text-muted-foreground mt-0.5">{descripcion}</p>
       </div>
-      <Select
-        value={value === null ? '__plan__' : String(value)}
-        onValueChange={v => onChange(v === '__plan__' ? null : v === 'true')}
-      >
-        <SelectTrigger className="w-56 shrink-0">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="__plan__">Según el plan ({defaultDelPlan ? 'incluido' : 'no incluido'})</SelectItem>
-          <SelectItem value="true">Forzar activado</SelectItem>
-          <SelectItem value="false">Forzar desactivado</SelectItem>
-        </SelectContent>
-      </Select>
+      <Switch checked={efectivo} onCheckedChange={onChange} />
+    </div>
+  )
+}
+
+// ─── Control de anulación de cupo numérico (vacío = hereda del plan) ─────────
+
+function AddonCupoOverrideRow({
+  label,
+  descripcion,
+  defaultDelPlan,
+  value,
+  onChange,
+}: {
+  label: string
+  descripcion: string
+  defaultDelPlan: number
+  value: number | null
+  onChange: (v: number | null) => void
+}) {
+  const [texto, setTexto] = useState(value === null ? '' : String(value))
+
+  useEffect(() => {
+    setTexto(value === null ? '' : String(value))
+  }, [value])
+
+  const handleChange = (raw: string) => {
+    setTexto(raw)
+    if (raw.trim() === '') {
+      onChange(null)
+      return
+    }
+    const n = parseInt(raw, 10)
+    if (!Number.isNaN(n) && n >= 0) onChange(n)
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div>
+        <p className="text-sm font-medium text-gray-800">{label}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{descripcion}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min={0}
+          className="w-24 h-8 text-sm"
+          placeholder={defaultDelPlan > 0 ? String(defaultDelPlan) : '∞'}
+          value={texto}
+          onChange={e => handleChange(e.target.value)}
+        />
+        {value !== null && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 px-2 text-xs text-muted-foreground"
+            onClick={() => onChange(null)}
+          >
+            Restablecer
+          </Button>
+        )}
+      </div>
     </div>
   )
 }
@@ -334,22 +385,25 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
   const [facialOverride, setFacialOverride]         = useState<boolean | null>(tenant.facial_verificacion_override)
   const [esteticoOverride, setEsteticoOverride]     = useState<boolean | null>(tenant.modulo_estetico_override)
   const [obesidadOverride, setObesidadOverride]     = useState<boolean | null>(tenant.modulo_obesidad_override)
-  const [otpOverride, setOtpOverride]               = useState<boolean | null>(tenant.otp_checkin_override)
+  const [whatsappOverride, setWhatsappOverride]     = useState<boolean | null>(tenant.whatsapp_override)
+  const [whatsappCupoOverride, setWhatsappCupoOverride] = useState<number | null>(tenant.whatsapp_envios_incluidos_override)
   const [puestaEnMarcha, setPuestaEnMarcha]         = useState(tenant.modo_puesta_en_marcha)
 
   useEffect(() => {
     setFacialOverride(tenant.facial_verificacion_override)
     setEsteticoOverride(tenant.modulo_estetico_override)
     setObesidadOverride(tenant.modulo_obesidad_override)
-    setOtpOverride(tenant.otp_checkin_override)
+    setWhatsappOverride(tenant.whatsapp_override)
+    setWhatsappCupoOverride(tenant.whatsapp_envios_incluidos_override)
     setPuestaEnMarcha(tenant.modo_puesta_en_marcha)
-  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.modulo_obesidad_override, tenant.otp_checkin_override, tenant.modo_puesta_en_marcha])
+  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.modulo_obesidad_override, tenant.whatsapp_override, tenant.whatsapp_envios_incluidos_override, tenant.modo_puesta_en_marcha])
 
   const addonsDirty =
     facialOverride   !== tenant.facial_verificacion_override ||
     esteticoOverride !== tenant.modulo_estetico_override ||
     obesidadOverride !== tenant.modulo_obesidad_override ||
-    otpOverride      !== tenant.otp_checkin_override ||
+    whatsappOverride !== tenant.whatsapp_override ||
+    whatsappCupoOverride !== tenant.whatsapp_envios_incluidos_override ||
     puestaEnMarcha   !== tenant.modo_puesta_en_marcha
 
   const mutation = useMutation({
@@ -362,7 +416,8 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
       facial_verificacion_override: facialOverride,
       modulo_estetico_override: esteticoOverride,
       modulo_obesidad_override: obesidadOverride,
-      otp_checkin_override: otpOverride,
+      whatsapp_override: whatsappOverride,
+      whatsapp_envios_incluidos_override: whatsappCupoOverride,
       modo_puesta_en_marcha: puestaEnMarcha,
     }),
     onSuccess: (data) => {
@@ -375,108 +430,120 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
   const planSeleccionado = planes.find(p => p.id === planValue)
 
   return (
-    <form onSubmit={handleSubmit(d => mutation.mutate(d))} className="max-w-2xl space-y-6">
-      <div className="rounded-xl border bg-white p-5 space-y-4">
-        <h3 className="text-sm font-semibold text-gray-800">Datos de la clínica</h3>
+    <form onSubmit={handleSubmit(d => mutation.mutate(d))} className="max-w-4xl space-y-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-start">
+        <div className="rounded-xl border bg-white p-5 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-800">Datos de la clínica</h3>
 
-        <div className="space-y-1.5">
-          <Label>Nombre *</Label>
-          <Input placeholder="Clínica Ejemplo" {...register('nombre')} className={cn(errors.nombre && 'border-red-400')} />
-          {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1.5">
-            <Label>NIT</Label>
-            <Input placeholder="900123456-1" {...register('nit')} />
+            <Label>Nombre *</Label>
+            <Input placeholder="Clínica Ejemplo" {...register('nombre')} className={cn(errors.nombre && 'border-red-400')} />
+            {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>NIT</Label>
+              <Input placeholder="900123456-1" {...register('nit')} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Teléfono</Label>
+              <Input placeholder="3001234567" {...register('telefono')} />
+            </div>
+          </div>
+
           <div className="space-y-1.5">
-            <Label>Teléfono</Label>
-            <Input placeholder="3001234567" {...register('telefono')} />
+            <Label>Email</Label>
+            <Input type="email" placeholder="admin@clinica.com" {...register('email')} className={cn(errors.email && 'border-red-400')} />
+            {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Plan</Label>
+            <Select value={planValue ?? ''} onValueChange={v => setValue('plan', v === '__none__' ? '' : v, { shouldDirty: true })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Sin plan asignado" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">Sin plan</SelectItem>
+                {planes.filter(p => p.activo).map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 
-        <div className="space-y-1.5">
-          <Label>Email</Label>
-          <Input type="email" placeholder="admin@clinica.com" {...register('email')} className={cn(errors.email && 'border-red-400')} />
-          {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Plan</Label>
-          <Select value={planValue ?? ''} onValueChange={v => setValue('plan', v === '__none__' ? '' : v, { shouldDirty: true })}>
-            <SelectTrigger>
-              <SelectValue placeholder="Sin plan asignado" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__none__">Sin plan</SelectItem>
-              {planes.filter(p => p.activo).map(p => (
-                <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-5 space-y-3">
-        <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 mb-1">
-          <Sparkles className="h-3.5 w-3.5" />
-          Add-ons
-        </div>
-        <p className="text-xs text-muted-foreground -mt-2">
-          Vienen del plan «{planSeleccionado?.nombre ?? 'sin plan'}». Anula uno puntual acá solo
-          si esta clínica necesita algo distinto a su plan.
-        </p>
-
-        <AddonOverrideRow
-          label="Verificación facial biométrica"
-          descripcion="Permite comparar la identidad del paciente con su foto de control en cada cita."
-          defaultDelPlan={planSeleccionado?.facial_verificacion_habilitada ?? false}
-          value={facialOverride}
-          onChange={setFacialOverride}
-        />
-
-        <div className="border-t border-violet-100" />
-
-        <AddonOverrideRow
-          label="Módulo estético"
-          descripcion="Procedimientos, zonas corporales, diagramas y notas clínicas estéticas."
-          defaultDelPlan={planSeleccionado?.modulo_estetico_habilitado ?? false}
-          value={esteticoOverride}
-          onChange={setEsteticoOverride}
-        />
-
-        <div className="border-t border-violet-100" />
-
-        <AddonOverrideRow
-          label="Módulo obesidad"
-          descripcion="Tratamientos, sesiones de seguimiento y control de peso."
-          defaultDelPlan={planSeleccionado?.modulo_obesidad_habilitado ?? false}
-          value={obesidadOverride}
-          onChange={setObesidadOverride}
-        />
-
-        <div className="border-t border-violet-100" />
-
-        <AddonOverrideRow
-          label="Check-in por OTP (WhatsApp)"
-          descripcion="Verificación de llegada del paciente por código de WhatsApp, con foto de respaldo."
-          defaultDelPlan={planSeleccionado?.otp_checkin_habilitado ?? false}
-          value={otpOverride}
-          onChange={setOtpOverride}
-        />
-
-        <div className="border-t border-violet-100" />
-
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium text-gray-800">Modo puesta en marcha</p>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Habilita el asistente para cargar pacientes en curso y saldos previos mientras la
-              clínica migra sus datos. Apágalo cuando termine.
-            </p>
+        <div className="rounded-xl border border-violet-100 bg-violet-50/50 p-5 space-y-3">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-violet-700 mb-1">
+            <Sparkles className="h-3.5 w-3.5" />
+            Add-ons
           </div>
-          <Switch checked={puestaEnMarcha} onCheckedChange={setPuestaEnMarcha} />
+          <p className="text-xs text-muted-foreground -mt-2">
+            Vienen del plan «{planSeleccionado?.nombre ?? 'sin plan'}». Anula uno puntual acá solo
+            si esta clínica necesita algo distinto a su plan.
+          </p>
+
+          <AddonOverrideRow
+            label="Verificación facial biométrica"
+            descripcion="Permite comparar la identidad del paciente con su foto de control en cada cita."
+            defaultDelPlan={planSeleccionado?.facial_verificacion_habilitada ?? false}
+            value={facialOverride}
+            onChange={setFacialOverride}
+          />
+
+          <div className="border-t border-violet-100" />
+
+          <AddonOverrideRow
+            label="Módulo estético"
+            descripcion="Procedimientos, zonas corporales, diagramas y notas clínicas estéticas."
+            defaultDelPlan={planSeleccionado?.modulo_estetico_habilitado ?? false}
+            value={esteticoOverride}
+            onChange={setEsteticoOverride}
+          />
+
+          <div className="border-t border-violet-100" />
+
+          <AddonOverrideRow
+            label="Módulo obesidad"
+            descripcion="Tratamientos, sesiones de seguimiento y control de peso."
+            defaultDelPlan={planSeleccionado?.modulo_obesidad_habilitado ?? false}
+            value={obesidadOverride}
+            onChange={setObesidadOverride}
+          />
+
+          <div className="border-t border-violet-100" />
+
+          <AddonOverrideRow
+            label="WhatsApp (documentos, firma, check-in OTP, recordatorios)"
+            descripcion="Envío de mensajes de WhatsApp: cotizaciones, firma de documentos, código de check-in, recordatorios de cita."
+            defaultDelPlan={planSeleccionado?.whatsapp_habilitado ?? false}
+            value={whatsappOverride}
+            onChange={setWhatsappOverride}
+          />
+
+          {(whatsappOverride ?? planSeleccionado?.whatsapp_habilitado ?? false) && (
+            <AddonCupoOverrideRow
+              label="Cupo mensual de envíos"
+              descripcion="Envíos de WhatsApp incluidos por mes para esta clínica. Vacío = hereda del plan."
+              defaultDelPlan={planSeleccionado?.whatsapp_envios_incluidos ?? 0}
+              value={whatsappCupoOverride}
+              onChange={setWhatsappCupoOverride}
+            />
+          )}
+
+          <div className="border-t border-violet-100" />
+
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-800">Modo puesta en marcha</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Habilita el asistente para cargar pacientes en curso y saldos previos mientras la
+                clínica migra sus datos. Apágalo cuando termine.
+              </p>
+            </div>
+            <Switch checked={puestaEnMarcha} onCheckedChange={setPuestaEnMarcha} />
+          </div>
         </div>
       </div>
 
@@ -837,7 +904,7 @@ export default function TenantDetailPage() {
       )}
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
         <div className="rounded-xl border bg-white p-3.5">
           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Plan</p>
           <div className="flex items-center gap-1.5 mt-1">
@@ -871,6 +938,29 @@ export default function TenantDetailPage() {
           <div className="flex items-center gap-1.5 mt-1">
             <MapPin className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-sm font-semibold">{tenant.total_sedes}</span>
+          </div>
+        </div>
+        <div className="rounded-xl border bg-white p-3.5">
+          <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">WhatsApp</p>
+          <div className="flex items-center gap-1.5 mt-1">
+            {tenant.whatsapp_uso.habilitado ? (
+              <>
+                <MessageCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className={cn(
+                  'text-sm font-semibold',
+                  !tenant.whatsapp_uso.sin_limite
+                    && tenant.whatsapp_uso.envios_realizados >= tenant.whatsapp_uso.envios_incluidos
+                    && 'text-amber-600',
+                )}>
+                  {tenant.whatsapp_uso.envios_realizados}
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  / {tenant.whatsapp_uso.sin_limite ? '∞' : tenant.whatsapp_uso.envios_incluidos}
+                </span>
+              </>
+            ) : (
+              <span className="text-sm text-muted-foreground">Desactivado</span>
+            )}
           </div>
         </div>
         <div className="rounded-xl border bg-white p-3.5">

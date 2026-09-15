@@ -25,11 +25,18 @@ export interface IngresoSemana {
   total: string
 }
 
+export interface WhatsAppUsoDashboard {
+  envios_realizados: number
+  envios_incluidos: number
+  cerca_del_limite: boolean
+}
+
 export interface DashboardData {
   citas_hoy: CitasHoy
   cobros_hoy: CobrosHoy
   stock_alertas: number
   ingresos_semana: IngresoSemana[]
+  whatsapp_uso?: WhatsAppUsoDashboard
 }
 
 export interface IngresosPeriodo {

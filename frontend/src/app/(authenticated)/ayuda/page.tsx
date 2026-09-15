@@ -13,7 +13,6 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
-import { AyudaSearchBar } from '@/components/ayuda/AyudaSearchBar'
 import { TemasRail } from '@/components/ayuda/TemasRail'
 import { ArticuloDestacado } from '@/components/ayuda/ArticuloDestacado'
 import { GrupoArticulos } from '@/components/ayuda/GrupoArticulos'
@@ -61,7 +60,7 @@ export default function AyudaHomePage() {
         action={
           puedeGestionar ? (
             <Button asChild variant="outline" size="sm">
-              <Link href="/ayuda/gestion">
+              <Link href="/console/ayuda">
                 <Settings2 className="mr-1.5 h-4 w-4" />
                 Gestionar contenido
               </Link>
@@ -69,8 +68,6 @@ export default function AyudaHomePage() {
           ) : undefined
         }
       />
-
-      <AyudaSearchBar className="mb-6" />
 
       <div className="grid gap-6 lg:grid-cols-[190px_1fr] lg:gap-8">
         <TemasRail categorias={categorias} seleccionado={tema} onSeleccionar={seleccionarTema} />

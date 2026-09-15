@@ -1,33 +1,28 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, CheckCircle, XCircle, Clock, ExternalLink, User, Stethoscope, Loader2 } from 'lucide-react'
-import { resolveMediaUrl } from '@/lib/utils/media'
+import { useQuery } from '@tanstack/react-query'
+import { AlertTriangle, User, Stethoscope, IdCard } from 'lucide-react'
 import Link from 'next/link'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { agendaApi } from '@/lib/api/agenda'
 import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { TabDatosGenerales } from '@/components/historia/TabDatosGenerales'
 import { formatDate } from '@/lib/utils'
-import { cn } from '@/lib/utils'
 import type { Paciente } from '@/types/pacientes'
 import type { Cita } from '@/types/agenda'
-import type { HistoriaClinica, ResumenConsentimiento } from '@/types/historia'
+import type { HistoriaClinica } from '@/types/historia'
 
 interface PanelPacienteProps {
   paciente: Paciente
   cita: Cita
   historia?: HistoriaClinica
-}
-
-const FITZPATRICK_LABELS: Record<string, string> = {
-  I: 'Tipo I',
-  II: 'Tipo II',
-  III: 'Tipo III',
-  IV: 'Tipo IV',
-  V: 'Tipo V',
-  VI: 'Tipo VI',
+  totalNotas?: number
+  totalFotos?: number
+  /** Respeta el toggle de configuración de la clínica para este tab/sección. */
+  mostrarDatosGenerales?: boolean
 }
 
 function calcularEdad(fechaNacimiento: string | null): string {
@@ -39,59 +34,16 @@ function calcularEdad(fechaNacimiento: string | null): string {
   return String(m < 0 || (m === 0 && hoy.getDate() < nac.getDate()) ? edad - 1 : edad) + ' años'
 }
 
-function ConsentimientoIcon({ item }: { item: ResumenConsentimiento }) {
-  if (item.firmado && item.vigente) {
-    return <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
-  }
-  if (item.firmado && !item.vigente) {
-    return <Clock className="h-3.5 w-3.5 text-amber-500 shrink-0" />
-  }
-  return <XCircle className="h-3.5 w-3.5 text-muted-foreground/40 shrink-0" />
-}
-
-export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) {
-  const queryClient = useQueryClient()
-
-  const { mutate: recuperarPdf, isPending: recuperandoPdf } = useMutation({
-    mutationFn: () => agendaApi.citas.recuperarPdfAsistencia(cita.id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['citas', cita.id] }),
-  })
+export function PanelPaciente({
+  paciente, cita, historia, totalNotas = 0, totalFotos = 0, mostrarDatosGenerales = true,
+}: PanelPacienteProps) {
+  const [datosOpen, setDatosOpen] = useState(false)
 
   const { data: antecedentes } = useQuery({
     queryKey: ['antecedentes', paciente.id],
     queryFn: () => historiaClinicaApi.antecedentes.get(paciente.id),
     retry: false,
   })
-
-  const { data: consentimientos } = useQuery({
-    queryKey: ['consentimientos-resumen', paciente.id],
-    queryFn: () => historiaClinicaApi.consentimientosInformados.resumen(paciente.id),
-    enabled: Boolean(paciente.id),
-  })
-
-  const { data: consentimientosCompletos } = useQuery({
-    queryKey: ['consentimientos-lista', paciente.id],
-    queryFn: () => historiaClinicaApi.consentimientosInformados.list(paciente.id),
-    enabled: Boolean(paciente.id),
-  })
-
-  // Mapa token → URL del PDF firmado. Prefiere archivo_url (presignada MinIO, TTL 1h)
-  const urlPorToken = Object.fromEntries(
-    (consentimientosCompletos ?? [])
-      .filter((c) => c.firmado && (c.archivo_url || c.url_firmada || c.archivo))
-      .map((c) => [
-        c.documenso_template_token,
-        c.archivo_url ?? resolveMediaUrl(c.url_firmada || c.archivo),
-      ])
-  )
-
-  // Tokens pendientes (sin firmar o vencidos) para esta cita
-  const tokensPendientes = new Set(
-    (cita.consentimiento_info?.consentimientos ?? [])
-      .filter((c) => !c.vigente)
-      .map((c) => c.template_token)
-  )
-  const todosAlDia = cita.consentimiento_info?.todos_firmados ?? true
 
   const { data: citasPaciente } = useQuery({
     queryKey: ['citas-paciente', paciente.id],
@@ -136,9 +88,6 @@ export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) 
     (antecedentes?.personales?.alergicos && antecedentes.personales.alergicos.trim()) ||
     (antecedentes?.personales?.contraindicaciones && antecedentes.personales.contraindicaciones.trim())
 
-  const consentimientosVigentes = consentimientos?.filter((c) => c.vigente).length ?? 0
-  const consentimientosTotal = consentimientos?.length ?? 0
-
   return (
     <>
       <div className="p-4 space-y-4">
@@ -149,10 +98,16 @@ export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) 
           </div>
           <p className="font-semibold text-sm leading-tight">{paciente.nombre_completo}</p>
           <p className="text-xs text-muted-foreground mt-0.5">{calcularEdad(paciente.fecha_nacimiento)}</p>
-          {antecedentes?.personales?.tipo_piel && (
-            <span className="mt-1 text-xs bg-muted px-2 py-0.5 rounded-full">
-              Fitzpatrick {FITZPATRICK_LABELS[antecedentes.personales.tipo_piel] ?? antecedentes.personales.tipo_piel}
-            </span>
+          {historia && mostrarDatosGenerales && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 mt-2.5 text-xs"
+              onClick={() => setDatosOpen(true)}
+            >
+              <IdCard className="h-3.5 w-3.5 mr-1.5" />
+              Datos generales
+            </Button>
           )}
         </div>
 
@@ -220,100 +175,6 @@ export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) 
           </div>
         )}
 
-        {/* Consentimientos */}
-        {consentimientos && consentimientos.length > 0 && (
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Consentimientos</p>
-              <span className={cn(
-                'text-xs font-medium',
-                consentimientosVigentes === consentimientosTotal ? 'text-green-600' : 'text-amber-600'
-              )}>
-                {consentimientosVigentes}/{consentimientosTotal}
-              </span>
-            </div>
-            <div className="space-y-1">
-              {todosAlDia && (
-                <div className="flex items-center gap-1.5 text-xs text-green-600">
-                  <CheckCircle className="h-3.5 w-3.5" />
-                  Consentimientos al día
-                </div>
-              )}
-              {consentimientos.map((c) => {
-                const esPendiente = tokensPendientes.has(c.documenso_template_token)
-                const urlDoc = urlPorToken[c.documenso_template_token]
-
-                return (
-                  <div
-                    key={c.documenso_template_token}
-                    className={cn(
-                      'flex items-center gap-2 rounded px-1.5 py-1 -mx-1.5',
-                      esPendiente && 'bg-rose-50 border border-rose-200/60'
-                    )}
-                  >
-                    <ConsentimientoIcon item={c} />
-                    <span className={cn(
-                      'text-xs flex-1 truncate',
-                      c.vigente ? 'text-foreground' : 'text-muted-foreground',
-                      esPendiente && 'font-medium'
-                    )}>
-                      {c.template_nombre}
-                      {esPendiente && (
-                        <span className="ml-1 text-rose-500 text-[10px]">· pendiente</span>
-                      )}
-                    </span>
-                    {c.firmado && !c.vigente && (
-                      <span className="text-xs text-amber-500">Vencido</span>
-                    )}
-                    {c.firmado && urlDoc && (
-                      <a
-                        href={urlDoc}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        title="Ver documento firmado"
-                        className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    )}
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Comprobante de asistencia firmado (P21) */}
-        {cita.firma_asistencia_estado === 'firmada' && (
-          <div className="space-y-1.5">
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Asistencia</p>
-            <div className="flex items-center gap-2 rounded px-1.5 py-1 -mx-1.5">
-              <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
-              <span className="text-xs flex-1">Firma de asistencia</span>
-              {cita.firma_asistencia_archivo_url ? (
-                <a
-                  href={cita.firma_asistencia_archivo_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Ver comprobante firmado"
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  <ExternalLink className="h-3 w-3" />
-                </a>
-              ) : (
-                <button
-                  onClick={() => recuperarPdf()}
-                  disabled={recuperandoPdf}
-                  className="text-[10px] text-primary hover:underline disabled:opacity-50"
-                  title="Recuperar PDF firmado"
-                >
-                  {recuperandoPdf ? <Loader2 className="h-3 w-3 animate-spin" /> : 'PDF'}
-                </button>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Mini timeline visitas anteriores */}
         {visitasAnteriores.length > 0 && (
           <div className="space-y-1.5">
@@ -347,6 +208,22 @@ export function PanelPaciente({ paciente, cita, historia }: PanelPacienteProps) 
         )}
       </div>
 
+      {historia && mostrarDatosGenerales && (
+        <Dialog open={datosOpen} onOpenChange={setDatosOpen}>
+          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Datos generales — {paciente.nombre_completo}</DialogTitle>
+            </DialogHeader>
+            <TabDatosGenerales
+              paciente={paciente}
+              historia={historia}
+              antecedentes={antecedentes}
+              totalNotas={totalNotas}
+              totalFotos={totalFotos}
+            />
+          </DialogContent>
+        </Dialog>
+      )}
     </>
   )
 }

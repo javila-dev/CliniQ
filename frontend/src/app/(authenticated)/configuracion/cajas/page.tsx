@@ -67,6 +67,7 @@ function CajasConfigContent() {
   return (
     <div className="space-y-8 max-w-4xl mx-auto">
       <PageHeader
+        helpSlug="abrir-y-cerrar-la-caja"
         title="Cajas y categorías"
         description="Configura la caja física de cada sede y el catálogo de categorías de gasto."
         action={

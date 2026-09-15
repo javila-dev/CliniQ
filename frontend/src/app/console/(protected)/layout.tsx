@@ -2,9 +2,10 @@
 
 import { useEffect } from 'react'
 import Link from 'next/link'
+import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  ShieldCheck, Building2, CreditCard, PersonStanding, Layers, LifeBuoy, Users, LogOut,
+  Building2, CreditCard, PersonStanding, LifeBuoy, Users, LogOut,
 } from 'lucide-react'
 
 import { canAccess, defaultRoute, isSuperAdmin } from '@/lib/permissions'
@@ -50,12 +51,11 @@ function ConsoleGuard({ children }: { children: React.ReactNode }) {
 }
 
 const NAV = [
-  { href: '/console/clinicas',      label: 'Clínicas',      icon: Building2 },
-  { href: '/console/planes',        label: 'Planes',         icon: CreditCard },
-  { href: '/console/diagramas',     label: 'Diagramas',      icon: PersonStanding },
-  { href: '/console/grupos-zonas',  label: 'Grupos zonas',   icon: Layers },
-  { href: '/console/usuarios',      label: 'Usuarios',       icon: Users },
-  { href: '/console/plataforma',    label: 'Plataforma',     icon: LifeBuoy },
+  { href: '/console/clinicas',      label: 'Clínicas',        icon: Building2 },
+  { href: '/console/planes',        label: 'Planes',          icon: CreditCard },
+  { href: '/console/diagramas',     label: 'Diagramas y zonas', icon: PersonStanding },
+  { href: '/console/usuarios',      label: 'Usuarios',        icon: Users },
+  { href: '/console/ayuda',         label: 'Centro de ayuda', icon: LifeBuoy },
 ]
 
 function ConsoleTopBar() {
@@ -72,11 +72,11 @@ function ConsoleTopBar() {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#0b0d12]">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
-        <Link href="/console/clinicas" className="flex shrink-0 items-center gap-2">
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-800 ring-1 ring-white/10">
-            <ShieldCheck className="h-3.5 w-3.5 text-slate-300" />
-          </div>
-          <span className="text-sm font-semibold text-slate-100">Console</span>
+        <Link href="/console/clinicas" className="flex shrink-0 items-center gap-2.5">
+          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={92} height={30} className="object-contain brightness-110" />
+          <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
+            Console
+          </span>
         </Link>
 
         <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">

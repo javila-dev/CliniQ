@@ -144,6 +144,7 @@ export default function PlantillasAsistenciaPage() {
   return (
     <div className="space-y-6">
       <PageHeader
+        helpSlug="firma-del-registro-de-asistencia"
         title="Plantillas de asistencia"
         description="Templates de Documenso para solicitar firma electrónica de asistencia durante la atención."
       />

@@ -151,6 +151,7 @@ export default function ProcedimientoDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <PageHeader
+        helpSlug="configurar-un-procedimiento"
         title={servicio.nombre}
         backHref="/configuracion/procedimientos"
         description={

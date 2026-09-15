@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import type { Sede, DiaSemana, HorarioSede } from '@/types/clinicas'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 
 // ─── constantes ──────────────────────────────────────────────
 
@@ -385,7 +386,10 @@ export default function SedesPage() {
           <Link href="/configuracion" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2">
             <ArrowLeft className="h-3.5 w-3.5" />Volver
           </Link>
-          <h1 className="text-xl font-bold">Sedes</h1>
+          <div className="flex items-center gap-1.5">
+            <h1 className="text-xl font-bold">Sedes</h1>
+            <HelpButton slug="sedes-horarios-y-turnos" />
+          </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isLoading ? 'Cargando…' : `${data?.count ?? 0} sede${(data?.count ?? 0) !== 1 ? 's' : ''} registradas`}
           </p>

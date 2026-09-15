@@ -19,6 +19,7 @@ import { BloqueosPanel } from '@/components/agenda/BloqueosPanel'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
+import { HelpButton } from '@/components/ayuda/HelpButton'
 import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG } from '@/lib/constants'
 import type { Cita, EstadoCita, BloqueoAgenda } from '@/types/agenda'
@@ -883,6 +884,7 @@ function AgendaContent() {
 
           {/* Actions */}
           <div className="flex items-center gap-2 ml-auto shrink-0">
+            <HelpButton slug="agendar-una-cita" />
             {registroUrl && (
               <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
                 <PopoverTrigger asChild>

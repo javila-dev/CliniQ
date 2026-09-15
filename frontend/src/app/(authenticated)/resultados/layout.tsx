@@ -1,5 +1,7 @@
 'use client'
 
+import { usePathname } from 'next/navigation'
+
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FinanzasTabs } from '@/components/finanzas/FinanzasTabs'
@@ -29,12 +31,24 @@ function SedeBadges() {
   )
 }
 
+// Cada pestaña de finanzas tiene su propio artículo de ayuda.
+function helpSlugPara(pathname: string | null): string {
+  if (pathname?.startsWith('/resultados/caja')) return 'abrir-y-cerrar-la-caja'
+  if (pathname?.startsWith('/resultados/egresos')) return 'registrar-un-gasto-o-egreso'
+  return 'resultados-del-periodo'
+}
+
 export default function ResultadosLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
   return (
     <RoleGuard check={canAccess.finanzas}>
       <ResultadosProvider>
         <div className="space-y-4">
-          <PageHeader title="Resultados" description="Cómo va el negocio: ingresos, egresos y margen del periodo" />
+          <PageHeader
+            title="Resultados"
+            description="Cómo va el negocio: ingresos, egresos y margen del periodo"
+            helpSlug={helpSlugPara(pathname)}
+          />
           <FinanzasTabs />
           <SedeBadges />
           {children}

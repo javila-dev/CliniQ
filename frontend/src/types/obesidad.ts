@@ -67,7 +67,7 @@ export interface MedicionAntropometrica {
   cita: string | null
   tomado_por: string
   fecha: string
-  peso_kg: string
+  peso_kg: string | null
   talla_cm: string | null
   imc: string | null
   cintura_cm: string | null
@@ -103,7 +103,7 @@ export interface MedicionAntropometricaInput {
   nota?: string | null
   cita?: string | null
   fecha?: string
-  peso_kg: number
+  peso_kg: number | null
   talla_cm?: number | null
   cintura_cm?: number | null
   cadera_cm?: number | null

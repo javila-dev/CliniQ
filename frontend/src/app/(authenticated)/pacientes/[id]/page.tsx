@@ -26,7 +26,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
 import { formatDate, cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/utils/media'
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import type { EstadoCobro } from '@/types/cobros'
 import type { Cita } from '@/types/agenda'
 
@@ -174,7 +175,11 @@ export default function PacienteDetailPage({ params }: Props) {
   const { id } = use(params)
   const [activeModal, setActiveModal] = useState<ModalType>(null)
   const [showEnrollment, setShowEnrollment] = useState(false)
+  const [showFotoControl, setShowFotoControl] = useState(false)
   const qc = useQueryClient()
+  const user = useAuthStore((s) => s.user)
+  const canCambiarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_CAMBIAR)
+  const canEliminarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_ELIMINAR)
 
   const { data: p, isLoading, isError, refetch } = useQuery({
     queryKey: ['pacientes', id],
@@ -218,6 +223,7 @@ export default function PacienteDetailPage({ params }: Props) {
   if (isError || !p) return <ErrorState onRetry={refetch} />
 
   const initials = `${p.nombres.charAt(0)}${p.apellidos.charAt(0)}`.toUpperCase()
+  const fotoControlUrl = resolveMediaUrl(p.foto_control_url ?? null)
   const edad = p.edad ?? (p.fecha_nacimiento ? calcularEdad(p.fecha_nacimiento) : null)
   const direccionCompleta = [p.direccion, p.barrio, p.ciudad].filter(Boolean).join(', ')
 
@@ -232,23 +238,26 @@ export default function PacienteDetailPage({ params }: Props) {
       {/* ── Encabezado ──────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-center gap-4 min-w-0">
-          <div className="relative shrink-0">
-            <div className="h-14 w-14 rounded-full bg-rose-100 text-rose-600 font-bold flex items-center justify-center text-xl select-none">
+          {p.tiene_foto_control !== null ? (
+            <button
+              type="button"
+              onClick={() => setShowFotoControl(true)}
+              title={fotoControlUrl ? 'Ver foto de control' : 'Sin foto de control'}
+              className="h-14 w-14 rounded-full overflow-hidden shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2"
+            >
+              {fotoControlUrl ? (
+                <img src={fotoControlUrl} alt="Foto de control" className="h-full w-full object-cover" />
+              ) : (
+                <div className="h-full w-full bg-rose-100 text-rose-600 font-bold flex items-center justify-center text-xl select-none">
+                  {initials}
+                </div>
+              )}
+            </button>
+          ) : (
+            <div className="h-14 w-14 rounded-full bg-rose-100 text-rose-600 font-bold flex items-center justify-center text-xl select-none shrink-0">
               {initials}
             </div>
-            {p.tiene_foto_control && (
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="absolute -bottom-0.5 -right-0.5 h-5 w-5 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center cursor-default">
-                      <Camera className="h-2.5 w-2.5 text-white" strokeWidth={2.5} />
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent side="bottom">Foto de control registrada</TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            )}
-          </div>
+          )}
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold tracking-tight truncate">{p.nombre_completo}</h1>
@@ -308,6 +317,22 @@ export default function PacienteDetailPage({ params }: Props) {
           </DialogContent>
         </Dialog>
       )}
+
+      <Dialog open={showFotoControl} onOpenChange={setShowFotoControl}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Foto de control</DialogTitle>
+          </DialogHeader>
+          <FotoControlModal
+            pacienteId={id}
+            fotoControlUrl={fotoControlUrl}
+            canCambiar={canCambiarFotoControl}
+            canEliminar={canEliminarFotoControl}
+            onClose={() => setShowFotoControl(false)}
+            onUpdated={() => qc.invalidateQueries({ queryKey: ['pacientes', id] })}
+          />
+        </DialogContent>
+      </Dialog>
 
       {/* ── Contenido ─────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -849,7 +874,7 @@ function VerificacionFacialSeccion({
   )
 }
 
-function EnrollmentFotoDialog({ pacienteId, onDone }: { pacienteId: string; onDone: () => void }) {
+function EnrollmentFotoDialog({ pacienteId, onDone, onCancelar }: { pacienteId: string; onDone: () => void; onCancelar?: () => void }) {
   const [state, setState] = useState<'camara' | 'uploading' | 'ok' | 'error'>('camara')
   const [enrollErrors, setEnrollErrors]   = useState<string[]>([])
   const [enrollWarnings, setEnrollWarnings] = useState<string[]>([])
@@ -895,7 +920,7 @@ function EnrollmentFotoDialog({ pacienteId, onDone }: { pacienteId: string; onDo
       {state === 'camara' && (
         <CamaraCaptura
           onCaptura={subir}
-          onCancelar={onDone}
+          onCancelar={onCancelar ?? onDone}
           labelCapturar="Tomar foto de control"
         />
       )}
@@ -945,6 +970,104 @@ function EnrollmentFotoDialog({ pacienteId, onDone }: { pacienteId: string; onDo
             <X className="h-3.5 w-3.5" />Cancelar
           </Button>
         </div>
+      )}
+    </div>
+  )
+}
+
+function FotoControlModal({
+  pacienteId, fotoControlUrl, canCambiar, canEliminar, onClose, onUpdated,
+}: {
+  pacienteId: string
+  fotoControlUrl: string | null
+  canCambiar: boolean
+  canEliminar: boolean
+  onClose: () => void
+  onUpdated: () => void
+}) {
+  const [modo, setModo] = useState<'ver' | 'capturar'>('ver')
+  const [confirmandoEliminar, setConfirmandoEliminar] = useState(false)
+
+  const eliminarMutation = useMutation({
+    mutationFn: () => pacientesApi.eliminarFotoControl(pacienteId),
+    onSuccess: () => {
+      onUpdated()
+      onClose()
+    },
+  })
+
+  if (modo === 'capturar') {
+    return (
+      <EnrollmentFotoDialog
+        pacienteId={pacienteId}
+        onCancelar={() => setModo('ver')}
+        onDone={() => {
+          onUpdated()
+          onClose()
+        }}
+      />
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-col items-center gap-3">
+        <div className="h-56 w-56 rounded-xl overflow-hidden border bg-muted">
+          {fotoControlUrl ? (
+            <img src={fotoControlUrl} alt="Foto de control" className="h-full w-full object-cover" />
+          ) : (
+            <div className="h-full w-full flex items-center justify-center">
+              <Camera className="h-10 w-10 text-muted-foreground/30" />
+            </div>
+          )}
+        </div>
+        {!fotoControlUrl && (
+          <p className="text-sm text-muted-foreground text-center">Este paciente no tiene foto de control.</p>
+        )}
+      </div>
+
+      {eliminarMutation.isError && (
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+          <p className="text-sm text-destructive">No se pudo eliminar la foto. Intenta de nuevo.</p>
+        </div>
+      )}
+
+      {confirmandoEliminar ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-3 space-y-2">
+          <p className="text-sm text-red-700">
+            ¿Eliminar la foto de control? El paciente quedará sin verificación facial hasta registrar una nueva.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="outline" onClick={() => setConfirmandoEliminar(false)}>
+              Cancelar
+            </Button>
+            <Button
+              size="sm"
+              variant="destructive"
+              disabled={eliminarMutation.isPending}
+              onClick={() => eliminarMutation.mutate()}
+            >
+              {eliminarMutation.isPending ? 'Eliminando…' : 'Sí, eliminar'}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        (canCambiar || (canEliminar && fotoControlUrl)) && (
+          <div className="flex gap-2 justify-center flex-wrap">
+            {canCambiar && (
+              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setModo('capturar')}>
+                <RefreshCw className="h-3.5 w-3.5" />
+                {fotoControlUrl ? 'Retomar foto' : 'Tomar foto'}
+              </Button>
+            )}
+            {canEliminar && fotoControlUrl && (
+              <Button size="sm" variant="destructive" className="gap-1.5" onClick={() => setConfirmandoEliminar(true)}>
+                <X className="h-3.5 w-3.5" />
+                Eliminar foto
+              </Button>
+            )}
+          </div>
+        )
       )}
     </div>
   )

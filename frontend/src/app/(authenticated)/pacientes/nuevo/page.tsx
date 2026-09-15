@@ -72,6 +72,7 @@ export default function NuevoPacientePage() {
   return (
     <div>
       <PageHeader
+        helpSlug="registrar-un-paciente-nuevo"
         title="Nuevo paciente"
         description="Completa los datos para registrar al paciente"
         action={

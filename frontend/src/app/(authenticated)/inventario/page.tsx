@@ -1,145 +1,48 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
 import {
   Plus, Search, AlertTriangle, Package, ChevronLeft, ChevronRight,
-  BarChart2, TrendingDown, Layers,
+  TrendingDown, Layers,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { inventarioApi } from '@/lib/api/inventario'
+import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
 import { Label } from '@/components/ui/label'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Card, CardContent } from '@/components/ui/card'
 import { useDebounce } from '@/hooks/useDebounce'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess } from '@/lib/permissions'
+import { PageHeader } from '@/components/shared/PageHeader'
+import { LoadingState } from '@/components/shared/LoadingState'
+import { canAccess, hasPermission, PERM } from '@/lib/permissions'
+import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
+import { UNIDAD_LABEL } from '@/lib/inventarioLabels'
 import type { Insumo } from '@/types/inventario'
 
 // ─── constants ───────────────────────────────────────────────
 
-const UNIDAD_LABEL: Record<string, string> = {
-  unidad: 'Unidad', ml: 'ml', gr: 'gr', cm: 'cm', par: 'Par', caja: 'Caja',
-}
-
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
-
-// ─── Ajuste stock dialog ──────────────────────────────────────
-
-const ajusteSchema = z.object({
-  cantidad_nueva: z.string().min(1, 'Requerido'),
-  motivo: z.string().min(3, 'Describe el motivo'),
-})
-
-function AjusteStockSheet({
-  insumo,
-  open,
-  onClose,
-}: {
-  insumo: Insumo | null
-  open: boolean
-  onClose: () => void
-}) {
-  const qc = useQueryClient()
-  const { register, handleSubmit, reset, formState: { errors } } = useForm({
-    resolver: zodResolver(ajusteSchema),
-  })
-
-  const mutation = useMutation({
-    mutationFn: (data: { cantidad_nueva: string; motivo: string }) =>
-      inventarioApi.ajustarStock(insumo!.id, data),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['insumos'] })
-      qc.invalidateQueries({ queryKey: ['alertas-stock'] })
-      reset()
-      onClose()
-    },
-  })
-
-  if (!insumo) return null
-
-  return (
-    <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
-      <SheetContent className="w-full sm:max-w-md p-6">
-        <SheetHeader>
-          <SheetTitle>Ajustar stock — {insumo.nombre}</SheetTitle>
-        </SheetHeader>
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="mt-6 space-y-4">
-          <div className="rounded-lg bg-muted/40 p-3 text-sm space-y-1">
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Stock actual</span>
-              <span className="font-semibold">{insumo.stock_actual} {UNIDAD_LABEL[insumo.unidad_medida]}</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-muted-foreground">Stock mínimo</span>
-              <span>{insumo.stock_minimo} {UNIDAD_LABEL[insumo.unidad_medida]}</span>
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="cantidad_nueva">Nueva cantidad</Label>
-            <Input
-              id="cantidad_nueva"
-              type="number"
-              step="0.001"
-              min="0"
-              placeholder="0.000"
-              {...register('cantidad_nueva')}
-              className={cn(errors.cantidad_nueva && 'border-red-400')}
-            />
-            {errors.cantidad_nueva && (
-              <p className="text-xs text-red-500">{errors.cantidad_nueva.message}</p>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label htmlFor="motivo">Motivo del ajuste</Label>
-            <Input
-              id="motivo"
-              placeholder="Ej. Conteo físico de cierre"
-              {...register('motivo')}
-              className={cn(errors.motivo && 'border-red-400')}
-            />
-            {errors.motivo && (
-              <p className="text-xs text-red-500">{errors.motivo.message}</p>
-            )}
-          </div>
-
-          {mutation.isError && (
-            <p className="text-sm text-red-500">Error al ajustar stock. Intenta de nuevo.</p>
-          )}
-
-          <div className="flex gap-2 pt-2">
-            <Button type="button" variant="outline" className="flex-1" onClick={onClose}>
-              Cancelar
-            </Button>
-            <Button type="submit" className="flex-1" disabled={mutation.isPending}>
-              {mutation.isPending ? 'Guardando…' : 'Guardar ajuste'}
-            </Button>
-          </div>
-        </form>
-      </SheetContent>
-    </Sheet>
-  )
-}
 
 // ─── Nuevo insumo sheet ───────────────────────────────────────
 
 const insumoSchema = z.object({
   nombre: z.string().min(2, 'Mínimo 2 caracteres'),
-  categoria: z.string().min(1, 'Selecciona categoría'),
   es_consumo_interno: z.boolean(),
   es_venta_retail: z.boolean(),
   unidad_medida: z.enum(['unidad', 'ml', 'gr', 'cm', 'par', 'caja']),
   stock_minimo: z.string().optional(),
-  costo_promedio: z.string().optional(),
   precio_venta: z.string().optional(),
+  permite_stock_negativo: z.boolean(),
 }).refine(d => d.es_consumo_interno || d.es_venta_retail, {
   message: 'Selecciona al menos un uso',
   path: ['es_consumo_interno'],
@@ -153,22 +56,27 @@ function NuevoInsumoSheet({
   onClose: () => void
 }) {
   const qc = useQueryClient()
-  const { data: catData } = useQuery({
-    queryKey: ['categorias-insumo'],
-    queryFn: () => inventarioApi.listCategorias(),
-    enabled: open,
-  })
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(insumoSchema),
-    defaultValues: { es_consumo_interno: true, es_venta_retail: false, unidad_medida: 'unidad' as const },
+    defaultValues: {
+      es_consumo_interno: true,
+      es_venta_retail: false,
+      unidad_medida: 'unidad' as const,
+      permite_stock_negativo: false,
+    },
   })
 
   const esConsumo = watch('es_consumo_interno')
   const esRetail = watch('es_venta_retail')
 
   const mutation = useMutation({
-    mutationFn: inventarioApi.createInsumo,
+    mutationFn: (data: z.infer<typeof insumoSchema>) =>
+      inventarioApi.createInsumo({
+        ...data,
+        stock_minimo: data.stock_minimo || undefined,
+        precio_venta: data.precio_venta || undefined,
+      } as Parameters<typeof inventarioApi.createInsumo>[0]),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['insumos'] })
       reset()
@@ -182,26 +90,12 @@ function NuevoInsumoSheet({
         <SheetHeader>
           <SheetTitle>Nuevo insumo</SheetTitle>
         </SheetHeader>
-        <form onSubmit={handleSubmit((d) => mutation.mutate(d as Parameters<typeof inventarioApi.createInsumo>[0]))} className="mt-6 space-y-4">
+        <form onSubmit={handleSubmit((d) => mutation.mutate(d))} className="mt-6 space-y-4">
 
           <div className="space-y-1.5">
             <Label>Nombre *</Label>
             <Input placeholder="Nombre del insumo" {...register('nombre')} className={cn(errors.nombre && 'border-red-400')} />
             {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Categoría *</Label>
-            <select {...register('categoria')} className={cn(
-              'flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm',
-              errors.categoria && 'border-red-400'
-            )}>
-              <option value="">Seleccionar…</option>
-              {catData?.results.map((c) => (
-                <option key={c.id} value={c.id}>{c.nombre}</option>
-              ))}
-            </select>
-            {errors.categoria && <p className="text-xs text-red-500">{errors.categoria.message}</p>}
           </div>
 
           <div className="space-y-1.5">
@@ -240,16 +134,25 @@ function NuevoInsumoSheet({
             </select>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label>Stock mínimo</Label>
-              <Input type="number" step="0.001" min="0" placeholder="0" {...register('stock_minimo')} />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Costo promedio</Label>
-              <Input type="number" step="0.01" min="0" placeholder="0.00" {...register('costo_promedio')} />
-            </div>
+          <div className="space-y-1.5">
+            <Label>Stock mínimo</Label>
+            <Input type="number" step="0.001" min="0" placeholder="0" {...register('stock_minimo')} />
+            <p className="text-[11px] text-muted-foreground">Umbral para la alerta de stock bajo, compartido entre sedes.</p>
           </div>
+
+          <label className="flex items-start gap-2.5 cursor-pointer rounded-md border p-3">
+            <input
+              type="checkbox"
+              {...register('permite_stock_negativo')}
+              className="h-4 w-4 mt-0.5 rounded border-input accent-rose-500"
+            />
+            <span>
+              <span className="text-sm block">Permitir stock negativo</span>
+              <span className="text-[11px] text-muted-foreground">
+                Deja registrar consumo o venta de este insumo aunque el stock disponible no alcance.
+              </span>
+            </span>
+          </label>
 
           {esRetail && (
             <div className="space-y-1.5">
@@ -278,78 +181,79 @@ function NuevoInsumoSheet({
 
 // ─── Insumo row ───────────────────────────────────────────────
 
-function InsumoRow({ insumo, onAjustar }: { insumo: Insumo; onAjustar: (i: Insumo) => void }) {
+function usoLabel(insumo: Insumo): string {
+  return [
+    insumo.es_consumo_interno && 'Consumo interno',
+    insumo.es_venta_retail && 'Venta retail',
+  ].filter(Boolean).join(' & ')
+}
+
+// El backend serializa cantidades con 3 decimales fijos ("5.000"); mostrarlo
+// tal cual se confunde con miles ("5.000" ~ "5000"). Se recorta a lo necesario.
+function formatCantidad(value: string): string {
+  const n = Number(value)
+  return isNaN(n) ? value : n.toLocaleString('es-CO', { maximumFractionDigits: 2 })
+}
+
+function InsumoRow({ insumo, sede }: { insumo: Insumo; sede: string }) {
   const stockBajo = insumo.stock_bajo
+  const router = useRouter()
 
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors">
-      <div className={cn(
-        'flex items-center justify-center h-9 w-9 rounded-lg shrink-0',
-        stockBajo ? 'bg-red-100' : 'bg-emerald-50'
-      )}>
-        {stockBajo
-          ? <AlertTriangle className="h-4 w-4 text-red-500" />
-          : <Package className="h-4 w-4 text-emerald-600" />}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-semibold text-foreground truncate">{insumo.nombre}</p>
-        <p className="text-xs text-muted-foreground">
-          {insumo.categoria_nombre} · {[
-            insumo.es_consumo_interno && 'Consumo interno',
-            insumo.es_venta_retail && 'Venta retail',
-          ].filter(Boolean).join(' & ')}
-        </p>
-      </div>
-
-      <div className="hidden sm:block w-32 shrink-0">
-        <p className={cn('text-sm font-bold', stockBajo ? 'text-red-600' : 'text-foreground')}>
-          {insumo.stock_actual}
-        </p>
-        <p className="text-xs text-muted-foreground">mín: {insumo.stock_minimo} {UNIDAD_LABEL[insumo.unidad_medida]}</p>
-      </div>
-
-      <div className="hidden md:block w-32 shrink-0">
-        <p className="text-sm text-muted-foreground">{COP.format(Number(insumo.costo_promedio))}</p>
-        <p className="text-xs text-muted-foreground">costo prom.</p>
-      </div>
-
-      <div className="hidden lg:block w-32 shrink-0">
-        <p className="text-sm text-muted-foreground">{COP.format(Number(insumo.valor_stock))}</p>
-        <p className="text-xs text-muted-foreground">valor en stock</p>
-      </div>
-
-      {stockBajo && (
-        <span className="hidden sm:inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600 ring-1 ring-red-200 shrink-0">
-          <TrendingDown className="h-3 w-3" />
-          Stock bajo
-        </span>
-      )}
-
-      <Button
-        variant="outline"
-        size="sm"
-        className="shrink-0 text-xs h-7"
-        onClick={() => onAjustar(insumo)}
-      >
-        Ajustar
-      </Button>
-    </div>
+    <tr
+      onClick={() => router.push(`/inventario/${insumo.id}?sede=${sede}`)}
+      className="border-b border-gray-100 last:border-0 hover:bg-muted/30 cursor-pointer"
+    >
+      <td className="px-5 py-3 font-medium truncate">{insumo.nombre}</td>
+      <td className="px-5 py-3 hidden md:table-cell text-muted-foreground">{usoLabel(insumo)}</td>
+      <td className={cn('px-5 py-3 text-right whitespace-nowrap font-semibold tabular-nums', stockBajo ? 'text-red-600' : 'text-foreground')}>
+        {formatCantidad(insumo.stock_actual)}
+      </td>
+      <td className="px-5 py-3 hidden sm:table-cell text-right text-muted-foreground whitespace-nowrap tabular-nums">
+        {formatCantidad(insumo.stock_minimo)}
+      </td>
+      <td className="px-5 py-3 hidden md:table-cell text-muted-foreground">{UNIDAD_LABEL[insumo.unidad_medida]}</td>
+      <td className="px-5 py-3 hidden sm:table-cell text-right text-muted-foreground whitespace-nowrap tabular-nums">{COP.format(Number(insumo.costo_promedio))}</td>
+      <td className="px-5 py-3 hidden lg:table-cell text-right text-muted-foreground whitespace-nowrap tabular-nums">{COP.format(Number(insumo.valor_stock))}</td>
+      <td className="px-5 py-3">
+        {stockBajo && (
+          <span className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium bg-red-50 text-red-600 ring-1 ring-red-200 whitespace-nowrap">
+            <TrendingDown className="h-3 w-3" />
+            Stock bajo
+          </span>
+        )}
+      </td>
+    </tr>
   )
 }
 
-function SkeletonRow() {
+// ─── Resumen card ───────────────────────────────────────────────
+
+function ResumenCard({
+  icon: Icon,
+  label,
+  value,
+  color,
+}: {
+  icon: React.ElementType
+  label: string
+  value: React.ReactNode
+  color: string
+}) {
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 animate-pulse">
-      <div className="h-9 w-9 rounded-lg bg-gray-100 shrink-0" />
-      <div className="flex-1 space-y-1.5">
-        <div className="h-3.5 w-40 rounded bg-gray-100" />
-        <div className="h-3 w-28 rounded bg-gray-100" />
-      </div>
-      <div className="hidden sm:block h-8 w-32 rounded bg-gray-100" />
-      <div className="hidden md:block h-8 w-32 rounded bg-gray-100" />
-      <div className="h-7 w-16 rounded bg-gray-100" />
-    </div>
+    <Card>
+      <CardContent className="pt-5">
+        <div className="flex items-start gap-3">
+          <div className={cn('rounded-lg p-2.5', color)}>
+            <Icon className="h-4 w-4 text-white" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">{label}</p>
+            <p className="text-xl font-bold tabular-nums mt-0.5">{value}</p>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -386,18 +290,33 @@ export default function InventarioPage() {
 }
 
 function InventarioContent() {
+  const { user } = useAuthStore()
+  const puedeGestionarInsumos = hasPermission(user, PERM.INVENTARIO_INSUMOS_GESTIONAR)
+
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [filtroTipo, setFiltroTipo] = useState<'todos' | 'consumo_interno' | 'venta_retail'>('todos')
   const [tab, setTab] = useState<'insumos' | 'alertas'>('insumos')
-  const [ajustarInsumo, setAjustarInsumo] = useState<Insumo | null>(null)
   const [nuevoOpen, setNuevoOpen] = useState(false)
+  const [sede, setSede] = useState<string>('')
   const debouncedSearch = useDebounce(search, 400)
+
+  const { data: sedesData } = useQuery({
+    queryKey: ['sedes-select'],
+    queryFn: () => clinicasApi.sedes.list({ activa: true }),
+  })
+  const sedes = sedesData?.results ?? []
+
+  // Primera sede activa por defecto, una sola vez que carguen.
+  useEffect(() => {
+    if (!sede && sedes.length > 0) setSede(sedes[0].id)
+  }, [sede, sedes])
 
   const params = {
     search: debouncedSearch || undefined,
     es_consumo_interno: filtroTipo === 'consumo_interno' ? true : undefined,
     es_venta_retail: filtroTipo === 'venta_retail' ? true : undefined,
+    sede: sede || undefined,
     page,
     page_size: 25,
   }
@@ -405,11 +324,13 @@ function InventarioContent() {
   const { data, isLoading } = useQuery({
     queryKey: ['insumos', params],
     queryFn: () => inventarioApi.listInsumos(params),
+    enabled: !!sede,
   })
 
   const { data: alertas } = useQuery({
-    queryKey: ['alertas-stock'],
-    queryFn: () => inventarioApi.alertasStock(),
+    queryKey: ['alertas-stock', sede],
+    queryFn: () => inventarioApi.alertasStock(sede),
+    enabled: !!sede,
   })
 
   const alertasCount = alertas?.length ?? 0
@@ -418,43 +339,29 @@ function InventarioContent() {
   return (
     <div className="space-y-5">
 
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold text-foreground">Inventario</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {isLoading ? 'Cargando…' : `${total} insumo${total !== 1 ? 's' : ''} registrados`}
-          </p>
-        </div>
-        <Button onClick={() => setNuevoOpen(true)}>
-          <Plus className="h-4 w-4 mr-1.5" />
-          Nuevo insumo
-        </Button>
-      </div>
+      <PageHeader
+        title="Inventario"
+        description="Gestiona el catálogo de insumos y el stock de cada sede."
+        helpSlug="inventario-de-insumos"
+        action={
+          puedeGestionarInsumos ? (
+            <Button onClick={() => setNuevoOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              Nuevo insumo
+            </Button>
+          ) : undefined
+        }
+      />
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        {[
-          { icon: Layers, label: 'Total insumos', value: total, color: 'text-foreground', bg: 'bg-gray-50' },
-          {
-            icon: AlertTriangle,
-            label: 'Stock bajo',
-            value: alertasCount,
-            color: alertasCount > 0 ? 'text-red-600' : 'text-green-600',
-            bg: alertasCount > 0 ? 'bg-red-50' : 'bg-green-50',
-          },
-          { icon: BarChart2, label: 'Categorías', value: '—', color: 'text-blue-600', bg: 'bg-blue-50' },
-        ].map(({ icon: Icon, label, value, color, bg }) => (
-          <div key={label} className={cn('rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3', bg)}>
-            <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-              <Icon className={cn('h-4 w-4', color)} />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">{label}</p>
-              <p className={cn('text-base font-bold', color)}>{value}</p>
-            </div>
-          </div>
-        ))}
+      <div className="grid grid-cols-2 gap-3">
+        <ResumenCard icon={Layers} label="Total insumos" value={isLoading ? '—' : total} color="bg-slate-500" />
+        <ResumenCard
+          icon={AlertTriangle}
+          label="Stock bajo"
+          value={alertasCount}
+          color={alertasCount > 0 ? 'bg-red-500' : 'bg-emerald-500'}
+        />
       </div>
 
       {/* Tabs */}
@@ -493,63 +400,91 @@ function InventarioContent() {
                 <SelectItem value="venta_retail">Venta retail</SelectItem>
               </SelectContent>
             </Select>
+            {sedes.length > 1 && (
+              <Select value={sede} onValueChange={(v) => { setSede(v); setPage(1) }}>
+                <SelectTrigger className="w-44 bg-white"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {sedes.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
 
           {/* Table */}
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            <div className="flex items-center gap-4 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
-              <div className="w-9 shrink-0" />
-              <div className="flex-1"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Insumo</span></div>
-              <div className="hidden sm:block w-32 shrink-0"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Stock</span></div>
-              <div className="hidden md:block w-32 shrink-0"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Costo prom.</span></div>
-              <div className="hidden lg:block w-32 shrink-0"><span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Valor stock</span></div>
-              <div className="hidden sm:block w-24 shrink-0" />
-              <div className="w-16 shrink-0" />
+          {isLoading || !sede ? (
+            <LoadingState rows={6} />
+          ) : data?.results.length === 0 ? (
+            <Card><CardContent className="py-16 text-center">
+              <Package className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm font-semibold">Sin insumos</p>
+              {puedeGestionarInsumos && (
+                <p className="text-sm text-muted-foreground mt-1">Crea el primer insumo usando el botón de arriba</p>
+              )}
+            </CardContent></Card>
+          ) : (
+            <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/60 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    <th className="text-left px-5 py-2.5">Insumo</th>
+                    <th className="text-left px-5 py-2.5 hidden md:table-cell">Uso</th>
+                    <th className="text-right px-5 py-2.5">Stock</th>
+                    <th className="text-right px-5 py-2.5 hidden sm:table-cell">Stock mín.</th>
+                    <th className="text-left px-5 py-2.5 hidden md:table-cell">Unidad</th>
+                    <th className="text-right px-5 py-2.5 hidden sm:table-cell">Costo prom.</th>
+                    <th className="text-right px-5 py-2.5 hidden lg:table-cell">Valor stock</th>
+                    <th className="text-left px-5 py-2.5">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data?.results.map((i) => (
+                    <InsumoRow key={i.id} insumo={i} sede={sede} />
+                  ))}
+                </tbody>
+              </table>
             </div>
-
-            {isLoading
-              ? Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
-              : data?.results.length === 0
-              ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <Package className="h-10 w-10 text-muted-foreground/30 mb-3" />
-                  <p className="text-sm font-semibold">Sin insumos</p>
-                  <p className="text-sm text-muted-foreground mt-1">Crea el primer insumo usando el botón de arriba</p>
-                </div>
-              )
-              : data?.results.map((i) => (
-                <InsumoRow key={i.id} insumo={i} onAjustar={setAjustarInsumo} />
-              ))
-            }
-          </div>
+          )}
 
           <Pagination page={page} total={total} pageSize={25} onPage={setPage} />
         </TabsContent>
 
         <TabsContent value="alertas" className="mt-4">
-          <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-            {!alertas || alertas.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-16 text-center">
-                <div className="flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mb-3">
-                  <Package className="h-6 w-6 text-green-600" />
-                </div>
-                <p className="text-sm font-semibold text-green-700">Todo en orden</p>
-                <p className="text-sm text-muted-foreground mt-1">Ningún insumo tiene stock bajo</p>
+          {!alertas || alertas.length === 0 ? (
+            <Card><CardContent className="py-16 text-center">
+              <div className="flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mx-auto mb-3">
+                <Package className="h-6 w-6 text-green-600" />
               </div>
-            ) : (
-              alertas.map((i) => (
-                <InsumoRow key={i.id} insumo={i} onAjustar={setAjustarInsumo} />
-              ))
-            )}
-          </div>
+              <p className="text-sm font-semibold text-green-700">Todo en orden</p>
+              <p className="text-sm text-muted-foreground mt-1">Ningún insumo tiene stock bajo</p>
+            </CardContent></Card>
+          ) : (
+            <div className="rounded-xl border bg-white shadow-sm overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-muted/60 text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
+                    <th className="text-left px-5 py-2.5">Insumo</th>
+                    <th className="text-left px-5 py-2.5 hidden md:table-cell">Uso</th>
+                    <th className="text-right px-5 py-2.5">Stock</th>
+                    <th className="text-right px-5 py-2.5 hidden sm:table-cell">Stock mín.</th>
+                    <th className="text-left px-5 py-2.5 hidden md:table-cell">Unidad</th>
+                    <th className="text-right px-5 py-2.5 hidden sm:table-cell">Costo prom.</th>
+                    <th className="text-right px-5 py-2.5 hidden lg:table-cell">Valor stock</th>
+                    <th className="text-left px-5 py-2.5">Estado</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alertas.map((i) => (
+                    <InsumoRow key={i.id} insumo={i} sede={sede} />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
-      <AjusteStockSheet
-        insumo={ajustarInsumo}
-        open={!!ajustarInsumo}
-        onClose={() => setAjustarInsumo(null)}
-      />
       <NuevoInsumoSheet open={nuevoOpen} onClose={() => setNuevoOpen(false)} />
     </div>
   )

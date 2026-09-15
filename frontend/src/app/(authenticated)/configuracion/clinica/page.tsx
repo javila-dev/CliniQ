@@ -37,7 +37,8 @@ const WIZARD_STEPS: {
   icon: React.ElementType
   toggleBloqueado?: boolean
   esAddon?: boolean
-  addonKey?: 'facial_verificacion_habilitada' | 'otp_checkin_habilitado'
+  addonKey?: 'facial_verificacion_habilitada' | 'whatsapp_habilitado'
+  addonLockedCopy?: string
 }[] = [
   {
     key: 'paso_checkin',
@@ -45,7 +46,8 @@ const WIZARD_STEPS: {
     description: 'Confirma la presencia del paciente vía código OTP por WhatsApp o foto.',
     icon: ScanFace,
     esAddon: true,
-    addonKey: 'otp_checkin_habilitado',
+    addonKey: 'whatsapp_habilitado',
+    addonLockedCopy: 'Envía cotizaciones, firmas y recordatorios por WhatsApp, y verifica la llegada del paciente por código. Contáctanos para activarlo.',
   },
   {
     key: 'paso_verificacion_facial',
@@ -591,7 +593,9 @@ export default function ClinicaConfigPage() {
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{step.description}</p>
                           {addonNoHabilitado && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">Contáctanos para habilitar este módulo en tu plan.</p>
+                            <p className="text-[11px] text-gray-400 mt-0.5">
+                              {step.addonLockedCopy ?? 'Contáctanos para habilitar este módulo en tu plan.'}
+                            </p>
                           )}
                         </div>
 
@@ -647,6 +651,34 @@ export default function ClinicaConfigPage() {
                       onCheckedChange={(val) => wizardMutation.mutate({ foto_control_obligatoria: val })}
                     />
                   </div>
+                </div>
+              )}
+
+              {miClinica && (
+                <div className={cn(
+                  'mt-4 rounded-lg border p-4',
+                  miClinica.whatsapp_habilitado ? 'bg-white' : 'bg-violet-50/50 border-violet-100',
+                )}>
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-800">
+                    <Sparkles className="h-3.5 w-3.5 text-violet-500" />
+                    WhatsApp
+                  </div>
+                  {miClinica.whatsapp_habilitado && miClinica.whatsapp_uso ? (
+                    <>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Cotizaciones, firma de documentos, check-in por código y recordatorios enviados por WhatsApp.
+                      </p>
+                      <p className="text-sm mt-2">
+                        <span className="font-semibold text-gray-900">{miClinica.whatsapp_uso.envios_realizados}</span>
+                        <span className="text-muted-foreground"> / {miClinica.whatsapp_uso.sin_limite ? '∞' : miClinica.whatsapp_uso.envios_incluidos} envíos este mes</span>
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs text-violet-700/80 mt-1.5">
+                      Envía cotizaciones, firmas y recordatorios por WhatsApp, y verifica la llegada del
+                      paciente por código. Contáctanos para activarlo en tu plan.
+                    </p>
+                  )}
                 </div>
               )}
             </Section>
@@ -754,6 +786,7 @@ const DEFAULTS: ConfiguracionFacial = {
   max_pitch: 20,
   max_roll: 25,
   min_face_area_pct: 8,
+  min_resolution: 400,
   updated_at: '',
 }
 
@@ -782,6 +815,7 @@ function TabBiometria({
   const [maxPitch,  setMaxPitch]  = useState(src.max_pitch)
   const [maxRoll,   setMaxRoll]   = useState(src.max_roll)
   const [minArea,   setMinArea]   = useState(src.min_face_area_pct)
+  const [minRes,    setMinRes]    = useState(src.min_resolution)
 
   useEffect(() => {
     if (config) {
@@ -796,6 +830,7 @@ function TabBiometria({
       setMaxPitch(config.max_pitch)
       setMaxRoll(config.max_roll)
       setMinArea(config.min_face_area_pct)
+      setMinRes(config.min_resolution)
     }
   }, [config])
 
@@ -814,7 +849,8 @@ function TabBiometria({
     config.max_yaw !== maxYaw ||
     config.max_pitch !== maxPitch ||
     config.max_roll !== maxRoll ||
-    config.min_face_area_pct !== minArea
+    config.min_face_area_pct !== minArea ||
+    config.min_resolution !== minRes
   )
 
   function handleSave() {
@@ -831,6 +867,7 @@ function TabBiometria({
       max_pitch: maxPitch,
       max_roll: maxRoll,
       min_face_area_pct: minArea,
+      min_resolution: minRes,
     })
   }
 
@@ -921,6 +958,7 @@ function TabBiometria({
               <CalidadBarra label="Inclinación arriba/abajo permitida" hint="Cuánto puede estar levantada o agachada la cabeza." value={maxPitch} onChange={setMaxPitch} min={5} max={60} step={5} display={v => `${v}°`} disabled={!isAdmin} />
               <CalidadBarra label="Inclinación lateral permitida" hint="Cuánto puede estar inclinada la cabeza de lado, como ladeándola." value={maxRoll} onChange={setMaxRoll} min={5} max={60} step={5} display={v => `${v}°`} disabled={!isAdmin} />
               <CalidadBarra label="Tamaño mínimo de la cara en la foto" hint="La cara debe ocupar al menos este porcentaje de la imagen. Más alto = el paciente debe acercarse más a la cámara." value={minArea} onChange={setMinArea} min={2} max={40} step={1} display={v => `${v}%`} disabled={!isAdmin} />
+              <CalidadBarra label="Resolución mínima de la foto" hint="Rechaza fotos de muy baja resolución (lado más chico de la imagen, en píxeles)." value={minRes} onChange={setMinRes} min={100} max={1000} step={50} display={v => `${v}px`} disabled={!isAdmin} />
             </div>
           </div>
         )}

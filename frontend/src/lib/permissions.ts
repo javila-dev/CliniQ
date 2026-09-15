@@ -25,6 +25,8 @@ export const PERM = {
   PACIENTES_CREAR:           'pacientes.crear',
   PACIENTES_EDITAR:          'pacientes.editar',
   PACIENTES_DATOS_SENSIBLES_VER: 'pacientes.datos_sensibles.ver',
+  PACIENTES_FOTO_CONTROL_CAMBIAR: 'pacientes.foto_control.cambiar',
+  PACIENTES_FOTO_CONTROL_ELIMINAR: 'pacientes.foto_control.eliminar',
 
   // Historia clínica
   HISTORIA_VER:              'historia.ver',
@@ -48,12 +50,20 @@ export const PERM = {
   CONSENTIMIENTOS_PLANTILLAS_VER: 'consentimientos.plantillas.ver',
 
   // Inventario
-  INVENTARIO_VER:            'inventario.ver',
-  INVENTARIO_GESTIONAR:      'inventario.gestionar',
+  INVENTARIO_VER:                 'inventario.ver',
+  INVENTARIO_INSUMOS_GESTIONAR:   'inventario.insumos.gestionar',
+  INVENTARIO_CATEGORIAS_GESTIONAR: 'inventario.categorias.gestionar',
+  INVENTARIO_AJUSTAR_STOCK:       'inventario.ajustar_stock',
+  INVENTARIO_KARDEX_VER:          'inventario.kardex.ver',
+  INVENTARIO_CONSUMO_REGISTRAR:   'inventario.consumo.registrar',
+  INVENTARIO_CONSUMO_ELIMINAR:    'inventario.consumo.eliminar',
 
   // Proveedores
-  PROVEEDORES_VER:           'proveedores.ver',
-  PROVEEDORES_GESTIONAR:     'proveedores.gestionar',
+  PROVEEDORES_VER:                'proveedores.ver',
+  PROVEEDORES_GESTIONAR:          'proveedores.gestionar',
+  PROVEEDORES_ORDENES_VER:        'proveedores.ordenes.ver',
+  PROVEEDORES_ORDENES_GESTIONAR:  'proveedores.ordenes.gestionar',
+  PROVEEDORES_ORDENES_RECIBIR:    'proveedores.ordenes.recibir',
 
   // Usuarios / equipo
   USUARIOS_VER:              'usuarios.ver',
@@ -227,6 +237,9 @@ export const canAccess = {
 
   proveedores: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.PROVEEDORES_VER),
+
+  compras: (u: AuthUser | null | undefined) =>
+    hasPermission(u, PERM.PROVEEDORES_ORDENES_VER),
 
   equipo: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.USUARIOS_VER),

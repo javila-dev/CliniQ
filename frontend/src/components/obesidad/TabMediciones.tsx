@@ -12,7 +12,7 @@ import {
   Tooltip,
   ResponsiveContainer,
 } from 'recharts'
-import { Plus, Save, Loader2, Activity, TrendingUp, TrendingDown, Minus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Save, Loader2, Activity, TrendingUp, TrendingDown, Minus, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -134,7 +134,7 @@ interface FieldConfig {
 }
 
 const ALL_FIELDS: FieldConfig[] = [
-  { key: 'peso_kg',                   label: 'Peso',               unit: 'kg',   step: '0.1', min: 1,  max: 500, placeholder: '70.5', required: true },
+  { key: 'peso_kg',                   label: 'Peso',               unit: 'kg',   step: '0.1', min: 1,  max: 500, placeholder: '70.5' },
   { key: 'talla_cm',                  label: 'Talla',              unit: 'cm',   step: '0.1', min: 1,  max: 250, placeholder: '165' },
   { key: 'presion_sistolica',         label: 'P. sistólica',       unit: 'mmHg',              min: 60, max: 300, placeholder: '120' },
   { key: 'presion_diastolica',        label: 'P. diastólica',      unit: 'mmHg',              min: 40, max: 200, placeholder: '80' },
@@ -209,6 +209,12 @@ function compact3(a: string | null, m: string | null, b: string | null): string 
 function compact2(a: string | null, b: string | null): string {
   if (!a && !b) return '—'
   return `${a ?? '—'}/${b ?? '—'}`
+}
+
+function formatFechaTabla(iso: string): string {
+  const d = new Date(iso)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()}`
 }
 
 function DeltaBadge({ delta }: { delta: number | null }) {
@@ -337,7 +343,7 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
 
   const mediciones = data?.results ?? []
 
-  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm<FormValues>({ defaultValues: EMPTY })
+  const { register, handleSubmit, reset, setValue, unregister, formState: { errors } } = useForm<FormValues>({ defaultValues: EMPTY })
   const [activeFields, setActiveFields] = useState<Set<FieldKey>>(new Set(['peso_kg']))
   const [editingId, setEditingId] = useState<string | null>(null)
 
@@ -351,13 +357,7 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
   }
 
   const abrirModal = () => {
-    if (sesionMedicion) {
-      setEditingId(sesionMedicion.id)
-      reset(medicionToForm(sesionMedicion))
-      setActiveFields(medicionActiveFields(sesionMedicion))
-    } else {
-      resetModal()
-    }
+    resetModal()
     setOpen(true)
   }
 
@@ -375,6 +375,7 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
       if (next.has(field.key)) {
         next.delete(field.key)
         setValue(field.key, '')
+        unregister(field.key)
       } else {
         next.add(field.key)
       }
@@ -389,7 +390,7 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
         // Al editar no reasignamos nota/cita: se conserva el vínculo original de la sesión.
         ...(editingId ? {} : { nota: notaId ?? null, cita: citaId ?? null }),
         fecha: values.fecha,
-        peso_kg: parseFloat(values.peso_kg),
+        peso_kg: toNum(values.peso_kg),
         talla_cm: toNum(values.talla_cm),
         presion_sistolica: toInt(values.presion_sistolica),
         presion_diastolica: toInt(values.presion_diastolica),
@@ -428,17 +429,6 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
     },
   })
 
-  const { mutate: eliminar, isPending: isDeleting } = useMutation({
-    mutationFn: (id: string) => obesidadApi.mediciones.remove(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['obesidad-mediciones', pacienteId] })
-      toast({ title: 'Registro eliminado' })
-    },
-    onError: () => {
-      toast({ title: 'Error al eliminar el registro', variant: 'destructive' })
-    },
-  })
-
   const prev = mediciones[1] ?? null
 
   return (
@@ -448,11 +438,11 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
           <h3 className="text-sm font-semibold">Signos vitales y seguimiento</h3>
           <p className="text-xs text-muted-foreground mt-0.5">{mediciones.length} registro{mediciones.length !== 1 ? 's' : ''}</p>
         </div>
-        <Button size="sm" onClick={abrirModal}>
-          {sesionMedicion
-            ? <><Pencil className="h-3.5 w-3.5 mr-1.5" />Cambiar registro</>
-            : <><Plus className="h-3.5 w-3.5 mr-1.5" />Nuevo registro</>}
-        </Button>
+        {!sesionMedicion && (
+          <Button size="sm" onClick={abrirModal}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />Nuevo registro
+          </Button>
+        )}
       </div>
 
       {isLoading ? (
@@ -472,6 +462,7 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
             <table className="w-full text-sm">
               <thead className="bg-muted/50">
                 <tr>
+                  <th className="px-2 py-2 w-px" />
                   <th className="text-left px-3 py-2 text-xs font-medium text-muted-foreground">Fecha</th>
                   <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Peso (kg)</th>
                   <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">IMC</th>
@@ -492,17 +483,32 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
                   <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Grasa visc.</th>
                   <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Agua %</th>
                   <th className="text-right px-3 py-2 text-xs font-medium text-muted-foreground">Δ peso</th>
-                  <th className="px-3 py-2 w-px" />
                 </tr>
               </thead>
               <tbody>
                 {mediciones.map((m, idx) => {
                   const prevM = mediciones[idx + 1] ?? null
-                  const deltaPeso = prevM ? parseFloat(m.peso_kg) - parseFloat(prevM.peso_kg) : null
+                  const deltaPeso = prevM && m.peso_kg != null && prevM.peso_kg != null
+                    ? parseFloat(m.peso_kg) - parseFloat(prevM.peso_kg)
+                    : null
                   return (
                     <tr key={m.id} className="border-t hover:bg-muted/30 transition-colors">
-                      <td className="px-3 py-2 text-xs whitespace-nowrap">{formatDate(m.fecha)}</td>
-                      <td className="px-3 py-2 text-right font-medium">{m.peso_kg}</td>
+                      <td className="px-2 py-2 whitespace-nowrap">
+                        {/* Una atención = una línea de medición: solo se puede modificar
+                            la medición tomada en esta atención, no el historial. */}
+                        {citaId && m.cita === citaId && (
+                          <button
+                            type="button"
+                            onClick={() => abrirEdicion(m)}
+                            className="p-1 rounded text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
+                            title="Editar registro de esta atención"
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-xs whitespace-nowrap">{formatFechaTabla(m.fecha)}</td>
+                      <td className="px-3 py-2 text-right font-medium">{m.peso_kg ?? '—'}</td>
                       <td className="px-3 py-2 text-right">{m.imc ?? '—'}</td>
                       <td className="px-3 py-2 text-right text-xs">
                         {m.presion_sistolica && m.presion_diastolica
@@ -530,29 +536,6 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
                       <td className="px-3 py-2 text-right">{m.agua_corporal_pct ?? '—'}</td>
                       <td className="px-3 py-2 text-right">
                         <DeltaBadge delta={deltaPeso} />
-                      </td>
-                      <td className="px-2 py-2 whitespace-nowrap">
-                        <div className="flex items-center gap-0.5">
-                          <button
-                            type="button"
-                            onClick={() => abrirEdicion(m)}
-                            className="p-1 rounded text-muted-foreground/60 hover:text-foreground hover:bg-muted transition-colors"
-                            title="Editar registro"
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={isDeleting}
-                            onClick={() => {
-                              if (window.confirm('¿Eliminar este registro de seguimiento?')) eliminar(m.id)
-                            }}
-                            className="p-1 rounded text-muted-foreground/60 hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-40"
-                            title="Eliminar registro"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        </div>
                       </td>
                     </tr>
                   )
@@ -604,21 +587,21 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
             <div className="grid grid-cols-2 gap-3">
               {ALL_FIELDS.filter((f) => activeFields.has(f.key)).map((f) => (
                 <div key={f.key} className="space-y-1.5">
-                  <Label>{f.label}{f.unit ? ` (${f.unit})` : ''}{f.required && <span className="text-destructive"> *</span>}</Label>
+                  <Label>{f.label}{f.unit ? ` (${f.unit})` : ''}<span className="text-destructive"> *</span></Label>
                   <Input
                     type="number"
                     step={f.step}
                     min={f.min}
                     max={f.max}
                     placeholder={f.placeholder}
-                    {...register(f.key, f.required ? { required: true } : undefined)}
+                    {...register(f.key, { required: true })}
                   />
-                  {f.required && errors[f.key] && <p className="text-xs text-destructive">Requerido</p>}
+                  {errors[f.key] && <p className="text-xs text-destructive">Requerido</p>}
                 </div>
               ))}
             </div>
 
-            {prev && (
+            {prev && prev.peso_kg != null && (
               <p className="text-xs text-muted-foreground">
                 Último registro: <strong>{prev.peso_kg} kg</strong> ({formatDate(prev.fecha)})
               </p>

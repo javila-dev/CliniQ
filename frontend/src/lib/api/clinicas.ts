@@ -12,6 +12,22 @@ export interface RegistroClinicaRequest {
   telefono?: string
 }
 
+export interface PlanPublico {
+  id: string
+  nombre: string
+  descripcion: string | null
+  precio: string | null
+  max_usuarios: number
+  max_sedes: number
+  precio_usuario_adicional: string | null
+  precio_sede_adicional: string | null
+  facial_verificacion_habilitada: boolean
+  modulo_estetico_habilitado: boolean
+  modulo_obesidad_habilitado: boolean
+  whatsapp_habilitado: boolean
+  whatsapp_envios_incluidos: number  // 0 = sin límite
+}
+
 export const registroPublicoApi = {
   registrarClinica: async (data: RegistroClinicaRequest): Promise<{ mensaje: string; email: string }> => {
     const res = await axios.post(`${BASE_URL}/registro-clinica/`, data)
@@ -20,6 +36,11 @@ export const registroPublicoApi = {
 
   verificarRegistro: async (token: string): Promise<{ ok: boolean; invite_token?: string; error?: string }> => {
     const res = await axios.get(`${BASE_URL}/registro-clinica/verificar/${token}/`)
+    return res.data
+  },
+
+  planesPublicos: async (): Promise<PlanPublico[]> => {
+    const res = await axios.get(`${BASE_URL}/registro-clinica/planes/`)
     return res.data
   },
 }
