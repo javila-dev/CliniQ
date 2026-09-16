@@ -61,6 +61,19 @@ const editSchema = createSchema.omit({ email: true, sede_principal: true }).exte
 type CreateForm = z.infer<typeof createSchema>
 type EditForm = z.infer<typeof editSchema>
 
+// Mapea errores por campo devueltos por el backend (DRF) a los inputs del form
+function applyServerFieldErrors(
+  data: any,
+  setError: (name: any, error: { message: string }) => void,
+  knownFields: string[],
+) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return
+  for (const field of knownFields) {
+    const msg = data[field]
+    if (msg) setError(field, { message: Array.isArray(msg) ? String(msg[0]) : String(msg) })
+  }
+}
+
 
 // ─── Multi-select buscable para especialidades ────────────────
 
@@ -506,6 +519,9 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
       authApi.invitar(variables.email).catch(() => {})
       onOpenChange(false)
     },
+    onError: (err: any) => {
+      applyServerFieldErrors(err?.response?.data, createForm.setError, Object.keys(createSchema.shape))
+    },
   })
 
   const editMut = useMutation({
@@ -522,6 +538,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     },
     onError: (err: any) => {
       console.error('PATCH colaborador error:', err?.response?.data)
+      applyServerFieldErrors(err?.response?.data, editForm.setError, Object.keys(editSchema.shape))
     },
   })
 
@@ -537,6 +554,15 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
 
   const isPending = createMut.isPending || editMut.isPending
   const serverError = (createMut.error || editMut.error) as any
+  // Si el backend devolvió errores por campo (email, etc.) ya se muestran junto al input;
+  // el mensaje genérico de abajo solo aplica cuando no hay un campo conocido que los muestre.
+  const serverErrorData = serverError?.response?.data
+  const knownFormFields = Object.keys(isEdit ? editSchema.shape : createSchema.shape)
+  const hasFieldSpecificError =
+    !!serverErrorData &&
+    typeof serverErrorData === 'object' &&
+    !Array.isArray(serverErrorData) &&
+    Object.keys(serverErrorData).some((k) => knownFormFields.includes(k))
 
   // Shared fields renderer (avoids duplication between create/edit)
   const renderCommonFields = (
@@ -849,11 +875,12 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
             </div>
           )}
 
-          {serverError && (
+          {serverError && !hasFieldSpecificError && (
             <div className="mt-4 rounded-lg bg-destructive/8 border border-destructive/15 px-3.5 py-2.5">
               <p className="text-sm text-destructive">
                 {serverError?.response?.data?.detail ||
                   serverError?.response?.data?.error ||
+                  serverError?.response?.data?.non_field_errors?.[0] ||
                   'Ocurrió un error. Verifica los datos e intenta de nuevo.'}
               </p>
             </div>
