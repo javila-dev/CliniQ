@@ -1,3 +1,4 @@
+import tempfile
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
@@ -120,6 +121,7 @@ class ConsentimientoCreateReuseTests(TestCase):
         self.assertNotEqual(response.json()["id"], str(previo.id))
 
 
+@override_settings(DOCUMENSO_API_URL="https://documenso.test", DOCUMENSO_API_KEY="test-key")
 class ConsentimientoIniciarFirmaTests(TestCase):
     def setUp(self):
         self.client = APIClient()
@@ -441,6 +443,7 @@ class H87H89HistoriaClinicaTests(TestCase):
         self.assertEqual(evolucion.json()["series"][0]["peso_kg"], 62.5)
         self.assertEqual(evolucion.json()["series"][0]["imc"], 22.96)
 
+    @override_settings(DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage", MEDIA_ROOT=tempfile.gettempdir())
     def test_zonas_historial_agrupa_solo_notas_con_anotaciones_activas(self):
         diagrama = DiagramaCorporal.objects.create(
             nombre="Rostro Frontal",

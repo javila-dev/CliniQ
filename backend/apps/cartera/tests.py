@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -89,7 +89,12 @@ class CarteraFlowTests(TestCase):
         self.cotizacion.formas_pago.create(tipo="transferencia", descripcion="Cuota 2", valor="350000.00")
 
     def _crear_cita_payload(self):
-        inicio = timezone.now() + timedelta(days=1)
+        # Fecha fija dentro del horario de la sede (lunes-viernes 08:00-18:00):
+        # "mañana a esta hora" es flaky cerca del fin de semana o fuera de horario.
+        hoy = timezone.localdate()
+        dias_hasta_lunes = (7 - hoy.weekday()) % 7 or 7
+        proximo_lunes = hoy + timedelta(days=dias_hasta_lunes)
+        inicio = timezone.make_aware(datetime.combine(proximo_lunes, time(10, 0)))
         return {
             "paciente": str(self.paciente.id),
             "sede": str(self.sede.id),

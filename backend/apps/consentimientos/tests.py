@@ -2,7 +2,7 @@ from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -14,6 +14,7 @@ from apps.pacientes.models import Paciente
 User = get_user_model()
 
 
+@override_settings(DOCUMENSO_API_URL="https://documenso.test", DOCUMENSO_API_KEY="test-key")
 class ConsentimientoIniciarFirmaCompromisoPagoTests(TestCase):
     """
     Cubre la logica de la app con mas responsabilidad legal del sistema
