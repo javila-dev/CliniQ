@@ -5,9 +5,10 @@ import { useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Search, Users, Stethoscope, PhoneCall, ShieldCheck, UserCog,
-  Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle,
+  Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle, Mail,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
+import { usuariosApi } from '@/lib/api/usuarios'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -127,12 +128,16 @@ function ColaboradorRow({
   onEdit,
   onToggle,
   onImpersonate,
+  onResend,
+  resending,
   canActivate,
 }: {
   colaborador: Colaborador
   onEdit: () => void
   onToggle: () => void
   onImpersonate?: () => void
+  onResend: () => void
+  resending: boolean
   canActivate: boolean
 }) {
   const rol = resolverRol(colaborador)
@@ -233,6 +238,16 @@ function ColaboradorRow({
             title="Ingresar como este usuario"
           >
             <LogIn className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {colaborador.invitacion_pendiente && (
+          <button
+            onClick={(e) => { e.stopPropagation(); if (!resending) onResend() }}
+            disabled={resending}
+            className="flex items-center justify-center h-7 w-7 rounded-md hover:bg-amber-50 text-muted-foreground hover:text-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Reenviar invitación por correo"
+          >
+            <Mail className="h-3.5 w-3.5" />
           </button>
         )}
         <button
@@ -342,6 +357,7 @@ export default function PersonalPage() {
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Colaborador | null>(null)
   const [toggleTarget, setToggleTarget] = useState<Colaborador | null>(null)
+  const [resendingId, setResendingId] = useState<string | null>(null)
   const debouncedSearch = useDebounce(search, 350)
 
   const handleImpersonate = async (colaborador: Colaborador) => {
@@ -390,6 +406,23 @@ export default function PersonalPage() {
             : 'Intenta de nuevo.'
       toast.error('No se pudo cambiar el estado', msg)
     },
+  })
+
+  const resendMut = useMutation({
+    mutationFn: (c: Colaborador) => usuariosApi.reenviarInvitacion(c.user),
+    onMutate: (c) => setResendingId(c.id),
+    onSuccess: (result, c) => {
+      if (result.email_enviado) {
+        toast.success('Invitación reenviada', `Se envió un nuevo enlace a ${c.email ?? c.nombre_completo}.`)
+      } else {
+        toast.error('El enlace se generó, pero el correo no se pudo enviar', 'Intenta de nuevo en unos minutos o contacta a soporte.')
+      }
+    },
+    onError: (e: any) => {
+      const msg = typeof e?.response?.data?.error === 'string' ? e.response.data.error : 'Intenta de nuevo.'
+      toast.error('No se pudo reenviar la invitación', msg)
+    },
+    onSettled: () => setResendingId(null),
   })
 
   const allColaboradores = data?.results ?? []
@@ -525,6 +558,8 @@ export default function PersonalPage() {
               onEdit={() => handleEdit(c)}
               onToggle={() => setToggleTarget(c)}
               onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}
+              onResend={() => resendMut.mutate(c)}
+              resending={resendingId === c.id}
             />
           ))
         )}
