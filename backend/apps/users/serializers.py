@@ -229,6 +229,7 @@ class UserSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     is_staff = serializers.BooleanField(read_only=True)
     centro_ayuda_habilitado = serializers.SerializerMethodField()
+    modo_puesta_en_marcha = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -246,6 +247,7 @@ class UserSerializer(serializers.ModelSerializer):
             "es_admin",
             "is_staff",
             "centro_ayuda_habilitado",
+            "modo_puesta_en_marcha",
             "clinica_id",
             "sede_id",
             "clinica",
@@ -268,6 +270,7 @@ class UserSerializer(serializers.ModelSerializer):
             "es_profesional",
             "is_staff",
             "centro_ayuda_habilitado",
+            "modo_puesta_en_marcha",
             "clinica_id",
             "sede_id",
             "clinica",
@@ -300,6 +303,9 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_centro_ayuda_habilitado(self, obj):
         return ConfiguracionGlobal.get_solo().centro_ayuda_habilitado
+
+    def get_modo_puesta_en_marcha(self, obj):
+        return obj.clinica.modo_puesta_en_marcha if obj.clinica_id else False
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
@@ -411,6 +417,7 @@ def build_auth_user_payload(user) -> dict:
         "es_admin": user.es_admin,
         "is_staff": user.is_staff,
         "centro_ayuda_habilitado": ConfiguracionGlobal.get_solo().centro_ayuda_habilitado,
+        "modo_puesta_en_marcha": user.clinica.modo_puesta_en_marcha if user.clinica_id else False,
         "clinica_id": str(user.clinica_id) if user.clinica_id else None,
         "sede_id": user_sede_id(user),
         "clinica_nombre": user.clinica.nombre if user.clinica_id else None,
