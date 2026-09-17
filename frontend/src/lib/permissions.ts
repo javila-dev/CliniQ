@@ -223,12 +223,6 @@ export const canAccess = {
   cajasConfig: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.CAJA_CAJAS_GESTIONAR),
 
-  // Rol/permiso para el asistente de puesta en marcha. La disponibilidad real
-  // exige además que la clínica activa tenga `modo_puesta_en_marcha` (se chequea
-  // aparte contra `miClinica`).
-  puestaEnMarcha: (u: AuthUser | null | undefined) =>
-    isSuperAdmin(u) || hasPermission(u, PERM.MIGRACION_GESTIONAR),
-
   consentimientos: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.CONSENTIMIENTOS_VER),
 

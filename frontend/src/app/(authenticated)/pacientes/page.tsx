@@ -11,6 +11,7 @@ import {
 import Link from 'next/link'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { CargaMasivaPacientesModal } from '@/components/pacientes/CargaMasivaPacientesModal'
+import { PuestaEnMarchaButton } from '@/components/shared/PuestaEnMarchaButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -291,6 +292,7 @@ export default function PacientesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <PuestaEnMarchaButton />
           <Button variant="outline" onClick={() => setCargaMasivaOpen(true)}>
             <Upload className="h-4 w-4 mr-1.5" />
             Cargar masivo

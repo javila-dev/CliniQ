@@ -6,11 +6,11 @@ import { useQuery } from '@tanstack/react-query'
 import { Rocket, ArrowRight, X } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
-import { canAccess } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 
-/** Banner que invita a cargar los pacientes en curso, visible solo mientras el
- *  superadmin tiene activo el "modo puesta en marcha" de la clínica.
+/** Banner que invita a cargar los pacientes en curso, visible a cualquier
+ *  usuario mientras el superadmin tiene activo el "modo puesta en marcha"
+ *  de la clínica — sin exigir ningún permiso.
  *  `dismissible` (default true): permite descartarlo por navegador — en el
  *  dashboard sí, en Configuración no (siempre visible). */
 export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boolean }) {
@@ -29,7 +29,6 @@ export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boo
   })
 
   if (dismissible && dismissed) return null
-  if (!canAccess.puestaEnMarcha(user)) return null
   if (!miClinica?.modo_puesta_en_marcha) return null
 
   const cerrar = () => {
@@ -50,7 +49,7 @@ export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boo
           </p>
         </div>
         <Button asChild size="sm" className="shrink-0">
-          <Link href="/configuracion/puesta-en-marcha">
+          <Link href="/puesta-en-marcha">
             Empezar<ArrowRight className="h-4 w-4 ml-1.5" />
           </Link>
         </Button>

@@ -7,6 +7,7 @@ import { Plus, FileText, Download, Loader2, ChevronLeft, ChevronRight, X } from 
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { PuestaEnMarchaButton } from '@/components/shared/PuestaEnMarchaButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
@@ -241,14 +242,17 @@ export default function CotizacionesPage() {
         description="Gestiona las propuestas comerciales para los pacientes"
         helpSlug="crear-y-enviar-una-cotizacion"
         action={
-          canGestionar ? (
-            <Button onClick={abrirNueva} disabled={loadingNueva}>
-              {loadingNueva
-                ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                : <Plus className="h-4 w-4 mr-2" />}
-              Nueva cotización
-            </Button>
-          ) : undefined
+          <div className="flex items-center gap-2">
+            <PuestaEnMarchaButton />
+            {canGestionar && (
+              <Button onClick={abrirNueva} disabled={loadingNueva}>
+                {loadingNueva
+                  ? <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  : <Plus className="h-4 w-4 mr-2" />}
+                Nueva cotización
+              </Button>
+            )}
+          </div>
         }
       />
 
