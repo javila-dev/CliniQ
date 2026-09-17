@@ -2,34 +2,27 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
 import { Rocket, ArrowRight, X } from 'lucide-react'
-import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 
 /** Banner que invita a cargar los pacientes en curso, visible a cualquier
  *  usuario mientras el superadmin tiene activo el "modo puesta en marcha"
- *  de la clínica — sin exigir ningún permiso.
+ *  de la clínica — sin exigir ningún permiso (el flag viaja en el perfil
+ *  del usuario, no requiere clinicas.ver).
  *  `dismissible` (default true): permite descartarlo por navegador — en el
  *  dashboard sí, en Configuración no (siempre visible). */
 export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boolean }) {
   const { user } = useAuthStore()
 
-  const { data: miClinica } = useQuery({
-    queryKey: ['mi-clinica', user?.clinica_id],
-    queryFn: () => clinicasApi.miClinica(user?.clinica_id),
-    enabled: !!user,
-  })
-
-  const key = miClinica?.id ? `pem-banner-dismissed:${miClinica.id}` : null
+  const key = user?.clinica_id ? `pem-banner-dismissed:${user.clinica_id}` : null
   const [dismissed, setDismissed] = useState(() => {
     if (typeof window === 'undefined' || !key) return false
     try { return window.localStorage.getItem(key) === '1' } catch { return false }
   })
 
   if (dismissible && dismissed) return null
-  if (!miClinica?.modo_puesta_en_marcha) return null
+  if (!user?.modo_puesta_en_marcha) return null
 
   const cerrar = () => {
     setDismissed(true)

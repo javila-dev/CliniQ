@@ -18,6 +18,8 @@ export interface AuthUser {
   is_staff: boolean
   /** Flag global (no por clínica): true cuando un superadmin activó el centro de ayuda. */
   centro_ayuda_habilitado: boolean
+  /** true cuando un superadmin activó el modo puesta en marcha para esta clínica. */
+  modo_puesta_en_marcha: boolean
   telefono: string | null
   foto_perfil: string | null
   firma_digital_url: string | null
