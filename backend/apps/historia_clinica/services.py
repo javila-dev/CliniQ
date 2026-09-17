@@ -68,6 +68,9 @@ def _extraer_signing_token(recipient: dict) -> str | None:
 
 def _obtener_email_destinatario(consentimiento) -> str:
     paciente = consentimiento.paciente
+    paciente_email = (getattr(paciente, "email", "") or "").strip()
+    if paciente_email:
+        return paciente_email
     clinica_email = (getattr(paciente.clinica, "email", "") or "").strip()
     if clinica_email:
         return clinica_email
