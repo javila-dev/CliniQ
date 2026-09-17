@@ -1,5 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
+import type { WheelEvent } from 'react'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -69,6 +70,17 @@ export function formatFechaLocal(
   const [y, m, d] = fecha.slice(0, 10).split('-').map(Number)
   if (!y || !m || !d) return ''
   return new Date(y, m - 1, d).toLocaleDateString('es-CO', opts)
+}
+
+/**
+ * Radix Dialog bloquea el scroll nativo con la rueda del mouse en cualquier
+ * contenedor con su propio `overflow-y-auto` anidado dentro del Dialog (solo
+ * deja scrollear el propio Dialog.Content). Este handler reenvía el delta a
+ * mano para que esas listas internas sigan siendo scrolleables sin tener que
+ * agrandar el modal entero. Usar como `onWheel={scrollWheelFallback}`.
+ */
+export function scrollWheelFallback(e: WheelEvent<HTMLElement>) {
+  e.currentTarget.scrollTop += e.deltaY
 }
 
 export function addDaysISO(iso: string, days: number): string {
