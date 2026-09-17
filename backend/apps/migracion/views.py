@@ -10,22 +10,18 @@ from apps.migracion.serializers import LoteMigracionSerializer, PacienteEnCursoS
 from apps.migracion.services import cargar_paciente_en_curso, revertir_lote
 from apps.pacientes.models import Paciente
 from apps.clinicas.models import Sede
-from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
 
 def _guard(request):
-    """El asistente exige: clínica activa en modo puesta en marcha + permiso
-    ``migracion.gestionar`` (o superadmin)."""
+    """El asistente exige clínica activa en modo puesta en marcha. Disponible
+    para cualquier usuario autenticado de la clínica mientras el toggle esté
+    activo — no depende de un permiso adicional."""
     clinica = get_clinica_activa(request)
     if clinica is None:
         raise PermissionDenied("No hay una clínica activa.")
     if not clinica.modo_puesta_en_marcha:
         raise PermissionDenied("La clínica no está en modo puesta en marcha.")
-    if request.user.rol != "superadmin" and not user_has_permission(
-        request.user, "migracion.gestionar", request=request
-    ):
-        raise PermissionDenied("No tienes permiso para el asistente de puesta en marcha.")
     return clinica
 
 
@@ -34,6 +30,10 @@ class MigracionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     serializer_class = LoteMigracionSerializer
     permission_classes = [IsAuthenticated]
+    search_fields = (
+        "paciente__nombres", "paciente__apellidos", "paciente__numero_documento",
+        "creado_por__first_name", "creado_por__last_name", "nota",
+    )
 
     def get_queryset(self):
         clinica = _guard(self.request)
