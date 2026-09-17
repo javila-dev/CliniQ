@@ -463,6 +463,9 @@ function TratamientoDialog({
                     Cada tipo define qué procedimientos se realizan en ese grupo de citas.
                     {totalSesiones > 0 && ` Total: ${totalSesiones} sesiones trackeables.`}
                   </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    <strong className="text-foreground">El orden importa:</strong> las flechas ↑↓ definen el número de sesión — el primer tipo de la lista arranca en la sesión 1, y así sigue con los siguientes.
+                  </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={addTipo}>
                   <Plus className="h-3.5 w-3.5" />Agregar tipo
