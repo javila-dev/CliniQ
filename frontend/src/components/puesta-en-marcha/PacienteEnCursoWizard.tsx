@@ -20,13 +20,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
-import type { PacienteEnCursoPayload, CuotaPlanInput } from '@/types/migracion'
+import type { PacienteEnCursoPayload, CuotaPlanInput, MedicionHistoricaInput } from '@/types/migracion'
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 const money = (v: string | number) => COP.format(Number(v) || 0)
 const today = () => new Date().toLocaleDateString('en-CA')
 
-const PASOS = ['Paciente', 'Tratamiento', 'Sesiones', 'Plan de pago', 'Confirmar']
+const PASOS = ['Paciente', 'Tratamiento', 'Sesiones', 'Medidas', 'Plan de pago', 'Confirmar']
 
 /** Input de dinero: muestra el valor con separador de miles (1.000.000) y
  *  guarda solo los dígitos. */
@@ -139,7 +139,20 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const marcarHasta = (n: number) =>
     setFilas((prev) => prev.map((f, i) => ({ ...f, done: i < n })))
 
-  // ── paso 4: plan de pago ──────────────────────────────────
+  // ── paso 4: medidas históricas ─────────────────────────────
+  interface MedicionRow extends MedicionHistoricaInput {
+    peso_kg: string
+    talla_cm: string
+    cintura_cm: string
+    cadera_cm: string
+  }
+  const [medidas, setMedidas] = useState<MedicionRow[]>([])
+  const nuevaMedicion = (): MedicionRow => ({ fecha: '', peso_kg: '', talla_cm: '', cintura_cm: '', cadera_cm: '' })
+  const setMedicion = (i: number, patch: Partial<MedicionRow>) =>
+    setMedidas((prev) => prev.map((m, j) => (j === i ? { ...m, ...patch } : m)))
+  const medicionesValidas = medidas.filter((m) => m.fecha && (m.peso_kg || m.talla_cm || m.cintura_cm || m.cadera_cm))
+
+  // ── paso 5: plan de pago ──────────────────────────────────
   const [plan, setPlan] = useState<CuotaPlanInput[]>([])
   const [nota, setNota] = useState('')
 
@@ -168,6 +181,13 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
           ? [{ valor: pagado.toFixed(2), medio_pago: 'otro' as const, fecha: today() }]
           : [],
         plan_saldo: saldo > 0 ? plan.map((c) => ({ ...c, valor_esperado: (Number(c.valor_esperado) || 0).toFixed(2) })) : [],
+        mediciones_historicas: medicionesValidas.map((m) => ({
+          fecha: m.fecha,
+          peso_kg: m.peso_kg || null,
+          talla_cm: m.talla_cm || null,
+          cintura_cm: m.cintura_cm || null,
+          cadera_cm: m.cadera_cm || null,
+        })),
       }
       return migracionApi.cargarPacienteEnCurso(payload)
     },
@@ -186,6 +206,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const puedeAvanzar = [
     !!pacienteId && !!sede,
     (tipo === 'tratamiento' ? (!!tratamientoId && !!tratSel) : !!descripcion.trim()) && total > 0 && pagado <= total,
+    true,
     true,
     planCuadra,
     true,
@@ -370,8 +391,54 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
             </div>
           )}
 
-          {/* ── Paso 4: plan de pago ── */}
+          {/* ── Paso 4: medidas históricas ── */}
           {step === 3 && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <Label>Medidas previas (opcional)</Label>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Quedan en la pestaña Seguimiento de la historia clínica, para ver la evolución real.
+                  </p>
+                </div>
+                <Button size="sm" variant="ghost" className="shrink-0" onClick={() => setMedidas((m) => [...m, nuevaMedicion()])}>
+                  <Plus className="h-4 w-4 mr-1" />Registro
+                </Button>
+              </div>
+
+              {medidas.length === 0 ? (
+                <p className="rounded-lg border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">
+                  Sin registros. Agregá uno si el paciente ya tiene mediciones previas.
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {medidas.map((m, i) => (
+                    <div key={i} className="grid grid-cols-2 sm:grid-cols-[8.5rem_1fr_1fr_1fr_1fr_2.25rem] gap-2">
+                      <Input type="date" max={today()} value={m.fecha}
+                        onChange={(e) => setMedicion(i, { fecha: e.target.value })} className="h-9 col-span-2 sm:col-span-1" />
+                      <Input type="number" step="0.1" placeholder="Peso kg" value={m.peso_kg}
+                        onChange={(e) => setMedicion(i, { peso_kg: e.target.value })} className="h-9" />
+                      <Input type="number" step="0.1" placeholder="Talla cm" value={m.talla_cm}
+                        onChange={(e) => setMedicion(i, { talla_cm: e.target.value })} className="h-9" />
+                      <Input type="number" step="0.1" placeholder="Cintura cm" value={m.cintura_cm}
+                        onChange={(e) => setMedicion(i, { cintura_cm: e.target.value })} className="h-9" />
+                      <div className="flex gap-2">
+                        <Input type="number" step="0.1" placeholder="Cadera cm" value={m.cadera_cm}
+                          onChange={(e) => setMedicion(i, { cadera_cm: e.target.value })} className="h-9" />
+                        <Button size="icon" variant="ghost" className="h-9 w-9 shrink-0 text-rose-600"
+                          onClick={() => setMedidas((x) => x.filter((_, j) => j !== i))}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Paso 5: plan de pago ── */}
+          {step === 4 && (
             <div className="space-y-4">
               <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
                 <span className="font-semibold">Saldo pendiente</span>
@@ -418,13 +485,16 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
             </div>
           )}
 
-          {/* ── Paso 5: confirmar ── */}
-          {step === 4 && (
+          {/* ── Paso 6: confirmar ── */}
+          {step === 5 && (
             <div className="space-y-4 text-sm">
               <p className="font-semibold">{pacienteNombre}</p>
               <ul className="space-y-1.5 text-muted-foreground">
                 <li>· Tratamiento <strong className="text-foreground">{tipo === 'tratamiento' ? nombreTrat : descripcion}</strong> — {numSesionesTotal} sesiones — <strong className="text-foreground">{hechas} hechas, {numSesionesTotal - hechas} pendientes</strong></li>
                 <li>· Pactado <strong className="text-foreground">{money(total)}</strong> · pagó <strong className="text-foreground">{money(pagado)}</strong> · debe <strong className="text-foreground">{money(saldo)}</strong>{saldo > 0 && plan.length > 0 && ` en ${plan.length} cuota(s)`}</li>
+                {medicionesValidas.length > 0 && (
+                  <li>· {medicionesValidas.length} registro{medicionesValidas.length !== 1 ? 's' : ''} de medidas previas</li>
+                )}
               </ul>
               <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[12px] text-amber-800 space-y-0.5">
                 <p>Se registra como <strong>datos previos</strong>:</p>

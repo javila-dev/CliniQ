@@ -20,6 +20,16 @@ export interface CuotaPlanInput {
   descripcion?: string
 }
 
+/** Una medida corporal tomada antes de usar CliniQ. Queda en la pestaña
+ *  Seguimiento de la historia clínica del paciente, sin cita ni nota. */
+export interface MedicionHistoricaInput {
+  fecha: string
+  peso_kg?: string | null
+  talla_cm?: string | null
+  cintura_cm?: string | null
+  cadera_cm?: string | null
+}
+
 export interface PacienteEnCursoPayload {
   paciente: string
   sede: string
@@ -36,6 +46,7 @@ export interface PacienteEnCursoPayload {
   sesiones_realizadas: SesionRealizadaInput[]
   pagos: PagoPrevioInput[]
   plan_saldo: CuotaPlanInput[]
+  mediciones_historicas: MedicionHistoricaInput[]
 }
 
 export interface LoteMigracion {
