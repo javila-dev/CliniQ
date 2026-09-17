@@ -270,7 +270,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
                       <Input className="pl-9" placeholder="Buscar por nombre o documento…" value={buscar} onChange={(e) => setBuscar(e.target.value)} />
                     </div>
                     {(pacientesData?.results ?? []).length > 0 && (
-                      <div className="rounded-lg border divide-y max-h-56 overflow-y-auto">
+                      <div className="rounded-lg border divide-y">
                         {pacientesData!.results.slice(0, 8).map((p) => (
                           <button key={p.id} type="button"
                             className="flex w-full items-center justify-between px-3 py-2 text-sm hover:bg-muted/40"
@@ -379,7 +379,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
                 <span className="text-muted-foreground">de {filas.length}</span>
               </div>
 
-              <div className="rounded-lg border divide-y max-h-72 overflow-y-auto">
+              <div className="rounded-lg border divide-y">
                 {filas.map((f) => (
                   <label key={f.key} className="flex items-center gap-2.5 px-3 py-2 text-sm cursor-pointer">
                     <input type="checkbox" checked={f.done} onChange={(e) => setFila(f.key, { done: e.target.checked })} className="h-4 w-4" />
