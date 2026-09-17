@@ -21,6 +21,7 @@ import { useToast } from '@/hooks/use-toast'
 import { obesidadApi } from '@/lib/api/obesidad'
 import { formatDate } from '@/lib/utils'
 import type { MedicionAntropometrica, MedicionAntropometricaInput } from '@/types/obesidad'
+import { MEDICION_FIELDS, MEDICION_FIELD_KEYS, type FieldKey, type FieldConfig } from './medicionFields'
 
 interface Props {
   pacienteId: string
@@ -120,46 +121,8 @@ const METRICAS: { key: MetricaKey; label: string; unit: string; color: string }[
   { key: 'agua_corporal_pct',        label: '% de agua',          unit: '%',    color: '#0284c7' },
 ]
 
-type FieldKey = Exclude<keyof FormValues, 'fecha'>
-
-interface FieldConfig {
-  key: FieldKey
-  label: string
-  unit?: string
-  step?: string
-  min?: number
-  max?: number
-  placeholder: string
-  required?: boolean
-}
-
-const ALL_FIELDS: FieldConfig[] = [
-  { key: 'peso_kg',                   label: 'Peso',               unit: 'kg',   step: '0.1', min: 1,  max: 500, placeholder: '70.5' },
-  { key: 'talla_cm',                  label: 'Talla',              unit: 'cm',   step: '0.1', min: 1,  max: 250, placeholder: '165' },
-  { key: 'presion_sistolica',         label: 'P. sistólica',       unit: 'mmHg',              min: 60, max: 300, placeholder: '120' },
-  { key: 'presion_diastolica',        label: 'P. diastólica',      unit: 'mmHg',              min: 40, max: 200, placeholder: '80' },
-  { key: 'frecuencia_cardiaca',       label: 'Frec. cardíaca',     unit: 'lpm',                min: 20, max: 250, placeholder: '72' },
-  { key: 'frecuencia_respiratoria',   label: 'Frec. respiratoria', unit: 'rpm',                min: 5,  max: 60,  placeholder: '16' },
-  { key: 'temperatura_c',             label: 'Temperatura',        unit: '°C',   step: '0.1', min: 30, max: 45,  placeholder: '36.5' },
-  { key: 'saturacion_oxigeno',        label: 'SpO₂',                unit: '%',    step: '0.1', min: 50, max: 100, placeholder: '98' },
-  { key: 'cintura_cm',                label: 'Cintura',            unit: 'cm',   step: '0.1', placeholder: '90' },
-  { key: 'cadera_cm',                 label: 'Cadera',             unit: 'cm',   step: '0.1', placeholder: '100' },
-  { key: 'brazo_cm',                  label: 'Brazo',              unit: 'cm',   step: '0.1', placeholder: '32' },
-  { key: 'muslo_cm',                  label: 'Muslo',              unit: 'cm',   step: '0.1', placeholder: '55' },
-  { key: 'abdomen_alto_cm',           label: 'Abdomen alto',       unit: 'cm',   step: '0.1', placeholder: '90' },
-  { key: 'abdomen_medio_cm',          label: 'Abdomen medio',      unit: 'cm',   step: '0.1', placeholder: '85' },
-  { key: 'abdomen_bajo_cm',           label: 'Abdomen bajo',       unit: 'cm',   step: '0.1', placeholder: '95' },
-  { key: 'pierna_derecha_alto_cm',    label: 'Pierna der. alto',   unit: 'cm',   step: '0.1', placeholder: '55' },
-  { key: 'pierna_derecha_bajo_cm',    label: 'Pierna der. bajo',   unit: 'cm',   step: '0.1', placeholder: '40' },
-  { key: 'pierna_izquierda_alto_cm',  label: 'Pierna izq. alto',   unit: 'cm',   step: '0.1', placeholder: '55' },
-  { key: 'pierna_izquierda_bajo_cm',  label: 'Pierna izq. bajo',   unit: 'cm',   step: '0.1', placeholder: '40' },
-  { key: 'grasa_corporal_pct',        label: 'Grasa corporal',     unit: '%',    step: '0.1', min: 1,  max: 70,  placeholder: '35' },
-  { key: 'masa_muscular_kg',          label: 'Masa muscular',      unit: 'kg',   step: '0.1', placeholder: '28' },
-  { key: 'grasa_visceral',            label: 'Grasa visceral',                  step: '0.1', placeholder: '8' },
-  { key: 'agua_corporal_pct',         label: '% de agua',          unit: '%',    step: '0.1', min: 1,  max: 90,  placeholder: '55' },
-]
-
-const MEDIDA_KEYS = ALL_FIELDS.map((f) => f.key)
+const ALL_FIELDS = MEDICION_FIELDS
+const MEDIDA_KEYS = MEDICION_FIELD_KEYS
 
 /** Convierte una medición existente al shape del formulario (todo string). */
 function medicionToForm(m: MedicionAntropometrica): FormValues {
@@ -369,7 +332,6 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
   }
 
   const toggleField = (field: FieldConfig) => {
-    if (field.required) return
     setActiveFields((prev) => {
       const next = new Set(prev)
       if (next.has(field.key)) {
@@ -571,14 +533,12 @@ export function TabMediciones({ pacienteId, notaId, citaId }: Props) {
                     type="button"
                     onClick={() => toggleField(f)}
                     className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                      f.required
-                        ? 'bg-primary text-primary-foreground border-primary cursor-default'
-                        : activeFields.has(f.key)
+                      activeFields.has(f.key)
                         ? 'bg-primary text-primary-foreground border-primary'
                         : 'border-border hover:bg-muted'
                     }`}
                   >
-                    {f.label}{f.required ? ' *' : ''}
+                    {f.label}
                   </button>
                 ))}
               </div>

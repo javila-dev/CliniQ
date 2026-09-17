@@ -20,14 +20,34 @@ export interface CuotaPlanInput {
   descripcion?: string
 }
 
-/** Una medida corporal tomada antes de usar CliniQ. Queda en la pestaña
- *  Seguimiento de la historia clínica del paciente, sin cita ni nota. */
+/** Una medición antropométrica tomada antes de usar CliniQ (mismos campos
+ *  que la pestaña Seguimiento de la historia clínica). Queda ahí, sin cita
+ *  ni nota asociada. */
 export interface MedicionHistoricaInput {
   fecha: string
   peso_kg?: string | null
   talla_cm?: string | null
+  presion_sistolica?: string | null
+  presion_diastolica?: string | null
+  frecuencia_cardiaca?: string | null
+  frecuencia_respiratoria?: string | null
+  temperatura_c?: string | null
+  saturacion_oxigeno?: string | null
   cintura_cm?: string | null
   cadera_cm?: string | null
+  brazo_cm?: string | null
+  muslo_cm?: string | null
+  abdomen_alto_cm?: string | null
+  abdomen_medio_cm?: string | null
+  abdomen_bajo_cm?: string | null
+  pierna_derecha_alto_cm?: string | null
+  pierna_derecha_bajo_cm?: string | null
+  pierna_izquierda_alto_cm?: string | null
+  pierna_izquierda_bajo_cm?: string | null
+  grasa_corporal_pct?: string | null
+  masa_muscular_kg?: string | null
+  grasa_visceral?: string | null
+  agua_corporal_pct?: string | null
 }
 
 export interface PacienteEnCursoPayload {
