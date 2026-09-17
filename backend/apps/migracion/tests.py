@@ -183,7 +183,7 @@ class PacienteEnCursoTests(TestCase):
 
     def test_carga_medidas_historicas(self):
         p = self._payload(mediciones_historicas=[
-            {"fecha": "2025-11-01", "peso_kg": "82.5", "cintura_cm": "95.0"},
+            {"fecha": "2025-11-01", "peso_kg": "82.5", "cintura_cm": "95.0", "presion_sistolica": 130},
             {"fecha": "2025-12-01", "peso_kg": "80.0"},
         ])
         r = self.client.post(URL, p, format="json")
@@ -194,6 +194,7 @@ class PacienteEnCursoTests(TestCase):
         primera = mediciones.first()
         self.assertEqual(primera.peso_kg, Decimal("82.50"))
         self.assertEqual(primera.cintura_cm, Decimal("95.0"))
+        self.assertEqual(primera.presion_sistolica, 130)
         self.assertIsNone(primera.cita)
         self.assertIsNone(primera.nota)
         self.assertEqual(primera.tomado_por, self.superadmin)

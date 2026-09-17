@@ -33,19 +33,53 @@ class CuotaPlanSerializer(serializers.Serializer):
     descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
+# Mismos campos que MedicionAntropometrica (menos paciente/nota/cita/fecha),
+# compartidos entre el serializer y el service para no listarlos dos veces.
+CAMPOS_MEDICION = (
+    "peso_kg", "talla_cm",
+    "presion_sistolica", "presion_diastolica",
+    "frecuencia_cardiaca", "frecuencia_respiratoria",
+    "temperatura_c", "saturacion_oxigeno",
+    "cintura_cm", "cadera_cm", "brazo_cm", "muslo_cm",
+    "abdomen_alto_cm", "abdomen_medio_cm", "abdomen_bajo_cm",
+    "pierna_derecha_alto_cm", "pierna_derecha_bajo_cm",
+    "pierna_izquierda_alto_cm", "pierna_izquierda_bajo_cm",
+    "grasa_corporal_pct", "masa_muscular_kg", "grasa_visceral", "agua_corporal_pct",
+)
+
+
 class MedicionHistoricaSerializer(serializers.Serializer):
-    """Una medida corporal tomada antes de usar CliniQ. Queda en el
-    historial normal del paciente (pestaña Seguimiento), sin cita ni nota
-    asociada."""
+    """Una medición antropométrica tomada antes de usar CliniQ — mismos
+    campos que la pestaña Seguimiento de la historia clínica. Queda ahí,
+    sin cita ni nota asociada."""
 
     fecha = serializers.DateField()
     peso_kg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
     talla_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    presion_sistolica = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    presion_diastolica = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    frecuencia_cardiaca = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    frecuencia_respiratoria = serializers.IntegerField(min_value=0, required=False, allow_null=True)
+    temperatura_c = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
+    saturacion_oxigeno = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
     cintura_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
     cadera_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    brazo_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    muslo_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    abdomen_alto_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    abdomen_medio_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    abdomen_bajo_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    pierna_derecha_alto_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    pierna_derecha_bajo_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    pierna_izquierda_alto_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    pierna_izquierda_bajo_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    grasa_corporal_pct = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
+    masa_muscular_kg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    grasa_visceral = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
+    agua_corporal_pct = serializers.DecimalField(max_digits=4, decimal_places=1, required=False, allow_null=True)
 
     def validate(self, attrs):
-        if not any(attrs.get(k) is not None for k in ("peso_kg", "talla_cm", "cintura_cm", "cadera_cm")):
+        if not any(attrs.get(k) is not None for k in CAMPOS_MEDICION):
             raise serializers.ValidationError("Cada registro necesita al menos una medida.")
         return attrs
 

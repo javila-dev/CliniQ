@@ -31,6 +31,7 @@ from apps.cartera.models import Cartera, CuotaCartera
 from apps.cobros.models import Cobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.migracion.models import LoteMigracion
+from apps.migracion.serializers import CAMPOS_MEDICION
 
 
 def _dt(fecha):
@@ -239,11 +240,8 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         medicion = MedicionAntropometrica.objects.create(
             paciente=paciente,
             fecha=_dt(med["fecha"]),
-            peso_kg=med.get("peso_kg"),
-            talla_cm=med.get("talla_cm"),
-            cintura_cm=med.get("cintura_cm"),
-            cadera_cm=med.get("cadera_cm"),
             tomado_por=actor,
+            **{campo: med.get(campo) for campo in CAMPOS_MEDICION},
         )
         medicion_ids.append(str(medicion.id))
 
