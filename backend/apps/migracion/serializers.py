@@ -33,6 +33,23 @@ class CuotaPlanSerializer(serializers.Serializer):
     descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True)
 
 
+class MedicionHistoricaSerializer(serializers.Serializer):
+    """Una medida corporal tomada antes de usar CliniQ. Queda en el
+    historial normal del paciente (pestaña Seguimiento), sin cita ni nota
+    asociada."""
+
+    fecha = serializers.DateField()
+    peso_kg = serializers.DecimalField(max_digits=5, decimal_places=2, required=False, allow_null=True)
+    talla_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    cintura_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+    cadera_cm = serializers.DecimalField(max_digits=5, decimal_places=1, required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if not any(attrs.get(k) is not None for k in ("peso_kg", "talla_cm", "cintura_cm", "cadera_cm")):
+            raise serializers.ValidationError("Cada registro necesita al menos una medida.")
+        return attrs
+
+
 class TratamientoPrevioSerializer(serializers.Serializer):
     tipo = serializers.ChoiceField(choices=["tratamiento", "procedimiento", "libre"])
     tratamiento = serializers.UUIDField(required=False, allow_null=True)
@@ -62,6 +79,7 @@ class PacienteEnCursoSerializer(serializers.Serializer):
     sesiones_realizadas = SesionRealizadaSerializer(many=True, required=False, default=list)
     pagos = PagoPrevioSerializer(many=True, required=False, default=list)
     plan_saldo = CuotaPlanSerializer(many=True, required=False, default=list)
+    mediciones_historicas = MedicionHistoricaSerializer(many=True, required=False, default=list)
 
     def validate(self, attrs):
         total = attrs["tratamiento"]["precio_total_pactado"]

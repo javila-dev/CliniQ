@@ -11,6 +11,7 @@ from apps.cobros.models import Cobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion
 from apps.clinicas.models import Clinica, Sede
 from apps.migracion.models import LoteMigracion
+from apps.obesidad.models import MedicionAntropometrica
 from apps.pacientes.models import Paciente
 
 User = get_user_model()
@@ -179,6 +180,40 @@ class PacienteEnCursoTests(TestCase):
         self.assertFalse(Cobro.objects.filter(paciente=self.paciente).exists())
         self.assertFalse(Cartera.objects.filter(paciente=self.paciente).exists())
         self.assertTrue(LoteMigracion.objects.get(id=lote_id).revertido)
+
+    def test_carga_medidas_historicas(self):
+        p = self._payload(mediciones_historicas=[
+            {"fecha": "2025-11-01", "peso_kg": "82.5", "cintura_cm": "95.0"},
+            {"fecha": "2025-12-01", "peso_kg": "80.0"},
+        ])
+        r = self.client.post(URL, p, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+
+        mediciones = MedicionAntropometrica.objects.filter(paciente=self.paciente).order_by("fecha")
+        self.assertEqual(mediciones.count(), 2)
+        primera = mediciones.first()
+        self.assertEqual(primera.peso_kg, Decimal("82.50"))
+        self.assertEqual(primera.cintura_cm, Decimal("95.0"))
+        self.assertIsNone(primera.cita)
+        self.assertIsNone(primera.nota)
+        self.assertEqual(primera.tomado_por, self.superadmin)
+
+        lote = LoteMigracion.objects.get()
+        self.assertEqual(len(lote.manifest["mediciones"]), 2)
+
+    def test_medicion_historica_sin_datos_falla(self):
+        p = self._payload(mediciones_historicas=[{"fecha": "2025-11-01"}])
+        r = self.client.post(URL, p, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_revertir_borra_medidas_historicas(self):
+        p = self._payload(mediciones_historicas=[{"fecha": "2025-11-01", "peso_kg": "82.5"}])
+        lote_id = self.client.post(URL, p, format="json").json()["id"]
+        self.assertTrue(MedicionAntropometrica.objects.filter(paciente=self.paciente).exists())
+
+        rev = self.client.post(f"/api/v1/migracion/lotes/{lote_id}/revertir/")
+        self.assertEqual(rev.status_code, 200, rev.content)
+        self.assertFalse(MedicionAntropometrica.objects.filter(paciente=self.paciente).exists())
 
     def test_migrada_no_genera_compromiso_pago_y_revierte(self):
         from apps.configuracion.models import ConfiguracionCartera

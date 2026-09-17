@@ -231,6 +231,22 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         )
         cuota_ids.append(str(c.id))
 
+    # ── 5. Medidas históricas (pestaña Seguimiento de la historia clínica) ──
+    from apps.obesidad.models import MedicionAntropometrica
+
+    medicion_ids = []
+    for med in data.get("mediciones_historicas", []):
+        medicion = MedicionAntropometrica.objects.create(
+            paciente=paciente,
+            fecha=_dt(med["fecha"]),
+            peso_kg=med.get("peso_kg"),
+            talla_cm=med.get("talla_cm"),
+            cintura_cm=med.get("cintura_cm"),
+            cadera_cm=med.get("cadera_cm"),
+            tomado_por=actor,
+        )
+        medicion_ids.append(str(medicion.id))
+
     lote.manifest = {
         "cotizaciones": [str(cotizacion.id)],
         "items_cotizacion": [str(item.id)],
@@ -240,6 +256,7 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         "carteras": [str(cartera.id)],
         "cuotas": cuota_ids,
         "tratamientos_paciente": tratamientos_paciente_ids,
+        "mediciones": medicion_ids,
         "resumen": {
             "total_pactado": str(total),
             "pagado": str(pagado),
@@ -261,9 +278,11 @@ def revertir_lote(lote: LoteMigracion, *, actor) -> None:
     m = lote.manifest or {}
     # Orden inverso a la creación para respetar los PROTECT.
     from apps.consentimientos.models import Consentimiento
+    from apps.obesidad.models import MedicionAntropometrica
     from apps.protocolos.models import TratamientoPaciente
 
     cot_ids = m.get("cotizaciones", [])
+    MedicionAntropometrica.objects.filter(id__in=m.get("mediciones", [])).delete()
     Cita.objects.filter(id__in=m.get("citas", [])).delete()
     TratamientoPaciente.objects.filter(id__in=m.get("tratamientos_paciente", [])).delete()
     # Compromiso de pago generado de forma diferida al abrir el detalle.
