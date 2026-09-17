@@ -464,7 +464,10 @@ function TratamientoDialog({
                     {totalSesiones > 0 && ` Total: ${totalSesiones} sesiones trackeables.`}
                   </p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    <strong className="text-foreground">El orden importa:</strong> las flechas ↑↓ definen el número de sesión — el primer tipo de la lista arranca en la sesión 1, y así sigue con los siguientes.
+                    <strong className="text-foreground">El orden en que aparecen aquí es el orden de las sesiones del paciente:</strong> el primer tipo de la lista será la Sesión 1, el segundo la Sesión 2, y así sucesivamente. Usa las flechas ↑↓ para cambiar el orden.
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    <strong className="text-foreground">Un mismo procedimiento puede repetirse en más de un tipo:</strong> si en el medio del tratamiento hay otra cita distinta, tienes que partirlo. Ejemplo: el procedimiento A se hace 10 veces, pero a mitad de camino el paciente tiene una cita de control. En vez de un solo tipo "Procedimiento A ×10", crea 3 tipos en este orden: <strong className="text-foreground">Procedimiento A ×5</strong>, luego <strong className="text-foreground">Cita de control ×1</strong>, y después <strong className="text-foreground">Procedimiento A ×5</strong> otra vez. Así las sesiones quedan numeradas en el mismo orden en que van a pasar de verdad.
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" className="h-7 text-xs gap-1" onClick={addTipo}>
