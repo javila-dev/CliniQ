@@ -955,6 +955,13 @@ def recuperar_pdf_asistencia(cita) -> bool:
     return True
 
 
+def _envelope_completado(payload: dict) -> bool:
+    """True si Documenso ya sello el documento (estado COMPLETED). Que el firmante
+    haya firmado no basta: hasta el sellado, la descarga devuelve el PDF original sin firma."""
+    status = str(payload.get("status") or payload.get("documentStatus") or payload.get("envelopeStatus") or "").upper()
+    return status in {"COMPLETED", "COMPLETE"} or bool(payload.get("completedAt"))
+
+
 def _estado_firma_desde_envelope(payload: dict) -> str:
     """Traduce la respuesta de ``GET /api/v2/envelope/{id}`` de Documenso a
     uno de: ``"firmada"`` | ``"rechazada"`` | ``"pendiente"``.
@@ -1055,6 +1062,15 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
     from apps.historia_clinica.services import DocumensoIntegrationError, _fetch_documenso_json
 
     if consentimiento.estado == Consentimiento.Estado.FIRMADO:
+        # Firmado pero sin PDF (aun no sellado cuando se confirmo la firma): reintentar.
+        if not consentimiento.pdf_archivo:
+            try:
+                recuperar_pdf_compromiso_pago(consentimiento)
+            except Exception:
+                logger.exception(
+                    "[verificar_firma_compromiso_pago] fallo al recuperar PDF | consentimiento_id=%s",
+                    consentimiento.id,
+                )
         return consentimiento.estado
 
     envelope_id = (consentimiento.documenso_documento_id or "").strip()
@@ -1097,12 +1113,17 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
     return consentimiento.estado
 
 
-def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento) -> bool:
+def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento, *, reemplazar: bool = False) -> bool:
     """
     Igual que recuperar_pdf_asistencia pero para Consentimiento.pdf_archivo.
     Se usa como respaldo cuando el webhook de Documenso no llega (ej. entorno
     local sin URL publica) — se llama de forma eager al confirmar la firma
     desde el frontend, ademas de quedar disponible para el webhook.
+
+    Solo guarda el PDF cuando Documenso ya sello el documento (COMPLETED): antes
+    de eso la descarga devuelve el original SIN firma, y guardarlo dejaria un PDF
+    equivocado para siempre. Devuelve False (sin guardar) si aun no esta sellado.
+    Con ``reemplazar`` sustituye un PDF ya guardado.
     """
     from django.core.files.base import ContentFile
 
@@ -1122,6 +1143,12 @@ def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento) -> bool:
     envelope = {}
     try:
         envelope = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+        if not _envelope_completado(envelope):
+            logger.info(
+                "[recuperar_pdf_compromiso_pago] documento aun sin sellar en Documenso | consentimiento_id=%s | envelope_id=%s",
+                consentimiento.id, envelope_id,
+            )
+            return False
         secondary = (envelope.get("secondaryId") or "").removeprefix("document_")
         if secondary.isdigit():
             numeric_id = secondary
@@ -1158,6 +1185,10 @@ def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento) -> bool:
         return False
 
     filename = f"compromiso_pago-{consentimiento.id}.pdf"
+    if consentimiento.pdf_archivo:
+        if not reemplazar:
+            return True
+        consentimiento.pdf_archivo.delete(save=False)
     consentimiento.pdf_archivo.save(filename, ContentFile(pdf_bytes), save=False)
     consentimiento.save(update_fields=["pdf_archivo", "updated_at"])
     logger.info(

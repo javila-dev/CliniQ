@@ -167,3 +167,83 @@ class WebhookCompromisoPagoIdempotenciaTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.consentimiento.refresh_from_db()
         self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
+
+
+@override_settings(
+    DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage",
+    MEDIA_ROOT=tempfile.gettempdir(),
+)
+class RecuperarPdfCompromisoPagoTests(TestCase):
+    """El PDF solo se guarda cuando Documenso ya sello el documento: antes de eso
+    la descarga devuelve el original SIN firma y quedaria guardado para siempre."""
+
+    def setUp(self):
+        self.clinica = Clinica.objects.create(nombre="Clinica PDF CP", nit="901555888")
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica, tipo_documento=Paciente.TipoDocumento.CC, numero_documento="222333666",
+            nombres="Lina", apellidos="Mora", fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO, direccion="Calle 4", telefono="3000000005",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP, autoriza_datos=True,
+        )
+        cotizacion = Cotizacion.objects.create(clinica=self.clinica, paciente=self.paciente)
+        self.consentimiento = Consentimiento.objects.create(
+            cotizacion=cotizacion, paciente=self.paciente, plantilla=None,
+            contenido_snapshot="<p>Texto</p>", hash_contenido="c" * 64,
+            documenso_documento_id="envelope-pdf-1", estado=Consentimiento.Estado.FIRMADO,
+        )
+
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso")
+    @patch("apps.historia_clinica.services._fetch_documenso_json")
+    def test_no_guarda_el_pdf_si_documenso_aun_no_sello_el_documento(self, mocked_fetch, mocked_descargar):
+        from apps.consentimientos.services import recuperar_pdf_compromiso_pago
+
+        mocked_fetch.return_value = {"status": "PENDING", "secondaryId": "document_7"}
+        mocked_descargar.return_value = b"%PDF-sin-firma"
+
+        guardado = recuperar_pdf_compromiso_pago(self.consentimiento)
+
+        self.assertFalse(guardado)
+        mocked_descargar.assert_not_called()
+        self.consentimiento.refresh_from_db()
+        self.assertFalse(self.consentimiento.pdf_archivo)
+
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso")
+    @patch("apps.historia_clinica.services._fetch_documenso_json")
+    def test_guarda_el_pdf_firmado_cuando_esta_sellado_y_puede_reemplazar_uno_previo(self, mocked_fetch, mocked_descargar):
+        from apps.consentimientos.services import recuperar_pdf_compromiso_pago
+
+        mocked_fetch.return_value = {"status": "COMPLETED", "secondaryId": "document_7"}
+        mocked_descargar.return_value = b"%PDF-firmado-1"
+        self.assertTrue(recuperar_pdf_compromiso_pago(self.consentimiento))
+        self.consentimiento.refresh_from_db()
+        self.assertTrue(self.consentimiento.pdf_archivo)
+
+        # Sin "reemplazar" un PDF ya guardado se conserva.
+        mocked_descargar.return_value = b"%PDF-otro"
+        self.assertTrue(recuperar_pdf_compromiso_pago(self.consentimiento))
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.pdf_archivo.read(), b"%PDF-firmado-1")
+
+        mocked_descargar.return_value = b"%PDF-firmado-2"
+        self.assertTrue(recuperar_pdf_compromiso_pago(self.consentimiento, reemplazar=True))
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.pdf_archivo.read(), b"%PDF-firmado-2")
+
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso")
+    @patch("apps.historia_clinica.services._fetch_documenso_json")
+    def test_verificar_reintenta_el_pdf_de_un_consentimiento_firmado_sin_pdf(self, mocked_fetch, mocked_descargar):
+        from apps.consentimientos.services import verificar_firma_compromiso_pago_en_documenso
+
+        mocked_fetch.side_effect = [
+            {"status": "PENDING", "secondaryId": "document_7"},
+            {"status": "COMPLETED", "secondaryId": "document_7"},
+        ]
+        mocked_descargar.return_value = b"%PDF-firmado"
+
+        verificar_firma_compromiso_pago_en_documenso(self.consentimiento)
+        self.consentimiento.refresh_from_db()
+        self.assertFalse(self.consentimiento.pdf_archivo)
+
+        verificar_firma_compromiso_pago_en_documenso(self.consentimiento)
+        self.consentimiento.refresh_from_db()
+        self.assertTrue(self.consentimiento.pdf_archivo)
