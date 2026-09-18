@@ -81,7 +81,7 @@ class CarteraFlowTests(TestCase):
             descripcion="Toxina botulinica",
             num_citas=4,
             periodicidad="Cada 4 meses",
-            valor_unitario="350000.00",
+            valor_unitario="175000.00",  # 4 x 175.000 = 700.000 = suma de las dos cuotas
             descuento_porcentaje="0.00",
         )
         self.item = item

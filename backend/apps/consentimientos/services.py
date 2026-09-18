@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 from datetime import timedelta
+from decimal import ROUND_HALF_UP, Decimal
 
 import requests as _requests
 from botocore.exceptions import ClientError
@@ -36,20 +37,60 @@ def renderizar_template_con_datos(cita, plantilla: PlantillaConsentimiento) -> s
     return template.render(context)
 
 
-def _contexto_merge_cotizacion(cotizacion) -> dict:
+def formatear_moneda(valor) -> str:
+    """Pesos colombianos sin decimales y con punto de miles: ``$1.250.000``."""
+    entero = int(Decimal(valor or 0).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+    return "$" + f"{entero:,}".replace(",", ".")
+
+
+def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
     """
     Contexto de merge fields compartido por las plantillas con ambito=COTIZACION
-    y por el documento estandar de compromiso de pago. La cartera puede no
-    existir aun si se genera antes de aceptar la cotizacion.
+    y por el documento estandar de aceptacion de cotizacion y compromiso de
+    pago. La cartera puede no existir aun si se genera antes de aceptar la
+    cotizacion (el documento firmado es justamente lo que la acepta), asi que
+    la forma de pago se toma de ``formas_pago`` de la cotizacion.
     """
     cartera = getattr(cotizacion, "cartera", None)
-    cuotas = (
-        list(cartera.cuotas.filter(anulada=False).order_by("fecha_esperada"))
-        if cartera
-        else []
-    )
+    formas_pago = list(cotizacion.formas_pago.filter(activo=True).order_by("fecha", "created_at"))
+    if cartera:
+        cuotas = list(cartera.cuotas.filter(anulada=False).order_by("fecha_esperada"))
+    else:
+        cuotas = [
+            {
+                "fecha_esperada": forma.fecha,
+                "descripcion": forma.descripcion or forma.get_tipo_display(),
+                "valor_esperado": forma.valor,
+            }
+            for forma in formas_pago
+        ]
     costo_total = cotizacion.total
-    abono_inicial = cuotas[0].valor_esperado if cuotas else None
+    total_formas = sum((forma.valor for forma in formas_pago), Decimal("0"))
+    items_aceptados = [
+        {
+            "descripcion": item.descripcion,
+            "cantidad": item.num_citas,
+            "valor_unitario": formatear_moneda(item.valor_unitario),
+            "descuento": f"{item.descuento_porcentaje:.0f}%" if item.descuento_porcentaje else "",
+            "subtotal": formatear_moneda(item.subtotal),
+        }
+        for item in cotizacion.items.filter(activo=True)
+    ]
+    formas_pago_detalle = [
+        {
+            "tipo": forma.get_tipo_display(),
+            "descripcion": forma.descripcion,
+            "fecha": forma.fecha,
+            "valor": formatear_moneda(forma.valor),
+        }
+        for forma in formas_pago
+    ]
+    primera_cuota = cuotas[0] if cuotas else None
+    abono_inicial = (
+        (primera_cuota["valor_esperado"] if isinstance(primera_cuota, dict) else primera_cuota.valor_esperado)
+        if primera_cuota is not None
+        else None
+    )
     # Saldo del COMPROMISO (total - abono acordado), no el saldo ya pagado en
     # tiempo real: este documento se genera al aceptar la cotizacion, antes de
     # que se registre ningun cobro, asi que cartera.saldo_pendiente siempre
@@ -66,7 +107,16 @@ def _contexto_merge_cotizacion(cotizacion) -> dict:
         "costo_total": costo_total,
         "abono_inicial": abono_inicial,
         "saldo_pendiente": saldo_compromiso,
-        "fecha_generacion": timezone.localdate(),
+        "fecha_generacion": fecha_generacion or timezone.localdate(),
+        "referencia": str(cotizacion.id)[:8].upper(),
+        "fecha_cotizacion": timezone.localtime(cotizacion.created_at).date(),
+        "validez_dias": cotizacion.validez_dias,
+        "fecha_vencimiento": cotizacion.fecha_vencimiento,
+        "items_aceptados": items_aceptados,
+        "formas_pago": formas_pago_detalle,
+        "total_fmt": formatear_moneda(costo_total),
+        "total_formas_fmt": formatear_moneda(total_formas),
+        "diferencia_fmt": formatear_moneda(costo_total - total_formas) if formas_pago and abs(costo_total - total_formas) >= 1 else "",
     }
 
 
@@ -84,15 +134,21 @@ COMPROMISO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/compromiso_pago_estandar.ht
 ACTA_ACUERDO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/acta_acuerdo_pago_estandar.html"
 
 
-def renderizar_compromiso_pago_estandar(cotizacion) -> str:
+def renderizar_compromiso_pago_estandar(cotizacion, fecha_generacion=None) -> str:
     """
-    Cuerpo estandar (no configurable) del compromiso de pago. La clinica solo
-    activa o desactiva el requisito en ConfiguracionCartera; el texto es fijo,
-    igual que el registro de asistencia.
+    Cuerpo estandar (no configurable) de la aceptacion de la cotizacion con
+    compromiso de pago: servicios aceptados, forma de pago acordada y
+    condiciones. La clinica solo activa o desactiva el requisito en
+    ConfiguracionCartera; el texto es fijo, igual que el registro de asistencia.
+    ``fecha_generacion`` fija la fecha impresa para que re-renderizar el mismo
+    contenido de otro dia no cambie el hash.
     """
     from django.template.loader import render_to_string
 
-    return render_to_string(COMPROMISO_PAGO_ESTANDAR_TEMPLATE, _contexto_merge_cotizacion(cotizacion))
+    return render_to_string(
+        COMPROMISO_PAGO_ESTANDAR_TEMPLATE,
+        _contexto_merge_cotizacion(cotizacion, fecha_generacion=fecha_generacion),
+    )
 
 
 def documenso_configurado() -> bool:
@@ -169,6 +225,19 @@ def generar_pdf_consentimiento(consentimiento: Consentimiento) -> bytes:
     return HTML(string=html).write_pdf()
 
 
+def es_acta_acuerdo_pago(consentimiento: Consentimiento) -> bool:
+    """True si el consentimiento (sin plantilla, atado a cotizacion) es el acta
+    de un AcuerdoPago y no la aceptacion de la cotizacion."""
+    if not consentimiento.cotizacion_id or consentimiento.plantilla_id:
+        return False
+    from apps.cartera.models import AcuerdoPago
+
+    return AcuerdoPago.objects.filter(documento_id=consentimiento.id).exists()
+
+
+TITULO_ACEPTACION_COTIZACION = "Aceptación de cotización y compromiso de pago"
+
+
 def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
     """
     Renderiza el PDF de firma reutilizando el mismo sistema visual que el
@@ -180,7 +249,8 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
 
     if consentimiento.cotizacion_id:
         clinica = consentimiento.cotizacion.clinica
-        doc_ref = f"#COMP-{str(consentimiento.cotizacion_id)[:8].upper()}"
+        prefijo = "ACTA" if es_acta_acuerdo_pago(consentimiento) else "ACEP"
+        doc_ref = f"#{prefijo}-{str(consentimiento.cotizacion_id)[:8].upper()}"
     else:
         clinica = consentimiento.cita.sede.clinica
         doc_ref = f"#CONS-{str(consentimiento.id)[:8].upper()}"
@@ -192,7 +262,15 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
         "doc_title": (
             consentimiento.plantilla.nombre
             if consentimiento.plantilla_id and consentimiento.plantilla.nombre
-            else ("Compromiso de pago" if consentimiento.cotizacion_id else "Consentimiento")
+            else (
+                (
+                    "Acta de acuerdo de pago"
+                    if es_acta_acuerdo_pago(consentimiento)
+                    else TITULO_ACEPTACION_COTIZACION
+                )
+                if consentimiento.cotizacion_id
+                else "Consentimiento"
+            )
         ),
         "doc_ref": doc_ref,
         "paciente": consentimiento.paciente,
@@ -248,7 +326,8 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
     # Crear nuevo envelope.
     pdf_bytes = generar_pdf_para_firma_documenso(consentimiento)
     coords = extraer_coordenadas_firma(pdf_bytes)
-    nombre_archivo = f"compromiso_pago_{str(consentimiento.id)[:8].upper()}.pdf"
+    prefijo_archivo = "acta_acuerdo_pago" if es_acta_acuerdo_pago(consentimiento) else "aceptacion_cotizacion"
+    nombre_archivo = f"{prefijo_archivo}_{str(consentimiento.id)[:8].upper()}.pdf"
 
     envelope_id = _crear_envelope_documenso(
         pdf_bytes, nombre_archivo, consentimiento.paciente.nombre_completo, recipient_email, coords,
@@ -273,11 +352,9 @@ def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     if consentimiento.plantilla_id:
         return consentimiento.plantilla.nombre
     if consentimiento.cotizacion_id:
-        from apps.cartera.models import AcuerdoPago
-
-        if AcuerdoPago.objects.filter(documento_id=consentimiento.id).exists():
+        if es_acta_acuerdo_pago(consentimiento):
             return "acta de acuerdo de pago"
-        return "compromiso de pago"
+        return "aceptación de cotización y compromiso de pago"
     return "consentimiento"
 
 

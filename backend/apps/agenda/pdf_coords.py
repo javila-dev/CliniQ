@@ -3,6 +3,19 @@ import io
 import pdfplumber
 
 
+def _buscar_marcadores_firma(pdf):
+    """Recorre las paginas y devuelve ``(numero_pagina, page, marcador_tl, marcador_br)``
+    de la primera que contiene ambos marcadores, o ``None``. El recuadro de firma
+    puede quedar en una pagina posterior cuando el contenido del documento es largo."""
+    for numero, page in enumerate(pdf.pages, start=1):
+        words = page.extract_words()
+        marker_tl = next((w for w in words if "__SIG_TL__" in w.get("text", "")), None)
+        marker_br = next((w for w in words if "__SIG_BR__" in w.get("text", "")), None)
+        if marker_tl is not None and marker_br is not None:
+            return numero, page, marker_tl, marker_br
+    return None
+
+
 def extraer_coordenadas_firma(pdf_bytes: bytes) -> dict:
     """
     Abre el PDF renderizado y busca los marcadores __SIG_TL__ (esquina
@@ -12,14 +25,10 @@ def extraer_coordenadas_firma(pdf_bytes: bytes) -> dict:
     de pagina (formato que espera Documenso: pageX, pageY, pageWidth, pageHeight).
     """
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        page = pdf.pages[0]
-        words = page.extract_words()
-
-        marker_tl = next((w for w in words if "__SIG_TL__" in w.get("text", "")), None)
-        marker_br = next((w for w in words if "__SIG_BR__" in w.get("text", "")), None)
-
-        if marker_tl is None or marker_br is None:
-            return _coordenadas_fallback(page)
+        encontrados = _buscar_marcadores_firma(pdf)
+        if encontrados is None:
+            return _coordenadas_fallback(pdf.pages[0])
+        numero_pagina, page, marker_tl, marker_br = encontrados
 
         page_w = page.width
         page_h = page.height
@@ -30,7 +39,7 @@ def extraer_coordenadas_firma(pdf_bytes: bytes) -> dict:
         y1 = marker_br["bottom"]
 
         return {
-            "pageNumber": 1,
+            "pageNumber": numero_pagina,
             "pageX": round((x0 / page_w) * 100, 2),
             "pageY": round((y0 / page_h) * 100, 2),
             "pageWidth": round(((x1 - x0) / page_w) * 100, 2),
@@ -49,13 +58,10 @@ def recortar_firma_paciente(pdf_bytes: bytes) -> bytes | None:
     (p.ej. PDF generado antes de que existiera este mecanismo).
     """
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        page = pdf.pages[0]
-        words = page.extract_words()
-
-        marker_tl = next((w for w in words if "__SIG_TL__" in w.get("text", "")), None)
-        marker_br = next((w for w in words if "__SIG_BR__" in w.get("text", "")), None)
-        if marker_tl is None or marker_br is None:
+        encontrados = _buscar_marcadores_firma(pdf)
+        if encontrados is None:
             return None
+        _, page, marker_tl, marker_br = encontrados
 
         bbox = (marker_tl["x0"], marker_tl["top"], marker_br["x1"], marker_br["bottom"])
         crop_img = page.crop(bbox).to_image(resolution=200)

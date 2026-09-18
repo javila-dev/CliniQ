@@ -12,6 +12,8 @@ from apps.notificaciones.services import (
     registrar_envio_whatsapp,
     verificar_disponibilidad_whatsapp,
 )
+from apps.historia_clinica.models import ConsentimientoInformado
+from apps.historia_clinica.services import consentimiento_informado_vigente, consentimiento_satisfecho
 from apps.protocolos.models import CheckinOTP, ConsentimientoPaciente, SesionProcedimiento, TratamientoPaciente
 
 
@@ -229,10 +231,12 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
 
     for procedimiento in procedimientos:
         for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
+            if consentimiento_satisfecho(paciente.id, (relacion.template.template_token or str(relacion.template.id))):
+                continue
             consentimiento = (
                 ConsentimientoPaciente.objects.filter(
                     paciente=paciente,
-                    template_token=relacion.template.template_token,
+                    template_token=(relacion.template.template_token or str(relacion.template.id)),
                 )
                 .order_by("-fecha_firma", "-created_at")
                 .first()
@@ -242,7 +246,7 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
                     {
                         "estado": "faltante",
                         "procedimiento": procedimiento.nombre,
-                        "template_token": relacion.template.template_token,
+                        "template_token": (relacion.template.template_token or str(relacion.template.id)),
                         "template_nombre": relacion.template.get_tipo_display(),
                         "accion": "firmar",
                     }
@@ -253,7 +257,7 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
                     {
                         "estado": "vencido",
                         "procedimiento": procedimiento.nombre,
-                        "template_token": relacion.template.template_token,
+                        "template_token": (relacion.template.template_token or str(relacion.template.id)),
                         "template_nombre": consentimiento.template_nombre,
                         "fecha_firma": consentimiento.fecha_firma,
                         "vencio": consentimiento.vigencia_hasta,
@@ -271,15 +275,27 @@ def consentimiento_status_sesion(sesion: SesionProcedimiento):
 
     for procedimiento in procedimientos:
         for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
+            informado = consentimiento_informado_vigente(paciente.id, (relacion.template.template_token or str(relacion.template.id)))
             consentimiento = (
                 ConsentimientoPaciente.objects.filter(
                     paciente=paciente,
-                    template_token=relacion.template.template_token,
+                    template_token=(relacion.template.template_token or str(relacion.template.id)),
                 )
                 .order_by("-fecha_firma", "-created_at")
                 .first()
             )
-            if consentimiento is None:
+            legado_vigente = consentimiento is not None and consentimiento.vigencia_hasta >= hoy
+            if informado is not None and not legado_vigente:
+                resultado.append(
+                    {
+                        "procedimiento": procedimiento.nombre,
+                        "template_nombre": informado.documenso_template_nombre or relacion.template.get_tipo_display(),
+                        "estado": "vigente",
+                        "fecha_firma": informado.fecha_firma,
+                        "vence": informado.fecha_vencimiento,
+                    }
+                )
+            elif consentimiento is None:
                 resultado.append(
                     {
                         "procedimiento": procedimiento.nombre,
@@ -319,7 +335,6 @@ def consentimiento_status_sesion(sesion: SesionProcedimiento):
 
 def consentimientos_pendientes_cotizacion(cotizacion):
     faltantes = []
-    hoy = date.today()
     procedimientos_unicos = {}
 
     for item in cotizacion.items.select_related("tratamiento", "servicio", "procedimiento").prefetch_related(
@@ -334,21 +349,44 @@ def consentimientos_pendientes_cotizacion(cotizacion):
         elif item.servicio_id:
             procedimientos_unicos[str(item.servicio_id)] = item.servicio
 
+    por_token = {}
     for procedimiento in procedimientos_unicos.values():
-        for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template"):
-            vigente = ConsentimientoPaciente.objects.filter(
-                paciente=cotizacion.paciente,
-                template_token=relacion.template.template_token,
-                vigencia_hasta__gte=hoy,
-            ).exists()
-            if not vigente:
-                faltantes.append(
-                    {
-                        "procedimiento": procedimiento.nombre,
-                        "template_token": relacion.template.template_token,
-                        "template_nombre": relacion.template.get_tipo_display(),
-                    }
+        for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
+            token = (relacion.template.template_token or str(relacion.template.id))
+            if token in por_token:
+                if por_token[token] is not None:
+                    por_token[token]["procedimientos"].append(procedimiento.nombre)
+                continue
+            if consentimiento_satisfecho(cotizacion.paciente_id, token):
+                por_token[token] = None
+                continue
+            borrador = (
+                ConsentimientoInformado.objects.filter(
+                    paciente_id=cotizacion.paciente_id,
+                    documenso_template_token=token,
+                    firmado=False,
                 )
+                .order_by("-created_at")
+                .first()
+            )
+            por_token[token] = {
+                "procedimientos": [procedimiento.nombre],
+                "template_token": token,
+                "template_nombre": relacion.template.nombre or relacion.template.get_tipo_display(),
+                "consentimiento_id": str(borrador.id) if borrador else None,
+            }
+
+    for datos in por_token.values():
+        if datos is None:
+            continue
+        faltantes.append(
+            {
+                "procedimiento": ", ".join(datos["procedimientos"]),
+                "template_token": datos["template_token"],
+                "template_nombre": datos["template_nombre"],
+                "consentimiento_id": datos["consentimiento_id"],
+            }
+        )
     return faltantes
 
 

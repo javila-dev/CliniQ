@@ -177,14 +177,14 @@ aplican contra esas cuotas.
 Alguien con permiso cambia el estado de la cotización a **aceptada**. Es el
 camino normal.
 
-### Aceptación por firma del compromiso de pago
+### Aceptación por firma (aceptación y compromiso de pago)
 
-Si tu clínica exige compromiso de pago, el flujo cambia: se genera el documento,
+Si tu clínica lo exige, el flujo cambia: se genera el documento de aceptación y compromiso de pago,
 el paciente lo firma y, **al confirmarse la firma, la cotización se acepta sola**.
 No hay que volver a entrar a marcarla.
 
 Esto se activa en Configuración → Otros documentos y se explica en
-[El compromiso de pago](/ayuda/articulo/el-compromiso-de-pago).
+[La aceptación de la cotización y el compromiso de pago](/ayuda/articulo/el-compromiso-de-pago).
 
 ## Revisa antes de aceptar
 
@@ -194,7 +194,8 @@ Después de aceptar ya no se edita la cotización, así que conviene verificar:
 - Que los **ítems** y sus cantidades reflejen lo acordado.
 - Que el **total** coincida con lo que se le dijo al paciente.
 - Que las **formas de pago** sumen el total y tengan fechas reales, no fechas de
-  relleno.
+  relleno. CliniQ no deja aceptar una cotización cuyo plan de pagos no suma el
+  total.
 
 Ese último punto es el que más problemas evita: las fechas de las líneas de pago
 son las fechas en que las cuotas vencen y empiezan a generar mora.

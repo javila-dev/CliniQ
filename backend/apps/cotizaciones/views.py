@@ -1,6 +1,7 @@
+import hashlib
 import logging
 from collections import defaultdict
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from decimal import Decimal
 
@@ -85,7 +86,7 @@ class CotizacionViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
-                           "historial_sesiones", "sesiones"}:
+                           "historial_sesiones", "sesiones", "consentimientos_pendientes"}:
             return [RequirePermission("cotizaciones.ver")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
@@ -179,6 +180,9 @@ class CotizacionViewSet(ModelViewSet):
             logger.debug("[PATCH cotizacion] validation errors: %s", exc.detail)
             return Response(normalize_error_response(exc.detail), status=status.HTTP_400_BAD_REQUEST)
         self.perform_update(serializer)
+        # El compromiso pendiente ya generado copia los servicios y la forma de
+        # pago: si la cotizacion cambio, hay que re-emitirlo para no firmar montos viejos.
+        self._refrescar_compromiso_pendiente(instance)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cambiar_estado")
@@ -199,8 +203,9 @@ class CotizacionViewSet(ModelViewSet):
 
         if nuevo_estado == Cotizacion.Estado.ACEPTADA:
             from apps.consentimientos.models import Consentimiento
-            from apps.cotizaciones.services import aceptar_cotizacion
+            from apps.cotizaciones.services import aceptar_cotizacion, validar_plan_de_pagos
 
+            validar_plan_de_pagos(cotizacion)
             compromiso_pago = self._generar_compromiso_pago_si_aplica(cotizacion)
             requiere_firma = (
                 compromiso_pago is not None
@@ -225,6 +230,41 @@ class CotizacionViewSet(ModelViewSet):
         cotizacion.estado = nuevo_estado
         cotizacion.save(update_fields=["estado", "updated_at"])
         return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
+
+    def _refrescar_compromiso_pendiente(self, cotizacion, compromiso=None):
+        """Re-renderiza el compromiso pendiente de una cotizacion en borrador.
+
+        Si el contenido cambio (servicios, valores o forma de pago) actualiza el
+        snapshot y descarta el envelope de Documenso ya creado, que tenia el PDF
+        anterior. No toca documentos firmados ni el acta de un acuerdo de pago.
+        """
+        from apps.consentimientos.models import Consentimiento
+        from apps.consentimientos.services import es_acta_acuerdo_pago, renderizar_compromiso_pago_estandar
+
+        if cotizacion.estado != Cotizacion.Estado.BORRADOR:
+            return compromiso
+        compromiso = compromiso or self._compromiso_pago_existente(cotizacion)
+        if (
+            compromiso is None
+            or compromiso.estado != Consentimiento.Estado.PENDIENTE
+            or es_acta_acuerdo_pago(compromiso)
+        ):
+            return compromiso
+
+        snapshot = renderizar_compromiso_pago_estandar(
+            cotizacion, fecha_generacion=timezone.localtime(compromiso.created_at).date(),
+        )
+        hash_contenido = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
+        if hash_contenido == compromiso.hash_contenido:
+            return compromiso
+
+        compromiso.contenido_snapshot = snapshot
+        compromiso.hash_contenido = hash_contenido
+        compromiso.documenso_documento_id = ""
+        compromiso.documenso_signing_token = ""
+        compromiso.token_expira = timezone.now() + timedelta(hours=48)
+        compromiso.save()
+        return compromiso
 
     def _serializar_compromiso_pago(self, compromiso_pago):
         if not compromiso_pago:
@@ -260,7 +300,7 @@ class CotizacionViewSet(ModelViewSet):
             cotizacion=cotizacion, plantilla__isnull=True,
         ).exclude(estado=Consentimiento.Estado.REVOCADO).first()
         if existente:
-            return existente
+            return self._refrescar_compromiso_pendiente(cotizacion, existente)
 
         try:
             return generar_consentimiento(cotizacion=cotizacion, plantilla=None)
@@ -269,6 +309,13 @@ class CotizacionViewSet(ModelViewSet):
                 "[cambiar_estado] fallo al generar compromiso de pago | cotizacion_id=%s", cotizacion.id,
             )
             return None
+
+    @action(detail=True, methods=["get"], url_path="consentimientos_pendientes")
+    def consentimientos_pendientes(self, request, pk=None):
+        from apps.protocolos.services import consentimientos_pendientes_cotizacion
+
+        cotizacion = self.get_object()
+        return Response(consentimientos_pendientes_cotizacion(cotizacion), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):

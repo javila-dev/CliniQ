@@ -1,14 +1,17 @@
 import logging
 
-from django.db import models
 from django.utils import timezone
 from rest_framework import serializers
 
 from apps.agenda.models import BloqueoAgenda, Cita, RegistroConfirmacion
 from apps.clinicas.models import Sede
 from apps.core.storage import get_signed_url
-from apps.historia_clinica.models import ConsentimientoInformado
-from apps.historia_clinica.services import descargar_pdf_documenso, guardar_pdf_firmado
+from apps.historia_clinica.services import (
+    consentimiento_informado_vigente,
+    consentimiento_satisfecho,
+    descargar_pdf_documenso,
+    guardar_pdf_firmado,
+)
 from apps.protocolos.models import SesionProcedimiento
 from apps.users.models import User
 
@@ -60,7 +63,6 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
     else:
         return {"todos_firmados": True, "consentimientos": []}
 
-    hoy = timezone.localdate()
     resultado = []
     todos_firmados = True
     seen_tokens = set()
@@ -75,17 +77,8 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
             if token in seen_tokens:
                 continue
             seen_tokens.add(token)
-            consentimiento = (
-                ConsentimientoInformado.objects.filter(
-                    paciente_id=paciente_id,
-                    documenso_template_token=token,
-                    firmado=True,
-                )
-                .filter(models.Q(fecha_vencimiento__isnull=True) | models.Q(fecha_vencimiento__gte=hoy))
-                .order_by("-fecha_firma", "-created_at")
-                .first()
-            )
-            vigente = consentimiento is not None
+            consentimiento = consentimiento_informado_vigente(paciente_id, token)
+            vigente = consentimiento_satisfecho(paciente_id, token, informado=consentimiento)
             if not vigente:
                 todos_firmados = False
             resultado.append(
@@ -119,22 +112,12 @@ def build_consentimiento_info(cita):
     if not templates.exists():
         return {"todos_firmados": True, "consentimientos": []}
 
-    hoy = timezone.localdate()
     resultado = []
     todos_firmados = True
     for template in templates:
         token = template.template_token or str(template.id)
-        consentimiento = (
-            ConsentimientoInformado.objects.filter(
-                paciente_id=cita.paciente_id,
-                documenso_template_token=token,
-                firmado=True,
-            )
-            .filter(models.Q(fecha_vencimiento__isnull=True) | models.Q(fecha_vencimiento__gte=hoy))
-            .order_by("-fecha_firma", "-created_at")
-            .first()
-        )
-        vigente = consentimiento is not None
+        consentimiento = consentimiento_informado_vigente(cita.paciente_id, token)
+        vigente = consentimiento_satisfecho(cita.paciente_id, token, informado=consentimiento)
         if not vigente:
             todos_firmados = False
         resultado.append(

@@ -1,4 +1,5 @@
 import tempfile
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -455,6 +456,8 @@ class CampanaStatsTests(TestCase):
         )
 
     def _crear_y_aceptar_cotizacion(self, *, valor="280000.00", num_citas=1, descuento="0.00"):
+        # El plan de pagos debe sumar el total (cantidad x valor - descuento).
+        total_plan = str((Decimal(valor) * num_citas * (Decimal("100") - Decimal(descuento)) / Decimal("100")).quantize(Decimal("0.01")))
         create = self.client.post(
             "/api/v1/cotizaciones/",
             {
@@ -469,7 +472,7 @@ class CampanaStatsTests(TestCase):
                         "descuento_porcentaje": descuento,
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": valor}],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": total_plan}],
             },
             format="json",
         )
@@ -488,7 +491,7 @@ class CampanaStatsTests(TestCase):
                         "descuento_porcentaje": descuento,
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": valor}],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": total_plan}],
             },
             format="json",
         )

@@ -288,15 +288,30 @@ El acta se revoca y el plan original sigue como estaba, intacto.
     {
         "slug": "el-compromiso-de-pago",
         "categoria": "cartera-y-cobros",
-        "titulo": "El compromiso de pago",
-        "resumen": "Qué es el documento que el paciente firma al aceptar una cotización, cómo se activa para toda la clínica y por qué la cotización se acepta sola al firmarse.",
+        "titulo": "La aceptación de la cotización y el compromiso de pago",
+        "resumen": "Qué es el documento de aceptación y compromiso de pago que el paciente firma, qué detalla, cómo se activa para toda la clínica y por qué la cotización se acepta sola al firmarse.",
         "area": "cartera",
-        "keywords": "compromiso de pago, documento, firma, aceptación, cotización, promocional, cartera",
+        "keywords": "compromiso de pago, aceptación de cotización, documento, firma, forma de pago, cotización, promocional, cartera",
         "destacado": False,
         "contenido": """
-El **compromiso de pago** es el documento en que el paciente reconoce lo que
-compró y cómo lo va a pagar. Se genera al aceptar una cotización, cuando la
-clínica lo tiene activado.
+La **aceptación de la cotización con compromiso de pago** es el documento en que
+el paciente declara que acepta la cotización y se compromete a pagar. Se genera
+al aceptar una cotización, cuando la clínica lo tiene activado.
+
+## Qué dice el documento
+
+- **Quién acepta y qué acepta:** los datos del paciente y la cotización (número,
+  fecha y vigencia).
+- **Servicios aceptados:** cada ítem con su cantidad, valor unitario, descuento y
+  subtotal, y el total de la cotización.
+- **Forma de pago acordada:** cada forma de pago con su concepto, fecha y valor
+  (por ejemplo, un abono inicial y las cuotas). Si lo registrado no cubre el total,
+  el documento lo advierte.
+- **Compromiso y condiciones:** el paciente se compromete a pagar en las fechas
+  acordadas y autoriza suspender los servicios pendientes si incumple.
+
+Si editas la cotización mientras el documento sigue pendiente de firma, CliniQ lo
+vuelve a generar con los datos nuevos: el paciente nunca firma montos desactualizados.
 
 ## Cómo se activa
 
@@ -311,7 +326,7 @@ paciente.
 ## Cómo funciona el flujo
 
 1. Se arma la cotización con sus ítems y sus formas de pago.
-2. Al aceptarla, CliniQ genera el compromiso de pago con esos datos.
+2. Al aceptarla, CliniQ genera el documento con esos datos.
 3. El paciente lo firma, en la clínica o por un enlace enviado a su teléfono.
 4. **Al confirmarse la firma, la cotización queda aceptada** y se crean su
    cartera y sus cuotas.
@@ -342,7 +357,7 @@ documento: la confirmación puede tardar unos segundos en llegar.
 - Si cobras todo de contado en la misma sesión: probablemente no lo necesites, y
   agrega un paso al mostrador.
 
-> El compromiso de pago no reemplaza al consentimiento informado. Uno es sobre el
+> Este documento no reemplaza al consentimiento informado. Uno es sobre el
 > dinero, el otro sobre el procedimiento, y ambos pueden ser necesarios en la
 > misma venta.
 """,

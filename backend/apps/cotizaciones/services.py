@@ -13,6 +13,9 @@ exactamente lo mismo.
 """
 
 import logging
+from decimal import Decimal
+
+from rest_framework.exceptions import ValidationError
 
 from apps.cotizaciones.models import Cotizacion
 
@@ -27,6 +30,43 @@ def clinica_exige_compromiso_pago(cotizacion) -> bool:
         clinica_id=cotizacion.clinica_id,
         requiere_consentimiento_promocional=True,
     ).exists()
+
+
+# Tolerancia de 1 peso: el descuento porcentual puede dejar centavos que la
+# interfaz redondea (misma tolerancia que aplica el formulario al aceptar).
+TOLERANCIA_PLAN_PAGOS = Decimal("1")
+
+
+def validar_plan_de_pagos(cotizacion) -> None:
+    """El plan de pagos (formas de pago) debe sumar el total de la cotizacion.
+
+    Sin esto la cartera y el documento de aceptacion firmado no cuadrarian con
+    lo que el paciente acepto. Lanza ``ValidationError`` (400) si no cuadra.
+    """
+    from apps.consentimientos.services import formatear_moneda
+
+    total = Decimal(cotizacion.total)
+    if total <= 0:
+        return
+    formas_pago = list(cotizacion.formas_pago.filter(activo=True))
+    if not formas_pago:
+        raise ValidationError(
+            {
+                "error": "Debes registrar el plan de pagos antes de aceptar la cotización.",
+                "code": "PLAN_PAGOS_NO_CUADRA",
+            }
+        )
+    suma = sum((forma.valor for forma in formas_pago), Decimal("0"))
+    if abs(suma - total) > TOLERANCIA_PLAN_PAGOS:
+        raise ValidationError(
+            {
+                "error": (
+                    f"El plan de pagos suma {formatear_moneda(suma)} y el total de la cotización es "
+                    f"{formatear_moneda(total)}. Ajusta el plan de pagos para que sume el total."
+                ),
+                "code": "PLAN_PAGOS_NO_CUADRA",
+            }
+        )
 
 
 def aceptar_cotizacion(cotizacion, *, actor=None) -> list:

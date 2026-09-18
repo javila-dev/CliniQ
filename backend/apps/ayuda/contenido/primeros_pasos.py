@@ -138,8 +138,8 @@ acordarse.
 
 - **Pantalla de atención** e **Historia clínica**: elige qué pestañas ve el
   profesional, para no mostrar campos que tu clínica no usa.
-- **Otros documentos**: decide si al aceptar una cotización se exige un
-  compromiso de pago firmado.
+- **Otros documentos**: decide si al aceptar una cotización se exige el
+  documento de aceptación y compromiso de pago firmado.
 - **Cajas y categorías de gasto**: si vas a manejar efectivo, define la caja de
   cada sede, su fondo inicial y su responsable.
 
@@ -317,7 +317,7 @@ Varias cosas están apagadas hasta que alguien las enciende:
 
 - Los pasos de **llegada**, **cobro** y **firma de asistencia** del asistente de
   inicio de atención se activan o desactivan por clínica.
-- El **compromiso de pago** al aceptar una cotización es opcional.
+- El documento de **aceptación y compromiso de pago** al aceptar una cotización es opcional.
 - Las pestañas de la **historia clínica** y de la **pantalla de atención** se
   eligen una por una.
 - Los **módulos adicionales**, como el de obesidad o la verificación facial, se

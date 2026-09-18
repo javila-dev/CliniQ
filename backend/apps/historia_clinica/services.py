@@ -327,6 +327,40 @@ def descargar_pdf_documenso(document_id: str) -> bytes | None:
         return None
 
 
+def consentimiento_informado_vigente(paciente_id, template_token):
+    """Último ConsentimientoInformado firmado y no vencido del paciente para el template."""
+    from django.db.models import Q
+
+    from apps.historia_clinica.models import ConsentimientoInformado
+
+    hoy = timezone.localdate()
+    return (
+        ConsentimientoInformado.objects.filter(
+            paciente_id=paciente_id,
+            documenso_template_token=template_token,
+            firmado=True,
+        )
+        .filter(Q(fecha_vencimiento__isnull=True) | Q(fecha_vencimiento__gte=hoy))
+        .order_by("-fecha_firma", "-created_at")
+        .first()
+    )
+
+
+def consentimiento_satisfecho(paciente_id, template_token, *, informado=None) -> bool:
+    """True si el paciente tiene el consentimiento vigente en cualquiera de los dos modelos:
+    ConsentimientoInformado (firma Documenso) o ConsentimientoPaciente (registro manual/legado).
+    """
+    from apps.protocolos.models import ConsentimientoPaciente
+
+    if informado is not None or consentimiento_informado_vigente(paciente_id, template_token) is not None:
+        return True
+    return ConsentimientoPaciente.objects.filter(
+        paciente_id=paciente_id,
+        template_token=template_token,
+        vigencia_hasta__gte=timezone.localdate(),
+    ).exists()
+
+
 def marcar_consentimiento_firmado(consentimiento, *, documenso_document_id: str | None = None):
     if consentimiento.firmado:
         if documenso_document_id and consentimiento.documenso_document_id != documenso_document_id:

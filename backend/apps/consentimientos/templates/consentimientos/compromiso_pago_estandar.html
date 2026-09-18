@@ -1,44 +1,82 @@
-<h1>Compromiso de pago</h1>
+<h1>Aceptación de cotización y compromiso de pago</h1>
 
 <p>
   Yo, <strong>{{ paciente.nombre_completo }}</strong>, identificado(a) con
-  <strong>{{ paciente.tipo_documento }} {{ paciente.numero_documento }}</strong>, declaro que
-  he aceptado la cotización de servicios de <strong>{{ clinica.nombre }}</strong> por un valor
-  total de <strong>${{ costo_total|floatformat:0 }}</strong> y me comprometo a pagar dicho
-  valor en las condiciones que se describen a continuación.
+  <strong>{{ paciente.tipo_documento }} {{ paciente.numero_documento }}</strong>, declaro que he
+  revisado y <strong>acepto la cotización N.° {{ referencia }}</strong> emitida por
+  <strong>{{ clinica.nombre }}</strong> el {{ fecha_cotizacion|date:"d/m/Y" }}, por los servicios que
+  se detallan a continuación, y me comprometo a pagar el valor total de
+  <strong>{{ total_fmt }}</strong> en la forma y en las fechas que se especifican en este documento.
 </p>
 
-<h2>Detalle del pago</h2>
-<p>
-  Valor total de la cotización: <strong>${{ costo_total|floatformat:0 }}</strong><br>
-  {% if abono_inicial is not None %}Abono inicial acordado: <strong>${{ abono_inicial|floatformat:0 }}</strong><br>{% endif %}
-  Saldo pendiente al momento de la firma: <strong>${{ saldo_pendiente|floatformat:0 }}</strong>
-</p>
-
-{% if cuotas %}
-<h2>Plan de pagos acordado</h2>
+<h2>1. Servicios aceptados</h2>
 <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
   <tr>
-    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Fecha</td>
-    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Concepto</td>
-    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor</td>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Descripción</td>
+    <td style="padding:4px 6px; color:#6b7280; text-align:center; border-bottom:0.5px solid #e5e7eb;">Cant.</td>
+    <td style="padding:4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor unitario</td>
+    <td style="padding:4px 6px; color:#6b7280; text-align:center; border-bottom:0.5px solid #e5e7eb;">Desc.</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Subtotal</td>
   </tr>
-  {% for cuota in cuotas %}
+  {% for item in items_aceptados %}
   <tr>
-    <td style="padding:4px 6px 4px 0;">{{ cuota.fecha_esperada|date:"d/m/Y" }}</td>
-    <td style="padding:4px 6px;">{{ cuota.descripcion|default:"Cuota" }}</td>
-    <td style="padding:4px 0 4px 6px; text-align:right;"><strong>${{ cuota.valor_esperado|floatformat:0 }}</strong></td>
+    <td style="padding:4px 6px 4px 0;">{{ item.descripcion }}</td>
+    <td style="padding:4px 6px; text-align:center;">{{ item.cantidad }}</td>
+    <td style="padding:4px 6px; text-align:right;">{{ item.valor_unitario }}</td>
+    <td style="padding:4px 6px; text-align:center;">{{ item.descuento|default:"—" }}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right;"><strong>{{ item.subtotal }}</strong></td>
   </tr>
   {% endfor %}
+  <tr>
+    <td colspan="4" style="padding:6px 6px 4px 0; text-align:right; border-top:0.5px solid #e5e7eb;"><strong>Total de la cotización</strong></td>
+    <td style="padding:6px 0 4px 6px; text-align:right; border-top:0.5px solid #e5e7eb;"><strong>{{ total_fmt }}</strong></td>
+  </tr>
 </table>
+
+<h2>2. Forma de pago acordada</h2>
+{% if formas_pago %}
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
+  <tr>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Forma de pago</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Concepto</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Fecha de pago</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor</td>
+  </tr>
+  {% for forma in formas_pago %}
+  <tr>
+    <td style="padding:4px 6px 4px 0;">{{ forma.tipo }}</td>
+    <td style="padding:4px 6px;">{{ forma.descripcion|default:"—" }}</td>
+    <td style="padding:4px 6px;">{% if forma.fecha %}{{ forma.fecha|date:"d/m/Y" }}{% else %}Sin fecha definida{% endif %}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right;"><strong>{{ forma.valor }}</strong></td>
+  </tr>
+  {% endfor %}
+  <tr>
+    <td colspan="3" style="padding:6px 6px 4px 0; text-align:right; border-top:0.5px solid #e5e7eb;"><strong>Total según forma de pago</strong></td>
+    <td style="padding:6px 0 4px 6px; text-align:right; border-top:0.5px solid #e5e7eb;"><strong>{{ total_formas_fmt }}</strong></td>
+  </tr>
+</table>
+{% if diferencia_fmt %}
+<p style="font-size:10.5px; color:#6b7280;">
+  La forma de pago registrada no cubre la totalidad de la cotización: la diferencia de
+  <strong>{{ diferencia_fmt }}</strong> se acordará con {{ clinica.nombre }}.
+</p>
+{% endif %}
+{% else %}
+<p>
+  No se registró una forma de pago específica en la cotización; el pago del valor total de
+  <strong>{{ total_fmt }}</strong> se realizará en las condiciones que se acuerden con {{ clinica.nombre }}.
+</p>
 {% endif %}
 
-<h2>Condiciones</h2>
+<h2>3. Compromiso y condiciones</h2>
 <p>
-  Me comprometo a cumplir con los pagos en las fechas acordadas. En caso de incumplimiento,
-  autorizo a <strong>{{ clinica.nombre }}</strong> a suspender la prestación de los servicios
-  pendientes hasta regularizar la situación. Declaro que la información aquí consignada es
-  correcta y que acepto este compromiso de forma libre y voluntaria.
+  Me comprometo a pagar los valores indicados en las fechas y por los medios acordados. En caso de
+  incumplimiento, autorizo a <strong>{{ clinica.nombre }}</strong> a suspender la prestación de los
+  servicios pendientes hasta regularizar la situación. Al firmar este documento confirmo mi
+  aceptación de la cotización, declaro que la información aquí consignada es correcta y que asumo
+  este compromiso de forma libre y voluntaria.
 </p>
 
-<p style="font-size:10px; color:#9ca3af;">Documento generado el {{ fecha_generacion|date:"d/m/Y" }}.</p>
+<p style="font-size:10px; color:#9ca3af;">
+  Cotización vigente por {{ validez_dias }} días desde su emisión (hasta el {{ fecha_vencimiento|date:"d/m/Y" }}).
+</p>

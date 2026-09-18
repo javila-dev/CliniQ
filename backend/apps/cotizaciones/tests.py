@@ -16,6 +16,7 @@ from apps.clinicas.models import Sede, Servicio, ServicioConsentimiento, TipoSes
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import build_cotizacion_pdf_html
+from apps.historia_clinica.models import ConsentimientoInformado
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.pacientes.models import Paciente
 
@@ -382,6 +383,7 @@ class CotizacionFlowTests(TestCase):
 
         payload = self._payload()
         payload["items"] = [{"tratamiento": str(tratamiento.id), "descuento_porcentaje": "0.00"}]
+        payload["formas_pago"][0]["valor"] = "500000.00"
         create_response = self.client.post("/api/v1/cotizaciones/", payload, format="json")
 
         response = self.client.post(
@@ -393,6 +395,44 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["estado"], Cotizacion.Estado.ACEPTADA)
         self.assertEqual(response.json()["consentimientos_pendientes"][0]["template_token"], "consentimiento-toxina")
+
+        cotizacion_id = create_response.json()["id"]
+        pendientes = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos_pendientes/")
+        self.assertEqual(pendientes.status_code, 200)
+        self.assertEqual([p["template_token"] for p in pendientes.json()], ["consentimiento-toxina"])
+
+        ConsentimientoInformado.objects.create(
+            paciente=self.paciente,
+            clinica=self.clinica,
+            tipo="otros",
+            documenso_template_token="consentimiento-toxina",
+            firmado=True,
+            fecha_firma=timezone.localdate(),
+        )
+        pendientes = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos_pendientes/")
+        self.assertEqual(pendientes.json(), [])
+
+    def test_consentimientos_pendientes_usa_id_si_template_sin_token(self):
+        plantillas = [
+            DocumensoConsentimientoTemplate.objects.create(clinica=self.clinica, nombre=nombre, template_token="")
+            for nombre in ("Consentimiento A", "Consentimiento B")
+        ]
+        for orden, plantilla in enumerate(plantillas, start=1):
+            ServicioConsentimiento.objects.create(servicio=self.servicio, template=plantilla, orden=orden)
+
+        payload = self._payload()
+        payload["items"] = [{"tipo": "procedimiento", "procedimiento": str(self.servicio.id), "valor_unitario": "100000.00"}]
+        payload["formas_pago"][0]["valor"] = "100000.00"
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+        self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+
+        pendientes = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos_pendientes/").json()
+
+        self.assertEqual(
+            sorted(p["template_token"] for p in pendientes),
+            sorted(str(p.id) for p in plantillas),
+        )
+        self.assertEqual({p["template_nombre"] for p in pendientes}, {"Consentimiento A", "Consentimiento B"})
 
     @patch("apps.cotizaciones.views.render_cotizacion_pdf")
     def test_pdf_incluye_columna_periodicidad_si_hay_valores(self, mocked_render_pdf):
@@ -531,9 +571,178 @@ class CotizacionFlowTests(TestCase):
         compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
         self.assertIsNone(compromiso.plantilla_id)
         self.assertEqual(compromiso.estado, Consentimiento.Estado.PENDIENTE)
-        self.assertIn("Compromiso de pago", compromiso.contenido_snapshot)
+        self.assertIn("Aceptación de cotización y compromiso de pago", compromiso.contenido_snapshot)
         self.assertIn(self.paciente.nombre_completo, compromiso.contenido_snapshot)
         self.assertIsNotNone(response.json().get("compromiso_pago"))
+
+    def test_compromiso_pago_detalla_servicios_y_forma_de_pago(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        payload = self._payload()
+        payload["items"][0]["num_citas"] = 2
+        payload["items"][0]["valor_unitario"] = "500000.00"
+        payload["formas_pago"] = [
+            {"tipo": "transferencia", "descripcion": "Abono inicial", "valor": "400000.00", "fecha": "2026-10-01"},
+            {"tipo": "efectivo", "descripcion": "Saldo", "valor": "600000.00", "fecha": "2026-11-01"},
+        ]
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+        self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+
+        contenido = Consentimiento.objects.get(cotizacion_id=cotizacion_id).contenido_snapshot
+
+        self.assertIn(f"cotización N.° {cotizacion_id[:8].upper()}", contenido)
+        self.assertIn("Toxina botulinica", contenido)
+        self.assertIn("$1.000.000", contenido)  # total de la cotización
+        self.assertIn("Abono inicial", contenido)
+        self.assertIn("$400.000", contenido)
+        self.assertIn("01/10/2026", contenido)
+        self.assertIn("Saldo", contenido)
+        self.assertIn("$600.000", contenido)
+        self.assertIn("01/11/2026", contenido)
+        self.assertNotIn("La forma de pago registrada no cubre", contenido)
+
+    def test_no_se_acepta_si_el_plan_de_pagos_no_suma_el_total(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        payload = self._payload()
+        payload["formas_pago"][0]["valor"] = "100000.00"
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PLAN_PAGOS_NO_CUADRA")
+        self.assertIn("$100.000", response.json()["error"])
+        self.assertIn("$350.000", response.json()["error"])
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.BORRADOR)
+        self.assertFalse(Consentimiento.objects.filter(cotizacion_id=cotizacion_id).exists())
+
+    def test_no_se_acepta_sin_plan_de_pagos(self):
+        payload = self._payload()
+        payload["formas_pago"] = []
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PLAN_PAGOS_NO_CUADRA")
+        self.assertEqual(Cotizacion.objects.get(id=cotizacion_id).estado, Cotizacion.Estado.BORRADOR)
+
+    def test_se_acepta_si_el_plan_de_pagos_suma_el_total_con_varias_formas(self):
+        payload = self._payload()
+        payload["formas_pago"] = [
+            {"tipo": "transferencia", "descripcion": "Abono", "valor": "100000.00"},
+            {"tipo": "efectivo", "descripcion": "Saldo", "valor": "250000.00"},
+        ]
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["estado"], Cotizacion.Estado.ACEPTADA)
+
+    def test_documento_de_aceptacion_advierte_si_la_forma_de_pago_no_cubre_el_total(self):
+        from apps.consentimientos.services import renderizar_compromiso_pago_estandar
+
+        payload = self._payload()
+        payload["formas_pago"][0]["valor"] = "100000.00"
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
+
+        contenido = renderizar_compromiso_pago_estandar(Cotizacion.objects.get(id=cotizacion_id))
+
+        self.assertIn("La forma de pago registrada no cubre", contenido)
+        self.assertIn("$250.000", contenido)
+
+    def test_pdf_de_aceptacion_mantiene_el_bloque_de_firma_en_una_sola_pagina(self):
+        import io
+
+        import pdfplumber
+
+        from apps.agenda.pdf_coords import extraer_coordenadas_firma
+        from apps.consentimientos.models import Consentimiento
+        from apps.consentimientos.services import generar_pdf_para_firma_documenso, renderizar_compromiso_pago_estandar
+
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json").json()["id"]
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+        base = renderizar_compromiso_pago_estandar(cotizacion)
+        documento = f"{self.paciente.tipo_documento} {self.paciente.numero_documento}"
+
+        # Distintos largos para que el bloque de firma caiga en varios puntos del salto de pagina.
+        for parrafos in (0, 12, 18, 24, 30, 45):
+            relleno = "".join(f"<p>Cláusula {i}: texto de relleno para forzar salto de página.</p>" for i in range(parrafos))
+            consentimiento = Consentimiento(
+                cotizacion=cotizacion, paciente=self.paciente, contenido_snapshot=base + relleno, hash_contenido="x",
+            )
+            pdf = generar_pdf_para_firma_documenso(consentimiento)
+            coords = extraer_coordenadas_firma(pdf)
+            with pdfplumber.open(io.BytesIO(pdf)) as doc:
+                textos = [pagina.extract_text() or "" for pagina in doc.pages]
+            pagina_firma = coords["pageNumber"]
+            self.assertIn("FIRMA DEL PACIENTE", textos[pagina_firma - 1], f"parrafos={parrafos}")
+            self.assertIn(documento, textos[pagina_firma - 1], f"parrafos={parrafos}")
+
+    def test_compromiso_pendiente_se_reemite_si_se_edita_la_cotizacion(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(
+            clinica=self.clinica, requiere_consentimiento_promocional=True,
+        )
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json").json()["id"]
+        self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+        compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
+        compromiso.documenso_documento_id = "doc-viejo"
+        compromiso.documenso_signing_token = "token-viejo"
+        compromiso.save()
+        hash_anterior = compromiso.hash_contenido
+
+        # Sin cambios reales el documento (y su envelope) no se toca.
+        sin_cambios = self.client.patch(f"/api/v1/cotizaciones/{cotizacion_id}/", {"notas": "otra nota"}, format="json")
+        self.assertEqual(sin_cambios.status_code, 200)
+        compromiso.refresh_from_db()
+        self.assertEqual(compromiso.hash_contenido, hash_anterior)
+        self.assertEqual(compromiso.documenso_documento_id, "doc-viejo")
+
+        item_id = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["items"][0]["id"]
+        editado = self.client.patch(
+            f"/api/v1/cotizaciones/{cotizacion_id}/",
+            {
+                "items": [{
+                    "id": item_id,
+                    "descripcion": "Toxina botulinica",
+                    "num_citas": 1,
+                    "duracion_estimada": "45 min",
+                    "periodicidad": "Cada 4 meses",
+                    "valor_unitario": "420000.00",
+                    "descuento_porcentaje": "0.00",
+                }],
+                "formas_pago": [{"tipo": "transferencia", "descripcion": "Banco XYZ", "valor": "420000.00"}],
+            },
+            format="json",
+        )
+        self.assertEqual(editado.status_code, 200)
+
+        compromiso.refresh_from_db()
+        self.assertNotEqual(compromiso.hash_contenido, hash_anterior)
+        self.assertIn("$420.000", compromiso.contenido_snapshot)
+        self.assertEqual(compromiso.documenso_documento_id, "")
+        self.assertEqual(compromiso.documenso_signing_token, "")
+        self.assertEqual(Consentimiento.objects.filter(cotizacion_id=cotizacion_id).count(), 1)
 
     def test_compromiso_pago_no_se_genera_si_el_requisito_esta_desactivado(self):
         from apps.consentimientos.models import Consentimiento
