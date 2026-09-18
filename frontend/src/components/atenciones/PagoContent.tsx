@@ -134,7 +134,7 @@ export function PagoContent({ cita, soloRegistrar = false, onInicioExitoso, onRe
       <div className="space-y-4 py-1">
         <div className="rounded-lg bg-muted/50 px-4 py-3 text-sm">
           <p className="font-medium">{cita.paciente_nombre}</p>
-          <p className="text-muted-foreground">{cita.servicio_nombre}</p>
+          <p className="text-muted-foreground uppercase">{cita.servicio_nombre}</p>
         </div>
 
         <div className="space-y-1.5">

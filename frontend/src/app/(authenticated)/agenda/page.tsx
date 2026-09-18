@@ -217,7 +217,7 @@ function CitaBlock({ cita, onClick, selected }: { cita: CitaWithLayout; onClick:
             </p>
             {!tiny && (
               <p className={cn('text-[10px] truncate opacity-70 mt-0.5', c.text)}>
-                {formatTime(cita.fecha_inicio)} · {cita.servicio_nombre}
+                {formatTime(cita.fecha_inicio)} · <span className="uppercase">{cita.servicio_nombre}</span>
               </p>
             )}
           </button>
@@ -989,7 +989,7 @@ function AgendaContent() {
                         <div className={cn('w-1 self-stretch rounded-full shrink-0', cfg.dot.replace('bg-', 'bg-'))} />
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
-                          <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre} · {cita.profesional_nombre}</p>
+                          <p className="text-xs text-muted-foreground truncate"><span className="uppercase">{cita.servicio_nombre}</span> · {cita.profesional_nombre}</p>
                           <div className="flex items-center gap-2 mt-1">
                             <span className="text-[11px] capitalize text-muted-foreground">{fecha} · {formatTime(cita.fecha_inicio)}</span>
                             <span className={cn('text-[11px] font-medium', cfg.text)}>

@@ -105,7 +105,7 @@ function AsistenciaFila({ cita, pacienteId }: { cita: Cita; pacienteId: string }
       <div className="flex items-center gap-2.5 min-w-0 flex-1">
         <CheckCircle className="h-4 w-4 text-green-500 shrink-0" />
         <div className="min-w-0">
-          <p className="text-sm font-medium truncate">{cita.servicio_nombre}</p>
+          <p className="text-sm font-medium truncate uppercase">{cita.servicio_nombre}</p>
           <p className="text-xs text-muted-foreground">{formatDate(cita.fecha_inicio)}</p>
         </div>
       </div>

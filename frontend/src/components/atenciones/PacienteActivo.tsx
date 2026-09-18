@@ -71,7 +71,7 @@ export function PacienteActivo({ cita }: PacienteActivoProps) {
             </div>
             <CardTitle className="text-lg leading-tight">{cita.paciente_nombre}</CardTitle>
             <p className="text-sm text-muted-foreground mt-0.5">
-              {cita.servicio_nombre} · {formatTime(cita.fecha_inicio)}
+              <span className="uppercase">{cita.servicio_nombre}</span> · {formatTime(cita.fecha_inicio)}
             </p>
           </div>
         </div>

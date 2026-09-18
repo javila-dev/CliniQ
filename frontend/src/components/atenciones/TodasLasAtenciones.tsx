@@ -211,7 +211,7 @@ export function TodasLasAtenciones() {
                         <p className="font-medium text-foreground truncate max-w-[180px]">{cita.paciente_nombre}</p>
                       </td>
                       <td className="px-4 py-3">
-                        <p className="text-foreground truncate max-w-[200px]">{cita.servicio_nombre || <span className="text-muted-foreground italic">Sin asignar</span>}</p>
+                        <p className="text-foreground truncate max-w-[200px]">{cita.servicio_nombre ? <span className="uppercase">{cita.servicio_nombre}</span> : <span className="text-muted-foreground italic">Sin asignar</span>}</p>
                       </td>
                       <td className="px-4 py-3">
                         <p className="text-foreground truncate max-w-[160px]">{cita.profesional_nombre}</p>

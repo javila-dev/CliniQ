@@ -99,7 +99,7 @@ function PanelLegacy({ tratamientoResumen, citaId }: { tratamientoResumen: Trata
       <button className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-50/60 border-b hover:bg-gray-100/60 transition-colors text-left"
         onClick={() => setExpanded((v) => !v)}>
         {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-        <p className="text-xs font-semibold flex-1">{tratamiento.servicio_nombre}</p>
+        <p className="text-xs font-semibold flex-1 uppercase">{tratamiento.servicio_nombre}</p>
         <span className="text-[10px] text-muted-foreground tabular-nums">
           {tratamiento.pasos_completados}/{tratamiento.total_pasos}
         </span>
@@ -264,7 +264,7 @@ function PanelH27({ tratamientoResumen, citaId }: { tratamientoResumen: Tratamie
       <button className="w-full flex items-center gap-2 px-3 py-2.5 bg-gray-50/60 border-b hover:bg-gray-100/60 transition-colors text-left"
         onClick={() => setExpanded((v) => !v)}>
         {expanded ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />}
-        <p className="text-xs font-semibold flex-1">{tratamiento.tratamiento_catalogo_nombre ?? tratamiento.servicio_nombre}</p>
+        <p className="text-xs font-semibold flex-1 uppercase">{tratamiento.tratamiento_catalogo_nombre ?? tratamiento.servicio_nombre}</p>
         <span className="text-[10px] text-muted-foreground tabular-nums">{completadas}/{total}</span>
         <div className="w-16 h-1.5 rounded-full bg-gray-200 overflow-hidden">
           <div className="h-full rounded-full bg-primary" style={{ width: `${tratamiento.progreso_pct}%` }} />

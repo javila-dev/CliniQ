@@ -87,7 +87,7 @@ export function TabMotivoConsulta({ historia, notas, notaId }: TabMotivoConsulta
             <div className="pb-4 flex-1 min-w-0">
               <div className="flex flex-wrap items-center gap-1.5 mb-1 text-xs text-muted-foreground">
                 <span className="font-medium text-foreground">{formatDate(nota.created_at)}</span>
-                {nota.servicio_nombre && <><span>·</span><span>{nota.servicio_nombre}</span></>}
+                {nota.servicio_nombre && <><span>·</span><span className="uppercase">{nota.servicio_nombre}</span></>}
                 {nota.profesional_nombre && <><span>·</span><span>{nota.profesional_nombre}</span></>}
               </div>
               <p className="text-sm leading-relaxed">{nota.motivo_consulta ?? nota.anamnesis}</p>

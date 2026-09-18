@@ -244,7 +244,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 <div className="grid grid-cols-2 divide-x">
                   <div className="px-4 py-3">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Servicio</p>
-                    <p className="text-sm font-medium leading-snug">{cita.servicio_nombre || '—'}</p>
+                    <p className="text-sm font-medium leading-snug uppercase">{cita.servicio_nombre || '—'}</p>
                   </div>
                   <div className="px-4 py-3">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Sede</p>

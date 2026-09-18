@@ -103,7 +103,7 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">{formatDate(primeraFoto.cita_fecha)}</p>
-                    <p className="text-xs text-muted-foreground">{primeraFoto.servicio_nombre} · {fotos.length} foto{fotos.length !== 1 ? 's' : ''}</p>
+                    <p className="text-xs text-muted-foreground"><span className="uppercase">{primeraFoto.servicio_nombre}</span> · {fotos.length} foto{fotos.length !== 1 ? 's' : ''}</p>
                   </div>
                   <Button
                     size="sm"

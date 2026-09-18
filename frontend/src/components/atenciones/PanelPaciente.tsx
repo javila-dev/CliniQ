@@ -184,7 +184,7 @@ export function PanelPaciente({
                 <div key={v.id} className="flex items-start gap-2 text-xs">
                   <div className="h-1.5 w-1.5 rounded-full bg-muted-foreground/40 mt-1.5 shrink-0" />
                   <div>
-                    <p className="text-foreground">{v.servicio_nombre}</p>
+                    <p className="text-foreground uppercase">{v.servicio_nombre}</p>
                     <p className="text-muted-foreground">{formatDate(v.fecha_inicio)}</p>
                   </div>
                 </div>

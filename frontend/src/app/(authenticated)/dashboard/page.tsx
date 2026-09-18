@@ -743,7 +743,7 @@ function DashboardContent() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
-                      <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
+                      <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
                     </div>
                     <CitaStatusBadge estado={cita.estado} />
                   </Link>
@@ -1057,7 +1057,7 @@ function DashboardContent() {
                   const pct = totalIngresos > 0 ? (Number(s.ingresos) / totalIngresos) * 100 : 0
                   return (
                     <div key={s.servicio_nombre} className="grid grid-cols-4 px-5 py-2.5 items-center hover:bg-gray-50/50">
-                      <span className="text-sm truncate pr-2">{s.servicio_nombre}</span>
+                      <span className="text-sm truncate pr-2 uppercase">{s.servicio_nombre}</span>
                       <span className="text-sm text-muted-foreground">{s.cantidad_citas}</span>
                       <span className="text-sm font-medium">{COP.format(Number(s.ingresos))}</span>
                       <span className={cn(
@@ -1166,7 +1166,7 @@ function DashboardContent() {
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
                     <p className="text-xs text-muted-foreground truncate">
-                      {cita.servicio_nombre} · {cita.profesional_nombre}
+                      <span className="uppercase">{cita.servicio_nombre}</span> · {cita.profesional_nombre}
                     </p>
                   </div>
                   <CitaStatusBadge estado={cita.estado} />

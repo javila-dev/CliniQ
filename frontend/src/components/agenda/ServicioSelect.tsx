@@ -34,7 +34,7 @@ export function ServicioSelect({
         {data?.map((s) => (
           <SelectItem key={s.id} value={s.id}>
             <div className="flex flex-col">
-              <span>{s.nombre}</span>
+              <span className="uppercase">{s.nombre}</span>
               {s.duracion_min && (
                 <span className="text-xs text-muted-foreground">{s.duracion_min} min</span>
               )}

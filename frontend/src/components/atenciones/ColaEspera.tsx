@@ -155,7 +155,7 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
                     </p>
                     <ConsentimientoBadge cita={cita} todosFirmadosOverride={todosFirmadosOverride} />
                   </div>
-                  <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
+                  <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
                 </div>
 
                 {puedeContinuar && puedeIniciarAtencion ? (

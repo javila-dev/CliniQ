@@ -37,7 +37,7 @@ function ProcedimientosTable({
           {servicios.map((s) => (
             <tr key={s.id} className={cn('hover:bg-gray-50/50 transition-colors', !s.activo && 'opacity-55')}>
               <td className="px-4 py-2">
-                <p className="font-medium text-gray-900 leading-tight">{s.nombre}</p>
+                <p className="font-medium text-gray-900 leading-tight uppercase">{s.nombre}</p>
                 {s.descripcion && <p className="text-xs text-muted-foreground truncate max-w-xs mt-0.5">{s.descripcion}</p>}
               </td>
               <td className="px-4 py-2 text-center">

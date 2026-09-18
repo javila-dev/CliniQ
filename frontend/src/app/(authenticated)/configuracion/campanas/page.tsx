@@ -438,11 +438,11 @@ function CampanaDialog({
                         ? procedimientos
                             .filter((p) => !itemsDraft.some((d) => d.tipo === 'procedimiento' && d.targetId === p.id))
                             .filter((p) => !procOcupados.has(p.id))
-                            .map((p) => <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>)
+                            .map((p) => <SelectItem key={p.id} value={p.id} className="uppercase">{p.nombre}</SelectItem>)
                         : tratamientos
                             .filter((t) => !itemsDraft.some((d) => d.tipo === 'tratamiento' && d.targetId === t.id))
                             .filter((t) => !tratOcupados.has(t.id))
-                            .map((t) => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)
+                            .map((t) => <SelectItem key={t.id} value={t.id} className="uppercase">{t.nombre}</SelectItem>)
                       }
                     </SelectContent>
                   </Select>
@@ -523,7 +523,7 @@ function CampanaItems({ campana }: { campana: Campana }) {
               ? <Stethoscope className="h-3.5 w-3.5 text-muted-foreground" />
               : <Package2 className="h-3.5 w-3.5 text-muted-foreground" />
             }
-            <span>{item.procedimiento_nombre ?? item.tratamiento_nombre}</span>
+            <span className="uppercase">{item.procedimiento_nombre ?? item.tratamiento_nombre}</span>
           </div>
           <span className="font-medium tabular-nums text-emerald-700">{COP.format(parseFloat(item.precio_campana))}</span>
         </div>
@@ -640,7 +640,7 @@ function CampanaStatsModal({ campana, open, onClose }: { campana: Campana | null
                               ? <Stethoscope className="h-3 w-3 text-muted-foreground shrink-0" />
                               : <Package2 className="h-3 w-3 text-muted-foreground shrink-0" />
                             }
-                            <span className="truncate max-w-[220px]">
+                            <span className="truncate max-w-[220px] uppercase">
                               {item.procedimiento_nombre ?? item.tratamiento_nombre}
                             </span>
                           </div>

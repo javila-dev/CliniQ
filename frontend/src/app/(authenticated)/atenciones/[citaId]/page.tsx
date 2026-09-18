@@ -345,7 +345,7 @@ export default function AtencionCitaPage({ params }: Props) {
               {cerrada ? 'Esta atención ya está cerrada' : 'Esta atención aún no ha iniciado'}
             </p>
             <p className="text-sm text-muted-foreground">
-              {cita.paciente_nombre} · {cita.servicio_nombre} — estado:{' '}
+              {cita.paciente_nombre} · <span className="uppercase">{cita.servicio_nombre}</span> — estado:{' '}
               <span className="font-medium">{ESTADO_LABEL[cita.estado] ?? cita.estado}</span>
             </p>
             <p className="text-sm text-muted-foreground">
@@ -430,7 +430,7 @@ export default function AtencionCitaPage({ params }: Props) {
           <div className="h-4 w-px bg-border shrink-0" />
           <div className="min-w-0">
             <span className="font-semibold text-sm">{cita.paciente_nombre}</span>
-            <span className="text-muted-foreground text-sm ml-2 truncate">· {cita.servicio_nombre}</span>
+            <span className="text-muted-foreground text-sm ml-2 truncate uppercase">· {cita.servicio_nombre}</span>
           </div>
           <Badge variant="secondary" className="text-xs bg-rose-50 text-rose-700 border-rose-200 shrink-0">
             En atención
@@ -462,7 +462,7 @@ export default function AtencionCitaPage({ params }: Props) {
         <div className="flex items-center gap-2 px-6 py-2 border-b bg-primary/5 text-xs min-w-0">
           <Stethoscope className="h-3.5 w-3.5 text-primary shrink-0" />
           <span className="font-medium shrink-0">
-            Sesión {sesionCtx.numero}/{sesionCtx.total} · {sesionCtx.tratamiento_nombre}
+            Sesión {sesionCtx.numero}/{sesionCtx.total} · <span className="uppercase">{sesionCtx.tratamiento_nombre}</span>
           </span>
           {sesionCtx.procedimientos.length > 0 && (
             <span className="text-muted-foreground truncate">

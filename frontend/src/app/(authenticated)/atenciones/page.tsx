@@ -147,7 +147,7 @@ function AtencionesContent() {
                         </div>
                         <div className="flex-1 min-w-0">
                           <p className="text-sm font-semibold text-foreground truncate">{cita.paciente_nombre}</p>
-                          <p className="text-xs text-muted-foreground truncate">{cita.servicio_nombre}</p>
+                          <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
                           <p className="text-xs text-amber-600 font-medium mt-0.5">{formatDate(cita.fecha_inicio)} · {formatTime(cita.fecha_inicio)}</p>
                         </div>
                         <span className="text-xs font-medium text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2.5 py-1.5 shrink-0 group-hover:bg-amber-100 transition-colors">

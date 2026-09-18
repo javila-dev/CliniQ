@@ -115,7 +115,7 @@ export function GenerarConsentimientoModal({ open, onOpenChange }: GenerarConsen
                     <SelectContent>
                       {citasData?.results.map((c) => (
                         <SelectItem key={c.id} value={c.id}>
-                          {formatDate(c.fecha_inicio)} — {c.servicio_nombre} · {c.profesional_nombre}
+                          {formatDate(c.fecha_inicio)} — <span className="uppercase">{c.servicio_nombre}</span> · {c.profesional_nombre}
                         </SelectItem>
                       ))}
                     </SelectContent>

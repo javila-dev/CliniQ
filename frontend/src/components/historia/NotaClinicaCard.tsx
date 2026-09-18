@@ -68,7 +68,7 @@ export function NotaClinicaCard({ nota, defaultOpen = false, compact = false }: 
                     <User className="h-3 w-3" />
                     {nota.profesional_nombre}
                   </span>
-                  <span>{nota.servicio_nombre}</span>
+                  <span className="uppercase">{nota.servicio_nombre}</span>
                 </>
               )}
             </div>
