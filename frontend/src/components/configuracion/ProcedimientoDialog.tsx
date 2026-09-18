@@ -15,7 +15,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
@@ -249,7 +248,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     if (entries.length > 0) {
       const labels: Record<string, string> = {
         nombre: 'Nombre', duracion_min: 'Duración', precio_base: 'Precio',
-        descuento_maximo_pct: 'Flexibilidad de precio', profesionales: 'Profesionales',
+        descuento_maximo_pct: 'Descuento máximo', profesionales: 'Profesionales',
         documenso_template_id: 'Plantilla de consentimiento', vigencia_meses: 'Vigencia',
       }
       return entries.map(([f, m]) => `${labels[f] ?? f}: ${Array.isArray(m) ? m[0] : m}`).join(' | ')
@@ -277,53 +276,47 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
               <Label>Descripción</Label>
               <Textarea {...register('descripcion')} placeholder="Descripción opcional..." rows={2} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Duración (min) *</Label>
-                <Controller name="duracion_min" control={control} render={({ field }) => (
-                  <Input type="number" min={5} step={5} value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
-                )} />
-                {errors.duracion_min && <p className="text-xs text-destructive">{errors.duracion_min.message}</p>}
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-[5.5rem_1fr_1fr] gap-3 items-start">
+                <div className="space-y-1.5">
+                  <Label>Minutos *</Label>
+                  <Controller name="duracion_min" control={control} render={({ field }) => (
+                    <Input type="number" min={5} max={999} step={5} value={field.value}
+                      onChange={(e) => field.onChange(Math.min(999, Number(e.target.value)))} />
+                  )} />
+                  {errors.duracion_min && <p className="text-xs text-destructive">{errors.duracion_min.message}</p>}
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Precio</Label>
+                  <Controller name="precio_base" control={control} render={({ field }) => (
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
+                      <Input inputMode="numeric" className="pl-7" placeholder="0"
+                        value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
+                        onChange={(e) => { const raw = e.target.value.replace(/\D/g, '').slice(0, 8); field.onChange(raw ? Number(raw) : null) }}
+                      />
+                    </div>
+                  )} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Descuento máximo</Label>
+                  <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
+                    <div className="relative">
+                      <Input inputMode="numeric" className="pr-7" placeholder="0"
+                        value={field.value ?? 0}
+                        onChange={(e) => {
+                          const raw = e.target.value.replace(/\D/g, '').slice(0, 3)
+                          field.onChange(raw ? Math.min(100, Number(raw)) : 0)
+                        }}
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">%</span>
+                    </div>
+                  )} />
+                </div>
               </div>
-              <div className="space-y-1.5">
-                <Label>Precio</Label>
-                <Controller name="precio_base" control={control} render={({ field }) => (
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none select-none">$</span>
-                    <Input inputMode="numeric" className="pl-7" placeholder="0"
-                      value={field.value != null ? new Intl.NumberFormat('es-CO').format(field.value) : ''}
-                      onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); field.onChange(raw ? Number(raw) : null) }}
-                    />
-                  </div>
-                )} />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Flexibilidad de precio</Label>
-                <Controller name="descuento_maximo_pct" control={control} render={({ field }) => (
-                  <Select
-                    value={String(field.value ?? 0)}
-                    onValueChange={(v) => field.onChange(Number(v))}
-                  >
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="0">Firme — no se puede cambiar</SelectItem>
-                      <SelectItem value="5">Hasta 5% de descuento</SelectItem>
-                      <SelectItem value="10">Hasta 10% de descuento</SelectItem>
-                      <SelectItem value="15">Hasta 15% de descuento</SelectItem>
-                      <SelectItem value="20">Hasta 20% de descuento</SelectItem>
-                      <SelectItem value="25">Hasta 25% de descuento</SelectItem>
-                      <SelectItem value="30">Hasta 30% de descuento</SelectItem>
-                      <SelectItem value="50">Hasta 50% de descuento</SelectItem>
-                      <SelectItem value="100">Libre — precio sugerido, editable</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )} />
-                <p className="text-xs text-muted-foreground">
-                  Controla cuánto se puede bajar el precio al armar una cotización.
-                </p>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Descuento máximo: cuánto se puede bajar el precio al armar una cotización. 0 = sin descuento.
+              </p>
             </div>
             <div className="space-y-1.5">
               <Label>Profesionales que lo realizan</Label>
