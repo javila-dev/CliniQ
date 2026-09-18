@@ -158,7 +158,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
   }
 
   return (
-    <div className="flex flex-col h-[520px]">
+    <div className="flex flex-col h-[70vh] min-h-[420px]">
       {!firmado && modo !== 'elegir' && (
         <div className="shrink-0 pb-2">
           <button

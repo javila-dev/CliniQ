@@ -567,7 +567,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
 
       {showFirmaAcuerdo && acuerdoPendiente?.documento && (
         <Dialog open={showFirmaAcuerdo} onOpenChange={setShowFirmaAcuerdo}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl w-[95vw]">
             <DialogHeader>
               <DialogTitle>Acta de acuerdo de pago N.&deg;{acuerdoPendiente.numero}</DialogTitle>
             </DialogHeader>

@@ -134,7 +134,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) cerrar() }}>
-      <DialogContent className="max-w-2xl">
+      <DialogContent className={paso === 'firma' ? 'max-w-4xl w-[95vw]' : 'max-w-2xl'}>
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Nuevo acuerdo de pago</span>

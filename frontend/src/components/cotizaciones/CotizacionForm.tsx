@@ -23,7 +23,8 @@ import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
-import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY } from './FirmarConsentimientosCotizacionWizard'
+import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
+import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -532,11 +533,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
   const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
 
-  const { data: consentimientosPendientes } = useQuery({
-    queryKey: [CONSENTIMIENTOS_PENDIENTES_KEY, cotizacion?.id],
-    queryFn: () => cotizacionesApi.consentimientosPendientes(cotizacion!.id),
+  const { data: consentimientosRequeridos } = useQuery({
+    queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion?.id],
+    queryFn: () => cotizacionesApi.consentimientos(cotizacion!.id),
     enabled: cotizacion?.estado === 'aceptada',
   })
+  const hayConsentimientos = cotizacion?.estado === 'aceptada' && (consentimientosRequeridos?.length ?? 0) > 0
+  const mostrarCompromiso = Boolean(cotizacion?.compromiso_pago) && (cotizacion?.estado === 'aceptada' || cotizacion?.estado === 'borrador')
 
   // Compromiso de pago firmado sin PDF cacheado (el webhook de Documenso no llegó):
   // reconcilia contra Documenso, recupera el PDF y lo abre.
@@ -787,37 +790,15 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
 
-        {/* ── Consentimientos pendientes de firma (cotización aceptada) ───── */}
-        {cotizacion?.estado === 'aceptada' && (consentimientosPendientes?.length ?? 0) > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <FileSignature className="h-4 w-4 text-amber-600 shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-amber-900">
-                  {consentimientosPendientes!.length === 1
-                    ? '1 consentimiento pendiente de firma'
-                    : `${consentimientosPendientes!.length} consentimientos pendientes de firma`}
-                </p>
-                <p className="text-xs text-amber-800/80">
-                  Los procedimientos de esta cotización requieren consentimientos firmados por el paciente.
-                </p>
-              </div>
-            </div>
-            {canFirmarConsentimientos && (
-              <Button size="sm" variant="outline" className="shrink-0" onClick={() => setConsentimientosWizardOpen(true)}>
-                Firmar ahora
-              </Button>
-            )}
-          </div>
-        )}
-
         {/* ── Seguimiento de sesiones (solo cuando está aceptada) ─────────── */}
         {cotizacion?.estado === 'aceptada' && (
           <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
         )}
 
         {/* ── Compromiso de pago (vive aquí, no en /consentimientos) ──────── */}
-        {cotizacion?.compromiso_pago && (cotizacion.estado === 'aceptada' || cotizacion.estado === 'borrador') && (() => {
+        {(mostrarCompromiso || hayConsentimientos) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {mostrarCompromiso && cotizacion?.compromiso_pago && (() => {
           const cp = cotizacion.compromiso_pago
           const enBorrador = cotizacion.estado === 'borrador'
           const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
@@ -827,7 +808,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               ? { badge: 'bg-gray-100 text-gray-500 ring-gray-200/60', dot: 'bg-gray-400' }
               : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
           return (
-            <div className="bg-white rounded-xl border p-4 flex items-center justify-between gap-3">
+            <div className={cn('bg-white rounded-xl border p-4 flex items-center justify-between gap-3', !hayConsentimientos && 'md:col-span-2')}>
               <div className="flex items-center gap-2.5 min-w-0">
                 <FileSignature className="h-4 w-4 text-primary shrink-0" />
                 <div className="min-w-0">
@@ -872,6 +853,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             </div>
           )
         })()}
+        {hayConsentimientos && consentimientosRequeridos && (
+          <ConsentimientosCotizacionPanel
+            consentimientos={consentimientosRequeridos}
+            canFirmar={canFirmarConsentimientos}
+            onFirmar={() => setConsentimientosWizardOpen(true)}
+            className={!mostrarCompromiso ? 'md:col-span-2' : undefined}
+          />
+        )}
+        </div>
+        )}
 
         {/* ── Fila 1: Cliente + Meta ──────────────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1556,7 +1547,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
 {/* ── Modal firma compromiso de pago (Documenso) ────────────────── */}
       <Dialog open={Boolean(compromisoPagoId)} onOpenChange={(v) => !v && setCompromisoPagoId(null)}>
-        <DialogContent className="max-w-lg">
+        <DialogContent className="max-w-4xl w-[95vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-4.5 w-4.5 text-primary" />

@@ -10,6 +10,18 @@ export interface ConsentimientoPendienteCotizacion {
   consentimiento_id: string | null
 }
 
+export interface ConsentimientoRequeridoCotizacion {
+  procedimiento: string
+  template_token: string
+  template_nombre: string
+  estado: 'firmado' | 'pendiente'
+  consentimiento_id: string | null
+  fecha_firma: string | null
+  fecha_vencimiento: string | null
+  archivo_url: string | null
+  origen: 'documenso' | 'manual' | null
+}
+
 export interface CambiarEstadoResponse extends Cotizacion {
   consentimientos_pendientes?: ConsentimientoPendienteCotizacion[]
   compromiso_pago?: Consentimiento | null
@@ -58,6 +70,11 @@ export const cotizacionesApi = {
 
   cambiarEstado: async (id: string, estado: EstadoCotizacion): Promise<CambiarEstadoResponse> => {
     const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado })
+    return res.data
+  },
+
+  consentimientos: async (id: string): Promise<ConsentimientoRequeridoCotizacion[]> => {
+    const res = await apiClient.get<ConsentimientoRequeridoCotizacion[]>(`/cotizaciones/${id}/consentimientos/`)
     return res.data
   },
 

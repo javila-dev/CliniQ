@@ -11,6 +11,7 @@ import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { ConsentimientoFirmaContent } from '@/components/atenciones/ConsentimientoFirmaContent'
 
 export const CONSENTIMIENTOS_PENDIENTES_KEY = 'cotizacion-consentimientos-pendientes'
+export const CONSENTIMIENTOS_COTIZACION_KEY = 'cotizacion-consentimientos'
 
 interface Props {
   open: boolean
@@ -47,8 +48,14 @@ export function FirmarConsentimientosCotizacionWizard({
   const total = totalRef.current
   const firmados = total - (pendientes?.length ?? 0)
 
+  function refrescarListado() {
+    queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_PENDIENTES_KEY, cotizacionId] })
+    queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacionId] })
+  }
+
   function handleOpenChange(next: boolean) {
     if (!next) {
+      refrescarListado()
       setMaximized(false)
       setFirmando(false)
       totalRef.current = 0
@@ -148,9 +155,7 @@ export function FirmarConsentimientosCotizacionWizard({
                     setFirmando(false)
                     setMaximized(false)
                   }}
-                  onCompleted={() => {
-                    queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_PENDIENTES_KEY, cotizacionId] })
-                  }}
+                  onCompleted={refrescarListado}
                 />
               </div>
             </div>
