@@ -86,7 +86,7 @@ class CotizacionViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
-                           "historial_sesiones", "sesiones", "consentimientos_pendientes"}:
+                           "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos"}:
             return [RequirePermission("cotizaciones.ver")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
@@ -316,6 +316,16 @@ class CotizacionViewSet(ModelViewSet):
 
         cotizacion = self.get_object()
         return Response(consentimientos_pendientes_cotizacion(cotizacion), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="consentimientos")
+    def consentimientos(self, request, pk=None):
+        """Consentimientos que exige la cotizacion, firmados y pendientes, con el PDF de los firmados."""
+        from apps.protocolos.services import consentimientos_requeridos_cotizacion
+
+        cotizacion = self.get_object()
+        return Response(
+            consentimientos_requeridos_cotizacion(cotizacion, incluir_archivos=True), status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):

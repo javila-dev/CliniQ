@@ -400,6 +400,8 @@ class CotizacionFlowTests(TestCase):
         pendientes = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos_pendientes/")
         self.assertEqual(pendientes.status_code, 200)
         self.assertEqual([p["template_token"] for p in pendientes.json()], ["consentimiento-toxina"])
+        todos = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos/").json()
+        self.assertEqual([(c["template_token"], c["estado"]) for c in todos], [("consentimiento-toxina", "pendiente")])
 
         ConsentimientoInformado.objects.create(
             paciente=self.paciente,
@@ -411,6 +413,12 @@ class CotizacionFlowTests(TestCase):
         )
         pendientes = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos_pendientes/")
         self.assertEqual(pendientes.json(), [])
+        todos = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/consentimientos/").json()
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["estado"], "firmado")
+        self.assertEqual(todos[0]["origen"], "documenso")
+        self.assertEqual(todos[0]["fecha_firma"], str(timezone.localdate()))
+        self.assertIsNotNone(todos[0]["consentimiento_id"])
 
     def test_consentimientos_pendientes_usa_id_si_template_sin_token(self):
         plantillas = [

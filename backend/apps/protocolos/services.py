@@ -333,10 +333,16 @@ def consentimiento_status_sesion(sesion: SesionProcedimiento):
     }
 
 
-def consentimientos_pendientes_cotizacion(cotizacion):
-    faltantes = []
-    procedimientos_unicos = {}
+def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False):
+    """Consentimientos que exigen los procedimientos de la cotizacion (directos o
+    via los tipos de sesion de un tratamiento), sin repetir plantillas, cada uno
+    con su estado para el paciente: ``firmado`` (vigente en cualquiera de los dos
+    modelos) o ``pendiente``. ``incluir_archivos`` resuelve la URL del PDF firmado
+    (puede consultar Documenso), asi que se pide solo donde se muestra."""
+    from apps.agenda.serializers import _archivo_url
+    from apps.core.storage import get_signed_url
 
+    procedimientos_unicos = {}
     for item in cotizacion.items.select_related("tratamiento", "servicio", "procedimiento").prefetch_related(
         "tratamiento__tipos_sesion__procedimientos__procedimiento"
     ).filter(activo=True):
@@ -349,45 +355,84 @@ def consentimientos_pendientes_cotizacion(cotizacion):
         elif item.servicio_id:
             procedimientos_unicos[str(item.servicio_id)] = item.servicio
 
+    hoy = date.today()
     por_token = {}
     for procedimiento in procedimientos_unicos.values():
         for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
             token = (relacion.template.template_token or str(relacion.template.id))
             if token in por_token:
-                if por_token[token] is not None:
-                    por_token[token]["procedimientos"].append(procedimiento.nombre)
+                por_token[token]["procedimientos"].append(procedimiento.nombre)
                 continue
-            if consentimiento_satisfecho(cotizacion.paciente_id, token):
-                por_token[token] = None
-                continue
-            borrador = (
-                ConsentimientoInformado.objects.filter(
-                    paciente_id=cotizacion.paciente_id,
-                    documenso_template_token=token,
-                    firmado=False,
-                )
-                .order_by("-created_at")
-                .first()
-            )
-            por_token[token] = {
+
+            datos = {
                 "procedimientos": [procedimiento.nombre],
                 "template_token": token,
                 "template_nombre": relacion.template.nombre or relacion.template.get_tipo_display(),
-                "consentimiento_id": str(borrador.id) if borrador else None,
+                "estado": "pendiente",
+                "consentimiento_id": None,
+                "fecha_firma": None,
+                "fecha_vencimiento": None,
+                "archivo_url": None,
+                "origen": None,
             }
+            informado = consentimiento_informado_vigente(cotizacion.paciente_id, token)
+            legado = None
+            if informado is None:
+                legado = (
+                    ConsentimientoPaciente.objects.filter(
+                        paciente_id=cotizacion.paciente_id, template_token=token, vigencia_hasta__gte=hoy,
+                    )
+                    .order_by("-fecha_firma", "-created_at")
+                    .first()
+                )
 
-    for datos in por_token.values():
-        if datos is None:
-            continue
-        faltantes.append(
-            {
-                "procedimiento": ", ".join(datos["procedimientos"]),
-                "template_token": datos["template_token"],
-                "template_nombre": datos["template_nombre"],
-                "consentimiento_id": datos["consentimiento_id"],
-            }
-        )
-    return faltantes
+            if informado is not None:
+                datos.update(
+                    estado="firmado",
+                    consentimiento_id=str(informado.id),
+                    fecha_firma=informado.fecha_firma,
+                    fecha_vencimiento=informado.fecha_vencimiento,
+                    origen="documenso",
+                    archivo_url=_archivo_url(informado) if incluir_archivos else None,
+                )
+            elif legado is not None:
+                datos.update(
+                    estado="firmado",
+                    consentimiento_id=str(legado.id),
+                    fecha_firma=legado.fecha_firma,
+                    fecha_vencimiento=legado.vigencia_hasta,
+                    origen="manual",
+                    archivo_url=(
+                        get_signed_url(legado.archivo.name, expires_in=3600)
+                        if incluir_archivos and legado.archivo
+                        else None
+                    ),
+                )
+            else:
+                borrador = (
+                    ConsentimientoInformado.objects.filter(
+                        paciente_id=cotizacion.paciente_id, documenso_template_token=token, firmado=False,
+                    )
+                    .order_by("-created_at")
+                    .first()
+                )
+                datos["consentimiento_id"] = str(borrador.id) if borrador else None
+            por_token[token] = datos
+
+    return [{**datos, "procedimiento": ", ".join(datos["procedimientos"])} for datos in por_token.values()]
+
+
+def consentimientos_pendientes_cotizacion(cotizacion):
+    return [
+        {
+            "procedimiento": c["procedimiento"],
+            "template_token": c["template_token"],
+            "template_nombre": c["template_nombre"],
+            "consentimiento_id": c["consentimiento_id"],
+        }
+        for c in consentimientos_requeridos_cotizacion(cotizacion)
+        if c["estado"] == "pendiente"
+    ]
 
 
 def marcar_sesion_completada(
