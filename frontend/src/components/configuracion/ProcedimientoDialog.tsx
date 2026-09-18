@@ -5,7 +5,7 @@ import { useForm, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, ChevronDown, X } from 'lucide-react'
+import { Loader2, ChevronDown, X, Check, Search } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { configuracionApi } from '@/lib/api/configuracion'
@@ -16,9 +16,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { cn, toTitleCase } from '@/lib/utils'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
+import type { ColaboradorProfesional } from '@/types/colaboradores'
 
 const schema = z.object({
   nombre: z.string().min(1, 'Requerido'),
@@ -40,6 +41,83 @@ const DEFAULT_VALUES: FormValues = {
   precio_base: null, descuento_maximo_pct: 0,
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, vigencia_meses: 12, profesionales: [], activo: true,
+}
+
+function ProfesionalesMultiSelect({ opciones, selected, onChange }: {
+  opciones: ColaboradorProfesional[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const q = query.trim().toLowerCase()
+  const filtradas = q ? opciones.filter((p) => p.nombre_completo.toLowerCase().includes(q)) : opciones
+  const seleccionados = opciones.filter((p) => selected.includes(p.colaborador_id))
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+
+  return (
+    <div className="space-y-2">
+      <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery('') }}>
+        <PopoverTrigger asChild>
+          <Button type="button" variant="outline" className="w-full justify-between font-normal">
+            <span className={cn(!seleccionados.length && 'text-muted-foreground')}>
+              {seleccionados.length
+                ? `${seleccionados.length} profesional${seleccionados.length > 1 ? 'es' : ''} seleccionado${seleccionados.length > 1 ? 's' : ''}`
+                : 'Seleccionar profesionales…'}
+            </span>
+            <ChevronDown className="h-4 w-4 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0 overflow-hidden">
+          <div className="relative border-b p-2">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <Input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar profesional..."
+              className="h-8 pl-7 text-sm"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto py-1" onWheel={scrollWheelFallback}>
+            {opciones.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-muted-foreground">No hay profesionales registrados.</p>
+            ) : filtradas.length === 0 ? (
+              <p className="px-3 py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
+            ) : filtradas.map((p) => {
+              const marcado = selected.includes(p.colaborador_id)
+              return (
+                <button
+                  key={p.colaborador_id}
+                  type="button"
+                  onClick={() => toggle(p.colaborador_id)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent transition-colors"
+                >
+                  <Check className={cn('h-3.5 w-3.5 shrink-0', marcado ? 'opacity-100' : 'opacity-0')} />
+                  <span className="truncate">{toTitleCase(p.nombre_completo)}</span>
+                </button>
+              )
+            })}
+          </div>
+        </PopoverContent>
+      </Popover>
+      {seleccionados.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {seleccionados.map((p) => (
+            <Badge key={p.colaborador_id} variant="secondary" className="gap-1 pr-1">
+              {toTitleCase(p.nombre_completo)}
+              <button type="button" onClick={() => toggle(p.colaborador_id)}
+                className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${p.nombre_completo}`}>
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+    </div>
+  )
 }
 
 interface Props {
@@ -249,57 +327,13 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
             </div>
             <div className="space-y-1.5">
               <Label>Profesionales que lo realizan</Label>
-              <Controller name="profesionales" control={control} render={({ field }) => {
-                const selected = field.value ?? []
-                const toggle = (id: string) =>
-                  field.onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
-                const opciones = profesionales ?? []
-                const seleccionados = opciones.filter((p) => selected.includes(p.colaborador_id))
-                return (
-                  <div className="space-y-2">
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button type="button" variant="outline" className="w-full justify-between font-normal">
-                          <span className={cn(!seleccionados.length && 'text-muted-foreground')}>
-                            {seleccionados.length
-                              ? `${seleccionados.length} profesional${seleccionados.length > 1 ? 'es' : ''} seleccionado${seleccionados.length > 1 ? 's' : ''}`
-                              : 'Seleccionar profesionales…'}
-                          </span>
-                          <ChevronDown className="h-4 w-4 opacity-50" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="start"
-                        className="w-[var(--radix-dropdown-menu-trigger-width)] max-h-64 overflow-y-auto">
-                        {opciones.length === 0 ? (
-                          <div className="px-2 py-3 text-xs text-muted-foreground">No hay profesionales registrados.</div>
-                        ) : opciones.map((p) => (
-                          <DropdownMenuCheckboxItem
-                            key={p.colaborador_id}
-                            checked={selected.includes(p.colaborador_id)}
-                            onCheckedChange={() => toggle(p.colaborador_id)}
-                            onSelect={(e) => e.preventDefault()}
-                          >
-                            {toTitleCase(p.nombre_completo)}
-                          </DropdownMenuCheckboxItem>
-                        ))}
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                    {seleccionados.length > 0 && (
-                      <div className="flex flex-wrap gap-1.5">
-                        {seleccionados.map((p) => (
-                          <Badge key={p.colaborador_id} variant="secondary" className="gap-1 pr-1">
-                            {toTitleCase(p.nombre_completo)}
-                            <button type="button" onClick={() => toggle(p.colaborador_id)}
-                              className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${p.nombre_completo}`}>
-                              <X className="h-3 w-3" />
-                            </button>
-                          </Badge>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )
-              }} />
+              <Controller name="profesionales" control={control} render={({ field }) => (
+                <ProfesionalesMultiSelect
+                  opciones={profesionales ?? []}
+                  selected={field.value ?? []}
+                  onChange={field.onChange}
+                />
+              )} />
               <p className="text-xs text-muted-foreground">También se puede editar desde cada perfil de personal.</p>
             </div>
             <div className="flex items-center justify-between rounded-lg border px-4 py-3">

@@ -6,7 +6,7 @@ import { Check, ChevronDown, Search } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
-import { cn, toTitleCase } from '@/lib/utils'
+import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
 
 interface ProfesionalSelectProps {
   value: string
@@ -56,7 +56,7 @@ export function ProfesionalSelect({
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0 overflow-hidden">
         <div className="relative border-b p-2">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
           <Input
             autoFocus
             value={query}
@@ -65,7 +65,7 @@ export function ProfesionalSelect({
             className="h-8 pl-7 text-sm"
           />
         </div>
-        <div className="max-h-60 overflow-y-auto py-1">
+        <div className="max-h-60 overflow-y-auto py-1" onWheel={scrollWheelFallback}>
           {filtrados.length === 0 ? (
             <p className="px-3 py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
           ) : (
