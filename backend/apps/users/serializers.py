@@ -311,7 +311,7 @@ class UserSerializer(serializers.ModelSerializer):
 class MeUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ("telefono", "foto_perfil", "registro_profesional", "firma_digital")
+        fields = ("first_name", "last_name", "telefono", "foto_perfil", "registro_profesional", "firma_digital")
 
     def validate(self, attrs):
         # Los admins también atienden pacientes en algunas clínicas: pueden cargar

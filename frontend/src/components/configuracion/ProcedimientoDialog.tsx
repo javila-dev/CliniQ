@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { cn } from '@/lib/utils'
+import { cn, toTitleCase } from '@/lib/utils'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
 
 const schema = z.object({
@@ -162,7 +162,22 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     setTimeout(() => { reset(DEFAULT_VALUES); mut.reset() }, 200)
   }
 
-  const serverError = mut.error as any
+  const serverError = (() => {
+    if (!mut.error) return null
+    const data = (mut.error as any)?.response?.data
+    if (!data) return 'Ocurrió un error.'
+    if (data.detail) return String(data.detail)
+    const entries = Object.entries(data)
+    if (entries.length > 0) {
+      const labels: Record<string, string> = {
+        nombre: 'Nombre', duracion_min: 'Duración', precio_base: 'Precio',
+        descuento_maximo_pct: 'Flexibilidad de precio', profesionales: 'Profesionales',
+        documenso_template_id: 'Plantilla de consentimiento', vigencia_meses: 'Vigencia',
+      }
+      return entries.map(([f, m]) => `${labels[f] ?? f}: ${Array.isArray(m) ? m[0] : m}`).join(' | ')
+    }
+    return 'Ocurrió un error.'
+  })()
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
@@ -264,7 +279,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
                             onCheckedChange={() => toggle(p.colaborador_id)}
                             onSelect={(e) => e.preventDefault()}
                           >
-                            {p.nombre_completo}
+                            {toTitleCase(p.nombre_completo)}
                           </DropdownMenuCheckboxItem>
                         ))}
                       </DropdownMenuContent>
@@ -273,7 +288,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
                       <div className="flex flex-wrap gap-1.5">
                         {seleccionados.map((p) => (
                           <Badge key={p.colaborador_id} variant="secondary" className="gap-1 pr-1">
-                            {p.nombre_completo}
+                            {toTitleCase(p.nombre_completo)}
                             <button type="button" onClick={() => toggle(p.colaborador_id)}
                               className="rounded-sm hover:bg-muted-foreground/20" aria-label={`Quitar ${p.nombre_completo}`}>
                               <X className="h-3 w-3" />
@@ -341,7 +356,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
             )}
             {serverError && (
               <div className="rounded-lg bg-destructive/8 border border-destructive/15 px-3.5 py-2.5">
-                <p className="text-sm text-destructive">{serverError?.response?.data?.detail || 'Ocurrió un error.'}</p>
+                <p className="text-sm text-destructive">{serverError}</p>
               </div>
             )}
           </form>

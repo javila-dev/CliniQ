@@ -83,6 +83,19 @@ export function scrollWheelFallback(e: WheelEvent<HTMLElement>) {
   e.currentTarget.scrollTop += e.deltaY
 }
 
+/**
+ * Muchos usuarios escriben su nombre en mayúsculas sostenidas al registrarse.
+ * Para mostrarlo de forma legible en listados (sin tocar el dato guardado)
+ * lo pasamos a Título: primera letra de cada palabra en mayúscula.
+ */
+export function toTitleCase(texto: string): string {
+  return texto
+    .toLowerCase()
+    .split(' ')
+    .map((palabra) => (palabra ? palabra[0].toUpperCase() + palabra.slice(1) : palabra))
+    .join(' ')
+}
+
 export function addDaysISO(iso: string, days: number): string {
   // Parsear como fecha local, no UTC: `new Date("2026-08-28")` es medianoche UTC
   // y en zonas UTC-negativas (Colombia UTC-5) cae en el día anterior, corriendo

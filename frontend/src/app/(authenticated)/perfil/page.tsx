@@ -68,9 +68,9 @@ export default function PerfilPage() {
 
   const nombreMut = useMutation({
     mutationFn: (data: { first_name: string; last_name: string }) =>
-      usuariosApi.update(user!.id, data),
+      authApi.updateMe(data),
     onSuccess: (updated) => {
-      setUser({ ...user!, first_name: updated.first_name, last_name: updated.last_name, nombre_completo: updated.nombre_completo })
+      setUser(updated)
       nombreForm.reset({ first_name: updated.first_name, last_name: updated.last_name })
     },
   })
