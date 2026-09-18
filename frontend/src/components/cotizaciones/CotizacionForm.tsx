@@ -23,7 +23,6 @@ import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
-import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -529,13 +528,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
-  const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
-
-  const { data: consentimientosPendientes } = useQuery({
-    queryKey: [CONSENTIMIENTOS_PENDIENTES_KEY, cotizacion?.id],
-    queryFn: () => cotizacionesApi.consentimientosPendientes(cotizacion!.id),
-    enabled: cotizacion?.estado === 'aceptada',
-  })
 
   // Compromiso de pago firmado sin PDF cacheado (el webhook de Documenso no llegó):
   // reconcilia contra Documenso, recupera el PDF y lo abre.
@@ -567,9 +559,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
       if (data.compromiso_pago?.estado === 'pendiente' && data.compromiso_pago.id) {
         setCompromisoPagoId(data.compromiso_pago.id)
-      } else if (data.estado === 'aceptada' && (data.consentimientos_pendientes?.length ?? 0) > 0) {
-        queryClient.setQueryData([CONSENTIMIENTOS_PENDIENTES_KEY, data.id], data.consentimientos_pendientes)
-        setConsentimientosWizardOpen(true)
       }
       router.refresh()
     },
@@ -781,30 +770,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
-
-        {/* ── Consentimientos pendientes de firma (cotización aceptada) ───── */}
-        {cotizacion?.estado === 'aceptada' && (consentimientosPendientes?.length ?? 0) > 0 && (
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <FileSignature className="h-4 w-4 text-amber-600 shrink-0" />
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-amber-900">
-                  {consentimientosPendientes!.length === 1
-                    ? '1 consentimiento pendiente de firma'
-                    : `${consentimientosPendientes!.length} consentimientos pendientes de firma`}
-                </p>
-                <p className="text-xs text-amber-800/80">
-                  Los procedimientos de esta cotización requieren consentimientos firmados por el paciente.
-                </p>
-              </div>
-            </div>
-            {canGestionar && (
-              <Button size="sm" variant="outline" className="shrink-0" onClick={() => setConsentimientosWizardOpen(true)}>
-                Firmar ahora
-              </Button>
-            )}
-          </div>
-        )}
 
         {/* ── Seguimiento de sesiones (solo cuando está aceptada) ─────────── */}
         {cotizacion?.estado === 'aceptada' && (
@@ -1535,17 +1500,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           cotizacionId={cotizacion.id}
           pacienteTelefono={cotizacion.paciente_telefono}
           pacienteEmail={cotizacion.paciente_email}
-        />
-      )}
-
-{/* ── Wizard firma de consentimientos de la cotización ───────────── */}
-      {cotizacion?.estado === 'aceptada' && (
-        <FirmarConsentimientosCotizacionWizard
-          open={consentimientosWizardOpen}
-          onOpenChange={setConsentimientosWizardOpen}
-          cotizacionId={cotizacion.id}
-          pacienteId={cotizacion.paciente}
-          pacienteNombre={cotizacion.paciente_nombre}
         />
       )}
 

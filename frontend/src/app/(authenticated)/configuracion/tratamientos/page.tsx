@@ -1,14 +1,14 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { useQuery, useQueries, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Plus, MoreHorizontal, Pencil, Power, Loader2, Package2,
   Maximize2, Minimize2, X, Search, ChevronUp, ChevronDown,
-  ChevronLeft, ChevronRight, Stethoscope, GripVertical, Info, Clock, FileSignature,
+  ChevronLeft, ChevronRight, Stethoscope, GripVertical, Info, Clock,
 } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -281,7 +281,7 @@ function TratamientoDialog({
 }) {
   const qc = useQueryClient()
   const isEdit = !!tratamiento
-  const [tab, setTab] = useState<'datos' | 'tipos' | 'consentimientos'>('datos')
+  const [tab, setTab] = useState<'datos' | 'tipos'>('datos')
   const [expanded, setExpanded] = useState(false)
   const [tipos, setTipos] = useState<TipoSesionDraft[]>([])
   const [procDialogOpen, setProcDialogOpen] = useState(false)
@@ -293,38 +293,6 @@ function TratamientoDialog({
     setTipos(tratamiento.tipos_sesion.map(buildDraftFromTipo))
     setSyncedId(tratamiento.id)
   }
-
-  // Consentimientos requeridos: unión de los configurados en cada procedimiento de la composición
-  const procedimientosEnComposicion = useMemo(() => {
-    const porId = new Map<string, string>()
-    for (const t of tipos) for (const p of t.procedimientos) if (!porId.has(p.id)) porId.set(p.id, p.nombre)
-    return porId
-  }, [tipos])
-
-  const procedimientosDetalle = useQueries({
-    queries: Array.from(procedimientosEnComposicion.keys()).map((id) => ({
-      queryKey: ['procedimiento', id],
-      queryFn: () => clinicasApi.procedimientos.get(id),
-      enabled: open,
-    })),
-  })
-  const cargandoConsentimientos = procedimientosDetalle.some((q) => q.isLoading)
-
-  const consentimientosRequeridos = useMemo(() => {
-    const porTemplate = new Map<string, { nombre: string; procedimientos: string[] }>()
-    for (const q of procedimientosDetalle) {
-      const proc = q.data
-      if (!proc) continue
-      for (const c of proc.consentimientos_requeridos ?? []) {
-        if (c.activo === false) continue
-        const key = c.template_id || c.template_token || c.id
-        const entry = porTemplate.get(key) ?? { nombre: c.template_nombre, procedimientos: [] }
-        if (!entry.procedimientos.includes(proc.nombre)) entry.procedimientos.push(proc.nombre)
-        porTemplate.set(key, entry)
-      }
-    }
-    return Array.from(porTemplate.entries()).map(([key, v]) => ({ key, ...v }))
-  }, [procedimientosDetalle])
 
   const { data: procData } = useQuery({
     queryKey: ['procedimientos', 'all'],
@@ -416,7 +384,7 @@ function TratamientoDialog({
             </button>
           </DialogHeader>
 
-          <Tabs value={tab} onValueChange={(v) => setTab(v as 'datos' | 'tipos' | 'consentimientos')} className="flex flex-col flex-1 overflow-hidden">
+          <Tabs value={tab} onValueChange={(v) => setTab(v as 'datos' | 'tipos')} className="flex flex-col flex-1 overflow-hidden">
             <TabsList className="shrink-0 rounded-none border-b bg-gray-50/70 h-10 px-6 justify-start gap-1">
               <TabsTrigger value="datos" className="rounded-md text-xs px-3 h-7">Datos</TabsTrigger>
               <TabsTrigger value="tipos" className="rounded-md text-xs px-3 h-7">
@@ -424,14 +392,6 @@ function TratamientoDialog({
                 {tipos.length > 0 && (
                   <span className="ml-1.5 bg-primary/15 text-primary text-[10px] font-semibold px-1.5 rounded-full">
                     {tipos.length}
-                  </span>
-                )}
-              </TabsTrigger>
-              <TabsTrigger value="consentimientos" className="rounded-md text-xs px-3 h-7">
-                Consentimientos
-                {consentimientosRequeridos.length > 0 && (
-                  <span className="ml-1.5 bg-primary/15 text-primary text-[10px] font-semibold px-1.5 rounded-full">
-                    {consentimientosRequeridos.length}
                   </span>
                 )}
               </TabsTrigger>
@@ -550,43 +510,6 @@ function TratamientoDialog({
                   <span><strong>seguim.</strong> = genera sesión trackeable con checkin y consentimientos. <strong>info</strong> = aparece en el plan pero no crea seguimiento.</span>
                 </div>
               )}
-            </TabsContent>
-
-            {/* ── Tab Consentimientos (solo lectura, derivado de la composición) ── */}
-            <TabsContent value="consentimientos" className="flex-1 overflow-y-auto mt-0 focus-visible:outline-none">
-              <div className="px-6 py-5 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Consentimientos que el paciente debe firmar según los procedimientos de este tratamiento.
-                  Para cambiarlos, edita el consentimiento requerido en cada procedimiento.
-                </p>
-                {procedimientosEnComposicion.size === 0 ? (
-                  <p className="text-sm text-muted-foreground rounded-lg border px-4 py-6 text-center">
-                    Agrega procedimientos en “Tipos de sesión” para ver los consentimientos requeridos.
-                  </p>
-                ) : cargandoConsentimientos ? (
-                  <div className="flex justify-center py-8">
-                    <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                  </div>
-                ) : consentimientosRequeridos.length === 0 ? (
-                  <p className="text-sm text-muted-foreground rounded-lg border px-4 py-6 text-center">
-                    Ninguno de los procedimientos de este tratamiento tiene consentimientos configurados.
-                  </p>
-                ) : (
-                  <ul className="rounded-xl border divide-y">
-                    {consentimientosRequeridos.map((c) => (
-                      <li key={c.key} className="flex items-start gap-3 px-4 py-3">
-                        <FileSignature className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium">{c.nombre}</p>
-                          <p className="text-xs text-muted-foreground">
-                            Requerido por: {c.procedimientos.join(', ')}
-                          </p>
-                        </div>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
             </TabsContent>
           </Tabs>
 
