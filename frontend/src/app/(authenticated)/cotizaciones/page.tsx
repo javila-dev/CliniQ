@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, FileText, Download, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Plus, FileText, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
-import { formatDate, cn } from '@/lib/utils'
+import { cn } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
@@ -31,6 +31,10 @@ const PAGE_SIZE = 25
 
 function formatCOP(value: string | number): string {
   return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(value))
+}
+
+function formatFechaCorta(iso: string): string {
+  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
 }
 
 // ─── Progreso de sesiones ─────────────────────────────────────
@@ -224,17 +228,6 @@ export default function CotizacionesPage() {
     router.push(`/cotizaciones/${c.id}`)
   }
 
-  async function descargarPdf(e: React.MouseEvent, id: string) {
-    e.stopPropagation()
-    const blob = await cotizacionesApi.descargarPdf(id)
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `cotizacion-${id.slice(0, 8)}.pdf`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <div className="space-y-4">
       <PageHeader
@@ -328,7 +321,7 @@ export default function CotizacionesPage() {
         </Card>
       ) : (
         <>
-          <div className="rounded-lg border overflow-hidden">
+          <div className="rounded-lg border bg-white overflow-hidden">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b bg-muted/40">
@@ -351,15 +344,7 @@ export default function CotizacionesPage() {
                     onClick={() => abrirDetalle(c)}
                   >
                     <td className="px-4 py-3">
-                      <p className="font-medium">
-                        {c.paciente_nombre}
-                        {c.es_migracion && (
-                          <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                            Datos previos
-                          </span>
-                        )}
-                      </p>
-                      <p className="text-xs text-muted-foreground">{c.items.length} servicio{c.items.length !== 1 ? 's' : ''}</p>
+                      <p className="font-medium">{c.paciente_nombre}</p>
                     </td>
                     <td className="px-4 py-3">
                       <CotizacionEstadoBadge estado={c.estado} />
@@ -384,21 +369,11 @@ export default function CotizacionesPage() {
                       {c.profesional_nombre ?? '—'}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      {formatDate(c.created_at)}
+                      {formatFechaCorta(c.created_at)}
                     </td>
-                    <td className="px-4 py-3">
-                      {loadingId === c.id ? (
+                    <td className="px-4 py-3 w-8">
+                      {loadingId === c.id && (
                         <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      ) : (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-7 w-7"
-                          title="Descargar PDF"
-                          onClick={(e) => descargarPdf(e, c.id)}
-                        >
-                          <Download className="h-3.5 w-3.5 text-muted-foreground" />
-                        </Button>
                       )}
                     </td>
                   </tr>

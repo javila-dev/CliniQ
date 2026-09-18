@@ -706,6 +706,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               )}
             </div>
             {cotizacion && <CotizacionEstadoBadge estado={cotizacion.estado} />}
+            {cotizacion?.es_migracion && (
+              <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                Datos previos
+              </span>
+            )}
           </div>
 
           {/* Acciones topbar */}
