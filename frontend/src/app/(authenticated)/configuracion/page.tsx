@@ -127,7 +127,7 @@ const SECTIONS: ConfigSection[] = [
       {
         href: '/configuracion/cartera',
         label: 'Otros documentos',
-        description: 'Configuración de documentos adicionales que maneja la clínica. Por ahora: compromiso de pago al aceptar una cotización.',
+        description: 'Configuración de documentos adicionales que maneja la clínica. Por ahora: aceptación y compromiso de pago al aceptar una cotización.',
         icon: Receipt,
         color: 'text-rose-500',
         bg: 'bg-rose-50',

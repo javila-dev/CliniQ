@@ -23,6 +23,7 @@ import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
+import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -311,6 +312,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const esNueva = !cotizacion
   const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
   // Sin cotizaciones.gestionar el formulario es de solo lectura (p. ej. recepción,
   // que tiene cotizaciones.ver pero no puede crear/editar). El backend responde 403
   // a create/patch/cambiar_estado, así que aquí evitamos la UI editable + submit fallido.
@@ -528,6 +530,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
+  const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
+
+  const { data: consentimientosPendientes } = useQuery({
+    queryKey: [CONSENTIMIENTOS_PENDIENTES_KEY, cotizacion?.id],
+    queryFn: () => cotizacionesApi.consentimientosPendientes(cotizacion!.id),
+    enabled: cotizacion?.estado === 'aceptada',
+  })
 
   // Compromiso de pago firmado sin PDF cacheado (el webhook de Documenso no llegó):
   // reconcilia contra Documenso, recupera el PDF y lo abre.
@@ -559,8 +568,15 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
       if (data.compromiso_pago?.estado === 'pendiente' && data.compromiso_pago.id) {
         setCompromisoPagoId(data.compromiso_pago.id)
+      } else if (data.estado === 'aceptada' && canFirmarConsentimientos && (data.consentimientos_pendientes?.length ?? 0) > 0) {
+        queryClient.setQueryData([CONSENTIMIENTOS_PENDIENTES_KEY, data.id], data.consentimientos_pendientes)
+        setConsentimientosWizardOpen(true)
       }
       router.refresh()
+    },
+    onError: (err: any) => {
+      const data = err?.response?.data
+      toast.error('No se pudo cambiar el estado', data?.error ?? data?.detail ?? 'Vuelve a intentarlo en un momento.')
     },
   })
 
@@ -771,6 +787,30 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
 
+        {/* ── Consentimientos pendientes de firma (cotización aceptada) ───── */}
+        {cotizacion?.estado === 'aceptada' && (consentimientosPendientes?.length ?? 0) > 0 && (
+          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 flex items-center justify-between gap-3">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <FileSignature className="h-4 w-4 text-amber-600 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-amber-900">
+                  {consentimientosPendientes!.length === 1
+                    ? '1 consentimiento pendiente de firma'
+                    : `${consentimientosPendientes!.length} consentimientos pendientes de firma`}
+                </p>
+                <p className="text-xs text-amber-800/80">
+                  Los procedimientos de esta cotización requieren consentimientos firmados por el paciente.
+                </p>
+              </div>
+            </div>
+            {canFirmarConsentimientos && (
+              <Button size="sm" variant="outline" className="shrink-0" onClick={() => setConsentimientosWizardOpen(true)}>
+                Firmar ahora
+              </Button>
+            )}
+          </div>
+        )}
+
         {/* ── Seguimiento de sesiones (solo cuando está aceptada) ─────────── */}
         {cotizacion?.estado === 'aceptada' && (
           <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
@@ -791,7 +831,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               <div className="flex items-center gap-2.5 min-w-0">
                 <FileSignature className="h-4 w-4 text-primary shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium">Compromiso de pago</p>
+                  <p className="text-sm font-medium">Aceptación y compromiso de pago</p>
                   <p className="text-xs text-muted-foreground">
                     {cp.estado === 'firmado'
                       ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
@@ -1503,13 +1543,24 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         />
       )}
 
+{/* ── Wizard firma de consentimientos de la cotización ───────────── */}
+      {cotizacion?.estado === 'aceptada' && (
+        <FirmarConsentimientosCotizacionWizard
+          open={consentimientosWizardOpen}
+          onOpenChange={setConsentimientosWizardOpen}
+          cotizacionId={cotizacion.id}
+          pacienteId={cotizacion.paciente}
+          pacienteNombre={cotizacion.paciente_nombre}
+        />
+      )}
+
 {/* ── Modal firma compromiso de pago (Documenso) ────────────────── */}
       <Dialog open={Boolean(compromisoPagoId)} onOpenChange={(v) => !v && setCompromisoPagoId(null)}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-4.5 w-4.5 text-primary" />
-              Compromiso de pago
+              Aceptación y compromiso de pago
             </DialogTitle>
           </DialogHeader>
           {compromisoPagoId && (

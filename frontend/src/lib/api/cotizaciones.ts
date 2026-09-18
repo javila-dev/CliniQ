@@ -3,8 +3,15 @@ import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotiza
 import type { Consentimiento } from '@/types/consentimientos'
 import type { Paginated } from '@/types/common'
 
+export interface ConsentimientoPendienteCotizacion {
+  procedimiento: string
+  template_token: string
+  template_nombre: string
+  consentimiento_id: string | null
+}
+
 export interface CambiarEstadoResponse extends Cotizacion {
-  consentimientos_pendientes?: Array<{ procedimiento: string; template_token: string; template_nombre: string }>
+  consentimientos_pendientes?: ConsentimientoPendienteCotizacion[]
   compromiso_pago?: Consentimiento | null
 }
 
@@ -51,6 +58,11 @@ export const cotizacionesApi = {
 
   cambiarEstado: async (id: string, estado: EstadoCotizacion): Promise<CambiarEstadoResponse> => {
     const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado })
+    return res.data
+  },
+
+  consentimientosPendientes: async (id: string): Promise<ConsentimientoPendienteCotizacion[]> => {
+    const res = await apiClient.get<ConsentimientoPendienteCotizacion[]>(`/cotizaciones/${id}/consentimientos_pendientes/`)
     return res.data
   },
 

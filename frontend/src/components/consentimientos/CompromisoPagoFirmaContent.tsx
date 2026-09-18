@@ -16,13 +16,13 @@ interface CompromisoPagoFirmaContentProps {
   initialSigningToken?: string | null
   onFirmado?: () => void
   onCancel?: () => void
-  /** Nombre del documento en la UI. Por defecto "Compromiso de pago". */
+  /** Nombre del documento en la UI. Por defecto el de aceptación de cotización y compromiso de pago. */
   documentoLabel?: string
 }
 
 type Modo = 'elegir' | 'firmar' | 'enviado'
 
-export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningToken, onFirmado, onCancel, documentoLabel = 'Compromiso de pago' }: CompromisoPagoFirmaContentProps) {
+export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningToken, onFirmado, onCancel, documentoLabel = 'Documento de aceptación y compromiso de pago' }: CompromisoPagoFirmaContentProps) {
   const queryClient = useQueryClient()
   const [modo, setModo] = useState<Modo>(initialSigningToken ? 'firmar' : 'elegir')
   const [signingToken, setSigningToken] = useState<string | null>(initialSigningToken ?? null)

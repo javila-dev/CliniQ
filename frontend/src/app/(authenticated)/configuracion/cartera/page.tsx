@@ -39,7 +39,7 @@ export default function ConfiguracionCarteraPage() {
       />
 
       <div className="flex items-baseline gap-2.5">
-        <h2 className="text-sm font-semibold text-gray-800">Compromiso de pago</h2>
+        <h2 className="text-sm font-semibold text-gray-800">Aceptación de cotización y compromiso de pago</h2>
         <span className="text-xs text-gray-400">Al aceptar una cotización</span>
       </div>
 
@@ -56,11 +56,12 @@ export default function ConfiguracionCarteraPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <p className="text-sm font-semibold">Requiere compromiso de pago firmado</p>
+                  <p className="text-sm font-semibold">Requiere aceptación y compromiso de pago firmados</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Al aceptar una cotización, se genera y queda pendiente de firma un documento
-                    estándar con el detalle del pago (valor total, abono inicial, saldo y plan de
-                    cuotas). El texto del documento es fijo; aquí solo lo activas o lo desactivas.
+                    estándar donde el paciente acepta la cotización y se compromete a pagar: incluye
+                    los servicios aceptados, el valor total y la forma de pago (valores y fechas).
+                    El texto del documento es fijo; aquí solo lo activas o lo desactivas.
                   </p>
                 </div>
                 <Switch
