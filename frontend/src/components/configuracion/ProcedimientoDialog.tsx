@@ -5,10 +5,11 @@ import { useForm, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, ChevronDown, X, Check, Search } from 'lucide-react'
+import { Loader2, ChevronDown, X, Check, Search, LayoutTemplate, Maximize2, Minimize2, CheckCircle2 } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { configuracionApi } from '@/lib/api/configuracion'
+import { DiagramasProcedimiento } from './DiagramasProcedimiento'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,6 +17,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
 import type { ColaboradorProfesional } from '@/types/colaboradores'
@@ -132,6 +134,10 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
   const target = procedimiento ?? servicio ?? null
   const qc = useQueryClient()
   const isEdit = !!target
+  const [createdId, setCreatedId] = useState<string | null>(null)
+  const procedimientoId = target?.id ?? createdId
+  const [tab, setTab] = useState<'datos' | 'zonas'>('datos')
+  const [expanded, setExpanded] = useState(false)
 
   // Un solo precio: precio_base (con fallbacks legacy).
   function getPrecio(p: Procedimiento | null): number | null {
@@ -230,14 +236,23 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       qc.invalidateQueries({ queryKey: ['procedimiento', result.id] })
       qc.invalidateQueries({ queryKey: ['servicios', 'all'] }) // backward compat
       onCreated?.(result)
-      handleClose()
+      if (!isEdit) {
+        // Recién creado: pasa al tab Zonas para asignar diagramas sin cerrar el modal.
+        setCreatedId(result.id)
+        setTab('zonas')
+        setExpanded(true)
+      } else {
+        handleClose()
+      }
     },
   })
 
   function handleClose() {
     onOpenChange(false)
-    setTimeout(() => { reset(DEFAULT_VALUES); mut.reset() }, 200)
+    setTimeout(() => { setCreatedId(null); setTab('datos'); setExpanded(false); reset(DEFAULT_VALUES); mut.reset() }, 200)
   }
+
+  const justCreated = !isEdit && !!createdId
 
   const serverError = (() => {
     if (!mut.error) return null
@@ -258,14 +273,44 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) handleClose() }}>
-      <DialogContent className="flex flex-col p-0 gap-0 overflow-hidden sm:max-w-xl w-full max-h-[90vh]">
-        <DialogHeader className="px-6 py-4 border-b shrink-0 space-y-0">
+      <DialogContent className={cn(
+        'flex flex-col p-0 gap-0 overflow-hidden transition-all duration-200 max-h-[90vh]',
+        expanded ? 'max-w-4xl w-full' : 'sm:max-w-xl w-full',
+      )}>
+        <DialogHeader className="flex flex-row items-center justify-between px-6 py-4 border-b shrink-0 space-y-0">
           <DialogTitle className="text-base">
-            {isEdit ? 'Editar procedimiento' : 'Nuevo procedimiento'}
+            {justCreated ? 'Procedimiento creado · Zonas' : isEdit ? 'Editar procedimiento' : 'Nuevo procedimiento'}
           </DialogTitle>
+          <button type="button" onClick={() => setExpanded((v) => !v)}
+            className="ml-auto mr-8 text-muted-foreground hover:text-foreground transition-colors"
+            title={expanded ? 'Reducir' : 'Expandir'}>
+            {expanded ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+          </button>
         </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as 'datos' | 'zonas')} className="flex flex-col flex-1 overflow-hidden">
+          <TabsList className="shrink-0 rounded-none border-b bg-gray-50/70 h-10 px-6 justify-start gap-1">
+            <TabsTrigger value="datos" className="rounded-md text-xs px-3 h-7">Datos</TabsTrigger>
+            <TabsTrigger value="zonas" disabled={!procedimientoId}
+              className={cn('rounded-md text-xs px-3 h-7', !procedimientoId && 'opacity-40 cursor-not-allowed')}>
+              <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />Zonas
+              {!procedimientoId && <span className="ml-1.5 text-[10px] text-muted-foreground">(guarda primero)</span>}
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="datos" className="flex-1 overflow-y-auto mt-0 focus-visible:outline-none">
+          {justCreated ? (
+            <div className="px-6 py-8 flex flex-col items-center text-center gap-3">
+              <CheckCircle2 className="h-10 w-10 text-green-500" />
+              <p className="font-semibold">¡Procedimiento creado correctamente!</p>
+              <p className="text-sm text-muted-foreground">
+                Asigna diagramas corporales desde el tab <strong>Zonas</strong>, o cierra si no los necesitas ahora.
+              </p>
+              <Button variant="outline" size="sm" className="mt-1" onClick={() => setTab('zonas')}>
+                <LayoutTemplate className="h-3.5 w-3.5 mr-1.5" />Ir a zonas
+              </Button>
+            </div>
+          ) : (
           <form id="procedimiento-form" onSubmit={handleSubmit((d) => mut.mutate(d))} className="px-6 py-5 space-y-4">
             <div className="space-y-1.5">
               <Label>Nombre *</Label>
@@ -329,17 +374,31 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
               )} />
               <p className="text-xs text-muted-foreground">También se puede editar desde cada perfil de personal.</p>
             </div>
-            <div className="flex items-center justify-between rounded-lg border px-4 py-3">
-              <div className="space-y-0.5">
-                <p className="text-sm font-medium">Requiere consentimiento</p>
-                <p className="text-xs text-muted-foreground">El paciente debe firmar antes del procedimiento</p>
+            {/* Al activarlo, la vigencia aparece a su lado y el card se angosta */}
+            <div className="flex items-stretch gap-3">
+              <div className="flex flex-1 min-w-0 items-center justify-between gap-3 rounded-lg border px-4 py-3">
+                <div className="space-y-0.5 min-w-0">
+                  <p className="text-sm font-medium">Requiere consentimiento</p>
+                  <p className="text-xs text-muted-foreground">El paciente debe firmar antes del procedimiento</p>
+                </div>
+                <Controller name="requiere_consentimiento" control={control} render={({ field }) => (
+                  <input type="checkbox" checked={field.value} onChange={(e) => {
+                    field.onChange(e.target.checked)
+                    if (!e.target.checked) { setValue('documenso_template_id', null); setValue('documenso_template_nombre', null) }
+                  }} className="h-4 w-4 accent-primary shrink-0" />
+                )} />
               </div>
-              <Controller name="requiere_consentimiento" control={control} render={({ field }) => (
-                <input type="checkbox" checked={field.value} onChange={(e) => {
-                  field.onChange(e.target.checked)
-                  if (!e.target.checked) { setValue('documenso_template_id', null); setValue('documenso_template_nombre', null) }
-                }} className="h-4 w-4 accent-primary" />
-              )} />
+              {requiereConsentimiento && (
+                <div className="w-40 shrink-0 rounded-lg border px-3 py-2 flex flex-col justify-center gap-1">
+                  <Label className="text-xs">Vigencia (meses) *</Label>
+                  <Controller name="vigencia_meses" control={control} render={({ field }) => (
+                    <div className="flex items-center gap-2">
+                      <Input type="number" min={1} max={120} className="h-8 w-20" value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
+                      <span className="text-sm text-muted-foreground">meses</span>
+                    </div>
+                  )} />
+                </div>
+              )}
             </div>
             {requiereConsentimiento && (
               <>
@@ -358,15 +417,6 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
                       </select>
                     )} />
                   )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Vigencia (meses) *</Label>
-                  <Controller name="vigencia_meses" control={control} render={({ field }) => (
-                    <div className="flex items-center gap-2">
-                      <Input type="number" min={1} max={120} className="w-24" value={field.value} onChange={(e) => field.onChange(Number(e.target.value))} />
-                      <span className="text-sm text-muted-foreground">meses</span>
-                    </div>
-                  )} />
                 </div>
               </>
             )}
@@ -387,17 +437,34 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
               </div>
             )}
           </form>
-        </div>
+          )}
+          </TabsContent>
 
-        <div className="shrink-0 border-t px-6 py-4 flex justify-end items-center bg-white">
+          <TabsContent value="zonas" className="flex-1 overflow-y-auto mt-0 focus-visible:outline-none">
+            {procedimientoId
+              ? <div className="p-5"><DiagramasProcedimiento servicioId={procedimientoId} /></div>
+              : <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+                  <LayoutTemplate className="h-8 w-8 text-muted-foreground/30 mb-3" />
+                  <p className="text-sm text-muted-foreground">Guarda el procedimiento primero para asignar diagramas.</p>
+                </div>
+            }
+          </TabsContent>
+        </Tabs>
+
+        <div className="shrink-0 border-t px-6 py-4 flex justify-between items-center bg-white">
+          {tab === 'zonas' && procedimientoId
+            ? <p className="text-xs text-muted-foreground">Los cambios se guardan automáticamente.</p>
+            : <span />}
           <div className="flex gap-3">
             <Button variant="outline" onClick={handleClose} disabled={mut.isPending}>
-              Cancelar
+              {justCreated ? 'Cerrar' : 'Cancelar'}
             </Button>
-            <Button form="procedimiento-form" type="submit" disabled={mut.isPending}>
-              {mut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              {isEdit ? 'Guardar cambios' : 'Crear procedimiento'}
-            </Button>
+            {!justCreated && (
+              <Button form="procedimiento-form" type="submit" disabled={mut.isPending}>
+                {mut.isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isEdit ? 'Guardar cambios' : 'Crear procedimiento'}
+              </Button>
+            )}
           </div>
         </div>
       </DialogContent>
