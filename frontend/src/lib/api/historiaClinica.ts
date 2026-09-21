@@ -196,6 +196,14 @@ export const historiaClinicaApi = {
       )
       return res.data
     },
+    // Consulta a Documenso si ya firmó (p. ej. desde el link de WhatsApp); respaldo del webhook.
+    verificarFirma: async (id: string): Promise<ConsentimientoInformado> => {
+      const res = await apiClient.post<ConsentimientoInformado>(
+        `/historia-clinica/consentimientos/${id}/verificar_firma/`,
+        {}
+      )
+      return res.data
+    },
     completarFirma: async (id: string, documenso_document_id: string): Promise<ConsentimientoInformado> => {
       const res = await apiClient.patch<ConsentimientoInformado>(
         `/historia-clinica/consentimientos/${id}/completar_firma/`,

@@ -193,7 +193,7 @@ export function FirmaAsistenciaContent({
   return (
     <div className="h-full">
       {firmada ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 h-full text-center">
           <CheckCircle2 className="h-10 w-10 text-green-600" />
           <div className="space-y-1">
             <p className="text-sm font-medium">Firma registrada</p>
@@ -220,7 +220,7 @@ export function FirmaAsistenciaContent({
           )}
         </div>
       ) : rechazada ? (
-        <div className="flex flex-col items-center justify-center gap-4 py-12 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 h-full text-center">
           <XCircle className="h-10 w-10 text-destructive" />
           <div className="space-y-1">
             <p className="text-sm font-medium">El paciente no firmó el documento</p>
@@ -234,7 +234,7 @@ export function FirmaAsistenciaContent({
           </Button>
         </div>
       ) : linkInfo ? (
-        <div className="flex flex-col items-center gap-4 pt-[8%] text-center px-6">
+        <div className="flex flex-col items-center justify-center gap-4 h-full text-center px-6">
           <div className="relative">
             <Smartphone className="h-10 w-10 text-primary" />
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground absolute -bottom-1 -right-1" />
@@ -298,7 +298,7 @@ export function FirmaAsistenciaContent({
           onEnviado={handleLinkEnviado}
         />
       ) : !signingToken ? (
-        <div className="flex flex-col items-center gap-4 pt-[15%] text-center">
+        <div className="flex flex-col items-center justify-center gap-4 h-full text-center">
           <FileSignature className="h-10 w-10 text-muted-foreground" />
           <div className="space-y-1">
             <p className="text-sm font-medium">Firma de asistencia</p>

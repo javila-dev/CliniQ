@@ -7,6 +7,7 @@ import { EmbedSignDocument } from '@documenso/embed-react'
 import { Button } from '@/components/ui/button'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { ElegirMetodoFirma } from '@/components/shared/ElegirMetodoFirma'
+import { EsperaFirmaLink, type LinkFirmaInfo } from '@/components/shared/EsperaFirmaLink'
 
 interface ConsentimientoFirmaContentProps {
   pacienteId: string
@@ -18,6 +19,8 @@ interface ConsentimientoFirmaContentProps {
   onCompleted?: () => void
   onInicioFirma?: () => void
   onFinFirma?: () => void
+  /** Avisa al padre de que el link se envió por WhatsApp (para que arranque el polling del estado). */
+  onLinkEnviado?: () => void
 }
 
 const DOCUMENSO_URL = process.env.NEXT_PUBLIC_DOCUMENSO_URL ?? 'http://localhost:3000'
@@ -32,6 +35,7 @@ export function ConsentimientoFirmaContent({
   onCompleted,
   onInicioFirma,
   onFinFirma,
+  onLinkEnviado,
 }: ConsentimientoFirmaContentProps) {
   const queryClient = useQueryClient()
   const [signed, setSigned] = useState(false)
@@ -41,6 +45,10 @@ export function ConsentimientoFirmaContent({
   const [syncError, setSyncError] = useState(false)
   const [pendingDocId, setPendingDocId] = useState<string | null>(null)
   const [metodoElegido, setMetodoElegido] = useState(false)
+  // Camino "enviar link por WhatsApp": el paciente firma en su teléfono. El padre detecta la firma
+  // haciendo polling del estado (como en el registro de asistencia); aquí queda el respaldo manual.
+  const [linkInfo, setLinkInfo] = useState<LinkFirmaInfo | null>(null)
+  const [linkConsentimientoId, setLinkConsentimientoId] = useState<string | null>(null)
   const embedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const {
@@ -91,6 +99,18 @@ export function ConsentimientoFirmaContent({
   })
 
   const targetConsentimientoId = consentimientoId ?? consentimientoCreado?.id
+
+  async function comprobarEnDocumenso(): Promise<boolean> {
+    if (!linkConsentimientoId) return false
+    const consentimiento = await historiaClinicaApi.consentimientosInformados.verificarFirma(linkConsentimientoId)
+    if (!consentimiento.firmado) return false
+    queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })
+    queryClient.invalidateQueries({ queryKey: ['consentimientos-lista', pacienteId] })
+    queryClient.invalidateQueries({ queryKey: ['citas'] })
+    setSigned(true)
+    onCompleted?.()
+    return true
+  }
 
   // Auto-call iniciarFirma once the user eligió "firmar aquí" y hay consentimientoId
   useEffect(() => {
@@ -173,6 +193,15 @@ export function ConsentimientoFirmaContent({
           </Button>
         </div>
 
+      ) : linkInfo ? (
+        <EsperaFirmaLink
+          linkInfo={linkInfo}
+          onComprobar={comprobarEnDocumenso}
+          onElegirOtro={() => {
+            setLinkInfo(null)
+            setLinkConsentimientoId(null)
+          }}
+        />
       ) : !metodoElegido ? (
         <ElegirMetodoFirma
           documentoLabel="el consentimiento"
@@ -183,7 +212,12 @@ export function ConsentimientoFirmaContent({
           enviarLink={async () => {
             let id = targetConsentimientoId
             if (!id) id = (await crearConsentimientoAsync()).id
+            setLinkConsentimientoId(id)
             return historiaClinicaApi.consentimientosInformados.enviarLinkFirma(id)
+          }}
+          onEnviado={(r) => {
+            setLinkInfo(r)
+            onLinkEnviado?.()
           }}
         />
       ) : !targetConsentimientoId ? (

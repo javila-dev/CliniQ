@@ -365,20 +365,24 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
               )}
             </div>
           ) : displayStep === 'llegada' ? (
-            <div className="w-1/2 mx-auto mt-6">
-              <LlegadaCheckinContent
-                cita={cita}
-                onCheckinSuccess={() => confirmarLlegada()}
-                facialActivo={activeSteps.includes('verificacion')}
-              />
+            <div className="min-h-full flex items-center justify-center">
+              <div className="w-1/2">
+                <LlegadaCheckinContent
+                  cita={cita}
+                  onCheckinSuccess={() => confirmarLlegada()}
+                  facialActivo={activeSteps.includes('verificacion')}
+                />
+              </div>
             </div>
           ) : displayStep === 'verificacion' ? (
-            <div className="w-[60%] mx-auto mt-6">
-              <VerificacionFacialContent
-                pacienteId={cita.paciente}
-                citaId={citaId}
-                onCompletado={() => setVerificacionCompletada(true)}
-              />
+            <div className="min-h-full flex items-center justify-center">
+              <div className="w-[60%]">
+                <VerificacionFacialContent
+                  pacienteId={cita.paciente}
+                  citaId={citaId}
+                  onCompletado={() => setVerificacionCompletada(true)}
+                />
+              </div>
             </div>
           ) : displayStep === 'consentimiento' && pendienteConsentimiento ? (
             <div className="h-full">
@@ -397,21 +401,25 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
                   setFirmandoConsentimiento(false)
                   setMaximized(false)
                 }}
+                // Link por WhatsApp: consultar la cita cada 4s hasta que el consentimiento quede firmado.
+                onLinkEnviado={() => setEsperandoConfirmacionFirma(true)}
                 onCompleted={() => {
                   queryClient.invalidateQueries({ queryKey: ['citas'] })
                 }}
               />
             </div>
           ) : displayStep === 'pago' ? (
-            <div className="w-[60%] mx-auto mt-6">
-              <PagoContent
-                cita={cita}
-                onPagoRegistrado={() => {
-                  setPagoRegistrado(true)
-                  queryClient.invalidateQueries({ queryKey: ['citas'] })
-                }}
-                onCancel={() => handleOpenChange(false)}
-              />
+            <div className="min-h-full flex items-center justify-center">
+              <div className="w-[60%]">
+                <PagoContent
+                  cita={cita}
+                  onPagoRegistrado={() => {
+                    setPagoRegistrado(true)
+                    queryClient.invalidateQueries({ queryKey: ['citas'] })
+                  }}
+                  onCancel={() => handleOpenChange(false)}
+                />
+              </div>
             </div>
           ) : displayStep === 'firma' ? (
             <FirmaAsistenciaContent

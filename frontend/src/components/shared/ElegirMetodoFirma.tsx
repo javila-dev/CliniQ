@@ -68,7 +68,7 @@ export function ElegirMetodoFirma({ documentoLabel, onFirmarAqui, enviarLink, on
 
   if (info) {
     return (
-      <div className="flex flex-col items-center gap-4 pt-[10%] text-center px-6">
+      <div className="flex flex-col items-center justify-center gap-4 h-full text-center px-6">
         <CheckCircle2 className="h-10 w-10 text-green-600" />
         <div className="space-y-1">
           <p className="text-sm font-medium">
@@ -95,7 +95,7 @@ export function ElegirMetodoFirma({ documentoLabel, onFirmarAqui, enviarLink, on
   }
 
   return (
-    <div className="flex flex-col items-center gap-4 pt-[10%] text-center px-6">
+    <div className="flex flex-col items-center justify-center gap-4 h-full text-center px-6">
       <div className="space-y-1">
         <p className="text-sm font-medium">Firma del documento</p>
         <p className="text-xs text-muted-foreground max-w-xs">
