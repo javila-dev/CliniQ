@@ -46,7 +46,8 @@ from apps.historia_clinica.serializers import (
 from apps.obesidad.models import MedicionAntropometrica
 from apps.historia_clinica.services import (
     DocumensoIntegrationError,
-    descargar_pdf_documenso,
+    descargar_pdf_documenso_sellado,
+    verificar_firma_consentimiento_en_documenso,
     eliminar_consumo_insumo,
     guardar_pdf_firmado,
     iniciar_firma_consentimiento,
@@ -571,7 +572,7 @@ class ConsentimientoInformadoViewSet(
         sin_pdf = [c for c in queryset if c.firmado and not c.archivo and c.documenso_document_id]
         for consentimiento in sin_pdf:
             try:
-                pdf_bytes = descargar_pdf_documenso(consentimiento.documenso_document_id)
+                pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
                 if pdf_bytes:
                     guardar_pdf_firmado(
                         consentimiento,
@@ -732,6 +733,15 @@ class ConsentimientoInformadoViewSet(
         )
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["post"], url_path="verificar_firma")
+    def verificar_firma(self, request, pk=None):
+        """Consulta directamente a Documenso si el paciente ya firmo (p. ej. desde el
+        link de WhatsApp) y reconcilia el estado. Respaldo del webhook."""
+        consentimiento = self.get_object()
+        verificar_firma_consentimiento_en_documenso(consentimiento)
+        consentimiento.refresh_from_db()
+        return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["post"], url_path="iniciar_firma")
     def iniciar_firma(self, request, pk=None):
         consentimiento = self.get_object()
@@ -793,10 +803,13 @@ class ConsentimientoInformadoViewSet(
                 {"error": "El consentimiento no tiene un documento de Documenso asociado.", "code": "SIN_DOCUMENTO"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        pdf_bytes = descargar_pdf_documenso(consentimiento.documenso_document_id)
+        pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
         if not pdf_bytes:
             return Response(
-                {"error": "No fue posible descargar el PDF desde Documenso.", "code": "DOCUMENSO_ERROR"},
+                {
+                    "error": "El PDF firmado aún no está disponible en Documenso. Inténtalo de nuevo en unos segundos.",
+                    "code": "DOCUMENSO_ERROR",
+                },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         guardar_pdf_firmado(

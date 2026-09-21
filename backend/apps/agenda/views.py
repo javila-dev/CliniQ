@@ -847,7 +847,10 @@ class CitaViewSet(ModelViewSet):
         ok = _recuperar(cita)
         if not ok:
             return Response(
-                {"error": "No fue posible recuperar el PDF desde Documenso.", "code": "DOCUMENSO_ERROR"},
+                {
+                    "error": "El PDF firmado aún no está disponible en Documenso. Inténtalo de nuevo en unos segundos.",
+                    "code": "DOCUMENSO_ERROR",
+                },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         cita.refresh_from_db()

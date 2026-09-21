@@ -9,7 +9,7 @@ from apps.core.storage import get_signed_url
 from apps.historia_clinica.services import (
     consentimiento_informado_vigente,
     consentimiento_satisfecho,
-    descargar_pdf_documenso,
+    descargar_pdf_documenso_sellado,
     guardar_pdf_firmado,
 )
 from apps.protocolos.models import SesionProcedimiento
@@ -23,7 +23,7 @@ def _archivo_url(consentimiento) -> str | None:
         return None
     if not consentimiento.archivo and consentimiento.documenso_document_id:
         try:
-            pdf_bytes = descargar_pdf_documenso(consentimiento.documenso_document_id)
+            pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
             if pdf_bytes:
                 guardar_pdf_firmado(
                     consentimiento,

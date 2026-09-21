@@ -34,6 +34,36 @@ def _resolve_asistencia_by_token(recipients: list):
     return None
 
 
+def _resolve_by_signing_token(model, field: str, recipients: list):
+    """Instancia de ``model`` cuyo ``field`` (token de firma) coincide con el de algun firmante."""
+    for recipient in recipients:
+        token = (recipient.get("token") or "").strip()
+        if token:
+            instance = model.objects.filter(**{field: token}).first()
+            if instance is not None:
+                return instance
+    return None
+
+
+def _handle_consentimiento_informado(consentimiento, document_id: str | None) -> None:
+    marcar_consentimiento_firmado(consentimiento, documenso_document_id=document_id)
+
+    pdf_bytes = descargar_pdf_documenso(document_id) if document_id is not None else None
+    if pdf_bytes:
+        try:
+            guardar_pdf_firmado(
+                consentimiento,
+                pdf_bytes,
+                filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
+            )
+        except Exception:
+            logger.exception(
+                "No fue posible guardar el PDF firmado de Documenso | consentimiento_id=%s | document_id=%s",
+                consentimiento.id,
+                document_id,
+            )
+
+
 def _handle_firma_asistencia(external_id: str, event: str, document_id: str | None = None) -> None:
     from django.core.files.base import ContentFile
 
@@ -177,19 +207,39 @@ class DocumensoWebhookView(APIView):
             # externalId is absent when the envelope was created via multipart upload
             # (Documenso ignores that field in /api/v2/envelope/create). Fall back to
             # matching the recipient signing token against firma_asistencia_signing_token.
-            resolved = _resolve_asistencia_by_token(payload.get("recipients") or [])
+            recipients = payload.get("recipients") or []
+            doc_id = str(document_id) if document_id else None
+            resolved = _resolve_asistencia_by_token(recipients)
             if resolved is not None:
                 logger.info(
                     "Webhook Documenso: externalId ausente, cita resuelta por token | cita_id=%s",
                     resolved.id,
                 )
-                _handle_firma_asistencia(
-                    f"{_ASISTENCIA_PREFIX}{resolved.id}",
-                    event,
-                    document_id=str(document_id) if document_id else None,
+                _handle_firma_asistencia(f"{_ASISTENCIA_PREFIX}{resolved.id}", event, document_id=doc_id)
+                return Response({"ok": True}, status=200)
+
+            from apps.consentimientos.models import Consentimiento
+
+            informado = _resolve_by_signing_token(ConsentimientoInformado, "documenso_signing_token", recipients)
+            if informado is not None:
+                logger.info(
+                    "Webhook Documenso: externalId ausente, consentimiento resuelto por token | consentimiento_id=%s",
+                    informado.id,
                 )
-            else:
-                logger.warning("Webhook Documenso sin externalId | payload=%s", payload)
+                if event in {"DOCUMENT_COMPLETED", "document.completed"}:
+                    _handle_consentimiento_informado(informado, doc_id)
+                return Response({"ok": True}, status=200)
+
+            compromiso = _resolve_by_signing_token(Consentimiento, "documenso_signing_token", recipients)
+            if compromiso is not None:
+                logger.info(
+                    "Webhook Documenso: externalId ausente, compromiso resuelto por token | consentimiento_id=%s",
+                    compromiso.id,
+                )
+                _handle_compromiso_pago(f"{_COMPROMISO_PAGO_PREFIX}{compromiso.id}", event, document_id=doc_id)
+                return Response({"ok": True}, status=200)
+
+            logger.warning("Webhook Documenso sin externalId | payload=%s", payload)
             return Response({"ok": True}, status=200)
 
         if external_id.startswith(_ASISTENCIA_PREFIX):
@@ -208,24 +258,6 @@ class DocumensoWebhookView(APIView):
             logger.warning("Webhook Documenso con externalId no encontrado | external_id=%s", external_id)
             return Response({"ok": True}, status=200)
 
-        marcar_consentimiento_firmado(
-            consentimiento,
-            documenso_document_id=str(document_id) if document_id is not None else None,
-        )
-
-        pdf_bytes = descargar_pdf_documenso(str(document_id)) if document_id is not None else None
-        if pdf_bytes:
-            try:
-                guardar_pdf_firmado(
-                    consentimiento,
-                    pdf_bytes,
-                    filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
-                )
-            except Exception:
-                logger.exception(
-                    "No fue posible guardar el PDF firmado de Documenso | consentimiento_id=%s | document_id=%s",
-                    consentimiento.id,
-                    document_id,
-                )
+        _handle_consentimiento_informado(consentimiento, str(document_id) if document_id is not None else None)
 
         return Response({"ok": True}, status=200)

@@ -327,6 +327,105 @@ def descargar_pdf_documenso(document_id: str) -> bytes | None:
         return None
 
 
+def documento_documenso_sellado(document_id: str) -> bool:
+    """True si Documenso ya completo y sello el documento (estado COMPLETED).
+
+    Que el firmante haya firmado no basta: hasta el sellado, la descarga devuelve
+    el PDF original SIN firma. Ante cualquier error responde False (no se guarda nada).
+    """
+    if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY or not document_id:
+        return False
+    try:
+        resp = requests.get(
+            f"{settings.DOCUMENSO_API_URL.rstrip('/')}/api/v1/documents/{document_id}",
+            headers={"Authorization": _documenso_api_key()},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+    except Exception:
+        logger.exception("No fue posible consultar el estado del documento en Documenso | document_id=%s", document_id)
+        return False
+    status = str(data.get("status") or "").upper()
+    return status in {"COMPLETED", "COMPLETE"} or bool(data.get("completedAt"))
+
+
+def descargar_pdf_documenso_sellado(document_id: str) -> bytes | None:
+    """Como :func:`descargar_pdf_documenso`, pero solo si el documento ya esta sellado.
+
+    Devuelve ``None`` mientras Documenso siga sellandolo, para no guardar como
+    "firmado" el PDF original sin firma. Usar en toda descarga que no venga del
+    webhook de documento completado.
+    """
+    if not documento_documenso_sellado(document_id):
+        logger.info("Documento aun sin sellar en Documenso; no se descarga el PDF | document_id=%s", document_id)
+        return None
+    return descargar_pdf_documenso(document_id)
+
+
+def archivo_tiene_el_mismo_contenido(field_file, data: bytes) -> bool:
+    """True si el archivo guardado ya contiene exactamente ``data`` (evita reemplazos inutiles)."""
+    if not field_file:
+        return False
+    try:
+        field_file.open("rb")
+        try:
+            return field_file.read() == data
+        finally:
+            field_file.close()
+    except Exception:
+        return False
+
+
+def refrescar_pdf_consentimiento_informado(consentimiento) -> str:
+    """Reemplaza el PDF guardado por el firmado y sellado de Documenso.
+
+    Devuelve ``"actualizado"``, ``"sin_cambios"`` (ya era el firmado) o
+    ``"no_disponible"`` (sin documento, o Documenso aun no lo sella).
+    """
+    if not consentimiento.documenso_document_id:
+        return "no_disponible"
+    pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
+    if not pdf_bytes:
+        return "no_disponible"
+    if archivo_tiene_el_mismo_contenido(consentimiento.archivo, pdf_bytes):
+        return "sin_cambios"
+    if consentimiento.archivo:
+        consentimiento.archivo.delete(save=False)
+    guardar_pdf_firmado(
+        consentimiento, pdf_bytes, filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
+    )
+    return "actualizado"
+
+
+def verificar_firma_consentimiento_en_documenso(consentimiento) -> bool:
+    """Consulta a Documenso si el consentimiento ya fue firmado y lo marca como firmado.
+
+    Respaldo del webhook: los envelopes creados con la plantilla PDF propia se
+    crean por multipart y Documenso ignora el ``externalId``, asi que el webhook
+    puede no poder asociar el documento. Devuelve True si queda firmado. El PDF se
+    recupera despues (al leerlo) solo cuando Documenso ya lo selle.
+    """
+    if consentimiento.firmado:
+        return True
+    if not consentimiento.documenso_document_id:
+        return False
+
+    from apps.consentimientos.services import _estado_firma_desde_envelope
+
+    try:
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{consentimiento.documenso_document_id}")
+    except DocumensoIntegrationError:
+        logger.warning(
+            "No se pudo consultar el envelope para verificar la firma | consentimiento_id=%s", consentimiento.id,
+        )
+        return False
+    if _estado_firma_desde_envelope(payload) != "firmada":
+        return False
+    marcar_consentimiento_firmado(consentimiento)
+    return True
+
+
 def consentimiento_informado_vigente(paciente_id, template_token):
     """Último ConsentimientoInformado firmado y no vencido del paciente para el template."""
     from django.db.models import Q

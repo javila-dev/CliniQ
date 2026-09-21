@@ -878,8 +878,12 @@ def iniciar_firma_consentimiento_desde_plantilla(consentimiento) -> tuple[str, s
     return signing_token, str(envelope_id)
 
 
-def recuperar_pdf_asistencia(cita) -> bool:
+def recuperar_pdf_asistencia(cita, *, reemplazar: bool = False) -> bool:
     """Download and save the signed asistencia PDF from Documenso.
+
+    Only saves once Documenso sealed the document (COMPLETED): before that the
+    download returns the original PDF WITHOUT the signature. With ``reemplazar``
+    an already stored PDF is replaced.
 
     Useful when the webhook updated firma_asistencia_estado to 'firmada' but
     the PDF save failed (e.g. the original webhook lacked externalId so
@@ -907,6 +911,12 @@ def recuperar_pdf_asistencia(cita) -> bool:
     envelope = {}
     try:
         envelope = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+        if not _envelope_completado(envelope):
+            logger.info(
+                "[recuperar_pdf_asistencia] documento aun sin sellar en Documenso | cita_id=%s | envelope_id=%s",
+                cita.id, envelope_id,
+            )
+            return False
         secondary = (envelope.get("secondaryId") or "").removeprefix("document_")
         if secondary.isdigit():
             numeric_id = secondary
@@ -946,6 +956,14 @@ def recuperar_pdf_asistencia(cita) -> bool:
         return False
 
     filename = f"asistencia-{cita.id}.pdf"
+    if cita.firma_asistencia_archivo:
+        if not reemplazar:
+            return True
+        from apps.historia_clinica.services import archivo_tiene_el_mismo_contenido
+
+        if archivo_tiene_el_mismo_contenido(cita.firma_asistencia_archivo, pdf_bytes):
+            return True
+        cita.firma_asistencia_archivo.delete(save=False)
     cita.firma_asistencia_archivo.save(filename, ContentFile(pdf_bytes), save=False)
     cita.save(update_fields=["firma_asistencia_archivo", "updated_at"])
     logger.info(
@@ -1015,6 +1033,12 @@ def verificar_firma_asistencia_en_documenso(cita) -> str:
 
     estado_actual = cita.firma_asistencia_estado
     if estado_actual == "firmada":
+        # Firmada pero sin PDF (aun no sellado cuando se confirmo la firma): reintentar.
+        if not cita.firma_asistencia_archivo:
+            try:
+                recuperar_pdf_asistencia(cita)
+            except Exception:
+                logger.exception("[verificar_firma_asistencia] fallo al recuperar PDF | cita_id=%s", cita.id)
         return estado_actual
 
     envelope_id = (cita.firma_asistencia_documento_id or "").strip()
@@ -1187,6 +1211,10 @@ def recuperar_pdf_compromiso_pago(consentimiento: Consentimiento, *, reemplazar:
     filename = f"compromiso_pago-{consentimiento.id}.pdf"
     if consentimiento.pdf_archivo:
         if not reemplazar:
+            return True
+        from apps.historia_clinica.services import archivo_tiene_el_mismo_contenido
+
+        if archivo_tiene_el_mismo_contenido(consentimiento.pdf_archivo, pdf_bytes):
             return True
         consentimiento.pdf_archivo.delete(save=False)
     consentimiento.pdf_archivo.save(filename, ContentFile(pdf_bytes), save=False)
