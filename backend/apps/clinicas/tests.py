@@ -6,7 +6,18 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from apps.clinicas.models import Clinica, Sede, Servicio, TipoSesion, TratamientoCatalogo
+from apps.clinicas.models import (
+    Clinica,
+    DiagramaCorporal,
+    GrupoZonas,
+    GrupoZonasDiagrama,
+    Sede,
+    Servicio,
+    ServicioConsentimiento,
+    ServicioGrupoZonas,
+    TipoSesion,
+    TratamientoCatalogo,
+)
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 
 
@@ -159,6 +170,119 @@ class ServicioVigenciaTests(TestCase):
         self.assertEqual(response.status_code, 201)
         self.assertEqual(response.json()["template_id"], str(template.id))
         self.assertEqual(response.json()["template_token"], "laser-co2-token")
+
+
+class ProcedimientoNombreUnicoTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.superadmin = User.objects.create_user(
+            email="root-nombre-unico@example.com",
+            password="secret123",
+            first_name="Root",
+            last_name="Unico",
+            rol=User.Role.SUPERADMIN,
+        )
+        self.client.force_authenticate(self.superadmin)
+        self.clinica = Clinica.objects.create(nombre="Clinica Unico A", nit="901333444")
+        self.otra = Clinica.objects.create(nombre="Clinica Unico B", nit="901333555")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+        self.existente = Servicio.objects.create(
+            clinica=self.clinica, nombre="Botox Facial", duracion_min=30
+        )
+
+    def _crear(self, nombre, clinica=None):
+        clinica = clinica or self.clinica
+        return self.client.post(
+            "/api/v1/clinicas/procedimientos/",
+            {"nombre": nombre, "duracion_min": 30},
+            format="json",
+            HTTP_X_CLINICA_ID=str(clinica.id),
+        )
+
+    def test_rechaza_nombre_repetido_ignorando_mayusculas_y_espacios(self):
+        for variante in ("botox facial", "  BOTOX FACIAL  ", "Botox    Facial"):
+            response = self._crear(variante)
+            self.assertEqual(response.status_code, 400, variante)
+            self.assertIn("nombre", response.json())
+
+    def test_permite_mismo_nombre_en_otra_clinica(self):
+        self.assertEqual(self._crear("Botox Facial", clinica=self.otra).status_code, 201)
+
+    def test_normaliza_espacios_al_guardar(self):
+        response = self._crear("  Peeling   Quimico ")
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["nombre"], "Peeling Quimico")
+
+    def test_edicion_no_choca_consigo_mismo_pero_si_con_otro(self):
+        otro = Servicio.objects.create(clinica=self.clinica, nombre="Laser CO2", duracion_min=30)
+        url = f"/api/v1/clinicas/procedimientos/{self.existente.id}/"
+
+        self.assertEqual(self.client.patch(url, {"nombre": "BOTOX FACIAL"}, format="json").status_code, 200)
+        response = self.client.patch(url, {"nombre": " laser co2"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("nombre", response.json())
+        self.assertEqual(
+            self.client.patch(f"/api/v1/clinicas/procedimientos/{otro.id}/", {"activo": False}, format="json").status_code,
+            200,
+        )
+
+    def test_restriccion_de_bd_impide_duplicados(self):
+        from django.db import IntegrityError, transaction
+
+        with self.assertRaises(IntegrityError), transaction.atomic():
+            Servicio.objects.create(clinica=self.clinica, nombre=" botox facial ", duracion_min=30)
+
+
+class ProcedimientoFiltrosTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.superadmin = User.objects.create_user(
+            email="root-filtros@example.com",
+            password="secret123",
+            first_name="Root",
+            last_name="Filtros",
+            rol=User.Role.SUPERADMIN,
+        )
+        self.client.force_authenticate(self.superadmin)
+        self.clinica = Clinica.objects.create(nombre="Clinica Filtros", nit="901444555")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+        self.con_todo = Servicio.objects.create(clinica=self.clinica, nombre="Alfa", duracion_min=30)
+        self.sin_nada = Servicio.objects.create(
+            clinica=self.clinica, nombre="Beta", descripcion="hidratación", duracion_min=30, activo=False
+        )
+        template = DocumensoConsentimientoTemplate.objects.create(
+            clinica=self.clinica, tipo="laser", template_token="filtros-token"
+        )
+        ServicioConsentimiento.objects.create(servicio=self.con_todo, template=template)
+        grupo = GrupoZonas.objects.create(nombre="Grupo filtros")
+        diagrama = DiagramaCorporal.objects.create(
+            nombre="Rostro", imagen=SimpleUploadedFile("r.png", b"x", content_type="image/png")
+        )
+        GrupoZonasDiagrama.objects.create(grupo=grupo, diagrama=diagrama)
+        ServicioGrupoZonas.objects.create(servicio=self.con_todo, grupo=grupo)
+
+    def _ids(self, **params):
+        response = self.client.get("/api/v1/clinicas/procedimientos/", params)
+        self.assertEqual(response.status_code, 200)
+        return [r["nombre"] for r in response.json()["results"]]
+
+    def test_filtra_por_consentimiento(self):
+        self.assertEqual(self._ids(tiene_consentimiento="true"), ["Alfa"])
+        self.assertEqual(self._ids(tiene_consentimiento="false"), ["Beta"])
+
+    def test_filtra_por_zonas(self):
+        self.assertEqual(self._ids(tiene_zonas="true"), ["Alfa"])
+        self.assertEqual(self._ids(tiene_zonas="false"), ["Beta"])
+
+    def test_filtra_por_estado_y_busca_por_texto(self):
+        self.assertEqual(self._ids(activo="false"), ["Beta"])
+        self.assertEqual(self._ids(search="hidrata"), ["Beta"])
+        self.assertEqual(self._ids(search="alf", tiene_zonas="true"), ["Alfa"])
+        self.assertEqual(self._ids(search="alf", tiene_zonas="false"), [])
+
+    def test_lista_paginada_con_conteo(self):
+        response = self.client.get("/api/v1/clinicas/procedimientos/")
+        self.assertEqual(response.json()["count"], 2)
 
 
 class TratamientoCatalogoTests(TestCase):

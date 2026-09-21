@@ -2,6 +2,8 @@ import os
 import secrets
 
 from django.db import models
+from django.db.models import F
+from django.db.models.functions import Lower, Trim
 from django.utils import timezone
 
 from apps.core.models import BaseModel
@@ -302,6 +304,15 @@ class Servicio(BaseModel):
     class Meta:
         db_table = "servicios"
         ordering = ["nombre"]
+        constraints = [
+            # Nombre único por clínica ignorando mayúsculas y espacios en los extremos.
+            models.UniqueConstraint(
+                Lower(Trim("nombre")),
+                F("clinica"),
+                name="servicio_nombre_unico_por_clinica",
+                violation_error_message="Ya existe un procedimiento con ese nombre.",
+            ),
+        ]
 
     def __str__(self) -> str:
         return self.nombre

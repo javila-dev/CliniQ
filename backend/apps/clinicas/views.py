@@ -4,8 +4,8 @@ from uuid import UUID
 from django.contrib.auth import get_user_model
 
 User = get_user_model()
-from django.db import transaction
-from django.db.models import Prefetch
+from django.db import IntegrityError, transaction
+from django.db.models import Exists, OuterRef, Prefetch
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.decorators import action
@@ -670,9 +670,12 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
 
     def get_queryset(self):
         queryset = super().get_queryset()
-        activo = self.request.query_params.get("activo")
-        clinica = self.request.query_params.get("clinica")
-        tiene_protocolo = self.request.query_params.get("tiene_protocolo")
+        params = self.request.query_params
+        activo = params.get("activo")
+        clinica = params.get("clinica")
+        tiene_protocolo = params.get("tiene_protocolo")
+        tiene_consentimiento = params.get("tiene_consentimiento")
+        tiene_zonas = params.get("tiene_zonas")
 
         if activo is not None:
             queryset = queryset.filter(activo=activo.lower() == "true")
@@ -680,6 +683,18 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
             queryset = queryset.filter(clinica_id=clinica)
         if tiene_protocolo is not None:
             queryset = queryset.filter(tiene_protocolo=tiene_protocolo.lower() == "true")
+        if tiene_consentimiento is not None:
+            con_consentimiento = Exists(
+                ServicioConsentimiento.objects.filter(servicio=OuterRef("pk"), activo=True)
+            )
+            queryset = queryset.filter(con_consentimiento if tiene_consentimiento.lower() == "true" else ~con_consentimiento)
+        if tiene_zonas is not None:
+            con_zonas = Exists(
+                ServicioGrupoZonas.objects.filter(
+                    servicio=OuterRef("pk"), activo=True, grupo__diagramas__isnull=False
+                )
+            )
+            queryset = queryset.filter(con_zonas if tiene_zonas.lower() == "true" else ~con_zonas)
         return queryset
 
     def _debug_validation_error(self, request, serializer, *, instance=None):
@@ -717,8 +732,27 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         kwargs["partial"] = True
         return self.update(request, *args, **kwargs)
 
+    def _guardar_con_nombre_unico(self, serializer, clinica, save_kwargs=None):
+        nombre = serializer.validated_data.get("nombre")
+        if nombre is not None:
+            en_uso = Servicio.objects.filter(clinica=clinica, nombre__iexact=nombre.strip())
+            if serializer.instance is not None:
+                en_uso = en_uso.exclude(pk=serializer.instance.pk)
+            if en_uso.exists():
+                raise ValidationError({"nombre": ["Ya existe un procedimiento con ese nombre."]})
+        try:
+            with transaction.atomic():
+                serializer.save(**(save_kwargs or {}))
+        except IntegrityError:
+            # Carrera entre dos escrituras simultáneas: la restricción de BD tiene la última palabra.
+            raise ValidationError({"nombre": ["Ya existe un procedimiento con ese nombre."]})
+
     def perform_create(self, serializer):
-        serializer.save(clinica=self._get_write_clinica())
+        clinica = self._get_write_clinica()
+        self._guardar_con_nombre_unico(serializer, clinica, {"clinica": clinica})
+
+    def perform_update(self, serializer):
+        self._guardar_con_nombre_unico(serializer, serializer.instance.clinica)
 
     def _parse_template_uuid(self, raw_template_id):
         try:

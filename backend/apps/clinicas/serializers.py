@@ -327,6 +327,11 @@ class ServicioSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError("No puedes asignar servicios a otra clinica.")
         return value
 
+    def validate_nombre(self, value):
+        # Espacios repetidos o en los extremos no cuentan: "Botox  Facial " == "Botox Facial".
+        # La unicidad por clínica se verifica en la vista, que es quien conoce la clínica de escritura.
+        return " ".join(value.split())
+
     def validate_precio(self, value):
         if value in (None, ""):
             return None
