@@ -326,12 +326,12 @@ function TratamientoDialog({
     return Array.from(porTemplate.entries()).map(([key, v]) => ({ key, ...v }))
   }, [procedimientosDetalle])
 
-  const { data: procData } = useQuery({
-    queryKey: ['procedimientos', 'all'],
-    queryFn: () => clinicasApi.procedimientos.list(),
+  // `activos` no pagina: `list()` solo trae la primera página (25) y dejaba fuera al resto.
+  const { data: servicios = [] } = useQuery({
+    queryKey: ['procedimientos', 'activos'],
+    queryFn: () => clinicasApi.procedimientos.activos(),
     enabled: open,
   })
-  const servicios = (procData?.results ?? []).filter((s) => s.activo)
 
   const { register, control, handleSubmit, reset, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -389,7 +389,7 @@ function TratamientoDialog({
   }
 
   function handleProcCreated(s: Procedimiento) {
-    qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] })
+    qc.invalidateQueries({ queryKey: ['procedimientos'] })
     procCreatedCallback?.(s)
     setProcDialogOpen(false)
     setProcCreatedCallback(null)
