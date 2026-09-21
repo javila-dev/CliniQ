@@ -4,6 +4,8 @@ export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida' | 'descartada
 export type TipoFormaPago = 'efectivo' | 'transferencia' | 'tarjeta_credito'
 export type CanalEnvio = 'whatsapp' | 'email' | 'pdf'
 export type TipoItemCotizacion = 'tratamiento' | 'procedimiento' | 'libre'
+/** Un obsequio de producto usa `insumo`; solo existe como obsequio (es_obsequio = true). */
+export type TipoItemApi = TipoItemCotizacion | 'insumo'
 
 export interface CotizacionEnvio {
   id: string
@@ -16,7 +18,7 @@ export interface CotizacionEnvio {
 
 export interface ItemCotizacion {
   id: string
-  tipo: TipoItemCotizacion
+  tipo: TipoItemApi
   tratamiento?: string | null         // UUID FK a TratamientoCatalogo (H27.1)
   tratamiento_nombre?: string | null
   procedimiento?: string | null       // UUID FK a Procedimiento (H27.1)
@@ -38,6 +40,22 @@ export interface ItemCotizacion {
   citas_agendadas?: number
   citas_completadas?: number
   citas_restantes?: number
+  // Obsequios: valor cobrado 0 y valor de referencia solo informativo
+  es_obsequio?: boolean
+  agendable?: boolean                   // sesión obsequio que consume una sesión real
+  valor_referencia?: string             // precio de lista del obsequio
+  item_origen?: string | null           // ítem tratamiento del que se clona la sesión
+  tipo_sesion_origen?: string | null    // UUID de la TipoSesion clonada
+  tipo_sesion_origen_nombre?: string | null
+  insumo?: string | null                // UUID del producto obsequiado
+  insumo_nombre?: string | null
+  insumo_unidad?: string | null
+  cantidad_insumo?: string | null       // Decimal como string
+  stock_disponible?: string | null      // stock en la sede de la cotización (aviso antes de entregar)
+  entregado_at?: string | null
+  entregado_por_nombre?: string | null
+  sede_entrega?: string | null
+  sede_entrega_nombre?: string | null
 }
 
 export interface CitaSesion {
@@ -57,6 +75,8 @@ export interface ItemSesiones {
   citas_agendadas: number
   citas_completadas: number
   citas_restantes: number
+  es_obsequio?: boolean         // sesión obsequio con cupo propio (procedimiento del catálogo)
+  sesiones_obsequio?: number    // en un tratamiento: sesiones regaladas que suman a su cupo
   citas: CitaSesion[]
 }
 
@@ -137,7 +157,7 @@ export interface PreciosCampanaMap {
 }
 
 export interface CreateItemCotizacion {
-  tipo: TipoItemCotizacion
+  tipo: TipoItemApi
   tratamiento?: string | null
   procedimiento?: string | null
   descripcion: string
@@ -146,6 +166,19 @@ export interface CreateItemCotizacion {
   periodicidad: string
   valor_unitario: number
   descuento_porcentaje: number
+  // Obsequios (el backend fuerza valor_unitario = 0)
+  es_obsequio?: boolean
+  agendable?: boolean
+  valor_referencia?: number
+  tipo_sesion_origen?: string | null
+  /** Posición (base 0) del ítem tratamiento del que se clona la sesión, dentro de `items`. */
+  origen_indice?: number | null
+  insumo?: string | null
+  cantidad_insumo?: number | null
+}
+
+export interface EntregarObsequioRequest {
+  sede: string
 }
 
 export interface CreateFormaPago {

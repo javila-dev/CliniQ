@@ -189,7 +189,7 @@ export function NuevaCitaModal({
           .filter((s) => s.estado === 'pendiente')
           .map((s) => ({
             id: s.id,
-            label: `Sesión ${s.numero}/${g.total} · ${g.tipo_sesion_nombre}`,
+            label: `Sesión ${s.numero}/${g.total} · ${g.tipo_sesion_nombre}${s.es_obsequio ? ' (obsequio)' : ''}`,
             procedimientos: g.procedimientos,
           }))
       )
@@ -479,7 +479,7 @@ export function NuevaCitaModal({
                         </SelectItem>,
                         ...del_tipo.map((item) => (
                           <SelectItem key={item.item_id} value={item.item_id} className="pl-5">
-                            {item.descripcion} — {item.citas_restantes} de {item.num_citas} restantes
+                            {item.descripcion}{item.es_obsequio ? ' (obsequio)' : ''} — {item.citas_restantes} de {item.num_citas} restantes
                           </SelectItem>
                         )),
                       ]

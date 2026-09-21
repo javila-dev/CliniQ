@@ -1,6 +1,6 @@
 export type UnidadMedida = 'unidad' | 'ml' | 'gr' | 'cm' | 'par' | 'caja'
 export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'baja'
-export type OrigenMovimiento = 'compra' | 'consumo_cita' | 'venta_retail' | 'ajuste_manual' | 'baja_vencimiento'
+export type OrigenMovimiento = 'compra' | 'consumo_cita' | 'venta_retail' | 'obsequio' | 'ajuste_manual' | 'baja_vencimiento'
 
 export interface Insumo {
   id: string
@@ -52,7 +52,15 @@ export interface ContextoCobro {
   cotizacion_numero: string | null
 }
 
-export type MovimientoContexto = ContextoOrdenCompra | ContextoNotaClinica | ContextoCobro
+export interface ContextoObsequio {
+  tipo: 'obsequio'
+  cotizacion_id: string
+  cotizacion_referencia: string
+  paciente_id: string
+  paciente_nombre: string
+}
+
+export type MovimientoContexto = ContextoOrdenCompra | ContextoNotaClinica | ContextoCobro | ContextoObsequio
 
 export interface MovimientoInventario {
   id: string

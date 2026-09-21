@@ -53,6 +53,7 @@ const ORIGEN_LABEL: Record<string, string> = {
   compra: 'Compra',
   consumo_cita: 'Consumo en atención',
   venta_retail: 'Venta retail',
+  obsequio: 'Obsequio en cotización',
   ajuste_manual: 'Ajuste manual',
   baja_vencimiento: 'Baja por vencimiento',
 }

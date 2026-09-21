@@ -29,6 +29,7 @@ const ORIGEN_LABEL: Record<string, string> = {
   compra: 'Compra',
   consumo_cita: 'Consumo en atención',
   venta_retail: 'Venta retail',
+  obsequio: 'Obsequio en cotización',
   ajuste_manual: 'Ajuste manual',
   baja_vencimiento: 'Baja por vencimiento',
 }
@@ -119,6 +120,22 @@ export function MovimientoDetalleModal({
               {ctx.cotizacion_numero && (
                 <Fila label="Cotización"><span className="font-medium">#{ctx.cotizacion_numero}</span></Fila>
               )}
+            </div>
+          )}
+
+          {ctx?.tipo === 'obsequio' && (
+            <div className="rounded-lg border p-3 space-y-1.5">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Obsequio</p>
+              <Fila label="Paciente">
+                <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
+                  {ctx.paciente_nombre}
+                </Link>
+              </Fila>
+              <Fila label="Cotización">
+                <Link href={`/cotizaciones/${ctx.cotizacion_id}`} className="text-primary hover:underline font-medium">
+                  #{ctx.cotizacion_referencia}
+                </Link>
+              </Fila>
             </div>
           )}
 

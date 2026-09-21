@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EstadoCotizacion, HistorialSesionesCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { Paginated } from '@/types/common'
 
@@ -122,6 +122,17 @@ export const cotizacionesApi = {
 
   getEnvios: async (id: string): Promise<CotizacionEnvio[]> => {
     const res = await apiClient.get<CotizacionEnvio[]>(`/cotizaciones/${id}/envios/`)
+    return res.data
+  },
+
+  // Obsequios de producto: la entrega descuenta el inventario de la sede indicada.
+  entregarObsequio: async (id: string, itemId: string, data: EntregarObsequioRequest): Promise<ItemCotizacion> => {
+    const res = await apiClient.post<ItemCotizacion>(`/cotizaciones/${id}/items/${itemId}/entregar_obsequio/`, data)
+    return res.data
+  },
+
+  revertirEntregaObsequio: async (id: string, itemId: string): Promise<ItemCotizacion> => {
+    const res = await apiClient.post<ItemCotizacion>(`/cotizaciones/${id}/items/${itemId}/revertir_entrega/`)
     return res.data
   },
 

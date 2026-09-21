@@ -224,7 +224,7 @@ function GrupoSesionPanel({
               onClick={() => completarMut.mutate(proxPendiente)}
               title={!puedeEjecutar ? 'Hay consentimientos faltantes o vencidos' : undefined}>
               {completarMut.isPending ? <Loader2 className="h-2.5 w-2.5 animate-spin mr-1" /> : '✓ '}
-              Completar sesión {proxPendiente.numero}/{grupo.total}
+              Completar sesión {proxPendiente.numero}/{grupo.total}{proxPendiente.es_obsequio ? ' · obsequio' : ''}
             </Button>
           </div>
         </div>
@@ -237,7 +237,7 @@ function GrupoSesionPanel({
             ? <CheckCircle2 className="h-3 w-3 text-green-500 shrink-0" />
             : <XCircle className="h-3 w-3 text-red-400 shrink-0" />}
           <p className="text-[10px] text-muted-foreground">
-            Sesión {s.numero}
+            Sesión {s.numero}{s.es_obsequio ? ' (obsequio)' : ''}
             {s.fecha && ` · ${new Date(s.fecha).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' })}`}
           </p>
         </div>

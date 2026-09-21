@@ -25,6 +25,8 @@ import { CompromisoPagoFirmaContent } from '@/components/consentimientos/Comprom
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
+import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
+import { ObsequiosCotizacionPanel } from './ObsequiosCotizacionPanel'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -34,14 +36,15 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
-import type { Cotizacion, EstadoCotizacion, TipoItemCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, EstadoCotizacion, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento } from '@/types/clinicas'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
 // ── Schema ─────────────────────────────────────────────────────────────────────
 
 const itemSchema = z.object({
-  tipo: z.enum(['tratamiento', 'procedimiento', 'libre']),
+  // 'insumo' solo existe como obsequio de producto
+  tipo: z.enum(['tratamiento', 'procedimiento', 'libre', 'insumo']),
   tratamiento: z.string().nullable().optional(),
   procedimiento: z.string().nullable().optional(),
   descripcion: z.string().min(1, 'Requerido'),
@@ -55,6 +58,23 @@ const itemSchema = z.object({
   _id: z.string().optional(),
   precio_campana_disponible: z.string().nullable().optional(),
   campana_nombre: z.string().nullable().optional(),
+  // Obsequios (valor cobrado 0; el valor de referencia es solo informativo)
+  es_obsequio: z.boolean().optional(),
+  agendable: z.boolean().optional(),
+  valor_referencia: z.number().min(0).optional(),
+  tipo_sesion_origen: z.string().nullable().optional(),
+  insumo: z.string().nullable().optional(),
+  cantidad_insumo: z.number().nullable().optional(),
+  // Solo de la UI (no se envían): clave estable de la fila, clave del tratamiento
+  // de origen de una sesión clonada y datos del producto para mostrar el stock.
+  _clave: z.string().optional(),
+  // Forma elegida en la fila de obsequio; sin ella, "sesión clonada sin elegir" y
+  // "solo informativo" serían indistinguibles (ambas son libre sin origen).
+  _modo: z.enum(['procedimiento', 'clon', 'informativo', 'producto']).optional(),
+  origen_clave: z.string().nullable().optional(),
+  insumo_nombre: z.string().nullable().optional(),
+  insumo_unidad: z.string().nullable().optional(),
+  insumo_stock: z.string().nullable().optional(),
 })
 
 const pagoSchema = z.object({
@@ -76,6 +96,28 @@ const schema = z.object({
   items: z.array(itemSchema).min(1),
   formas_pago: z.array(pagoSchema),
 }).superRefine((data, ctx) => {
+  // Reglas de obsequios (van antes del plan de pagos, que puede terminar la validación).
+  if (data.items.length > 0 && data.items.every((i) => i.es_obsequio)) {
+    ctx.addIssue({ code: 'custom', message: 'Agrega al menos un ítem que no sea obsequio.', path: ['items'] })
+  }
+  data.items.forEach((it, idx) => {
+    if (!it.es_obsequio) return
+    if (it.tipo === 'insumo') {
+      if (!it.insumo) ctx.addIssue({ code: 'custom', message: 'Selecciona el producto', path: ['items', idx, 'insumo'] })
+      if (!it.cantidad_insumo || it.cantidad_insumo <= 0) {
+        ctx.addIssue({ code: 'custom', message: 'Cantidad inválida', path: ['items', idx, 'cantidad_insumo'] })
+      }
+    } else if (it.tipo === 'procedimiento') {
+      if (!it.procedimiento) ctx.addIssue({ code: 'custom', message: 'Selecciona el procedimiento', path: ['items', idx, 'procedimiento'] })
+    } else if (it.tipo_sesion_origen) {
+      const origen = data.items.find((x) => !x.es_obsequio && x.tipo === 'tratamiento' && x.tratamiento && x._clave && x._clave === it.origen_clave)
+      if (!origen) {
+        ctx.addIssue({ code: 'custom', message: 'El tratamiento de origen ya no está en la cotización', path: ['items', idx, 'origen_clave'] })
+      }
+    } else if (it.agendable) {
+      ctx.addIssue({ code: 'custom', message: 'Elige una sesión de un tratamiento cotizado', path: ['items', idx, 'origen_clave'] })
+    }
+  })
   if (data.formas_pago.length === 0) return
   const totalItems = data.items.reduce((acc, i) => acc + (i.valor_unitario || 0) * (i.num_citas || 1) * (1 - (i.descuento_porcentaje || 0) / 100), 0)
   const sumPagos = data.formas_pago.reduce((acc, p) => acc + (p.valor || 0), 0)
@@ -88,7 +130,7 @@ const schema = z.object({
   }
 })
 
-type FormValues = z.infer<typeof schema>
+export type FormValues = z.infer<typeof schema>
 
 // ── TratamientoSelector ────────────────────────────────────────────────────────
 
@@ -375,7 +417,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   })
 
   const campanaDeCatalogo = (
-    tipo: TipoItemCotizacion | undefined,
+    tipo: TipoItemApi | undefined,
     tratamientoId: string | null | undefined,
     procedimientoId: string | null | undefined,
   ) => {
@@ -388,6 +430,11 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const subtotalBruto = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1), 0)
   const totalDescuentos = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1) * ((i.descuento_porcentaje || 0) / 100), 0)
   const total = subtotalBruto - totalDescuentos
+  // Valor de lista de lo obsequiado (informativo: nunca entra al total).
+  const valorObsequios = items.reduce(
+    (a, i) => a + (i.es_obsequio ? (i.valor_referencia || 0) * (i.tipo === 'insumo' ? 1 : (i.num_citas || 1)) : 0),
+    0,
+  )
 
   useEffect(() => {
     if (cotizacion) {
@@ -397,7 +444,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
         validez_dias: cotizacion.validez_dias,
         notas: cotizacion.notas,
         items: cotizacion.items.map((i) => ({
-          tipo: (i.tipo ?? 'libre') as TipoItemCotizacion,
+          tipo: (i.tipo ?? 'libre') as TipoItemApi,
           tratamiento: i.tratamiento ?? null,
           procedimiento: i.procedimiento ?? null,
           descripcion: i.descripcion,
@@ -410,6 +457,19 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
           _id:              i.id,
           precio_campana_disponible: i.precio_campana_disponible ?? null,
           campana_nombre:   i.campana_nombre ?? null,
+          es_obsequio:      i.es_obsequio ?? false,
+          agendable:        i.agendable ?? false,
+          valor_referencia: i.valor_referencia ? parseFloat(i.valor_referencia) : 0,
+          tipo_sesion_origen: i.tipo_sesion_origen ?? null,
+          insumo:           i.insumo ?? null,
+          cantidad_insumo:  i.cantidad_insumo ? parseFloat(i.cantidad_insumo) : null,
+          // Los ítems se recrean con id nuevo al guardar: el id vigente hace de clave
+          // y el origen de una sesión clonada apunta al id de su tratamiento.
+          _clave:           i.id,
+          origen_clave:     i.item_origen ?? null,
+          insumo_nombre:    i.insumo_nombre ?? null,
+          insumo_unidad:    i.insumo_unidad ?? null,
+          insumo_stock:     i.stock_disponible ?? null,
         })),
         formas_pago: cotizacion.formas_pago.map((p) => ({
           fecha: p.fecha ? p.fecha.slice(0, 10) : null,
@@ -427,6 +487,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   useEffect(() => {
     if (!preciosCampana) return
     getValues('items').forEach((it, idx) => {
+      if (it.es_obsequio) return
       const camp = campanaDeCatalogo(it.tipo, it.tratamiento, it.procedimiento)
       const nuevoPrecio = camp?.precio_campana ?? null
       const nuevoNombre = camp?.campana_nombre ?? null
@@ -488,17 +549,37 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       sede: values.sede ?? null,
       validez_dias: values.validez_dias,
       notas: values.notas,
-      items: values.items.map((i) => ({
-        tipo: i.tipo,
-        tratamiento: i.tratamiento ?? null,
-        procedimiento: i.procedimiento ?? null,
-        descripcion: i.descripcion,
-        num_citas: i.num_citas,
-        duracion_estimada: i.duracion_estimada,
-        periodicidad: i.periodicidad,
-        valor_unitario: i.valor_unitario,
-        descuento_porcentaje: i.descuento_porcentaje,
-      })),
+      items: values.items.map((i) => {
+        const base = {
+          tipo: i.tipo,
+          tratamiento: i.tratamiento ?? null,
+          procedimiento: i.procedimiento ?? null,
+          descripcion: i.descripcion,
+          num_citas: i.num_citas,
+          duracion_estimada: i.duracion_estimada,
+          periodicidad: i.periodicidad,
+          valor_unitario: i.valor_unitario,
+          descuento_porcentaje: i.descuento_porcentaje,
+        }
+        if (!i.es_obsequio) return base
+        // Obsequio: el backend fuerza valor 0; el origen viaja como posición del
+        // tratamiento dentro de `items` (los ids cambian en cada guardado).
+        const origenIndice = i.origen_clave
+          ? values.items.findIndex((x) => !x.es_obsequio && x._clave === i.origen_clave)
+          : -1
+        return {
+          ...base,
+          valor_unitario: 0,
+          descuento_porcentaje: 0,
+          es_obsequio: true,
+          agendable: !!i.agendable,
+          valor_referencia: i.valor_referencia ?? 0,
+          tipo_sesion_origen: i.tipo_sesion_origen ?? null,
+          origen_indice: origenIndice >= 0 ? origenIndice : null,
+          insumo: i.insumo ?? null,
+          cantidad_insumo: i.cantidad_insumo ?? null,
+        }
+      }),
       formas_pago: values.formas_pago,
     }
     console.log('[PATCH payload]', JSON.stringify(payload, null, 2))
@@ -593,7 +674,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     const values = getValues()
     const { formas_pago, items } = values
 
-    const itemBajoMin = items.find((item) => {
+    const itemBajoMin = items.filter((item) => !item.es_obsequio).find((item) => {
       const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
       return min !== null && item.valor_unitario < min
     })
@@ -602,7 +683,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       return
     }
 
-    const itemDescExcedido = items.find((item) => {
+    const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
       const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [])
       if (!info) return false
       const desc = item.descuento_porcentaje || 0
@@ -771,7 +852,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     setError('paciente', { type: 'required', message: 'Selecciona un cliente para continuar' })
                     return
                   }
-                  const itemBajoMin = v.items.find((item) => {
+                  const itemBajoMin = v.items.filter((item) => !item.es_obsequio).find((item) => {
                     const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
                     return min !== null && item.valor_unitario < min
                   })
@@ -799,6 +880,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         {cotizacion?.estado === 'aceptada' && (
           <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
         )}
+
+        {/* ── Obsequios: estado y entrega de productos (solo cuando está aceptada) ── */}
+        {cotizacion?.estado === 'aceptada' && <ObsequiosCotizacionPanel cotizacion={cotizacion} />}
 
         {/* ── Compromiso de pago (vive aquí, no en /consentimientos) ──────── */}
         {(mostrarCompromiso || hayConsentimientos) && (
@@ -1019,7 +1103,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             const Icon = cfg.icon
             const filas = itemFields
               .map((f, i) => ({ field: f, idx: i }))
-              .filter(({ idx }) => (items[idx]?.tipo ?? 'libre') === seccion)
+              .filter(({ idx }) => !items[idx]?.es_obsequio && (items[idx]?.tipo ?? 'libre') === seccion)
 
             return (
               <div key={seccion} className="border-b last:border-b-0">
@@ -1047,6 +1131,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                         descuento_porcentaje: 0,
                         precio_bloqueado: false,
                         _id:              undefined,
+                        _clave:           nuevaClave(),
                         precio_campana_disponible: null,
                         campana_nombre:   null,
                       })}
@@ -1347,6 +1432,27 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             )
           })}
 
+          {/* Obsequios: no suman al total; el valor de referencia es solo informativo */}
+          <ObsequiosCotizacionSection
+            control={control}
+            register={register}
+            setValue={setValue}
+            itemFields={itemFields}
+            items={items}
+            errors={errors}
+            soloLectura={soloLectura}
+            procedimientos={procedimientos ?? []}
+            sedeId={sedeSeleccionada ?? null}
+            onAdd={(item) => addItem(item)}
+            onRemove={(idx) => removeItem(idx)}
+          />
+
+          {(errors.items?.root?.message || (errors.items as any)?.message) && (
+            <p className="px-5 py-2 text-xs text-destructive border-t">
+              {errors.items?.root?.message ?? (errors.items as any)?.message}
+            </p>
+          )}
+
           {/* Totales */}
           <div className="px-5 py-4 bg-gray-50 border-t">
             <div className="flex justify-end">
@@ -1365,6 +1471,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   <span className="text-sm font-semibold">Total</span>
                   <span className="text-2xl font-bold tabular-nums">{cop(total)}</span>
                 </div>
+                {valorObsequios > 0 && (
+                  <p className="text-xs text-amber-700 text-right pt-1">
+                    Incluye obsequios por {cop(valorObsequios)} sin costo
+                  </p>
+                )}
               </div>
             </div>
           </div>

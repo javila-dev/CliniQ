@@ -54,6 +54,16 @@ interface SesionFila {
   // Pendiente de agendar
   agendable?: boolean
   sesionEjecutadaId?: string | null
+  // Sesión extra regalada en la cotización
+  obsequio?: boolean
+}
+
+function ObsequioBadge() {
+  return (
+    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-amber-100 text-amber-800">
+      Obsequio
+    </span>
+  )
 }
 
 function SesionRow({
@@ -74,7 +84,10 @@ function SesionRow({
     <div>
       <div className="flex items-center justify-between px-3 py-2 gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-medium">{fila.titulo}</p>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <p className="text-xs font-medium">{fila.titulo}</p>
+            {fila.obsequio && <ObsequioBadge />}
+          </div>
           {fila.fecha ? (
             <p className="text-xs text-muted-foreground truncate">
               {formatDateTime(fila.fecha)}
@@ -312,9 +325,15 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
                           {item.tipo === 'tratamiento' ? 'Tratamiento' : 'Procedimiento'}
                         </span>
                       )}
+                      {item.es_obsequio && <ObsequioBadge />}
                     </div>
                     {item.periodicidad && (
                       <p className="text-xs text-muted-foreground">{item.periodicidad}</p>
+                    )}
+                    {(item.sesiones_obsequio ?? 0) > 0 && (
+                      <p className="text-xs text-amber-700">
+                        Incluye {item.sesiones_obsequio} {item.sesiones_obsequio === 1 ? 'sesión' : 'sesiones'} de obsequio
+                      </p>
                     )}
                   </div>
                   <div className="text-right shrink-0">
@@ -428,6 +447,7 @@ function construirFilasTipadas(
     for (const s of grupo.sesiones) {
       indice += 1
       const titulo = `Sesión ${indice}/${total} · ${grupo.tipoSesionNombre}`
+      const obsequio = !!s.es_obsequio
 
       // El backend puede mandar 'completada' (H27) o 'completado' (enum del modelo).
       if (s.estado === 'completada' || (s.estado as string) === 'completado') {
@@ -435,6 +455,7 @@ function construirFilasTipadas(
         filas.push({
           key: s.id,
           titulo,
+          obsequio,
           citaEstado: 'completada',
           citaId: cita?.cita_id ?? null,
           fecha: cita?.fecha_inicio ?? s.fecha,
@@ -444,7 +465,7 @@ function construirFilasTipadas(
       }
       if (s.estado === 'inasistencia') {
         const cita = s.cita ? citaById.get(s.cita) : undefined
-        filas.push({ key: s.id, titulo, citaEstado: 'no_asistio', citaId: cita?.cita_id ?? null, fecha: s.fecha, detalle: s.profesional_nombre })
+        filas.push({ key: s.id, titulo, obsequio, citaEstado: 'no_asistio', citaId: cita?.cita_id ?? null, fecha: s.fecha, detalle: s.profesional_nombre })
         continue
       }
 
@@ -454,6 +475,7 @@ function construirFilasTipadas(
         filas.push({
           key: s.id,
           titulo,
+          obsequio,
           citaEstado: cita.estado,
           citaId: cita.cita_id,
           fecha: cita.fecha_inicio,
@@ -465,6 +487,7 @@ function construirFilasTipadas(
         filas.push({
           key: s.id,
           titulo,
+          obsequio,
           agendable: true,
           sesionEjecutadaId: s.id,
           detalle: cita ? 'Cita anterior cancelada' : null,

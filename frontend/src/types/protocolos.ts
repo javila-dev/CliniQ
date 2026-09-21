@@ -75,7 +75,8 @@ export interface SesionEjecutada {
   tratamiento_paciente:        string
   tipo_sesion_id:              string
   tipo_sesion_nombre:          string
-  numero:                      number        // 1..tipo_sesion.cantidad
+  numero:                      number        // 1..tipo_sesion.cantidad (+ sesiones obsequiadas)
+  es_obsequio?:                boolean       // sesión extra regalada en la cotización
   estado:                      EstadoSesionEjecutada
   cita:                        string | null
   fecha:                       string | null
