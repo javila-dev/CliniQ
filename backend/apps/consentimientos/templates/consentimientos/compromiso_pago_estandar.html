@@ -33,6 +33,26 @@
   </tr>
 </table>
 
+{% if obsequios_aceptados %}
+<p style="margin:10px 0 2px 0;"><strong>Obsequios incluidos sin costo</strong></p>
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">
+  <tr>
+    <td style="padding:4px 6px 4px 0; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Descripción</td>
+    <td style="padding:4px 6px; color:#6b7280; border-bottom:0.5px solid #e5e7eb;">Tipo</td>
+    <td style="padding:4px 6px; color:#6b7280; text-align:center; border-bottom:0.5px solid #e5e7eb;">Cant.</td>
+    <td style="padding:4px 0 4px 6px; color:#6b7280; text-align:right; border-bottom:0.5px solid #e5e7eb;">Valor de referencia</td>
+  </tr>
+  {% for obsequio in obsequios_aceptados %}
+  <tr>
+    <td style="padding:4px 6px 4px 0;">{{ obsequio.descripcion }}</td>
+    <td style="padding:4px 6px;">{{ obsequio.etiqueta }}</td>
+    <td style="padding:4px 6px; text-align:center;">{{ obsequio.cantidad }}</td>
+    <td style="padding:4px 0 4px 6px; text-align:right;">{% if obsequio.valor_referencia %}<s style="color:#6b7280;">{{ obsequio.valor_referencia }}</s> · {% endif %}<strong>Obsequio</strong></td>
+  </tr>
+  {% endfor %}
+</table>
+{% endif %}
+
 <h2>2. Forma de pago acordada</h2>
 {% if formas_pago %}
 <table style="width:100%; border-collapse:collapse; font-size:11px; margin-top:4px;">

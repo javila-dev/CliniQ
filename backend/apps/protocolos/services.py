@@ -1,8 +1,10 @@
+import logging
 import random
 from datetime import date, timedelta
 
 import requests
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
 from apps.notificaciones.models import EnvioWhatsApp
@@ -15,6 +17,8 @@ from apps.notificaciones.services import (
 from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.services import consentimiento_informado_vigente, consentimiento_satisfecho
 from apps.protocolos.models import CheckinOTP, ConsentimientoPaciente, SesionProcedimiento, TratamientoPaciente
+
+logger = logging.getLogger(__name__)
 
 
 class ProtocolosError(Exception):
@@ -346,6 +350,9 @@ def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False)
     for item in cotizacion.items.select_related("tratamiento", "servicio", "procedimiento").prefetch_related(
         "tratamiento__tipos_sesion__procedimientos__procedimiento"
     ).filter(activo=True):
+        # Un obsequio solo informativo no se va a realizar: no pide consentimientos.
+        if item.es_obsequio and not item.agendable:
+            continue
         if item.tratamiento_id:
             for tipo in item.tratamiento.tipos_sesion.filter(activo=True):
                 for tp in tipo.procedimientos.filter(activo=True).select_related("procedimiento"):
@@ -508,6 +515,50 @@ def marcar_sesion_completada(
         tratamiento.estado = TratamientoPaciente.Estado.COMPLETADO
         tratamiento.save(update_fields=["estado", "updated_at"])
     return sesion
+
+
+def agregar_sesiones_obsequio(item_obsequio):
+    """Agrega al seguimiento del tratamiento de origen las sesiones clonadas que se regalaron.
+
+    Cada unidad de ``num_citas`` del obsequio se convierte en una fila más del
+    mismo tipo de sesión, con la numeración continuando la del seguimiento, para
+    que se atienda igual que las demás (presencia, consentimientos, procedimientos
+    ejecutados). Es idempotente: si el obsequio ya generó filas no repite nada.
+    Devuelve las filas creadas.
+    """
+    if not (
+        item_obsequio.es_obsequio
+        and item_obsequio.agendable
+        and item_obsequio.item_origen_id
+        and item_obsequio.tipo_sesion_origen_id
+    ):
+        return []
+    if SesionProcedimiento.objects.filter(item_obsequio=item_obsequio).exists():
+        return []
+    tratamiento = TratamientoPaciente.objects.filter(cotizacion_item_id=item_obsequio.item_origen_id).first()
+    if tratamiento is None:
+        # El tratamiento no generó seguimiento (sin tipos de sesión de compromiso):
+        # el obsequio igual suma al cupo agendable, pero no hay dónde agregar filas.
+        logger.warning(
+            "[agregar_sesiones_obsequio] el tratamiento de origen no tiene seguimiento | item_obsequio_id=%s",
+            item_obsequio.id,
+        )
+        return []
+
+    tipo = item_obsequio.tipo_sesion_origen
+    ultimo_numero = tratamiento.sesiones.filter(tipo_sesion=tipo).aggregate(ultimo=Max("numero"))["ultimo"] or 0
+    principal = tipo.procedimientos.filter(activo=True).select_related("procedimiento").order_by("orden").first()
+    sesiones = [
+        SesionProcedimiento(
+            tratamiento=tratamiento,
+            tipo_sesion=tipo,
+            numero=ultimo_numero + posicion,
+            procedimiento=principal.procedimiento if principal else None,
+            item_obsequio=item_obsequio,
+        )
+        for posicion in range(1, item_obsequio.num_citas + 1)
+    ]
+    return SesionProcedimiento.objects.bulk_create(sesiones)
 
 
 def crear_tratamiento_desde_cotizacion(cotizacion_item):

@@ -66,6 +66,7 @@ def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
         ]
     costo_total = cotizacion.total
     total_formas = sum((forma.valor for forma in formas_pago), Decimal("0"))
+    items_vigentes = list(cotizacion.items.filter(activo=True).select_related("insumo"))
     items_aceptados = [
         {
             "descripcion": item.descripcion,
@@ -74,7 +75,20 @@ def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
             "descuento": f"{item.descuento_porcentaje:.0f}%" if item.descuento_porcentaje else "",
             "subtotal": formatear_moneda(item.subtotal),
         }
-        for item in cotizacion.items.filter(activo=True)
+        for item in items_vigentes
+        if not item.es_obsequio
+    ]
+    # Lo que se le promete al paciente sin costo: se lista aparte para que no se
+    # confunda con lo que se cobra ni entre a los totales.
+    obsequios_aceptados = [
+        {
+            "descripcion": item.descripcion,
+            "etiqueta": item.etiqueta_obsequio(),
+            "cantidad": item.cantidad_legible(),
+            "valor_referencia": formatear_moneda(item.valor_referencia) if item.valor_referencia else "",
+        }
+        for item in items_vigentes
+        if item.es_obsequio
     ]
     formas_pago_detalle = [
         {
@@ -113,6 +127,7 @@ def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
         "validez_dias": cotizacion.validez_dias,
         "fecha_vencimiento": cotizacion.fecha_vencimiento,
         "items_aceptados": items_aceptados,
+        "obsequios_aceptados": obsequios_aceptados,
         "formas_pago": formas_pago_detalle,
         "total_fmt": formatear_moneda(costo_total),
         "total_formas_fmt": formatear_moneda(total_formas),

@@ -15,11 +15,15 @@ exactamente lo mismo.
 import logging
 from decimal import Decimal
 
+from django.db import transaction
+from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
-from apps.cotizaciones.models import Cotizacion
+from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 
 logger = logging.getLogger(__name__)
+
+REFERENCIA_OBSEQUIO = "obsequio_cotizacion"
 
 
 def clinica_exige_compromiso_pago(cotizacion) -> bool:
@@ -106,6 +110,91 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
         cotizacion.id, getattr(actor, "id", None),
     )
     return consentimientos_pendientes_cotizacion(cotizacion)
+
+
+def _bloquear_obsequio_producto(item) -> ItemCotizacion:
+    """Relee el ítem con bloqueo de fila y exige que sea un obsequio de producto."""
+    item = ItemCotizacion.objects.select_for_update().get(pk=item.pk)
+    if not (item.activo and item.es_obsequio and item.tipo == ItemCotizacion.Tipo.INSUMO):
+        raise ValidationError(
+            {"error": "Solo se pueden entregar obsequios de tipo producto.", "code": "OBSEQUIO_NO_ENTREGABLE"}
+        )
+    return item
+
+
+@transaction.atomic
+def entregar_obsequio(item, *, sede, user) -> ItemCotizacion:
+    """Entrega un obsequio de producto: descuenta el stock de ``sede``.
+
+    Solo con la cotización aceptada y una única vez. Respeta las reglas de
+    ``registrar_salida`` (stock insuficiente salvo que el insumo permita stock
+    negativo). Deja constancia en el kardex con origen ``obsequio``.
+    """
+    from apps.inventario.models import MovimientoInventario
+    from apps.inventario.services import registrar_salida
+
+    item = _bloquear_obsequio_producto(item)
+    cotizacion = item.cotizacion
+    if cotizacion.estado != Cotizacion.Estado.ACEPTADA:
+        raise ValidationError(
+            {"error": "Solo se entregan obsequios de cotizaciones aceptadas.", "code": "COTIZACION_NO_ACEPTADA"}
+        )
+    if item.entregado_at is not None:
+        raise ValidationError({"error": "Este obsequio ya fue entregado.", "code": "OBSEQUIO_YA_ENTREGADO"})
+    if sede.clinica_id != cotizacion.clinica_id or not sede.activo:
+        raise ValidationError({"error": "La sede no es válida para esta cotización.", "code": "SEDE_INVALIDA"})
+
+    movimiento = registrar_salida(
+        insumo=item.insumo,
+        sede=sede,
+        cantidad=item.cantidad_insumo,
+        origen=MovimientoInventario.OrigenMovimiento.OBSEQUIO,
+        referencia_id=cotizacion.id,
+        referencia_tipo=REFERENCIA_OBSEQUIO,
+        user=user,
+    )
+    item.entregado_at = timezone.now()
+    item.entregado_por = user
+    item.movimiento_entrega = movimiento
+    item.save(update_fields=["entregado_at", "entregado_por", "movimiento_entrega", "updated_at"])
+    logger.info(
+        "[entregar_obsequio] obsequio entregado | cotizacion_id=%s | item_id=%s | sede_id=%s | actor=%s",
+        cotizacion.id, item.id, sede.id, getattr(user, "id", None),
+    )
+    return item
+
+
+@transaction.atomic
+def revertir_entrega_obsequio(item, *, user) -> ItemCotizacion:
+    """Deshace la entrega de un obsequio: devuelve el stock con un ajuste trazable."""
+    from apps.inventario.services import get_or_crear_stock, registrar_ajuste
+
+    item = _bloquear_obsequio_producto(item)
+    if item.entregado_at is None:
+        raise ValidationError({"error": "Este obsequio no ha sido entregado.", "code": "OBSEQUIO_NO_ENTREGADO"})
+    movimiento = item.movimiento_entrega
+    if movimiento is None:
+        raise ValidationError(
+            {"error": "No se pudo determinar la sede de esta entrega.", "code": "SEDE_REQUERIDA"}
+        )
+
+    stock_actual = get_or_crear_stock(item.insumo, movimiento.sede).stock_actual
+    registrar_ajuste(
+        insumo=item.insumo,
+        sede=movimiento.sede,
+        cantidad_nueva=stock_actual + item.cantidad_insumo,
+        user=user,
+        motivo=f"Reversion de obsequio entregado (cotizacion {str(item.cotizacion_id)[:8].upper()})",
+    )
+    item.entregado_at = None
+    item.entregado_por = None
+    item.movimiento_entrega = None
+    item.save(update_fields=["entregado_at", "entregado_por", "movimiento_entrega", "updated_at"])
+    logger.info(
+        "[revertir_entrega_obsequio] entrega revertida | cotizacion_id=%s | item_id=%s | actor=%s",
+        item.cotizacion_id, item.id, getattr(user, "id", None),
+    )
+    return item
 
 
 def aceptar_cotizacion_por_firma_compromiso(consentimiento) -> None:

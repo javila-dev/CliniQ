@@ -103,6 +103,7 @@ class ItemCotizacion(BaseModel):
         TRATAMIENTO = "tratamiento", "Tratamiento del catalogo"
         PROCEDIMIENTO = "procedimiento", "Procedimiento individual"
         LIBRE = "libre", "Item libre"
+        INSUMO = "insumo", "Producto / insumo"
 
     cotizacion = models.ForeignKey(
         Cotizacion,
@@ -158,15 +159,114 @@ class ItemCotizacion(BaseModel):
         ),
     )
 
+    # ── Obsequios ──────────────────────────────────────────────────────────
+    # Un obsequio es un ítem con ``valor_unitario = 0`` (no altera el total, la
+    # cartera ni el plan de pagos) que se muestra en la cotización con su
+    # ``valor_referencia``. Hay tres formas:
+    #   * informativo (``agendable=False``): solo se muestra, ya está incluido
+    #     en el protocolo o no consume nada;
+    #   * sesión agendable: procedimiento del catálogo (cupo propio) o clon de
+    #     una sesión del tratamiento cotizado (``item_origen``: suma al cupo del
+    #     ítem tratamiento y no tiene cupo propio);
+    #   * producto (``tipo = insumo``): descuenta inventario al entregarse.
+    es_obsequio = models.BooleanField(default=False)
+    agendable = models.BooleanField(
+        default=False,
+        help_text="Solo obsequios de sesión: True si consume una sesión agendable real.",
+    )
+    valor_referencia = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        default=0,
+        help_text="Precio de lista del obsequio. Solo informativo: no entra al total.",
+    )
+    item_origen = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="obsequios",
+        help_text="Ítem tratamiento de la misma cotización del que se clona la sesión obsequiada.",
+    )
+    tipo_sesion_origen = models.ForeignKey(
+        "clinicas.TipoSesion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="items_obsequio",
+    )
+    insumo = models.ForeignKey(
+        "inventario.Insumo",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="items_obsequio_cotizacion",
+    )
+    cantidad_insumo = models.DecimalField(max_digits=10, decimal_places=3, null=True, blank=True)
+    # Entrega del producto obsequiado: es lo que descuenta inventario.
+    entregado_at = models.DateTimeField(null=True, blank=True)
+    entregado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="obsequios_entregados",
+    )
+    movimiento_entrega = models.ForeignKey(
+        "inventario.MovimientoInventario",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+    )
+
     class Meta:
         db_table = "items_cotizacion"
         ordering = ["created_at"]
 
     @property
     def subtotal(self):
+        if self.es_obsequio:
+            return Decimal("0.00")
         base = Decimal(self.num_citas) * self.valor_unitario
         descuento = (base * self.descuento_porcentaje) / Decimal("100.00")
         return base - descuento
+
+    @property
+    def tiene_cupo_propio(self) -> bool:
+        """True si el ítem aporta sesiones agendables por sí mismo.
+
+        Los ítems normales sí. Un obsequio solo cuando es una sesión agendable
+        con cupo propio (procedimiento del catálogo): los informativos, los
+        productos y los clones de una sesión del tratamiento no lo tienen (estos
+        últimos suman al cupo del ítem tratamiento de origen).
+        """
+        if not self.es_obsequio:
+            return True
+        return self.agendable and self.tipo != self.Tipo.INSUMO and self.item_origen_id is None
+
+    def cantidad_legible(self) -> str:
+        """Cantidad para documentos: ``"5 ml"`` en un producto, ``"2"`` en sesiones."""
+        if self.tipo == self.Tipo.INSUMO and self.cantidad_insumo is not None:
+            cantidad = format(self.cantidad_insumo.normalize(), "f")
+            unidad = self.insumo.unidad_medida if self.insumo_id else ""
+            return f"{cantidad} {'und.' if unidad == 'unidad' else unidad}".strip()
+        return str(self.num_citas)
+
+    def etiqueta_obsequio(self) -> str:
+        """Clase de obsequio para documentos: producto, sesión adicional o cortesía."""
+        if self.tipo == self.Tipo.INSUMO:
+            return "Producto"
+        return "Sesión adicional" if self.agendable else "Cortesía"
+
+    def sesiones_obsequio_extra(self) -> int:
+        """Sesiones regaladas (clonadas de este tratamiento) que suman a su cupo."""
+        if self.tipo != self.Tipo.TRATAMIENTO:
+            return 0
+        return sum(
+            obsequio.num_citas
+            for obsequio in self.obsequios.filter(activo=True, es_obsequio=True, agendable=True)
+        )
 
     def citas_no_canceladas(self):
         return self.citas.exclude(estado="cancelada").count()
@@ -177,17 +277,19 @@ class ItemCotizacion(BaseModel):
         Para ítems de tratamiento el total lo define la configuración vigente
         del catálogo (suma de ``TipoSesion`` de compromiso), no la columna
         ``num_citas`` —que para tratamientos queda en 1 porque solo representa
-        una línea cotizada/cobrada—. El endpoint ``/cotizaciones/{id}/sesiones/``
+        una línea cotizada/cobrada—. A eso se suman las sesiones obsequiadas
+        clonadas de este tratamiento. El endpoint ``/cotizaciones/{id}/sesiones/``
         usa esta misma fórmula; mantenerlas alineadas evita que el selector de
         "Nueva cita" ofrezca sesiones que luego el backend rechaza.
         """
+        if not self.tiene_cupo_propio:
+            return 0
         if self.tipo == self.Tipo.TRATAMIENTO and self.tratamiento_id:
             total = sum(
                 ts.cantidad
                 for ts in self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
             )
-            if total:
-                return total
+            return (total or self.num_citas) + self.sesiones_obsequio_extra()
         return self.num_citas
 
     def citas_restantes(self):

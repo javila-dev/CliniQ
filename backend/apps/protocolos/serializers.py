@@ -18,6 +18,7 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
     procedimientos_ejecutados_nombres = serializers.SerializerMethodField()
     consentimientos = serializers.SerializerMethodField()
     foto_presencia_url = serializers.SerializerMethodField()
+    es_obsequio = serializers.SerializerMethodField()
 
     class Meta:
         model = SesionProcedimiento
@@ -26,6 +27,8 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
             "tratamiento",
             "tipo_sesion",
             "numero",
+            "es_obsequio",
+            "item_obsequio",
             "paso",
             "procedimiento",
             "paso_nombre",
@@ -53,6 +56,8 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id",
+            "es_obsequio",
+            "item_obsequio",
             "paso_nombre",
             "paso_orden",
             "paso_semana",
@@ -66,6 +71,9 @@ class SesionProcedimientoSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_es_obsequio(self, obj):
+        return obj.item_obsequio_id is not None
 
     def get_checkin_verificado(self, obj):
         return obj.checkin_verificado

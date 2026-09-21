@@ -5,7 +5,9 @@ from datetime import date, datetime, timedelta
 
 from decimal import Decimal
 
-from django.http import HttpResponse
+from django.core.exceptions import ValidationError as DjangoValidationError
+from django.http import Http404, HttpResponse
+from django.shortcuts import get_object_or_404
 from django.db.models import DecimalField, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -17,6 +19,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.agenda.models import Cita, RegistroConfirmacion
+from apps.core.logging import registrar_accion
 from apps.core.models import LogAccion
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_cotizacion_pdf
@@ -24,7 +27,9 @@ from apps.cotizaciones.serializers import (
     CambiarEstadoCotizacionSerializer,
     CotizacionEnvioSerializer,
     CotizacionSerializer,
+    EntregarObsequioSerializer,
     EnviarCotizacionEmailSerializer,
+    ItemCotizacionSerializer,
     RegistrarEnvioCotizacionSerializer,
 )
 from apps.notificaciones.models import EnvioWhatsApp
@@ -88,6 +93,12 @@ class CotizacionViewSet(ModelViewSet):
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
                            "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos"}:
             return [RequirePermission("cotizaciones.ver")()]
+        # Entregar un obsequio es una salida de inventario: mismos permisos que
+        # registrar y eliminar un consumo de insumo en una atención.
+        if self.action == "entregar_obsequio":
+            return [RequirePermission("inventario.consumo.registrar")()]
+        if self.action == "revertir_entrega_obsequio":
+            return [RequirePermission("inventario.consumo.eliminar")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
     def get_queryset(self):
@@ -475,6 +486,10 @@ class CotizacionViewSet(ModelViewSet):
             "items": [],
         }
         for item in items:
+            # Obsequios informativos, productos y sesiones clonadas no tienen
+            # cupo propio: las clonadas suman al ítem tratamiento de origen.
+            if not item.tiene_cupo_propio:
+                continue
             citas = [
                 {
                     "cita_id": str(cita.id),
@@ -486,9 +501,11 @@ class CotizacionViewSet(ModelViewSet):
                 for cita in item.citas.all()
             ]
 
+            sesiones_obsequio = 0
             if item.tipo == "tratamiento" and item.tratamiento_id:
                 tipos_sesion = item.tratamiento.tipos_sesion_compromiso
-                num_citas = sum(ts.cantidad for ts in tipos_sesion)
+                sesiones_obsequio = item.sesiones_obsequio_extra()
+                num_citas = sum(ts.cantidad for ts in tipos_sesion) + sesiones_obsequio
                 duracion_min = max((ts.duracion_min for ts in tipos_sesion), default=0)
                 sesiones_detalle = [
                     {"nombre": ts.nombre, "cantidad": ts.cantidad, "duracion_min": ts.duracion_min}
@@ -513,6 +530,8 @@ class CotizacionViewSet(ModelViewSet):
                 ),
                 "citas_restantes": item.citas_restantes(),
                 "sesiones_previas": item.sesiones_previas_consumidas,
+                "es_obsequio": item.es_obsequio,
+                "sesiones_obsequio": sesiones_obsequio,
                 "citas": citas,
             }
             if sesiones_detalle is not None:
@@ -520,6 +539,44 @@ class CotizacionViewSet(ModelViewSet):
 
             payload["items"].append(item_data)
         return Response(payload, status=status.HTTP_200_OK)
+
+    def _item_obsequio(self, cotizacion, item_id):
+        try:
+            return get_object_or_404(cotizacion.items.filter(activo=True), pk=item_id)
+        except (ValueError, DjangoValidationError):
+            raise Http404
+
+    @action(detail=True, methods=["post"], url_path=r"items/(?P<item_id>[^/.]+)/entregar_obsequio")
+    def entregar_obsequio(self, request, pk=None, item_id=None):
+        """Entrega un obsequio de producto: descuenta el stock de la sede indicada."""
+        from apps.cotizaciones.services import entregar_obsequio
+
+        cotizacion = self.get_object()
+        item = self._item_obsequio(cotizacion, item_id)
+        serializer = EntregarObsequioSerializer(data=request.data, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        sede = serializer.validated_data["sede"]
+
+        item = entregar_obsequio(item, sede=sede, user=request.user)
+        registrar_accion(
+            request, "cotizacion.entregar_obsequio", cotizacion,
+            {"item_id": str(item.id), "insumo": item.insumo.nombre, "cantidad": str(item.cantidad_insumo), "sede": sede.nombre},
+        )
+        return Response(ItemCotizacionSerializer(item, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path=r"items/(?P<item_id>[^/.]+)/revertir_entrega")
+    def revertir_entrega_obsequio(self, request, pk=None, item_id=None):
+        """Revierte la entrega de un obsequio de producto y devuelve el stock."""
+        from apps.cotizaciones.services import revertir_entrega_obsequio
+
+        cotizacion = self.get_object()
+        item = self._item_obsequio(cotizacion, item_id)
+        item = revertir_entrega_obsequio(item, user=request.user)
+        registrar_accion(
+            request, "cotizacion.revertir_entrega_obsequio", cotizacion,
+            {"item_id": str(item.id), "insumo": item.insumo.nombre, "cantidad": str(item.cantidad_insumo)},
+        )
+        return Response(ItemCotizacionSerializer(item, context=self.get_serializer_context()).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="historial_sesiones")
     def historial_sesiones(self, request, pk=None):

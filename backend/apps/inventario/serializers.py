@@ -189,6 +189,20 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
                 "servicio_nombre": servicio_nombre,
             }
 
+        if obj.referencia_tipo == "obsequio_cotizacion":
+            from apps.cotizaciones.models import Cotizacion
+
+            cotizacion = Cotizacion.objects.select_related("paciente").filter(pk=obj.referencia_id).first()
+            if not cotizacion:
+                return None
+            return {
+                "tipo": "obsequio",
+                "cotizacion_id": str(cotizacion.id),
+                "cotizacion_referencia": str(cotizacion.id)[:8].upper(),
+                "paciente_id": str(cotizacion.paciente_id),
+                "paciente_nombre": cotizacion.paciente.nombre_completo,
+            }
+
         if obj.referencia_tipo == "cobro":
             from apps.cobros.models import Cobro
 
@@ -206,7 +220,7 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
                 "paciente_nombre": cobro.paciente.nombre_completo,
                 "origen": cobro.origen,
                 "cotizacion_id": str(cobro.cotizacion_id) if cobro.cotizacion_id else None,
-                "cotizacion_numero": cobro.cotizacion.numero if cobro.cotizacion_id else None,
+                "cotizacion_numero": str(cobro.cotizacion_id)[:8].upper() if cobro.cotizacion_id else None,
             }
 
         return None

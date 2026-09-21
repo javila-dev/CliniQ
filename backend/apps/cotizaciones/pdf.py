@@ -30,7 +30,11 @@ def build_logo_public_url(clinica) -> str | None:
 
 
 def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
-    items = list(cotizacion.items.filter(activo=True))
+    todos = list(cotizacion.items.filter(activo=True).select_related("insumo"))
+    # Los obsequios van en un bloque aparte: no son líneas de venta ni entran a
+    # los subtotales.
+    items = [item for item in todos if not item.es_obsequio]
+    obsequios = [item for item in todos if item.es_obsequio]
     formas_pago = list(cotizacion.formas_pago.filter(activo=True))
     subtotal_bruto = sum((Decimal(item.num_citas) * item.valor_unitario for item in items), Decimal("0.00"))
     total_descuentos = sum(
@@ -72,6 +76,15 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
                 "catalogo_ref": catalogo_ref,
                 "num_citas": item.num_citas,
             })
+    obsequios_payload = [
+        {
+            "descripcion": item.descripcion,
+            "etiqueta": item.etiqueta_obsequio(),
+            "cantidad": item.cantidad_legible(),
+            "valor_referencia": format_currency(item.valor_referencia) if item.valor_referencia else "",
+        }
+        for item in obsequios
+    ]
     formas_pago_payload = [
         {
             "tipo": forma.get_tipo_display(),
@@ -90,6 +103,7 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
         "sede": cotizacion.sede,
         "items_tratamientos": items_tratamientos,
         "items_servicios": items_servicios,
+        "obsequios": obsequios_payload,
         "mostrar_periodicidad": mostrar_periodicidad,
         "formas_pago": formas_pago_payload,
         "subtotal_bruto": format_currency(subtotal_bruto),

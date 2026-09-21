@@ -398,6 +398,13 @@ class PacientesSinReagendarView(APIView):
             )
         )
 
+        # Obsequios informativos, productos y sesiones clonadas no tienen cupo
+        # propio: no hay nada que reagendar en ellos.
+        items = items.exclude(
+            Q(es_obsequio=True)
+            & (Q(agendable=False) | Q(item_origen__isnull=False) | Q(tipo=ItemCotizacion.Tipo.INSUMO))
+        )
+
         if user.rol != "superadmin":
             items = items.filter(cotizacion__clinica=user.clinica)
         if sede_id:

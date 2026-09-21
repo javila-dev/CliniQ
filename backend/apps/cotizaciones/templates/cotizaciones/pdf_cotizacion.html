@@ -121,6 +121,10 @@
       }
       .table-title-tratamiento { background: #dbeafe; color: #1d4ed8; }
       .table-title-servicio    { background: #dcfce7; color: #15803d; }
+      .table-title-obsequio    { background: #fef3c7; color: #b45309; }
+
+      .valor-tachado { text-decoration: line-through; color: #6b7280; }
+      .sin-costo { font-weight: bold; color: #b45309; }
 
       .tipo-badge {
         display: inline-block;
@@ -287,6 +291,34 @@
             <td class="text-right">{{ item.valor_unitario }}</td>
             <td class="text-right">{{ item.descuento_porcentaje }}</td>
             <td class="text-right">{{ item.subtotal }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+
+    {% if obsequios %}
+    <div class="section">
+      <div class="table-section-title table-title-obsequio">Obsequios</div>
+      <table class="items-table">
+        <thead>
+          <tr>
+            <th style="width:46%">Descripcion</th>
+            <th>Tipo</th>
+            <th>Cantidad</th>
+            <th class="text-right">Valor de referencia</th>
+            <th class="text-right">Costo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for obsequio in obsequios %}
+          <tr>
+            <td><div class="item-desc">{{ obsequio.descripcion }}</div></td>
+            <td>{{ obsequio.etiqueta }}</td>
+            <td>{{ obsequio.cantidad }}</td>
+            <td class="text-right">{% if obsequio.valor_referencia %}<span class="valor-tachado">{{ obsequio.valor_referencia }}</span>{% else %}-{% endif %}</td>
+            <td class="text-right sin-costo">Obsequio</td>
           </tr>
           {% endfor %}
         </tbody>

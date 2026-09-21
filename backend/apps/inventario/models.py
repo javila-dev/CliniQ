@@ -114,6 +114,7 @@ class MovimientoInventario(models.Model):
         COMPRA = "compra", "Compra"
         CONSUMO_CITA = "consumo_cita", "Consumo en cita"
         VENTA_RETAIL = "venta_retail", "Venta retail"
+        OBSEQUIO = "obsequio", "Obsequio en cotización"
         AJUSTE_MANUAL = "ajuste_manual", "Ajuste manual"
         BAJA_VENCIMIENTO = "baja_vencimiento", "Baja por vencimiento"
 

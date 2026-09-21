@@ -146,6 +146,14 @@ class SesionProcedimiento(BaseModel):
         blank=True,
         related_name="sesiones",
     )
+    item_obsequio = models.ForeignKey(
+        "cotizaciones.ItemCotizacion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sesiones_obsequio",
+        help_text="Obsequio de la cotización que originó esta sesión extra (vacío en las sesiones normales).",
+    )
     forzado_sin_consentimiento = models.BooleanField(default=False)
     motivo_forzado = models.TextField(blank=True)
     checkin_metodo = models.CharField(max_length=20, choices=CheckinMetodo.choices, null=True, blank=True)
@@ -175,7 +183,14 @@ class SesionProcedimiento(BaseModel):
         return super().delete(*args, **kwargs)
 
     def __str__(self) -> str:
-        nombre = self.procedimiento.nombre if self.procedimiento_id else self.paso.nombre
+        if self.procedimiento_id:
+            nombre = self.procedimiento.nombre
+        elif self.paso_id:
+            nombre = self.paso.nombre
+        elif self.tipo_sesion_id:
+            nombre = self.tipo_sesion.nombre
+        else:
+            nombre = "Sesión"
         return f"{self.tratamiento} - {nombre}"
 
 

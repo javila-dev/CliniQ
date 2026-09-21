@@ -4,6 +4,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from rest_framework import serializers
 
+from apps.clinicas.models import Sede
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
@@ -90,6 +91,17 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
     campana_nombre = serializers.SerializerMethodField()
     descuento_maximo_pct = serializers.SerializerMethodField()
     precio_lista = serializers.SerializerMethodField()
+    tipo_sesion_origen_nombre = serializers.SerializerMethodField()
+    insumo_nombre = serializers.SerializerMethodField()
+    insumo_unidad = serializers.SerializerMethodField()
+    entregado_por_nombre = serializers.SerializerMethodField()
+    sede_entrega = serializers.SerializerMethodField()
+    sede_entrega_nombre = serializers.SerializerMethodField()
+    stock_disponible = serializers.SerializerMethodField()
+    # Posición (base 0) del ítem tratamiento de origen dentro de ``items``. Los
+    # ítems se recrean con id nuevo en cada guardado, así que el origen no puede
+    # viajar por id; el serializer de la cotización lo resuelve a ``item_origen``.
+    origen_indice = serializers.IntegerField(write_only=True, required=False, allow_null=True, min_value=0)
 
     class Meta:
         model = ItemCotizacion
@@ -117,12 +129,36 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             "precio_campana_disponible",
             "campana_id",
             "campana_nombre",
+            "es_obsequio",
+            "agendable",
+            "valor_referencia",
+            "item_origen",
+            "origen_indice",
+            "tipo_sesion_origen",
+            "tipo_sesion_origen_nombre",
+            "insumo",
+            "insumo_nombre",
+            "insumo_unidad",
+            "cantidad_insumo",
+            "stock_disponible",
+            "entregado_at",
+            "entregado_por_nombre",
+            "sede_entrega",
+            "sede_entrega_nombre",
         )
         extra_kwargs = {
+            "entregado_at": {"read_only": True},
             "descripcion": {"required": False, "allow_blank": True},
             "num_citas": {"required": False},
             "valor_unitario": {"required": False},
             "precio_bloqueado": {"required": False},
+            "es_obsequio": {"required": False},
+            "agendable": {"required": False},
+            "valor_referencia": {"required": False},
+            "item_origen": {"read_only": True},
+            "tipo_sesion_origen": {"required": False, "allow_null": True},
+            "insumo": {"required": False, "allow_null": True},
+            "cantidad_insumo": {"required": False, "allow_null": True},
         }
 
     def validate_num_citas(self, value):
@@ -140,12 +176,25 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         procedimiento = attrs.get("procedimiento", getattr(self.instance, "procedimiento", None))
         cotizacion = getattr(self.instance, "cotizacion", None)
         request = self.context.get("request")
+        es_obsequio = attrs.get("es_obsequio", getattr(self.instance, "es_obsequio", False))
+
+        if tipo == ItemCotizacion.Tipo.INSUMO and not es_obsequio:
+            raise serializers.ValidationError({"tipo": "Un producto solo puede agregarse como obsequio."})
+        if es_obsequio and tipo == ItemCotizacion.Tipo.TRATAMIENTO:
+            raise serializers.ValidationError(
+                {"tipo": "Un tratamiento completo no puede ser un obsequio: obsequia una de sus sesiones."}
+            )
 
         if servicio and not procedimiento:
             attrs["procedimiento"] = servicio
             procedimiento = servicio
 
-        if tipo == ItemCotizacion.Tipo.TRATAMIENTO:
+        if tipo == ItemCotizacion.Tipo.INSUMO:
+            attrs["tratamiento"] = None
+            attrs["procedimiento"] = None
+            attrs["servicio"] = None
+            tratamiento = procedimiento = servicio = None
+        elif tipo == ItemCotizacion.Tipo.TRATAMIENTO:
             if not tratamiento:
                 raise serializers.ValidationError({"tratamiento": "Requerido para tipo tratamiento."})
             attrs["procedimiento"] = None
@@ -178,6 +227,13 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"procedimiento": "El procedimiento no pertenece a la clinica de la cotizacion."})
         if procedimiento and request and request.user.rol != "superadmin" and procedimiento.clinica_id != request.user.clinica_id:
             raise serializers.ValidationError({"procedimiento": "El procedimiento no pertenece a tu clinica."})
+
+        if es_obsequio:
+            # Un obsequio no pasa por las reglas de precio (bloqueo, tope de
+            # descuento, campaña): su valor cobrado es siempre 0.
+            return self._validar_obsequio(attrs, tipo=tipo, procedimiento=procedimiento, request=request)
+        self._limpiar_campos_obsequio(attrs)
+
         if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
             raise serializers.ValidationError({"descripcion": "Este campo es obligatorio."})
         if attrs.get("valor_unitario", getattr(self.instance, "valor_unitario", None)) in (None, ""):
@@ -281,6 +337,132 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
         return attrs
 
+    @staticmethod
+    def _limpiar_campos_obsequio(attrs):
+        attrs["es_obsequio"] = False
+        attrs["agendable"] = False
+        attrs["valor_referencia"] = Decimal("0.00")
+        attrs["tipo_sesion_origen"] = None
+        attrs["insumo"] = None
+        attrs["cantidad_insumo"] = None
+        attrs["origen_indice"] = None
+
+    def _validar_obsequio(self, attrs, *, tipo, procedimiento, request):
+        """Reglas de un ítem obsequio (valor cobrado 0, valor de referencia aparte).
+
+        El cruce con los demás ítems (que el origen sea un tratamiento de la misma
+        cotización) lo valida ``CotizacionSerializer``, que ve la lista completa.
+        """
+        Tipo = ItemCotizacion.Tipo
+        insumo = attrs.get("insumo", getattr(self.instance, "insumo", None))
+        tipo_sesion = attrs.get("tipo_sesion_origen", getattr(self.instance, "tipo_sesion_origen", None))
+        agendable = attrs.get("agendable", getattr(self.instance, "agendable", False))
+        cantidad_insumo = attrs.get("cantidad_insumo", getattr(self.instance, "cantidad_insumo", None))
+        indice = attrs.get("origen_indice")
+        es_superadmin = bool(request and request.user.rol == "superadmin")
+        clinica_usuario = request.user.clinica_id if request else None
+
+        referencia = attrs.get("valor_referencia") or Decimal("0")
+        if not referencia:
+            if procedimiento is not None:
+                referencia = getattr(procedimiento, "precio_base", None) or procedimiento.precio or Decimal("0")
+            elif tipo == Tipo.INSUMO and insumo is not None:
+                referencia = insumo.precio_venta or Decimal("0")
+        attrs["valor_referencia"] = Decimal(referencia)
+        attrs["valor_unitario"] = Decimal("0.00")
+        attrs["descuento_porcentaje"] = Decimal("0.00")
+        attrs["precio_bloqueado"] = False
+        attrs["campana"] = None
+        attrs["es_obsequio"] = True
+
+        if tipo == Tipo.INSUMO:
+            if insumo is None:
+                raise serializers.ValidationError({"insumo": "Selecciona el producto a obsequiar."})
+            if not insumo.activo:
+                raise serializers.ValidationError({"insumo": "El producto está inactivo."})
+            if not es_superadmin and insumo.clinica_id != clinica_usuario:
+                raise serializers.ValidationError({"insumo": "El producto no pertenece a tu clinica."})
+            if cantidad_insumo is None or cantidad_insumo <= 0:
+                raise serializers.ValidationError({"cantidad_insumo": "Debe ser mayor a 0."})
+            attrs["agendable"] = False
+            attrs["num_citas"] = 1
+            attrs["tipo_sesion_origen"] = None
+            attrs["origen_indice"] = None
+            if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
+                attrs["descripcion"] = insumo.nombre
+        else:
+            attrs["insumo"] = None
+            attrs["cantidad_insumo"] = None
+            if tipo == Tipo.PROCEDIMIENTO:
+                attrs["tipo_sesion_origen"] = None
+                attrs["origen_indice"] = None
+            elif tipo_sesion is not None:
+                if indice is None:
+                    raise serializers.ValidationError(
+                        {"origen_indice": "Indica el tratamiento del que se clona la sesión."}
+                    )
+                if not es_superadmin and tipo_sesion.tratamiento.clinica_id != clinica_usuario:
+                    raise serializers.ValidationError({"tipo_sesion_origen": "La sesión no pertenece a tu clinica."})
+                if agendable and not (tipo_sesion.es_compromiso and tipo_sesion.activo):
+                    raise serializers.ValidationError(
+                        {"tipo_sesion_origen": "Solo se puede obsequiar como sesión agendable un tipo de sesión de compromiso."}
+                    )
+                if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
+                    attrs["descripcion"] = tipo_sesion.nombre
+            elif agendable:
+                raise serializers.ValidationError(
+                    {
+                        "agendable": (
+                            "Una sesión obsequio agendable debe ser un procedimiento del catálogo "
+                            "o una sesión clonada de un tratamiento cotizado."
+                        )
+                    }
+                )
+            else:
+                attrs["origen_indice"] = None
+
+        if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
+            raise serializers.ValidationError({"descripcion": "Este campo es obligatorio."})
+        return attrs
+
+    def get_tipo_sesion_origen_nombre(self, obj):
+        return obj.tipo_sesion_origen.nombre if obj.tipo_sesion_origen_id else None
+
+    def get_insumo_nombre(self, obj):
+        return obj.insumo.nombre if obj.insumo_id else None
+
+    def get_insumo_unidad(self, obj):
+        return obj.insumo.unidad_medida if obj.insumo_id else None
+
+    def get_entregado_por_nombre(self, obj):
+        return obj.entregado_por.nombre_completo if obj.entregado_por_id else None
+
+    def get_sede_entrega(self, obj):
+        return str(obj.movimiento_entrega.sede_id) if obj.movimiento_entrega_id else None
+
+    def get_sede_entrega_nombre(self, obj):
+        return obj.movimiento_entrega.sede.nombre if obj.movimiento_entrega_id else None
+
+    def get_stock_disponible(self, obj):
+        """Stock del producto en la sede de la cotización, para avisar antes de entregar.
+
+        Solo aplica a obsequios de producto aún no entregados y con sede definida;
+        es informativo (la entrega vuelve a validar el stock).
+        """
+        if obj.tipo != ItemCotizacion.Tipo.INSUMO or obj.entregado_at is not None:
+            return None
+        sede_id = obj.cotizacion.sede_id
+        if not sede_id or not obj.insumo_id:
+            return None
+        from apps.inventario.models import StockInsumoSede
+
+        stock = (
+            StockInsumoSede.objects.filter(insumo_id=obj.insumo_id, sede_id=sede_id)
+            .values_list("stock_actual", flat=True)
+            .first()
+        )
+        return str(stock if stock is not None else Decimal("0"))
+
     def _resolve_clinica_sede(self):
         cotizacion = getattr(self.instance, "cotizacion", None)
         if cotizacion is not None:
@@ -316,7 +498,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             return cache[obj_key]
 
         result = None
-        if obj.procedimiento or obj.tratamiento:
+        if not obj.es_obsequio and (obj.procedimiento or obj.tratamiento):
             result = lookup_campana_item(
                 clinica=obj.cotizacion.clinica,
                 sede=getattr(obj.cotizacion, "sede", None),
@@ -329,6 +511,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
     def _catalogo_precio_descmax(self, obj):
         """(precio_lista, descuento_maximo_pct) del catálogo del ítem, o (None, None)."""
+        if obj.es_obsequio:
+            return None, None
         if obj.tratamiento_id and obj.tratamiento and obj.tratamiento.precio_estimado is not None:
             return obj.tratamiento.precio_estimado, obj.tratamiento.descuento_maximo_pct
         proc = obj.procedimiento or obj.servicio
@@ -528,7 +712,11 @@ class CotizacionSerializer(serializers.ModelSerializer):
     def to_representation(self, instance):
         ret = super().to_representation(instance)
         ret["items"] = ItemCotizacionSerializer(
-            instance.items.filter(activo=True), many=True, context=self.context
+            instance.items.filter(activo=True).select_related(
+                "cotizacion", "insumo", "tipo_sesion_origen", "entregado_por", "movimiento_entrega__sede",
+            ),
+            many=True,
+            context=self.context,
         ).data
         ret["formas_pago"] = FormaPagoCotizacionSerializer(
             instance.formas_pago.filter(activo=True), many=True, context=self.context
@@ -571,6 +759,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         if sede and clinica and sede.clinica_id != clinica.id:
             raise serializers.ValidationError({"sede": "La sede no pertenece a la clinica de la cotizacion."})
         self._validate_items_clinica(attrs.get("items"), clinica)
+        self._validate_obsequios(attrs.get("items"))
         if self.instance and self.instance.estado != Cotizacion.Estado.BORRADOR:
             raise serializers.ValidationError(
                 {
@@ -584,11 +773,42 @@ class CotizacionSerializer(serializers.ModelSerializer):
             )
         return attrs
 
+    def _validate_obsequios(self, items):
+        """Reglas que cruzan ítems: al menos un ítem pagado y origen de las sesiones clonadas."""
+        if not items:
+            return
+        if all(item.get("es_obsequio") for item in items):
+            raise serializers.ValidationError(
+                {"items": "La cotización debe incluir al menos un ítem que no sea obsequio."}
+            )
+        for posicion, item in enumerate(items):
+            indice = item.get("origen_indice")
+            if indice is None:
+                continue
+            origen = items[indice] if indice < len(items) and indice != posicion else None
+            tipo_sesion = item.get("tipo_sesion_origen")
+            if (
+                origen is None
+                or origen.get("es_obsequio")
+                or origen.get("tipo") != ItemCotizacion.Tipo.TRATAMIENTO
+                or origen.get("tratamiento") is None
+                or tipo_sesion is None
+                or tipo_sesion.tratamiento_id != origen["tratamiento"].id
+            ):
+                raise serializers.ValidationError(
+                    {
+                        "items": (
+                            f"El obsequio del ítem {posicion + 1} debe clonar una sesión de un "
+                            "tratamiento incluido en esta misma cotización."
+                        )
+                    }
+                )
+
     def _validate_items_clinica(self, items, clinica):
         if not items or not clinica:
             return
         for index, item in enumerate(items, start=1):
-            for field in ("tratamiento", "procedimiento", "servicio"):
+            for field in ("tratamiento", "procedimiento", "servicio", "insumo"):
                 catalogo = item.get(field)
                 if catalogo and catalogo.clinica_id != clinica.id:
                     raise serializers.ValidationError(
@@ -599,6 +819,25 @@ class CotizacionSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
+
+    @staticmethod
+    def _crear_items(cotizacion, items_data):
+        """Crea los ítems y enlaza cada sesión obsequiada clonada con su tratamiento.
+
+        El origen llega como posición dentro de la lista (``origen_indice``); el pk
+        de cada ítem se genera al instanciarlo, así que se puede referenciar antes
+        del ``bulk_create``.
+        """
+        objetos = []
+        indices = []
+        for item_data in items_data:
+            datos = {k: v for k, v in item_data.items() if k != "id"}
+            indices.append(datos.pop("origen_indice", None))
+            objetos.append(ItemCotizacion(cotizacion=cotizacion, **datos))
+        for objeto, indice in zip(objetos, indices):
+            if indice is not None:
+                objeto.item_origen_id = objetos[indice].pk
+        ItemCotizacion.objects.bulk_create(objetos)
 
     @transaction.atomic
     def create(self, validated_data):
@@ -613,7 +852,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             clinica=clinica,
             profesional=validated_data.get("profesional") or request.user,
         )
-        ItemCotizacion.objects.bulk_create([ItemCotizacion(cotizacion=cotizacion, **item) for item in items_data])
+        self._crear_items(cotizacion, items_data)
         FormaPagoCotizacion.objects.bulk_create(
             [FormaPagoCotizacion(cotizacion=cotizacion, **forma) for forma in formas_pago_data]
         )
@@ -629,10 +868,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
         if items_data is not None:
             instance.items.filter(activo=True).update(activo=False)
-            ItemCotizacion.objects.bulk_create([
-                ItemCotizacion(cotizacion=instance, **{k: v for k, v in item_data.items() if k != "id"})
-                for item_data in items_data
-            ])
+            self._crear_items(instance, items_data)
 
         if formas_pago_data is not None:
             existentes = {str(item.id): item for item in instance.formas_pago.filter(activo=True)}
@@ -656,6 +892,16 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
         instance.refresh_from_db()
         return instance
+
+
+class EntregarObsequioSerializer(serializers.Serializer):
+    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.filter(activo=True))
+
+    def validate_sede(self, sede):
+        request = self.context.get("request")
+        if request and request.user.rol != "superadmin" and sede.clinica_id != request.user.clinica_id:
+            raise serializers.ValidationError("La sede no pertenece a tu clinica.")
+        return sede
 
 
 class CambiarEstadoCotizacionSerializer(serializers.Serializer):
