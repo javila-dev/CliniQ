@@ -11,12 +11,14 @@ from apps.clinicas.models import (
     DiagramaCorporal,
     GrupoZonas,
     GrupoZonasDiagrama,
+    PasoProtocolo,
     Sede,
     Servicio,
     ServicioConsentimiento,
     ServicioGrupoZonas,
     TipoSesion,
     TratamientoCatalogo,
+    TratamientoProcedimiento,
 )
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 
@@ -283,6 +285,47 @@ class ProcedimientoFiltrosTests(TestCase):
     def test_lista_paginada_con_conteo(self):
         response = self.client.get("/api/v1/clinicas/procedimientos/")
         self.assertEqual(response.json()["count"], 2)
+
+
+class ProcedimientoEliminarTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.superadmin = User.objects.create_user(
+            email="root-eliminar@example.com",
+            password="secret123",
+            first_name="Root",
+            last_name="Eliminar",
+            rol=User.Role.SUPERADMIN,
+        )
+        self.client.force_authenticate(self.superadmin)
+        self.clinica = Clinica.objects.create(nombre="Clinica Eliminar", nit="901555666")
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+
+    def _url(self, servicio):
+        return f"/api/v1/clinicas/procedimientos/{servicio.id}/"
+
+    def test_elimina_procedimiento_sin_uso_junto_con_su_configuracion(self):
+        servicio = Servicio.objects.create(clinica=self.clinica, nombre="Duplicado", duracion_min=30)
+        PasoProtocolo.objects.create(servicio=servicio, orden=1, nombre="Paso 1")
+
+        response = self.client.delete(self._url(servicio))
+
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(Servicio.objects.filter(pk=servicio.pk).exists())
+        self.assertFalse(PasoProtocolo.objects.filter(servicio_id=servicio.pk).exists())
+
+    def test_no_elimina_procedimiento_asociado_y_explica_por_que(self):
+        servicio = Servicio.objects.create(clinica=self.clinica, nombre="En uso", duracion_min=30)
+        tratamiento = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="Plan")
+        TratamientoProcedimiento.objects.create(tratamiento=tratamiento, procedimiento=servicio)
+
+        response = self.client.delete(self._url(servicio))
+
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json()["code"], "PROCEDIMIENTO_EN_USO")
+        self.assertEqual(response.json()["usos"], ["1 tratamiento del catálogo"])
+        self.assertIn("1 tratamiento del catálogo", response.json()["detail"])
+        self.assertTrue(Servicio.objects.filter(pk=servicio.pk).exists())
 
 
 class TratamientoCatalogoTests(TestCase):

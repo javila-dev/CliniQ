@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Prefetch
+from django.db.models import Exists, OuterRef, Prefetch, ProtectedError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.decorators import action
@@ -753,6 +753,63 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
 
     def perform_update(self, serializer):
         self._guardar_con_nombre_unico(serializer, serializer.instance.clinica)
+
+    # Datos de negocio que impiden eliminar un procedimiento: (accesores, singular, plural).
+    # Su configuración propia (pasos, zonas, consentimientos requeridos, profesionales
+    # asignados) no cuenta: se elimina junto con él.
+    _USOS_SERVICIO = (
+        (("citas",), "cita", "citas"),
+        (("items_cotizacion", "items_cotizacion_procedimiento"), "ítem de cotización", "ítems de cotización"),
+        (("itemcobro_set",), "cobro", "cobros"),
+        (("tratamientos",), "tratamiento de paciente", "tratamientos de pacientes"),
+        (("sesiones_tratamiento", "sesiones_completadas"), "sesión de tratamiento", "sesiones de tratamiento"),
+        (("consentimientos_pacientes",), "consentimiento de paciente", "consentimientos de pacientes"),
+        (("plantillas_consentimiento",), "plantilla de consentimiento", "plantillas de consentimiento"),
+        (("tratamientos_catalogo",), "tratamiento del catálogo", "tratamientos del catálogo"),
+        (("tipos_sesion",), "tipo de sesión de tratamiento", "tipos de sesión de tratamiento"),
+        (("campana_items",), "campaña", "campañas"),
+    )
+
+    def _usos_servicio(self, servicio):
+        usos = []
+        for accesores, singular, plural in self._USOS_SERVICIO:
+            pks = set()
+            for accesor in accesores:
+                pks.update(getattr(servicio, accesor).values_list("pk", flat=True))
+            if pks:
+                usos.append(f"{len(pks)} {singular if len(pks) == 1 else plural}")
+        return usos
+
+    def _respuesta_en_uso(self, usos):
+        return Response(
+            {
+                "detail": (
+                    f"No se puede eliminar: está asociado a {', '.join(usos)}. "
+                    "Puedes desactivarlo para que deje de usarse."
+                ),
+                "code": "PROCEDIMIENTO_EN_USO",
+                "usos": usos,
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        servicio = self.get_object()
+        usos = self._usos_servicio(servicio)
+        if usos:
+            return self._respuesta_en_uso(usos)
+        servicio_id = servicio.pk
+        try:
+            with transaction.atomic():
+                servicio.delete()
+        except ProtectedError:
+            # Algo se asoció entre la verificación y el borrado.
+            return self._respuesta_en_uso(["otros registros"])
+        logger.info(
+            "Servicio eliminado id=%s nombre=%s clinica_id=%s user_id=%s",
+            servicio_id, servicio.nombre, servicio.clinica_id, request.user.id,
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _parse_template_uuid(self, raw_template_id):
         try:
