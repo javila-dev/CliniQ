@@ -176,6 +176,10 @@ export const clinicasApi = {
       const res = await apiClient.patch<Procedimiento>(`/clinicas/procedimientos/${id}/`, data)
       return res.data
     },
+    /** Falla con 409 (`detail` explica qué lo usa) si el procedimiento está asociado a datos de negocio. */
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/procedimientos/${id}/`)
+    },
     pasos: {
       list: async (id: string): Promise<PasoProtocolo[]> => {
         const res = await apiClient.get<PasoProtocolo[]>(`/clinicas/procedimientos/${id}/pasos/`)

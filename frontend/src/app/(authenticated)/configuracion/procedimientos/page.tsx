@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Pencil, Power, Clock, FileText, ShieldCheck, Loader2, CheckCircle2, XCircle, Search, SearchX, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Plus, MoreHorizontal, Pencil, Power, Clock, FileText, ShieldCheck, Loader2, CheckCircle2, XCircle, Trash2, Search, SearchX, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ProcedimientoDialog } from '@/components/configuracion/ProcedimientoDialog'
@@ -11,18 +11,21 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import type { Servicio } from '@/types/clinicas'
 
 const PAGE_SIZE = 25 // Tamaño de página fijo del backend (PageNumberPagination)
 
 function ProcedimientosTable({
-  servicios, onEdit, onToggle, fetching,
+  servicios, onEdit, onToggle, onDelete, fetching,
 }: {
   servicios: Servicio[]
   onEdit: (s: Servicio) => void
   onToggle: (s: Servicio) => void
+  onDelete: (s: Servicio) => void
   fetching: boolean
 }) {
   return (
@@ -92,6 +95,9 @@ function ProcedimientosTable({
                       <Power className="h-4 w-4 mr-2" />
                       {s.activo ? 'Desactivar' : 'Activar'}
                     </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => onDelete(s)} className="text-destructive focus:text-destructive">
+                      <Trash2 className="h-4 w-4 mr-2" />Eliminar
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
               </td>
@@ -107,6 +113,8 @@ export default function ProcedimientosPage() {
   const qc = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Servicio | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Servicio | null>(null)
+  const { toast } = useToast()
 
   const [search, setSearch] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('todos')
@@ -145,6 +153,21 @@ export default function ProcedimientosPage() {
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       clinicasApi.procedimientos.update(id, { activo }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] }),
+  })
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => clinicasApi.procedimientos.delete(id),
+    onSuccess: () => {
+      toast({ title: 'Procedimiento eliminado' })
+      qc.invalidateQueries({ queryKey: ['procedimientos'] })
+    },
+    onError: (err: any) => {
+      toast({
+        title: err?.response?.data?.detail ?? 'No se pudo eliminar el procedimiento',
+        variant: 'destructive',
+      })
+    },
+    onSettled: () => setDeleteTarget(null),
   })
 
   const servicios = data?.results ?? []
@@ -242,6 +265,7 @@ export default function ProcedimientosPage() {
           fetching={isFetching}
           onEdit={(s) => { setEditTarget(s); setDialogOpen(true) }}
           onToggle={(s) => toggleMut.mutate({ id: s.id, activo: !s.activo })}
+          onDelete={setDeleteTarget}
         />
       )}
 
@@ -261,6 +285,23 @@ export default function ProcedimientosPage() {
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onOpenChange={(v) => { if (!v && !deleteMut.isPending) setDeleteTarget(null) }}
+        title="Eliminar procedimiento"
+        description={
+          <>
+            Se eliminará <strong>{deleteTarget?.nombre}</strong> junto con su protocolo, zonas y consentimientos
+            configurados. Solo es posible si no está asociado a citas, cotizaciones, tratamientos u otros registros;
+            en ese caso puedes desactivarlo.
+          </>
+        }
+        confirmLabel="Eliminar"
+        variant="destructive"
+        loading={deleteMut.isPending}
+        onConfirm={() => deleteTarget && deleteMut.mutate(deleteTarget.id)}
+      />
 
       <ProcedimientoDialog
         open={dialogOpen}
