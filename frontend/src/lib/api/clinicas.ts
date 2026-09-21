@@ -150,7 +150,13 @@ export const clinicasApi = {
 
   /** Catálogo de procedimientos (H26) — usa /clinicas/procedimientos/ */
   procedimientos: {
-    list: async (params?: { activo?: boolean; search?: string }): Promise<Paginated<Procedimiento>> => {
+    list: async (params?: {
+      activo?: boolean
+      search?: string
+      page?: number
+      tiene_consentimiento?: boolean
+      tiene_zonas?: boolean
+    }): Promise<Paginated<Procedimiento>> => {
       const res = await apiClient.get<Paginated<Procedimiento>>('/clinicas/procedimientos/', { params })
       return res.data
     },

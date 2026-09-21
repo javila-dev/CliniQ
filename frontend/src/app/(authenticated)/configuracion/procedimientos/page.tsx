@@ -1,26 +1,32 @@
 'use client'
 
-import { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, MoreHorizontal, Pencil, Power, Clock, FileText, ShieldCheck, Loader2, ListOrdered, CheckCircle2, XCircle } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { Plus, MoreHorizontal, Pencil, Power, Clock, FileText, ShieldCheck, Loader2, CheckCircle2, XCircle, Search, SearchX, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { ProcedimientoDialog } from '@/components/configuracion/ProcedimientoDialog'
 import { Button } from '@/components/ui/button'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import type { Servicio } from '@/types/clinicas'
 
+const PAGE_SIZE = 25 // Tamaño de página fijo del backend (PageNumberPagination)
+
 function ProcedimientosTable({
-  servicios, onEdit, onToggle,
+  servicios, onEdit, onToggle, fetching,
 }: {
   servicios: Servicio[]
   onEdit: (s: Servicio) => void
   onToggle: (s: Servicio) => void
+  fetching: boolean
 }) {
   return (
-    <div className="rounded-xl border bg-white overflow-hidden">
+    <div className={cn('rounded-xl border bg-white overflow-hidden transition-opacity', fetching && 'opacity-60')}>
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b bg-gray-50/60">
@@ -102,10 +108,38 @@ export default function ProcedimientosPage() {
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Servicio | null>(null)
 
-  const { data, isLoading } = useQuery({
-    queryKey: ['procedimientos', 'all'],
-    queryFn: () => clinicasApi.procedimientos.list(),
+  const [search, setSearch] = useState('')
+  const [filtroEstado, setFiltroEstado] = useState('todos')
+  const [filtroConsentimiento, setFiltroConsentimiento] = useState('todos')
+  const [filtroZonas, setFiltroZonas] = useState('todos')
+  const [page, setPage] = useState(1)
+  const debouncedSearch = useDebounce(search, 350)
+
+  // Cada cambio de filtro o búsqueda vuelve a la primera página.
+  const reset = (fn: () => void) => { fn(); setPage(1) }
+  const hayFiltros = search.trim() !== '' || filtroEstado !== 'todos' || filtroConsentimiento !== 'todos' || filtroZonas !== 'todos'
+  const limpiarFiltros = () => {
+    setSearch(''); setFiltroEstado('todos'); setFiltroConsentimiento('todos'); setFiltroZonas('todos'); setPage(1)
+  }
+
+  const params = {
+    search: debouncedSearch.trim() || undefined,
+    activo: filtroEstado !== 'todos' ? filtroEstado === 'activos' : undefined,
+    tiene_consentimiento: filtroConsentimiento !== 'todos' ? filtroConsentimiento === 'con' : undefined,
+    tiene_zonas: filtroZonas !== 'todos' ? filtroZonas === 'con' : undefined,
+    page,
+  }
+
+  const { data, isLoading, isFetching, isError } = useQuery({
+    queryKey: ['procedimientos', 'all', params],
+    queryFn: () => clinicasApi.procedimientos.list(params),
+    placeholderData: keepPreviousData,
   })
+
+  // Si la página pedida ya no existe (p. ej. se desactivó el último ítem de la última página con un filtro activo).
+  useEffect(() => {
+    if (isError && page > 1) setPage(1)
+  }, [isError, page])
 
   const toggleMut = useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
@@ -114,6 +148,9 @@ export default function ProcedimientosPage() {
   })
 
   const servicios = data?.results ?? []
+  const total = data?.count ?? 0
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
+  const abrirNuevo = () => { setEditTarget(null); setDialogOpen(true) }
 
   return (
     <div className="space-y-6">
@@ -123,12 +160,56 @@ export default function ProcedimientosPage() {
         description="Configura los procedimientos clínicos: duración, protocolo de pasos y consentimientos"
         backHref="/configuracion"
         action={
-          <Button onClick={() => { setEditTarget(null); setDialogOpen(true) }}>
+          <Button onClick={abrirNuevo}>
             <Plus className="h-4 w-4 mr-2" />
             Nuevo procedimiento
           </Button>
         }
       />
+
+      {/* Buscador y filtros: se mantienen visibles aunque el filtro no devuelva nada, para poder limpiarlos */}
+      {(hayFiltros || total > 0) && (
+        <div className="flex flex-wrap items-center gap-2.5">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar por nombre o descripción…"
+              value={search}
+              onChange={(e) => reset(() => setSearch(e.target.value))}
+              className="pl-9 bg-white"
+            />
+          </div>
+          <Select value={filtroEstado} onValueChange={(v) => reset(() => setFiltroEstado(v))}>
+            <SelectTrigger className="w-40 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Todos los estados</SelectItem>
+              <SelectItem value="activos">Activos</SelectItem>
+              <SelectItem value="inactivos">Inactivos</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filtroConsentimiento} onValueChange={(v) => reset(() => setFiltroConsentimiento(v))}>
+            <SelectTrigger className="w-52 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Consentimiento: todos</SelectItem>
+              <SelectItem value="con">Con consentimiento</SelectItem>
+              <SelectItem value="sin">Sin consentimiento</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filtroZonas} onValueChange={(v) => reset(() => setFiltroZonas(v))}>
+            <SelectTrigger className="w-44 bg-white"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todos">Zonas: todas</SelectItem>
+              <SelectItem value="con">Con zonas</SelectItem>
+              <SelectItem value="sin">Sin zonas</SelectItem>
+            </SelectContent>
+          </Select>
+          {hayFiltros && (
+            <Button variant="ghost" size="sm" onClick={limpiarFiltros}>
+              <X className="h-4 w-4 mr-1" />Limpiar
+            </Button>
+          )}
+        </div>
+      )}
 
       {isLoading && (
         <div className="flex justify-center py-12">
@@ -136,23 +217,49 @@ export default function ProcedimientosPage() {
         </div>
       )}
 
-      {!isLoading && servicios.length === 0 && (
+      {!isLoading && servicios.length === 0 && !hayFiltros && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FileText className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">No hay procedimientos configurados</p>
           <p className="text-xs text-muted-foreground mt-1">Crea el primer procedimiento para empezar a agendar citas</p>
-          <Button className="mt-4" onClick={() => { setEditTarget(null); setDialogOpen(true) }}>
+          <Button className="mt-4" onClick={abrirNuevo}>
             <Plus className="h-4 w-4 mr-2" />Nuevo procedimiento
           </Button>
+        </div>
+      )}
+
+      {!isLoading && servicios.length === 0 && hayFiltros && (
+        <div className="flex flex-col items-center justify-center py-16 text-center">
+          <SearchX className="h-10 w-10 text-muted-foreground/40 mb-3" />
+          <p className="text-sm font-medium text-muted-foreground">Ningún procedimiento coincide con los filtros</p>
+          <Button variant="outline" className="mt-4" onClick={limpiarFiltros}>Limpiar filtros</Button>
         </div>
       )}
 
       {!isLoading && servicios.length > 0 && (
         <ProcedimientosTable
           servicios={servicios}
+          fetching={isFetching}
           onEdit={(s) => { setEditTarget(s); setDialogOpen(true) }}
           onToggle={(s) => toggleMut.mutate({ id: s.id, activo: !s.activo })}
         />
+      )}
+
+      {!isLoading && total > 0 && (
+        <div className="flex items-center justify-between text-sm">
+          <p className="text-muted-foreground">
+            {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}
+          </p>
+          <div className={cn('flex items-center gap-2', totalPages <= 1 && 'hidden')}>
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-muted-foreground tabular-nums">{page} / {totalPages}</span>
+            <Button variant="outline" size="sm" disabled={page >= totalPages} onClick={() => setPage((p) => p + 1)}>
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       )}
 
       <ProcedimientoDialog
