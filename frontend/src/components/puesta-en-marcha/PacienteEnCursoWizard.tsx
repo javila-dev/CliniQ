@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, Check, Search, Plus, Trash2, Pencil, Loader2, CheckCircle2,
@@ -74,7 +74,6 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const cerrar = () => { setOpen(false); onClose() }
 
   const { sedes, defaultSedeId } = useUserSedes()
-  const { formasPago: formasPagoReales } = useFormasPago({ soloMedioReal: true })
   const { formasPago } = useFormasPago()
 
   const [step, setStep] = useState(0)
@@ -100,12 +99,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const [numLibre, setNumLibre] = useState('6')
   const [precio, setPrecio] = useState('')
   const [valorPagado, setValorPagado] = useState('')
-  const [medioPagoInicial, setMedioPagoInicial] = useState('')
   const [fechaInicio, setFechaInicio] = useState('')
-
-  useEffect(() => {
-    if (!medioPagoInicial && formasPagoReales.length > 0) setMedioPagoInicial(formasPagoReales[0].id)
-  }, [formasPagoReales, medioPagoInicial])
 
   const { data: tratamientos } = useQuery({
     queryKey: ['tratamientos-activos'],
@@ -198,7 +192,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
         },
         sesiones_realizadas: filas.filter((f) => f.done).map((f) => ({ nombre: f.nombre })),
         pagos: pagado > 0
-          ? [{ valor: pagado.toFixed(2), medio_pago: medioPagoInicial, fecha: today() }]
+          ? [{ valor: pagado.toFixed(2), fecha: today() }]
           : [],
         plan_saldo: saldo > 0 ? plan.map((c) => ({ ...c, valor_esperado: (Number(c.valor_esperado) || 0).toFixed(2) })) : [],
         mediciones_historicas: medidas,
@@ -220,7 +214,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const puedeAvanzar = [
     !!pacienteId && !!sede,
     (tipo === 'tratamiento' ? (!!tratamientoId && !!tratSel) : !!descripcion.trim())
-      && total > 0 && pagado <= total && (pagado <= 0 || !!medioPagoInicial),
+      && total > 0 && pagado <= total,
     true,
     true,
     planCuadra,
@@ -353,20 +347,6 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
                   <Input type="date" value={fechaInicio} max={today()} onChange={(e) => setFechaInicio(e.target.value)} />
                 </div>
               </div>
-
-              {pagado > 0 && (
-                <div className="space-y-1.5 sm:max-w-[240px]">
-                  <Label>Forma de pago de lo ya pagado</Label>
-                  <Select value={medioPagoInicial} onValueChange={setMedioPagoInicial}>
-                    <SelectTrigger><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
-                    <SelectContent>
-                      {formasPagoReales.map((f) => (
-                        <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
 
               {total > 0 && (
                 <p className={cn('text-[11px]', pagado > total ? 'text-rose-600' : 'text-muted-foreground')}>

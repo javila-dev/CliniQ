@@ -9,7 +9,7 @@ export interface SesionRealizadaInput {
 
 export interface PagoPrevioInput {
   valor: string
-  medio_pago: string          // id de FormaDePago
+  medio_pago?: string | null  // id de FormaDePago; sin él el backend usa "Otro"
   fecha: string
 }
 
