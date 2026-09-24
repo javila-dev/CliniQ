@@ -277,6 +277,9 @@ class CitaViewSet(ModelViewSet):
         nuevo_estado = serializer.validated_data["estado"]
         medio = serializer.validated_data.get("medio", "")
         nota = serializer.validated_data.get("nota", "")
+        if cita.estado == Cita.Estado.EN_CURSO and nuevo_estado == Cita.Estado.EN_CURSO:
+            # Ya se inició (doble clic, otra pestaña o la cola de espera): no es un error.
+            return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
         if cita.estado == Cita.Estado.CONFIRMADA and nuevo_estado == Cita.Estado.EN_CURSO:
             logger.warning(
                 "DEBUG cambiar_estado 400 invalid_transition | cita_id=%s estado_actual=%s nuevo_estado=%s payload=%s",

@@ -210,6 +210,19 @@ class CitaEnEsperaFlowTests(TestCase):
             },
         )
 
+    def test_iniciar_una_cita_ya_en_curso_no_es_error(self):
+        self.cita.estado = Cita.Estado.EN_CURSO
+        self.cita.save(update_fields=["estado", "updated_at"])
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.EN_CURSO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["estado"], Cita.Estado.EN_CURSO)
+
     def test_en_espera_a_en_curso_valida_consentimiento(self):
         self.cita.estado = Cita.Estado.EN_ESPERA
         self.cita.save(update_fields=["estado", "updated_at"])
