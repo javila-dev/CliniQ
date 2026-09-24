@@ -72,7 +72,8 @@ function FormaDialog({
       handleClose()
     },
     onError: (err: any) => {
-      toast.error('No se pudo guardar', err?.response?.data?.error ?? 'Intenta de nuevo.')
+      const data = err?.response?.data
+      toast.error('No se pudo guardar', data?.error ?? data?.nombre?.[0] ?? data?.tipo_base?.[0] ?? 'Intenta de nuevo.')
     },
   })
 
