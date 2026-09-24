@@ -454,22 +454,25 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
 
 
 class ProfesionalListSerializer(serializers.ModelSerializer):
-    id = serializers.UUIDField(source="user.id", read_only=True)
-    colaborador_id = serializers.UUIDField(source="pk", read_only=True)
+    """Profesionales agendables, incluso si un usuario legado aún no tiene
+    perfil laboral de Colaborador.
+
+    La capacidad clínica vive en ``User.es_profesional``. El perfil laboral
+    aporta sedes, horarios y especialidades, pero su ausencia no debe ocultar
+    al usuario ni las citas que ya tenga asignadas.
+    """
+
+    colaborador_id = serializers.SerializerMethodField()
     nombre_completo = serializers.CharField(read_only=True)
-    first_name = serializers.CharField(source="user.first_name", read_only=True)
-    last_name = serializers.CharField(source="user.last_name", read_only=True)
-    email = serializers.EmailField(source="user.email", read_only=True)
-    telefono = serializers.CharField(source="user.telefono", read_only=True, allow_null=True)
     rol = serializers.SerializerMethodField()
     role_id = serializers.SerializerMethodField()
     role_nombre = serializers.SerializerMethodField()
-    sede_principal = serializers.UUIDField(source="sede_principal_id", read_only=True)
-    sede_principal_nombre = serializers.CharField(source="sede_principal.nombre", read_only=True)
+    sede_principal = serializers.SerializerMethodField()
+    sede_principal_nombre = serializers.SerializerMethodField()
     especialidades = serializers.SerializerMethodField()
 
     class Meta:
-        model = Colaborador
+        model = User
         fields = (
             "id",
             "colaborador_id",
@@ -486,20 +489,39 @@ class ProfesionalListSerializer(serializers.ModelSerializer):
             "especialidades",
         )
 
+    @staticmethod
+    def _colaborador(obj):
+        return getattr(obj, "colaborador", None)
+
+    def get_colaborador_id(self, obj):
+        colaborador = self._colaborador(obj)
+        return str(colaborador.id) if colaborador else None
+
+    def get_sede_principal(self, obj):
+        colaborador = self._colaborador(obj)
+        return str(colaborador.sede_principal_id) if colaborador and colaborador.sede_principal_id else None
+
+    def get_sede_principal_nombre(self, obj):
+        colaborador = self._colaborador(obj)
+        return colaborador.sede_principal.nombre if colaborador and colaborador.sede_principal_id else None
+
     def get_especialidades(self, obj):
+        colaborador = self._colaborador(obj)
+        if colaborador is None:
+            return []
         return [
             {"id": str(item.id), "nombre": item.nombre, "duracion_min": item.duracion_min}
-            for item in obj.especialidades.all()
+            for item in colaborador.especialidades.all()
         ]
 
     def get_rol(self, obj):
-        return user_role_slug(obj.user)
+        return user_role_slug(obj)
 
     def get_role_id(self, obj):
-        return user_role_id(obj.user)
+        return user_role_id(obj)
 
     def get_role_nombre(self, obj):
-        return user_role_name(obj.user)
+        return user_role_name(obj)
 
 
 def colaborador_tiene_citas_futuras(colaborador):

@@ -52,14 +52,16 @@ def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
     la forma de pago se toma de ``formas_pago`` de la cotizacion.
     """
     cartera = getattr(cotizacion, "cartera", None)
-    formas_pago = list(cotizacion.formas_pago.filter(activo=True).order_by("fecha", "created_at"))
+    formas_pago = list(
+        cotizacion.formas_pago.filter(activo=True).select_related("tipo").order_by("fecha", "created_at")
+    )
     if cartera:
         cuotas = list(cartera.cuotas.filter(anulada=False).order_by("fecha_esperada"))
     else:
         cuotas = [
             {
                 "fecha_esperada": forma.fecha,
-                "descripcion": forma.descripcion or forma.get_tipo_display(),
+                "descripcion": forma.descripcion or forma.tipo.nombre,
                 "valor_esperado": forma.valor,
             }
             for forma in formas_pago
@@ -92,7 +94,7 @@ def _contexto_merge_cotizacion(cotizacion, fecha_generacion=None) -> dict:
     ]
     formas_pago_detalle = [
         {
-            "tipo": forma.get_tipo_display(),
+            "tipo": forma.tipo.nombre,
             "descripcion": forma.descripcion,
             "fecha": forma.fecha,
             "valor": formatear_moneda(forma.valor),

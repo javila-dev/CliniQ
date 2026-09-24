@@ -237,7 +237,7 @@ class TratamientoPacienteSerializer(serializers.ModelSerializer):
         request = self.context["request"]
 
         if paciente and servicio and paciente.clinica_id != servicio.clinica_id:
-            raise serializers.ValidationError({"servicio": "El servicio no pertenece a la misma clinica del paciente."})
+            raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la misma clinica del paciente."})
         if paciente and tratamiento_catalogo and paciente.clinica_id != tratamiento_catalogo.clinica_id:
             raise serializers.ValidationError(
                 {"tratamiento_catalogo": "El tratamiento no pertenece a la misma clinica del paciente."}
@@ -245,14 +245,14 @@ class TratamientoPacienteSerializer(serializers.ModelSerializer):
         if request.user.rol != "superadmin" and paciente and paciente.clinica_id != request.user.clinica_id:
             raise serializers.ValidationError({"paciente": "El paciente no pertenece a tu clinica."})
         if not servicio and not tratamiento_catalogo:
-            raise serializers.ValidationError({"error": "Debes enviar servicio o tratamiento_catalogo."})
+            raise serializers.ValidationError({"error": "Debes enviar un procedimiento o un tratamiento del catálogo."})
         if cotizacion_item:
             if paciente and cotizacion_item.cotizacion.paciente_id != paciente.id:
                 raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al paciente."})
             if tratamiento_catalogo and cotizacion_item.tratamiento_id != tratamiento_catalogo.id:
                 raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al tratamiento."})
             if servicio and cotizacion_item.servicio_id != servicio.id:
-                raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al servicio."})
+                raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al procedimiento."})
         return attrs
 
     def create(self, validated_data):

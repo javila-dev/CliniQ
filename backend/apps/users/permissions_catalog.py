@@ -21,6 +21,8 @@ PERMISSION_CATALOG = [
     ("clinicas.editar", "clinicas", "editar", "Editar datos de la clinica", False),
     ("clinicas.ver", "clinicas", "ver", "Ver datos de la clinica", True),
     ("campanas.gestionar", "campanas", "gestionar", "Gestionar campañas de precios especiales", False),
+    ("configuracion.formas_pago.gestionar", "configuracion", "formas_pago.gestionar", "Gestionar formas de pago", False),
+    ("configuracion.formas_pago.ver", "configuracion", "formas_pago.ver", "Ver formas de pago", True),
     ("core.ver_log_acciones", "core", "ver_log_acciones", "Ver log de acciones del sistema", False),
     ("cobros.anular", "cobros", "anular", "Anular cobros", False),
     ("cobros.cambiar_precio", "cobros", "cambiar_precio", "Cambiar precio de items al crear cobros de cita directa", False),
@@ -46,20 +48,20 @@ PERMISSION_CATALOG = [
     ("consentimientos.ver", "consentimientos", "ver", "Ver consentimientos", True),
     ("historia.consentimientos.gestionar", "historia", "consentimientos.gestionar", "Gestionar consentimientos informados", True),
     ("historia.fotos.eliminar", "historia", "fotos.eliminar", "Eliminar fotos clinicas", False),
-    ("historia.fotos.subir", "historia", "fotos.subir", "Subir fotos clinicas", True),
-    ("historia.notas.crear", "historia", "notas.crear", "Crear notas clinicas", True),
+    ("historia.fotos.subir", "historia", "fotos.subir", "Subir fotos clinicas", False),
+    ("historia.notas.crear", "historia", "notas.crear", "Crear notas clinicas", False),
     ("historia.ver", "historia", "ver", "Ver historia clinica", True),
     ("inventario.ajustar_stock", "inventario", "ajustar_stock", "Ajustar stock", False),
     ("inventario.categorias.gestionar", "inventario", "categorias.gestionar", "Gestionar categorias de insumos", False),
     ("inventario.consumo.eliminar", "inventario", "consumo.eliminar", "Revertir consumo de insumos en atencion", False),
-    ("inventario.consumo.registrar", "inventario", "consumo.registrar", "Registrar consumo de insumos en atencion", True),
+    ("inventario.consumo.registrar", "inventario", "consumo.registrar", "Registrar consumo de insumos en atencion", False),
     ("inventario.insumos.gestionar", "inventario", "insumos.gestionar", "Gestionar insumos", False),
     ("inventario.kardex.ver", "inventario", "kardex.ver", "Ver kardex", True),
     ("inventario.ver", "inventario", "ver", "Ver inventario", True),
     ("migracion.gestionar", "migracion", "gestionar", "Usar el asistente de puesta en marcha (cargar datos previos)", False),
     ("notificaciones.email.enviar", "notificaciones", "email.enviar", "Enviar emails administrativos", True),
     ("notificaciones.email.ver_config", "notificaciones", "email.ver_config", "Ver configuracion de email", True),
-    ("pacientes.antecedentes.editar", "pacientes", "antecedentes.editar", "Editar antecedentes", True),
+    ("pacientes.antecedentes.editar", "pacientes", "antecedentes.editar", "Editar antecedentes", False),
     ("pacientes.antecedentes.ver", "pacientes", "antecedentes.ver", "Ver antecedentes", True),
     ("pacientes.crear", "pacientes", "crear", "Crear pacientes", True),
     ("pacientes.datos_sensibles.ver", "pacientes", "datos_sensibles.ver", "Ver datos sensibles del paciente sin enmascarar (documento, telefono, email, direccion, fecha de nacimiento)", False),
@@ -83,8 +85,8 @@ PERMISSION_CATALOG = [
     ("sedes.eliminar", "sedes", "eliminar", "Eliminar sedes", False),
     ("sedes.gestionar", "sedes", "gestionar", "Gestionar sedes", False),
     ("sedes.ver", "sedes", "ver", "Ver sedes", True),
-    ("servicios.gestionar", "servicios", "gestionar", "Gestionar servicios", False),
-    ("servicios.ver", "servicios", "ver", "Ver servicios", True),
+    ("servicios.gestionar", "servicios", "gestionar", "Crear y editar el catálogo", False),
+    ("servicios.ver", "servicios", "ver", "Ver catálogo", True),
     ("usuarios.crear", "usuarios", "crear", "Crear usuarios", False),
     ("usuarios.editar", "usuarios", "editar", "Editar usuarios", False),
     ("usuarios.eliminar", "usuarios", "eliminar", "Eliminar usuarios", False),
@@ -211,28 +213,6 @@ CAPABILITY_CATALOG = [
         "titulo": "Atencion clinica",
         "capacidades": [
             {
-                "clave": "clinica.escribir_historia",
-                "titulo": "Realizar atenciones y escribir en la historia",
-                "descripcion": (
-                    "Registrar notas de evolucion, editar antecedentes y registrar los "
-                    "insumos consumidos durante la atencion."
-                ),
-                "permisos": [
-                    "historia.notas.crear",
-                    "pacientes.antecedentes.editar",
-                    "inventario.consumo.registrar",
-                    "inventario.ver",
-                ],
-                "profesional": True,
-            },
-            {
-                "clave": "clinica.fotos",
-                "titulo": "Subir fotos clinicas",
-                "descripcion": "Adjuntar fotografias a la historia del paciente.",
-                "permisos": ["historia.fotos.subir"],
-                "profesional": True,
-            },
-            {
                 "clave": "clinica.eliminar_fotos",
                 "titulo": "Eliminar fotos clinicas",
                 "descripcion": "Borrar fotografias de la historia del paciente.",
@@ -244,7 +224,8 @@ CAPABILITY_CATALOG = [
                 "titulo": "Gestionar consentimientos durante la atencion",
                 "descripcion": "Adjuntar y marcar consentimientos informados en la atencion.",
                 "permisos": ["historia.consentimientos.gestionar"],
-                "profesional": True,
+                # Tambien lo usa recepcion (firma en la cotizacion): no vuelve
+                # profesional al rol. Quien atiende lo recibe por el check.
             },
             {
                 "clave": "clinica.eliminar_consumo_insumos",
@@ -503,18 +484,18 @@ CAPABILITY_CATALOG = [
     },
     {
         "area": "servicios",
-        "titulo": "Servicios y catalogo",
+        "titulo": "Catálogo",
         "capacidades": [
             {
                 "clave": "servicios.ver",
-                "titulo": "Ver servicios",
-                "descripcion": "Consultar el catalogo de servicios y sus precios.",
+                "titulo": "Ver catálogo (procedimientos y tratamientos)",
+                "descripcion": "Consultar los procedimientos y tratamientos con sus precios.",
                 "permisos": ["servicios.ver"],
             },
             {
                 "clave": "servicios.gestionar",
-                "titulo": "Gestionar servicios y precios",
-                "descripcion": "Crear y editar servicios, protocolos y precios.",
+                "titulo": "Crear y editar procedimientos, tratamientos y precios",
+                "descripcion": "Crear, editar, activar o desactivar y eliminar procedimientos y tratamientos.",
                 "permisos": ["servicios.gestionar"],
             },
         ],
@@ -631,6 +612,12 @@ CAPABILITY_CATALOG = [
                 "descripcion": "Enviar correos administrativos y ver su configuracion.",
                 "permisos": ["notificaciones.email.enviar", "notificaciones.email.ver_config"],
             },
+            {
+                "clave": "config.formas_pago",
+                "titulo": "Gestionar formas de pago",
+                "descripcion": "Crear, editar y desactivar las formas de pago de la clinica.",
+                "permisos": ["configuracion.formas_pago.gestionar"],
+            },
         ],
     },
 ]
@@ -652,6 +639,19 @@ PROFESSIONAL_PERMISSION_KEYS = {
 }
 
 
+# Permisos de atencion clinica ligados al check "atiende pacientes"
+# (User.es_profesional). Los exclusivos del check no se asignan por rol
+# (assignable=False, fuera del selector); el resto el check los da y ademas
+# siguen asignables por rol (p.ej. recepcion firma consentimientos).
+PERMISOS_SOLO_CHECK_ATIENDE = frozenset({
+    "historia.notas.crear",
+    "pacientes.antecedentes.editar",
+    "inventario.consumo.registrar",
+    "historia.fotos.subir",
+})
+PERMISOS_ATIENDE_PACIENTES = PERMISOS_SOLO_CHECK_ATIENDE | {"historia.consentimientos.gestionar"}
+
+
 def role_is_professional_from_keys(permission_keys) -> bool:
     """True si el set de permisos incluye alguna clave de atencion clinica."""
     return bool(PROFESSIONAL_PERMISSION_KEYS & set(permission_keys))
@@ -667,6 +667,7 @@ ROLE_PERMISSION_DEFAULTS = {
         "caja.gastos.registrar",
         "caja.gastos.ver",
         "clinicas.ver",
+        "configuracion.formas_pago.ver",
         "cobros.crear",
         "cobros.editar_items",
         "cobros.registrar_pago",
@@ -703,6 +704,7 @@ ROLE_PERMISSION_DEFAULTS = {
         "caja.gastos.registrar",
         "caja.gastos.ver",
         "clinicas.ver",
+        "configuracion.formas_pago.ver",
         "cartera.ver",
         "cotizaciones.gestionar",
         "cotizaciones.ver",
@@ -712,13 +714,9 @@ ROLE_PERMISSION_DEFAULTS = {
         "consentimientos.plantillas.ver",
         "consentimientos.ver",
         "historia.consentimientos.gestionar",
-        "historia.fotos.subir",
-        "historia.notas.crear",
         "historia.ver",
-        "inventario.consumo.registrar",
         "inventario.kardex.ver",
         "inventario.ver",
-        "pacientes.antecedentes.editar",
         "pacientes.antecedentes.ver",
         "pacientes.crear",
         "pacientes.editar",

@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.caja.models import Caja, CategoriaGasto, GastoCaja, SesionCaja
-from apps.clinicas.models import Clinica, Sede
+from apps.clinicas.models import Clinica, FormaDePago, Sede
 from apps.cobros.models import Cobro
 from apps.pacientes.models import Paciente
 
@@ -73,7 +73,7 @@ class _BaseCajaTest(TestCase):
             estado=Cobro.Estado.PAGADO,
         )
         cobro.pagos.create(
-            medio_pago=medio_pago,
+            medio_pago=FormaDePago.objects.get(clinica=self.clinica, tipo_base=medio_pago),
             valor=valor,
             referencia="REF",
             fecha=fecha or timezone.now(),

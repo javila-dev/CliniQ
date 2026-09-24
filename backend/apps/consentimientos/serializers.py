@@ -28,7 +28,7 @@ class PlantillaConsentimientoSerializer(serializers.ModelSerializer):
         if request and request.user.rol != "superadmin" and clinica and clinica.id != request.user.clinica_id:
             raise serializers.ValidationError({"clinica": "No puedes gestionar plantillas de otra clinica."})
         if servicio and clinica and servicio.clinica_id != clinica.id:
-            raise serializers.ValidationError({"servicio": "El servicio no pertenece a la clinica seleccionada."})
+            raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la clinica seleccionada."})
         return attrs
 
 
@@ -120,7 +120,7 @@ class GenerarConsentimientoSerializer(serializers.Serializer):
             if plantilla.clinica_id != cita.sede.clinica_id:
                 raise serializers.ValidationError({"plantilla_id": "La plantilla no pertenece a la clinica de la cita."})
             if plantilla.servicio_id and plantilla.servicio_id != cita.servicio_id:
-                raise serializers.ValidationError({"plantilla_id": "La plantilla no aplica para el servicio de la cita."})
+                raise serializers.ValidationError({"plantilla_id": "La plantilla no aplica para el procedimiento de la cita."})
             if plantilla.ambito != PlantillaConsentimiento.Ambito.CITA:
                 raise serializers.ValidationError({"plantilla_id": "La plantilla no es de ambito cita."})
             attrs["cita"] = cita

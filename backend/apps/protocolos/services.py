@@ -227,7 +227,7 @@ def contexto_sesion_para_cita(cita):
     }
 
 
-def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
+def verificar_consentimientos_sesion(sesion: SesionProcedimiento, *, cita_id=None):
     faltantes = []
     procedimientos = procedimientos_requeridos_sesion(sesion)
     paciente = sesion.tratamiento.paciente
@@ -235,13 +235,23 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
 
     for procedimiento in procedimientos:
         for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
-            if consentimiento_satisfecho(paciente.id, (relacion.template.template_token or str(relacion.template.id))):
+            token = relacion.template.template_token or str(relacion.template.id)
+            cada_vez = relacion.requiere_firma_cada_vez
+            if consentimiento_satisfecho(paciente.id, token, cita_id=cita_id, requiere_cada_vez=cada_vez):
+                continue
+            if cada_vez:
+                faltantes.append(
+                    {
+                        "estado": "faltante",
+                        "procedimiento": procedimiento.nombre,
+                        "template_token": token,
+                        "template_nombre": relacion.template.get_tipo_display(),
+                        "accion": "firmar",
+                    }
+                )
                 continue
             consentimiento = (
-                ConsentimientoPaciente.objects.filter(
-                    paciente=paciente,
-                    template_token=(relacion.template.template_token or str(relacion.template.id)),
-                )
+                ConsentimientoPaciente.objects.filter(paciente=paciente, template_token=token)
                 .order_by("-fecha_firma", "-created_at")
                 .first()
             )
@@ -250,7 +260,7 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
                     {
                         "estado": "faltante",
                         "procedimiento": procedimiento.nombre,
-                        "template_token": (relacion.template.template_token or str(relacion.template.id)),
+                        "template_token": token,
                         "template_nombre": relacion.template.get_tipo_display(),
                         "accion": "firmar",
                     }
@@ -261,7 +271,7 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
                     {
                         "estado": "vencido",
                         "procedimiento": procedimiento.nombre,
-                        "template_token": (relacion.template.template_token or str(relacion.template.id)),
+                        "template_token": token,
                         "template_nombre": consentimiento.template_nombre,
                         "fecha_firma": consentimiento.fecha_firma,
                         "vencio": consentimiento.vigencia_hasta,
@@ -271,7 +281,7 @@ def verificar_consentimientos_sesion(sesion: SesionProcedimiento):
     return faltantes
 
 
-def consentimiento_status_sesion(sesion: SesionProcedimiento):
+def consentimiento_status_sesion(sesion: SesionProcedimiento, *, cita_id=None):
     procedimientos = procedimientos_requeridos_sesion(sesion)
     paciente = sesion.tratamiento.paciente
     hoy = date.today()
@@ -279,12 +289,44 @@ def consentimiento_status_sesion(sesion: SesionProcedimiento):
 
     for procedimiento in procedimientos:
         for relacion in procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden"):
-            informado = consentimiento_informado_vigente(paciente.id, (relacion.template.template_token or str(relacion.template.id)))
-            consentimiento = (
-                ConsentimientoPaciente.objects.filter(
-                    paciente=paciente,
-                    template_token=(relacion.template.template_token or str(relacion.template.id)),
+            token = relacion.template.template_token or str(relacion.template.id)
+            cada_vez = relacion.requiere_firma_cada_vez
+            informado = consentimiento_informado_vigente(paciente.id, token, cita_id=cita_id, requiere_cada_vez=cada_vez)
+
+            if cada_vez:
+                legado = (
+                    ConsentimientoPaciente.objects.filter(paciente=paciente, template_token=token, cita_id=cita_id)
+                    .order_by("-fecha_firma", "-created_at")
+                    .first()
+                    if cita_id
+                    else None
                 )
+                consentimiento_encontrado = informado or legado
+                if consentimiento_encontrado is not None:
+                    resultado.append(
+                        {
+                            "procedimiento": procedimiento.nombre,
+                            "template_nombre": getattr(consentimiento_encontrado, "documenso_template_nombre", None)
+                            or getattr(consentimiento_encontrado, "template_nombre", None)
+                            or relacion.template.get_tipo_display(),
+                            "estado": "vigente",
+                            "fecha_firma": consentimiento_encontrado.fecha_firma,
+                            "vence": None,
+                        }
+                    )
+                else:
+                    resultado.append(
+                        {
+                            "procedimiento": procedimiento.nombre,
+                            "template_nombre": relacion.template.get_tipo_display(),
+                            "estado": "faltante",
+                            "accion": "firmar",
+                        }
+                    )
+                continue
+
+            consentimiento = (
+                ConsentimientoPaciente.objects.filter(paciente=paciente, template_token=token)
                 .order_by("-fecha_firma", "-created_at")
                 .first()
             )
@@ -371,6 +413,7 @@ def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False)
                 por_token[token]["procedimientos"].append(procedimiento.nombre)
                 continue
 
+            cada_vez = relacion.requiere_firma_cada_vez
             datos = {
                 "procedimientos": [procedimiento.nombre],
                 "template_token": token,
@@ -381,10 +424,13 @@ def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False)
                 "fecha_vencimiento": None,
                 "archivo_url": None,
                 "origen": None,
+                "requiere_firma_cada_vez": cada_vez,
             }
-            informado = consentimiento_informado_vigente(cotizacion.paciente_id, token)
+            # Sin una cita concreta todavia (estamos a nivel cotizacion), un procedimiento
+            # "cada vez" nunca puede mostrarse como ya satisfecho: se firma en cada sesion.
+            informado = None if cada_vez else consentimiento_informado_vigente(cotizacion.paciente_id, token)
             legado = None
-            if informado is None:
+            if informado is None and not cada_vez:
                 legado = (
                     ConsentimientoPaciente.objects.filter(
                         paciente_id=cotizacion.paciente_id, template_token=token, vigencia_hasta__gte=hoy,
@@ -454,7 +500,7 @@ def marcar_sesion_completada(
     forzar_sin_consentimiento=False,
     motivo="",
 ):
-    faltantes = verificar_consentimientos_sesion(sesion)
+    faltantes = verificar_consentimientos_sesion(sesion, cita_id=cita.id if cita else None)
     if faltantes and not forzar_sin_consentimiento:
         raise ProtocolosError(
             "Consentimientos requeridos faltantes o vencidos",
@@ -495,6 +541,8 @@ def marcar_sesion_completada(
             sesion.procedimientos_ejecutados.set([sesion.procedimiento])
 
     if not faltantes:
+        from django.db.models import Q
+
         procedimientos = procedimientos_requeridos_sesion(sesion)
         template_tokens = set()
         for procedimiento in procedimientos:
@@ -503,11 +551,13 @@ def marcar_sesion_completada(
                 .select_related("template")
                 .values_list("template__template_token", flat=True)
             )
+        vigencia_q = Q(vigencia_hasta__gte=date.today())
+        if cita is not None:
+            vigencia_q |= Q(cita_id=cita.id)
         consentimientos = ConsentimientoPaciente.objects.filter(
             paciente=sesion.tratamiento.paciente,
             template_token__in=template_tokens,
-            vigencia_hasta__gte=date.today(),
-        )
+        ).filter(vigencia_q)
         sesion.consentimientos_verificados.set(consentimientos)
 
     tratamiento = sesion.tratamiento

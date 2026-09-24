@@ -17,6 +17,7 @@ from apps.caja.serializers import (
 )
 from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, PagoRecibido
+from apps.users.authorization import sede_ids_para_filtro
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
@@ -25,7 +26,7 @@ def _ingresos_efectivo(sede, desde, hasta):
     return (
         PagoRecibido.objects.filter(
             cobro__sede=sede,
-            medio_pago="efectivo",
+            medio_pago__tipo_base="efectivo",
             fecha__gte=desde,
             fecha__lte=hasta,
         )
@@ -121,9 +122,9 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
             qs = qs.filter(caja__sede__clinica=clinica)
         elif self.request.user.rol != "superadmin":
             qs = qs.none()
-        sede_id = self.request.query_params.get("sede")
-        if sede_id:
-            qs = qs.filter(caja__sede_id=sede_id)
+        sede_ids = sede_ids_para_filtro(self.request.user, self.request.query_params.get("sede"))
+        if sede_ids is not None:
+            qs = qs.filter(caja__sede_id__in=sede_ids)
         return qs
 
     def _caja_de(self, caja_id):
@@ -141,7 +142,7 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
             raise ValidationError({"sede": "sede es requerido.", "code": "SEDE_REQUERIDA"})
         clinica = get_clinica_activa(request)
         try:
-            sede_qs = Sede.objects.filter(id=sede_id)
+            sede_qs = Sede.objects.filter(id__in=sede_ids_para_filtro(request.user, sede_id))
             if clinica is not None:
                 sede_qs = sede_qs.filter(clinica=clinica)
             sede = sede_qs.get()
@@ -191,6 +192,8 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
         clinica = get_clinica_activa(request)
         if clinica is not None and caja.sede.clinica_id != clinica.id:
             raise PermissionDenied("La caja no pertenece a la clínica activa.")
+        if not sede_ids_para_filtro(request.user, caja.sede_id):
+            raise PermissionDenied("No tienes acceso a la caja de esa sede.")
         if not caja.activa:
             raise ValidationError({"caja": "La caja está inactiva.", "code": "CAJA_INACTIVA"})
         if caja.sesion_abierta is not None:
@@ -260,6 +263,10 @@ class GastoCajaViewSet(ModelViewSet):
             qs = qs.filter(sede__clinica=clinica)
         elif self.request.user.rol != "superadmin":
             qs = qs.none()
+        # El filtro exacto `?sede=` lo aplica filterset_fields; aca solo el alcance.
+        sede_ids = sede_ids_para_filtro(self.request.user)
+        if sede_ids is not None:
+            qs = qs.filter(sede_id__in=sede_ids)
         fecha_gte = self.request.query_params.get("fecha__gte")
         fecha_lte = self.request.query_params.get("fecha__lte")
         if fecha_gte:
@@ -273,6 +280,8 @@ class GastoCajaViewSet(ModelViewSet):
         clinica = get_clinica_activa(self.request)
         if clinica is not None and sede is not None and sede.clinica_id != clinica.id:
             raise ValidationError({"sede": "La sede no pertenece a la clínica activa.", "code": "SEDE_OTRA_CLINICA"})
+        if sede is not None and not sede_ids_para_filtro(self.request.user, sede.id):
+            raise PermissionDenied("No tienes acceso a esa sede.")
 
         caja = Caja.objects.filter(sede=sede, activa=True).first()
         if caja is None:

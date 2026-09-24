@@ -88,6 +88,15 @@ class NotaClinica(BaseModel):
         blank=True,
         related_name="notas_clinicas",
     )
+    # Mini-atención generada desde una cotización (sin cita agendada): trazabilidad
+    # opcional hacia la cotización que la originó.
+    cotizacion = models.ForeignKey(
+        "cotizaciones.Cotizacion",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="notas_clinicas",
+    )
     estado = models.CharField(
         max_length=20,
         choices=EstadoNota.choices,
@@ -156,6 +165,17 @@ class ConsentimientoInformado(BaseModel):
         "clinicas.Clinica",
         on_delete=models.PROTECT,
         related_name="consentimientos_informados",
+    )
+    cita = models.ForeignKey(
+        "agenda.Cita",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="consentimientos_informados",
+        help_text=(
+            "Cita en la que se firmó este consentimiento. Solo se usa cuando el "
+            "procedimiento exige firmar el consentimiento en cada ejecución (no por vigencia)."
+        ),
     )
     tipo = models.CharField(max_length=30, choices=TipoConsentimiento.choices)
     documenso_template_token = models.CharField(max_length=500, null=True, blank=True)

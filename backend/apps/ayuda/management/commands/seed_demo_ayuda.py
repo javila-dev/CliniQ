@@ -286,6 +286,7 @@ class Command(BaseCommand):
     def _cotizacion(self, clinica, sede, admin, paciente, tratamiento):
         """Cotización aceptada del tratamiento: deja cartera con tres cuotas,
         una ya vencida, para las capturas de cartera y de registrar pago."""
+        from apps.clinicas.models import FormaDePago
         from apps.cotizaciones.models import Cotizacion, FormaPagoCotizacion, ItemCotizacion
         from apps.cotizaciones.services import aceptar_cotizacion
 
@@ -316,10 +317,12 @@ class Command(BaseCommand):
         )
 
         hoy = timezone.localdate()
+        forma_efectivo = FormaDePago.objects.get(clinica=clinica, tipo_base="efectivo")
+        forma_cuotas = FormaDePago.objects.get(clinica=clinica, tipo_base="cuotas")
         cuotas = [
-            ("Cuota inicial", FormaPagoCotizacion.Tipo.EFECTIVO, total / 3, hoy - timedelta(days=12)),
-            ("Segunda cuota", FormaPagoCotizacion.Tipo.CUOTAS, total / 3, hoy + timedelta(days=18)),
-            ("Tercera cuota", FormaPagoCotizacion.Tipo.CUOTAS, total / 3, hoy + timedelta(days=48)),
+            ("Cuota inicial", forma_efectivo, total / 3, hoy - timedelta(days=12)),
+            ("Segunda cuota", forma_cuotas, total / 3, hoy + timedelta(days=18)),
+            ("Tercera cuota", forma_cuotas, total / 3, hoy + timedelta(days=48)),
         ]
         for descripcion, tipo, valor, fecha in cuotas:
             FormaPagoCotizacion.objects.update_or_create(

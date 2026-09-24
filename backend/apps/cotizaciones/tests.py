@@ -12,7 +12,7 @@ from rest_framework.test import APIClient
 
 from apps.clinicas.models import Clinica
 from apps.agenda.models import Cita
-from apps.clinicas.models import Sede, Servicio, ServicioConsentimiento, TipoSesion, TipoSesionProcedimiento, TratamientoCatalogo, TratamientoProcedimiento
+from apps.clinicas.models import FormaDePago, Sede, Servicio, ServicioConsentimiento, TipoSesion, TipoSesionProcedimiento, TratamientoCatalogo, TratamientoProcedimiento
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
 from apps.cotizaciones.pdf import build_cotizacion_pdf_html
@@ -22,6 +22,10 @@ from apps.pacientes.models import Paciente
 
 
 User = get_user_model()
+
+
+def forma_pago_id(clinica, tipo_base):
+    return str(FormaDePago.objects.get(clinica=clinica, tipo_base=tipo_base).id)
 
 
 @override_settings(DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage", MEDIA_ROOT=tempfile.gettempdir())
@@ -72,6 +76,9 @@ class CotizacionFlowTests(TestCase):
             precio="350000.00",
         )
 
+    def _forma_pago(self, tipo_base):
+        return forma_pago_id(self.clinica, tipo_base)
+
     def _payload(self):
         return {
             "paciente": str(self.paciente.id),
@@ -89,7 +96,7 @@ class CotizacionFlowTests(TestCase):
             ],
             "formas_pago": [
                 {
-                    "tipo": "transferencia",
+                    "tipo": self._forma_pago("transferencia"),
                     "descripcion": "Banco XYZ",
                     "valor": "350000.00",
                 }
@@ -105,6 +112,49 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(cotizacion.formas_pago.count(), 1)
         self.assertEqual(response.json()["estado"], Cotizacion.Estado.BORRADOR)
         self.assertEqual(response.json()["items"][0]["periodicidad"], "Cada 4 meses")
+
+    def test_crear_sin_sede_asigna_la_sede_principal(self):
+        response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(Cotizacion.objects.get().sede_id, self.sede.id)
+
+    def test_crear_falla_si_la_clinica_no_tiene_sedes_activas(self):
+        self.sede.activo = False
+        self.sede.save(update_fields=["activo"])
+
+        response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sede", response.json())
+
+    def test_no_permite_quitar_la_sede_al_editar(self):
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=self.paciente,
+            profesional=self.superadmin,
+            sede=self.sede,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+
+        response = self.client.patch(f"/api/v1/cotizaciones/{cotizacion.id}/", {"sede": None}, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sede", response.json())
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.sede_id, self.sede.id)
+
+    def test_no_permite_asignar_una_sede_inactiva(self):
+        inactiva = Sede.objects.create(
+            clinica=self.clinica, nombre="Cerrada", ciudad="Bogota", direccion="Calle 2",
+            telefono="3000000001", horario={}, activo=False,
+        )
+        payload = {**self._payload(), "sede": str(inactiva.id)}
+
+        response = self.client.post("/api/v1/cotizaciones/", payload, format="json")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("sede", response.json())
 
     def test_permite_editar_si_esta_en_borrador(self):
         cotizacion = Cotizacion.objects.create(
@@ -594,8 +644,8 @@ class CotizacionFlowTests(TestCase):
         payload["items"][0]["num_citas"] = 2
         payload["items"][0]["valor_unitario"] = "500000.00"
         payload["formas_pago"] = [
-            {"tipo": "transferencia", "descripcion": "Abono inicial", "valor": "400000.00", "fecha": "2026-10-01"},
-            {"tipo": "efectivo", "descripcion": "Saldo", "valor": "600000.00", "fecha": "2026-11-01"},
+            {"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Abono inicial", "valor": "400000.00", "fecha": "2026-10-01"},
+            {"tipo": forma_pago_id(self.clinica, "efectivo"), "descripcion": "Saldo", "valor": "600000.00", "fecha": "2026-11-01"},
         ]
         cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
         self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
@@ -652,8 +702,8 @@ class CotizacionFlowTests(TestCase):
     def test_se_acepta_si_el_plan_de_pagos_suma_el_total_con_varias_formas(self):
         payload = self._payload()
         payload["formas_pago"] = [
-            {"tipo": "transferencia", "descripcion": "Abono", "valor": "100000.00"},
-            {"tipo": "efectivo", "descripcion": "Saldo", "valor": "250000.00"},
+            {"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Abono", "valor": "100000.00"},
+            {"tipo": forma_pago_id(self.clinica, "efectivo"), "descripcion": "Saldo", "valor": "250000.00"},
         ]
         cotizacion_id = self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"]
 
@@ -739,7 +789,7 @@ class CotizacionFlowTests(TestCase):
                     "valor_unitario": "420000.00",
                     "descuento_porcentaje": "0.00",
                 }],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Banco XYZ", "valor": "420000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Banco XYZ", "valor": "420000.00"}],
             },
             format="json",
         )
@@ -920,7 +970,7 @@ class CotizacionFlowTests(TestCase):
             created_by=self.superadmin,
         )
         PagoRecibido.objects.create(
-            cobro=cobro, medio_pago="efectivo", valor="200000.00", recibido_por=self.superadmin,
+            cobro=cobro, medio_pago_id=self._forma_pago("efectivo"), valor="200000.00", recibido_por=self.superadmin,
         )
         # Un cobro anulado no cuenta.
         cobro_anulado = Cobro.objects.create(
@@ -928,7 +978,7 @@ class CotizacionFlowTests(TestCase):
             sede=self.sede, total="99000.00", estado=Cobro.Estado.ANULADO, created_by=self.superadmin,
         )
         PagoRecibido.objects.create(
-            cobro=cobro_anulado, medio_pago="efectivo", valor="99000.00", recibido_por=self.superadmin,
+            cobro=cobro_anulado, medio_pago_id=self._forma_pago("efectivo"), valor="99000.00", recibido_por=self.superadmin,
         )
 
         response = self.client.get("/api/v1/cotizaciones/")
@@ -1105,7 +1155,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "350000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "350000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "350000.00"}],
             },
             format="json",
         )
@@ -1121,7 +1171,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "280000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "280000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "280000.00"}],
             },
             format="json",
         )
@@ -1155,7 +1205,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "350000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "350000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "350000.00"}],
             },
             format="json",
         )
@@ -1172,7 +1222,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "100000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "100000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "100000.00"}],
             },
             format="json",
         )
@@ -1197,7 +1247,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "500000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "500000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "500000.00"}],
             },
             format="json",
         )
@@ -1212,7 +1262,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                         "valor_unitario": "430000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "430000.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "430000.00"}],
             },
             format="json",
         )
@@ -1229,7 +1279,7 @@ class CotizacionPrecioCampanaTests(TestCase):
                 "paciente": str(self.paciente.id),
                 "sede": str(self.sede.id),
                 "items": [item],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "1.00"}],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "1.00"}],
             },
             format="json",
         )

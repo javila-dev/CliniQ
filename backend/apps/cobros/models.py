@@ -144,27 +144,24 @@ class ItemCobro(models.Model):
         from django.core.exceptions import ValidationError
 
         if self.tipo == self.TipoItem.SERVICIO and not self.servicio_id:
-            raise ValidationError("El ítem de tipo servicio requiere un servicio.")
+            raise ValidationError("El ítem de tipo procedimiento requiere un procedimiento.")
         if self.tipo in {self.TipoItem.INSUMO_CONSUMO, self.TipoItem.PRODUCTO_RETAIL}:
             if not self.insumo_id:
                 raise ValidationError("El ítem de tipo insumo requiere un insumo.")
 
 
 class PagoRecibido(models.Model):
-    class MedioPago(models.TextChoices):
-        EFECTIVO = "efectivo", "Efectivo"
-        TARJETA_DEBITO = "tarjeta_debito", "Tarjeta débito"
-        TARJETA_CREDITO = "tarjeta_credito", "Tarjeta crédito"
-        TRANSFERENCIA = "transferencia", "Transferencia"
-        OTRO = "otro", "Otro"
-
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     cobro = models.ForeignKey(
         Cobro,
         on_delete=models.CASCADE,
         related_name="pagos",
     )
-    medio_pago = models.CharField(max_length=20, choices=MedioPago.choices)
+    medio_pago = models.ForeignKey(
+        "clinicas.FormaDePago",
+        on_delete=models.PROTECT,
+        related_name="pagos_recibidos",
+    )
     valor = models.DecimalField(max_digits=12, decimal_places=2)
     referencia = models.CharField(max_length=100, blank=True)
     fecha = models.DateTimeField(default=timezone.now)

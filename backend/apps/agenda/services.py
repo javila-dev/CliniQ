@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 
 import requests
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from rest_framework.exceptions import ValidationError
 
@@ -93,6 +94,50 @@ def verificar_horario_sede(sede: Sede, fecha_inicio: datetime, fecha_fin: dateti
     fin_habil = timezone.make_aware(datetime.combine(fecha_fin.date(), hora_fin), timezone.get_current_timezone())
 
     return inicio_habil <= fecha_inicio and fecha_fin <= fin_habil
+
+
+def proximo_dia_habil_sede(sede: Sede, desde):
+    """Primer día después de `desde` en que la sede tiene horario definido.
+
+    Si la sede no trabaja mañana (p. ej. no abre los viernes), el próximo día
+    hábil puede caer varios días después (de viernes a lunes).
+    """
+    candidato = desde + timedelta(days=1)
+    for _ in range(14):
+        key_dia = DIAS_SEMANA.get(candidato.weekday())
+        rango = sede.horario.get(key_dia)
+        if rango and len(rango) == 2:
+            return candidato
+        candidato += timedelta(days=1)
+    return desde + timedelta(days=1)
+
+
+def citas_sin_confirmar_proximo_dia_habil(clinica) -> dict:
+    """Citas sin confirmar del próximo día que cada sede trabaja (normalmente
+    mañana; si la sede no abre mañana, del siguiente día hábil de esa sede)."""
+    hoy = timezone.localdate()
+    sedes = list(Sede.objects.filter(clinica=clinica))
+
+    condiciones = Q()
+    fechas_objetivo = set()
+    for sede in sedes:
+        fecha = proximo_dia_habil_sede(sede, hoy)
+        fechas_objetivo.add(fecha)
+        condiciones |= Q(sede=sede, fecha_inicio__date=fecha)
+
+    if not fechas_objetivo:
+        return {"total": 0, "fecha_desde": None, "fecha_hasta": None}
+
+    total = (
+        Cita.objects.filter(condiciones, estado__in=[Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA])
+        .exclude(estado_confirmacion=Cita.EstadoConfirmacion.CONFIRMADO)
+        .count()
+    )
+    return {
+        "total": total,
+        "fecha_desde": min(fechas_objetivo),
+        "fecha_hasta": max(fechas_objetivo),
+    }
 
 
 def obtener_rango_horario_profesional(profesional_id, sede_id, fecha):
@@ -318,14 +363,14 @@ def crear_cita(data: dict, created_by) -> Cita:
         servicio, item_cotizacion, duracion_min_explicito, sesion_ejecutada
     )
     if not duracion_min:
-        raise ValidationError({"error": "Se requiere servicio, item_cotizacion, sesion_ejecutada o duracion_min.", "code": "MISSING_DURATION"})
+        raise ValidationError({"error": "Se requiere un procedimiento, un ítem de cotización, una sesión o una duración.", "code": "MISSING_DURATION"})
 
     fecha_fin = calcular_fecha_fin(fecha_inicio, duracion_min)
 
     if paciente.clinica_id != sede.clinica_id:
         raise ValidationError({"error": "El paciente no pertenece a la clinica de la sede."})
     if servicio and servicio.clinica_id != sede.clinica_id:
-        raise ValidationError({"error": "El servicio no pertenece a la clinica de la sede."})
+        raise ValidationError({"error": "El procedimiento no pertenece a la clinica de la sede."})
     if profesional.clinica_id != sede.clinica_id:
         raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
     if not verificar_horario_sede(sede, fecha_inicio, fecha_fin):

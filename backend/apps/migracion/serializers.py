@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.clinicas.models import FormaDePago
 from apps.migracion.models import LoteMigracion
 
 
@@ -17,20 +18,27 @@ class SesionRealizadaSerializer(serializers.Serializer):
 
 class PagoPrevioSerializer(serializers.Serializer):
     valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
-    medio_pago = serializers.ChoiceField(
-        choices=["efectivo", "tarjeta_debito", "tarjeta_credito", "transferencia", "otro"],
-    )
+    medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     fecha = serializers.DateField()
+
+    def validate_medio_pago(self, value):
+        clinica = self.context.get("clinica")
+        if clinica is not None and value.clinica_id != clinica.id:
+            raise serializers.ValidationError("La forma de pago no pertenece a esta clínica.")
+        return value
 
 
 class CuotaPlanSerializer(serializers.Serializer):
     valor_esperado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     fecha_esperada = serializers.DateField(required=False, allow_null=True)
-    tipo = serializers.ChoiceField(
-        choices=["efectivo", "transferencia", "cuotas", "financiamiento"],
-        default="efectivo",
-    )
+    tipo = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True)
+
+    def validate_tipo(self, value):
+        clinica = self.context.get("clinica")
+        if clinica is not None and value.clinica_id != clinica.id:
+            raise serializers.ValidationError("La forma de pago no pertenece a esta clínica.")
+        return value
 
 
 # Mismos campos que MedicionAntropometrica (menos paciente/nota/cita/fecha),

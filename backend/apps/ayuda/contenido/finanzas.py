@@ -40,7 +40,7 @@ entra cuando entra.
 
 ## Qué se puede cobrar
 
-Un cobro puede incluir servicios, insumos consumidos en la atención y productos
+Un cobro puede incluir procedimientos, insumos consumidos en la atención y productos
 de venta al público. Eso permite que la venta de un producto en mostrador quede
 registrada igual que una sesión.
 
@@ -219,10 +219,10 @@ que la caja no responde: no cuánto entró, sino **cuánto quedó**.
 El reporte recorre esta cadena:
 
 1. **Facturado**: el valor de lo vendido en el periodo.
-2. **Costo de insumos**: lo que costó ejecutar esos servicios.
+2. **Costo de insumos**: lo que costó ejecutar esos procedimientos.
 3. **Margen**: la diferencia entre los dos.
 
-Cada servicio aparece con esas columnas, lo que permite ordenar por margen y ver
+Cada procedimiento aparece con esas columnas, lo que permite ordenar por margen y ver
 qué procedimientos sostienen realmente a la clínica.
 
 ## Facturado no es recaudado
@@ -242,9 +242,9 @@ mayor que el recaudo, y la diferencia está en cartera.
 
 ## Qué hacer con estos números
 
-- **Servicios de margen bajo**: revisa el precio de lista o el costo del insumo.
+- **Procedimientos de margen bajo**: revisa el precio de lista o el costo del insumo.
   A veces el problema no es el precio, es el desperdicio de producto.
-- **Servicios de margen alto y poca venta**: son los candidatos naturales para la
+- **Procedimientos de margen alto y poca venta**: son los candidatos naturales para la
   próxima campaña.
 - **Comparar sedes**: el mismo procedimiento con márgenes distintos por sede
   suele indicar diferencias de precio autorizado o de consumo de insumos.
@@ -256,7 +256,7 @@ permiso de ver el dashboard. Es la separación entre quien necesita operar y qui
 necesita ver la plata de la clínica.
 
 > Mira los resultados con un periodo suficientemente largo. Un mes flojo puede ser
-> estacionalidad; tres meses con el mismo margen bajo en un servicio es una
+> estacionalidad; tres meses con el mismo margen bajo en un procedimiento es una
 > decisión pendiente.
 """,
     },
@@ -289,7 +289,7 @@ este mes, tres meses, seis meses o el último año:
 - **Cotizaciones** del periodo y cuántas se aceptaron.
 - **Cartera**: saldo total y cuánto está vencido.
 - **Cobros de hoy por medio de pago**, útil para cuadrar caja de un vistazo.
-- **Servicios** más vendidos del periodo.
+- **Procedimientos** más vendidos del periodo.
 - **Ocupación por profesional**, comparando el periodo con el día.
 
 Los bloques financieros solo aparecen si tu rol tiene el permiso de reportes

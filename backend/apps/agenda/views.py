@@ -8,7 +8,7 @@ from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -16,7 +16,12 @@ from rest_framework.viewsets import ModelViewSet
 import requests as http_requests
 
 from apps.agenda import services
-from apps.agenda.confirmacion import confirmar_cita, confirmar_manual, crear_registro_confirmacion
+from apps.agenda.confirmacion import (
+    confirmar_cita,
+    confirmar_manual,
+    crear_registro_confirmacion,
+    registrar_no_confirmo,
+)
 from apps.agenda.models import BloqueoAgenda, Cita, RegistroConfirmacion
 from apps.agenda.services import AgendaError, iniciar_checkin_otp_cita, registrar_checkin_foto_cita, verificar_otp_cita
 from apps.agenda.serializers import (
@@ -24,6 +29,7 @@ from apps.agenda.serializers import (
     CambiarEstadoSerializer,
     CitaSerializer,
     ConfirmarManualSerializer,
+    NoConfirmoSerializer,
     RecordatorioPendienteSerializer,
     RegistroConfirmacionSerializer,
     build_consentimiento_info,
@@ -37,6 +43,7 @@ from apps.notificaciones.services import (
     registrar_envio_whatsapp,
     verificar_disponibilidad_whatsapp,
 )
+from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
 from apps.users.models import User
 from apps.users.permissions import CanChangeAppointmentState, RequirePermission, get_clinica_activa
 
@@ -109,7 +116,7 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (CanChangeAppointmentState,)
         elif self.action == "destroy":
             permission_classes = (RequirePermission("agenda.citas.eliminar"),)
-        elif self.action == "confirmar_manual":
+        elif self.action in {"confirmar_manual", "no_confirmo"}:
             permission_classes = (RequirePermission("agenda.citas.confirmar_manual"),)
         elif self.action in {"solicitar_recordatorio", "enviar_recordatorio_inmediato"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
@@ -135,6 +142,7 @@ class CitaViewSet(ModelViewSet):
         estado_in = self.request.query_params.get("estado__in")
         estado_confirmacion = self.request.query_params.get("estado_confirmacion")
         profesional = self.request.query_params.get("profesional")
+        profesionales = self.request.query_params.get("profesional__in")
         sede = self.request.query_params.get("sede")
         fecha_inicio_date = self.request.query_params.get("fecha_inicio__date")
         fecha_inicio_date_gte = self.request.query_params.get("fecha_inicio__date__gte")
@@ -150,10 +158,15 @@ class CitaViewSet(ModelViewSet):
             queryset = queryset.filter(estado__in=[e.strip() for e in estado_in.split(",") if e.strip()])
         if estado_confirmacion:
             queryset = queryset.filter(estado_confirmacion=estado_confirmacion)
-        if profesional:
+        if profesionales:
+            queryset = queryset.filter(
+                profesional_id__in=[item.strip() for item in profesionales.split(",") if item.strip()]
+            )
+        elif profesional:
             queryset = queryset.filter(profesional_id=profesional)
-        if sede:
-            queryset = queryset.filter(sede_id=sede)
+        sede_ids = sede_ids_para_filtro(user, sede)
+        if sede_ids is not None:
+            queryset = queryset.filter(sede_id__in=sede_ids)
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
         if fecha_inicio_date_gte:
@@ -215,7 +228,7 @@ class CitaViewSet(ModelViewSet):
         if paciente.clinica_id != sede.clinica_id:
             raise ValidationError({"error": "El paciente no pertenece a la clinica de la sede."})
         if servicio and servicio.clinica_id != sede.clinica_id:
-            raise ValidationError({"error": "El servicio no pertenece a la clinica de la sede."})
+            raise ValidationError({"error": "El procedimiento no pertenece a la clinica de la sede."})
         if profesional.clinica_id != sede.clinica_id:
             raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
         if not services.verificar_horario_sede(sede, fecha_inicio, fecha_fin):
@@ -279,7 +292,13 @@ class CitaViewSet(ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        if nuevo_estado not in FLUJOS_ESTADO[cita.estado]:
+        # Una cita pendiente cuya hora ya pasó sin confirmarse también puede cerrarse como no asistió.
+        pendiente_vencida = (
+            cita.estado == Cita.Estado.PENDIENTE
+            and nuevo_estado == Cita.Estado.NO_ASISTIO
+            and cita.fecha_inicio <= timezone.now()
+        )
+        if nuevo_estado not in FLUJOS_ESTADO[cita.estado] and not pendiente_vencida:
             logger.warning(
                 "DEBUG cambiar_estado 400 flujo_no_valido | cita_id=%s estado_actual=%s nuevo_estado=%s payload=%s",
                 cita.id,
@@ -441,13 +460,13 @@ class CitaViewSet(ModelViewSet):
                 servicio = servicio_qs.get(id=servicio_id)
             except Servicio.DoesNotExist as exc:
                 logger.debug("[slots_disponibles] ERROR: servicio %s no encontrado", servicio_id)
-                raise ValidationError({"servicio_id": "El servicio no pertenece a tu clinica."}) from exc
+                raise ValidationError({"servicio_id": "El procedimiento no pertenece a tu clinica."}) from exc
             if servicio.clinica_id != sede.clinica_id:
                 logger.debug(
                     "[slots_disponibles] ERROR: clinica servicio (%s) != clinica sede (%s)",
                     servicio.clinica_id, sede.clinica_id,
                 )
-                raise ValidationError({"servicio_id": "El servicio no pertenece a la clinica de la sede."})
+                raise ValidationError({"servicio_id": "El procedimiento no pertenece a la clinica de la sede."})
             duracion_min = servicio.duracion_min
             logger.debug("[slots_disponibles] duracion_min desde servicio: %s", duracion_min)
 
@@ -528,6 +547,14 @@ class CitaViewSet(ModelViewSet):
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="sin_confirmar_proximo_dia_habil", pagination_class=None)
+    def sin_confirmar_proximo_dia_habil(self, request, *args, **kwargs):
+        """Citas sin confirmar del próximo día que la sede trabaja, para el aviso del dashboard y la agenda."""
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response({"total": 0, "fecha_desde": None, "fecha_hasta": None})
+        return Response(services.citas_sin_confirmar_proximo_dia_habil(clinica))
+
     @action(detail=True, methods=["patch"], url_path="confirmar_manual")
     def confirmar_manual(self, request, pk=None):
         serializer = ConfirmarManualSerializer(data=request.data)
@@ -537,6 +564,22 @@ class CitaViewSet(ModelViewSet):
             request.user,
             medio=serializer.validated_data.get("medio", ""),
             nota=serializer.validated_data.get("nota", ""),
+        )
+        return Response(self.get_serializer(cita).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="no_confirmo")
+    def no_confirmo(self, request, pk=None):
+        """Se contactó al paciente pero no confirmó: la cita sigue igual, queda el registro."""
+        cita = self.get_object()
+        if cita.estado not in {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}:
+            raise ValidationError({"error": "Solo se registra en citas pendientes o confirmadas."})
+        serializer = NoConfirmoSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        cita = registrar_no_confirmo(
+            cita,
+            request.user,
+            medio=serializer.validated_data.get("medio", ""),
+            nota=serializer.validated_data["nota"],
         )
         return Response(self.get_serializer(cita).data, status=status.HTTP_200_OK)
 
@@ -923,8 +966,14 @@ class BloqueoAgendaViewSet(ModelViewSet):
 
         if profesional:
             queryset = queryset.filter(profesional_id=profesional)
-        if sede:
-            queryset = queryset.filter(sede_id=sede)
+        sede_ids = sede_ids_para_filtro(user, sede)
+        if sede_ids is not None:
+            # Sin filtro explicito, un usuario acotado ve sus sedes y ademas los
+            # bloqueos sin sede (aplican a toda la clinica).
+            filtro = Q(sede_id__in=sede_ids)
+            if not sede:
+                filtro |= Q(sede__isnull=True)
+            queryset = queryset.filter(filtro)
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
         if estado:
@@ -937,6 +986,11 @@ class BloqueoAgendaViewSet(ModelViewSet):
         user = self.request.user
         sede = serializer.validated_data.get("sede")
         clinica = getattr(sede, "clinica", None) or getattr(user, "clinica", None)
+        # Un usuario acotado solo bloquea sus sedes; el bloqueo de toda la
+        # clinica (sin sede) queda para quien ve todas.
+        acotadas = user_sede_ids_acotadas(user)
+        if acotadas is not None and (sede is None or sede.id not in acotadas):
+            raise PermissionDenied("Solo puedes crear bloqueos en tus sedes.")
 
         if user_has_permission(user, "agenda.aprobar_bloqueo", request=self.request):
             estado = BloqueoAgenda.Estado.APROBADO

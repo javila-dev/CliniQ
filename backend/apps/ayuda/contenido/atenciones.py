@@ -19,7 +19,7 @@ Cada paciente en la cola aparece con:
 
 - Su **posición** en el orden del día.
 - La **hora** de su cita.
-- El **nombre del paciente** y el servicio que viene a recibir.
+- El **nombre del paciente** y el procedimiento que viene a recibir.
 - Un **escudo verde o ámbar** según si sus consentimientos están al día.
 - Su **estado**: confirmada, en espera, en curso.
 

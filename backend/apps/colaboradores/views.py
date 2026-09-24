@@ -1,5 +1,8 @@
 import logging
+from uuid import UUID
 
+from django.contrib.auth import get_user_model
+from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -20,6 +23,7 @@ from apps.users.permissions import HasClinicamente, RequirePermission, get_clini
 
 
 logger = logging.getLogger(__name__)
+User = get_user_model()
 
 
 class ColaboradorViewSet(HasClinicamente, ModelViewSet):
@@ -131,17 +135,83 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="profesionales", pagination_class=None)
     def profesionales(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(
-            self.get_queryset().filter(
-                activo=True,
-                user__es_profesional=True,
-            )
+        # La fuente de verdad para "atiende pacientes" es el usuario, no su
+        # perfil laboral. Algunos usuarios legados pueden no tener Colaborador
+        # y aun así ser profesionales válidos con citas ya asignadas.
+        queryset = (
+            User.objects.filter(activo=True, es_profesional=True)
+            .filter(Q(colaborador__activo=True) | Q(colaborador__isnull=True))
+            .select_related("rol_dinamico", "colaborador", "colaborador__sede_principal")
+            .prefetch_related("colaborador__especialidades", "colaborador__sedes")
         )
+        clinica = get_clinica_activa(request)
+        if clinica is not None:
+            queryset = queryset.filter(clinica=clinica)
+
         sede_id = request.query_params.get("sede_id")
         if sede_id:
-            queryset = queryset.filter(sedes__id=sede_id).distinct()
-        serializer = ProfesionalListSerializer(queryset, many=True)
+            queryset = queryset.filter(
+                Q(colaborador__sedes__id=sede_id) | Q(colaborador__sede_principal_id=sede_id)
+            ).distinct()
+
+        # Solo filtra por procedimiento si la clínica lo activó. Si no, cualquier
+        # profesional de la sede puede atender cualquier procedimiento y los parámetros
+        # se ignoran, así el frontend puede enviarlos siempre. Con varios procedimientos
+        # (sesión combinada) basta con que el profesional realice al menos uno.
+        servicio_ids, item_id, sesion_id = self._leer_filtro_por_procedimiento(request)
+        if clinica is not None and clinica.filtrar_profesionales_por_procedimiento:
+            requeridos = self._procedimientos_requeridos(clinica, servicio_ids, item_id, sesion_id)
+            if requeridos:
+                queryset = queryset.filter(colaborador__especialidades__id__in=requeridos).distinct()
+
+        serializer = ProfesionalListSerializer(queryset.order_by("last_name", "first_name"), many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _parse_uuid(valor, campo):
+        try:
+            return UUID(valor)
+        except ValueError:
+            raise ValidationError({campo: f"'{valor}' no es un id válido."})
+
+    def _leer_filtro_por_procedimiento(self, request):
+        """Lee y valida los ids recibidos, aunque la clínica no tenga el filtro activo."""
+        params = request.query_params
+        servicio_ids = {
+            self._parse_uuid(valor.strip(), "servicio_ids")
+            for valor in params.get("servicio_ids", "").split(",")
+            if valor.strip()
+        }
+        item_id = params.get("item_cotizacion_id")
+        sesion_id = params.get("sesion_ejecutada_id")
+        return (
+            servicio_ids,
+            self._parse_uuid(item_id, "item_cotizacion_id") if item_id else None,
+            self._parse_uuid(sesion_id, "sesion_ejecutada_id") if sesion_id else None,
+        )
+
+    @staticmethod
+    def _procedimientos_requeridos(clinica, servicio_ids, item_id, sesion_id) -> set:
+        """Procedimientos por los que se filtra, dados por id o por el ítem/sesión que se agenda."""
+        # Import diferido: agenda.serializers importa colaboradores.models.
+        from apps.agenda.serializers import procedimientos_de_la_cita
+        from apps.cotizaciones.models import ItemCotizacion
+        from apps.protocolos.models import SesionProcedimiento
+
+        requeridos = set(servicio_ids)
+        if item_id or sesion_id:
+            item = (
+                ItemCotizacion.objects.filter(id=item_id, cotizacion__clinica=clinica).first() if item_id else None
+            )
+            sesion = (
+                SesionProcedimiento.objects.select_related("tipo_sesion")
+                .filter(id=sesion_id, tratamiento__paciente__clinica=clinica)
+                .first()
+                if sesion_id
+                else None
+            )
+            requeridos |= procedimientos_de_la_cita(item_cotizacion=item, sesion=sesion)
+        return requeridos
 
 
 class HorarioColaboradorViewSet(ModelViewSet):

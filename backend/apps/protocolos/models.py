@@ -229,6 +229,17 @@ class ConsentimientoPaciente(BaseModel):
         blank=True,
         related_name="consentimientos_pacientes",
     )
+    cita = models.ForeignKey(
+        "agenda.Cita",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="consentimientos_protocolos",
+        help_text=(
+            "Cita en la que se registró este consentimiento. Solo se usa cuando el "
+            "procedimiento exige firmar el consentimiento en cada ejecución (no por vigencia)."
+        ),
+    )
     fecha_firma = models.DateField()
     vigencia_hasta = models.DateField()
     metodo = models.CharField(max_length=30, choices=Metodo.choices)

@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.agenda.models import BloqueoAgenda, Cita, RegistroConfirmacion
 from apps.clinicas.models import Sede
+from apps.colaboradores.models import Colaborador
 from apps.core.storage import get_signed_url
 from apps.historia_clinica.services import (
     consentimiento_informado_vigente,
@@ -49,7 +50,7 @@ class RegistroConfirmacionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-def _consentimientos_desde_sesion(sesion, paciente_id):
+def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
     """Calcula consentimiento_info a partir de los procedimientos de una sesión pre-vinculada."""
     if sesion.tipo_sesion_id:
         procedimientos = [
@@ -77,8 +78,11 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
             if token in seen_tokens:
                 continue
             seen_tokens.add(token)
-            consentimiento = consentimiento_informado_vigente(paciente_id, token)
-            vigente = consentimiento_satisfecho(paciente_id, token, informado=consentimiento)
+            cada_vez = relacion.requiere_firma_cada_vez
+            consentimiento = consentimiento_informado_vigente(paciente_id, token, cita_id=cita_id, requiere_cada_vez=cada_vez)
+            vigente = consentimiento_satisfecho(
+                paciente_id, token, informado=consentimiento, cita_id=cita_id, requiere_cada_vez=cada_vez
+            )
             if not vigente:
                 todos_firmados = False
             resultado.append(
@@ -88,6 +92,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id):
                     "vigente": vigente,
                     "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                     "archivo_url": _archivo_url(consentimiento),
+                    "requiere_firma_cada_vez": cada_vez,
                 }
             )
 
@@ -104,20 +109,24 @@ def build_consentimiento_info(cita):
 
     sesion = _sesion_vinculada_o_pendiente(cita)
     if sesion is not None and (sesion.tipo_sesion_id or sesion.procedimiento_id):
-        return _consentimientos_desde_sesion(sesion, cita.paciente_id)
+        return _consentimientos_desde_sesion(sesion, cita.paciente_id, cita_id=cita.id)
 
     if not cita.servicio_id:
         return {"todos_firmados": True, "consentimientos": []}
-    templates = cita.servicio.consentimientos_requeridos.filter(activo=True)
-    if not templates.exists():
+    relaciones = cita.servicio.consentimientos_requeridos_set.filter(activo=True).select_related("template")
+    if not relaciones.exists():
         return {"todos_firmados": True, "consentimientos": []}
 
     resultado = []
     todos_firmados = True
-    for template in templates:
+    for relacion in relaciones:
+        template = relacion.template
         token = template.template_token or str(template.id)
-        consentimiento = consentimiento_informado_vigente(cita.paciente_id, token)
-        vigente = consentimiento_satisfecho(cita.paciente_id, token, informado=consentimiento)
+        cada_vez = relacion.requiere_firma_cada_vez
+        consentimiento = consentimiento_informado_vigente(cita.paciente_id, token, cita_id=cita.id, requiere_cada_vez=cada_vez)
+        vigente = consentimiento_satisfecho(
+            cita.paciente_id, token, informado=consentimiento, cita_id=cita.id, requiere_cada_vez=cada_vez
+        )
         if not vigente:
             todos_firmados = False
         resultado.append(
@@ -127,9 +136,33 @@ def build_consentimiento_info(cita):
                 "vigente": vigente,
                 "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                 "archivo_url": _archivo_url(consentimiento),
+                "requiere_firma_cada_vez": cada_vez,
             }
         )
     return {"todos_firmados": todos_firmados, "consentimientos": resultado}
+
+
+def procedimientos_de_la_cita(*, servicio=None, item_cotizacion=None, sesion=None) -> set:
+    """Ids de los procedimientos que se realizan en la cita.
+
+    Sirve para filtrar por profesional. Vacío significa que no hay un procedimiento
+    concreto (consulta libre, o un ítem sin sesión definida) y no se restringe.
+    """
+    ids = set()
+    if servicio is not None:
+        ids.add(servicio.id)
+    if sesion is not None:
+        if sesion.tipo_sesion_id:
+            ids.update(
+                sesion.tipo_sesion.procedimientos.filter(activo=True).values_list("procedimiento_id", flat=True)
+            )
+        if sesion.procedimiento_id:
+            ids.add(sesion.procedimiento_id)
+    if not ids and item_cotizacion is not None:
+        procedimiento_id = item_cotizacion.procedimiento_id or item_cotizacion.servicio_id
+        if procedimiento_id:
+            ids.add(procedimiento_id)
+    return ids
 
 
 class CitaSerializer(serializers.ModelSerializer):
@@ -364,13 +397,13 @@ class CitaSerializer(serializers.ModelSerializer):
 
         if not self.instance and not servicio and not item_cotizacion and not duracion_min and not sesion_ejecutada_uuid:
             raise serializers.ValidationError(
-                {"error": "Se requiere servicio, item_cotizacion, sesion_ejecutada o duracion_min.", "code": "MISSING_DURATION"}
+                {"error": "Se requiere un procedimiento, un ítem de cotización, una sesión o una duración.", "code": "MISSING_DURATION"}
             )
 
         if paciente and sede and paciente.clinica_id != sede.clinica_id:
             raise serializers.ValidationError({"paciente": "El paciente no pertenece a la clinica de la sede."})
         if servicio and sede and servicio.clinica_id != sede.clinica_id:
-            raise serializers.ValidationError({"servicio": "El servicio no pertenece a la clinica de la sede."})
+            raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la clinica de la sede."})
         if profesional and sede and profesional.clinica_id != sede.clinica_id:
             raise serializers.ValidationError({"profesional": "El profesional no pertenece a la clinica de la sede."})
         if item_cotizacion:
@@ -386,7 +419,7 @@ class CitaSerializer(serializers.ModelSerializer):
             if paciente and item_cotizacion.cotizacion.paciente_id != paciente.id:
                 raise serializers.ValidationError({"item_cotizacion": "El item no corresponde al paciente de la cita."})
             if servicio and item_cotizacion.servicio_id and item_cotizacion.servicio_id != servicio.id:
-                raise serializers.ValidationError({"item_cotizacion": "El item no corresponde al servicio de la cita."})
+                raise serializers.ValidationError({"item_cotizacion": "El item no corresponde al procedimiento de la cita."})
             citas_usadas = item_cotizacion.citas_no_canceladas()
             if self.instance and self.instance.item_cotizacion_id == item_cotizacion.id and self.instance.estado != Cita.Estado.CANCELADA:
                 citas_usadas = max(0, citas_usadas - 1)
@@ -394,7 +427,46 @@ class CitaSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError(
                     {"error": "Este item no tiene sesiones disponibles.", "code": "SIN_SESIONES_DISPONIBLES"}
                 )
+        self._validar_profesional_del_procedimiento(
+            sede=sede,
+            profesional=profesional,
+            servicio=servicio,
+            item_cotizacion=item_cotizacion,
+            sesion=attrs.get("sesion_ejecutada"),
+        )
         return attrs
+
+    def _validar_profesional_del_procedimiento(self, *, sede, profesional, servicio, item_cotizacion, sesion):
+        """Si la clínica filtra por procedimiento, el profesional debe realizarlo.
+
+        No es retroactivo: al editar solo se revisa si cambia el profesional o el
+        procedimiento, para no romper citas creadas antes de activar el filtro.
+        Con varios procedimientos (sesión combinada) basta con que realice uno.
+        """
+        if not (sede and profesional) or not sede.clinica.filtrar_profesionales_por_procedimiento:
+            return
+        if (
+            self.instance
+            and sesion is None
+            and profesional.id == self.instance.profesional_id
+            and (servicio.id if servicio else None) == self.instance.servicio_id
+            and (item_cotizacion.id if item_cotizacion else None) == self.instance.item_cotizacion_id
+        ):
+            return
+        if sesion is None and self.instance:
+            # Al cambiar el profesional de una cita de tratamiento, los procedimientos
+            # salen de la sesión que ya tiene vinculada.
+            sesion = SesionProcedimiento.objects.select_related("tipo_sesion").filter(cita_id=self.instance.id).first()
+        requeridos = procedimientos_de_la_cita(servicio=servicio, item_cotizacion=item_cotizacion, sesion=sesion)
+        if not requeridos:
+            return
+        if not Colaborador.objects.filter(user=profesional, especialidades__id__in=requeridos).exists():
+            raise serializers.ValidationError(
+                {
+                    "profesional": "Este profesional no realiza el procedimiento elegido.",
+                    "code": "PROFESIONAL_NO_REALIZA_PROCEDIMIENTO",
+                }
+            )
 
 
 class BloqueoAgendaSerializer(serializers.ModelSerializer):
@@ -481,6 +553,11 @@ class CambiarEstadoSerializer(serializers.Serializer):
 class ConfirmarManualSerializer(serializers.Serializer):
     medio = serializers.ChoiceField(choices=RegistroConfirmacion.Medio.choices, required=False, allow_blank=True)
     nota = serializers.CharField(required=False, allow_blank=True)
+
+
+class NoConfirmoSerializer(serializers.Serializer):
+    medio = serializers.ChoiceField(choices=RegistroConfirmacion.Medio.choices, required=False, allow_blank=True)
+    nota = serializers.CharField(allow_blank=False, trim_whitespace=True)
 
 
 class RecordatorioPendienteSerializer(serializers.ModelSerializer):

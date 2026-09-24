@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 
 User = get_user_model()
 from django.db import IntegrityError, transaction
-from django.db.models import Exists, OuterRef, Prefetch, ProtectedError
+from django.db.models import Count, Exists, OuterRef, Prefetch, ProtectedError
 from django.shortcuts import get_object_or_404
 from rest_framework import generics, status
 from rest_framework.decorators import action
@@ -20,6 +20,7 @@ from apps.clinicas.models import (
     CampanaItem,
     Clinica,
     DiagramaCorporal,
+    FormaDePago,
     GrupoZonas,
     GrupoZonasDiagrama,
     PasoProtocolo,
@@ -46,6 +47,7 @@ from apps.clinicas.serializers import (
     ClinicaSerializer,
     ClinicaSlotIntervalSerializer,
     DiagramaCorporalSerializer,
+    FormaDePagoSerializer,
     GrupoZonasSerializer,
     GrupoZonasDiagramaSerializer,
     MiClinicaSerializer,
@@ -69,11 +71,20 @@ from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.core.logging import registrar_accion
 from apps.core.models import LogAccion
 from apps.core.serializers import LogAccionSerializer
+from apps.clinicas.preparacion import (
+    construir_preparacion,
+    guardar_preferencias,
+    marcar_como_profesional,
+    procedimientos_sin_profesional as _procedimientos_sin_profesional,
+    profesionales_activos as _profesionales_activos,
+)
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file
+from apps.users.authorization import user_has_permission, user_sede_ids_acotadas
 from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
+
 
 
 class ClinicaViewSet(ModelViewSet):
@@ -99,7 +110,10 @@ class ClinicaViewSet(ModelViewSet):
         raise MethodNotAllowed("DELETE")
 
     def get_permissions(self):
-        if self.action in {"partial_update", "update", "slot_interval", "recordatorio_config", "mi_clinica_logo", "clinica_logo"}:
+        if self.action in {
+            "partial_update", "update", "slot_interval", "recordatorio_config", "mi_clinica_logo", "clinica_logo",
+            "asignar_profesionales_a_procedimientos", "preparacion", "preparacion_yo_atiendo",
+        }:
             permission_classes = (RequirePermission("clinicas.editar"),)
         elif self.action == "asignar_plan":
             permission_classes = (IsSuperAdmin,)
@@ -146,58 +160,60 @@ class ClinicaViewSet(ModelViewSet):
             serializer = self.get_serializer(clinica)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
+    @action(detail=False, methods=["get"], url_path="procedimientos-sin-profesional")
+    def procedimientos_sin_profesional(self, request):
+        """Resumen previo a activar el filtro por procedimiento."""
+        clinica = self._get_request_clinica()
+        return Response({
+            "procedimientos": [
+                {"id": str(procedimiento.id), "nombre": procedimiento.nombre}
+                for procedimiento in _procedimientos_sin_profesional(clinica)
+            ],
+            "total_profesionales": _profesionales_activos(clinica).count(),
+        })
+
+    @action(detail=False, methods=["post"], url_path="asignar-profesionales-a-procedimientos")
+    def asignar_profesionales_a_procedimientos(self, request):
+        """Asigna todos los profesionales activos a los procedimientos que no tienen ninguno."""
+        clinica = self._get_request_clinica()
+        profesionales = list(_profesionales_activos(clinica))
+        if not profesionales:
+            raise ValidationError(
+                {"error": "No hay profesionales activos a quienes asignar.", "code": "SIN_PROFESIONALES"}
+            )
+        procedimientos = _procedimientos_sin_profesional(clinica)
+        with transaction.atomic():
+            for colaborador in profesionales:
+                colaborador.especialidades.add(*procedimientos)
+        return Response({
+            "procedimientos_actualizados": len(procedimientos),
+            "profesionales": len(profesionales),
+        })
+
     @action(detail=False, methods=["get"], url_path="setup-checklist")
     def setup_checklist(self, request):
-        from apps.users.models import User as UserModel
-
+        """Estado de "Preparar mi clínica", calculado desde los datos reales."""
         clinica = self._get_request_clinica()
+        return Response(construir_preparacion(clinica, request.user))
 
-        tiene_logo = bool(clinica.logo)
-        tiene_telefono = bool(clinica.telefono)
-        tiene_sedes = Sede.objects.filter(clinica=clinica, activo=True).exists()
-        from apps.colaboradores.models import Colaborador
-        tiene_profesional = Colaborador.objects.filter(
-            user__clinica=clinica, activo=True, user__is_active=True
-        ).exists()
-        tiene_servicios = Servicio.objects.filter(clinica=clinica, activo=True).exists()
-        tiene_consentimientos = DocumensoConsentimientoTemplate.objects.filter(
-            clinica=clinica, activo=True, nombre__gt=""
-        ).exists()
+    @action(detail=False, methods=["post"], url_path="preparacion")
+    def preparacion(self, request):
+        """Guarda qué vende la clínica y qué pasos opcionales se omiten o se restauran."""
+        clinica = self._get_request_clinica()
+        guardar_preferencias(
+            clinica,
+            modelo=request.data.get("modelo"),
+            omitir=request.data.get("omitir"),
+            restaurar=request.data.get("restaurar"),
+        )
+        return Response(construir_preparacion(clinica, request.user))
 
-        return Response({
-            "items": [
-                {
-                    "key": "clinica",
-                    "label": "Datos de la clínica",
-                    "completado": tiene_logo and tiene_telefono,
-                    "href": "/configuracion/clinica",
-                },
-                {
-                    "key": "sedes",
-                    "label": "Configuración de sedes",
-                    "completado": tiene_sedes,
-                    "href": "/configuracion/sedes",
-                },
-                {
-                    "key": "usuarios",
-                    "label": "Agregar un profesional",
-                    "completado": tiene_profesional,
-                    "href": "/equipo/personal",
-                },
-                {
-                    "key": "servicios",
-                    "label": "Configurar servicios",
-                    "completado": tiene_servicios,
-                    "href": "/configuracion/procedimientos",
-                },
-                {
-                    "key": "consentimientos",
-                    "label": "Configurar consentimientos",
-                    "completado": tiene_consentimientos,
-                    "href": "/configuracion/consentimientos",
-                },
-            ]
-        })
+    @action(detail=False, methods=["post"], url_path="preparacion/yo-atiendo")
+    def preparacion_yo_atiendo(self, request):
+        """Atajo para quien configura y también atiende pacientes."""
+        clinica = self._get_request_clinica()
+        marcar_como_profesional(request.user, clinica)
+        return Response(construir_preparacion(clinica, request.user))
 
     def mi_clinica(self, request):
         clinica = self._get_request_clinica()
@@ -570,7 +586,11 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
         elif self.action == "destroy":
             permission_classes = (RequirePermission("sedes.eliminar"),)
         else:
-            permission_classes = (RequirePermission("sedes.ver"),)
+            # Leer sedes es dato de referencia que necesitan todos los selectores
+            # (agenda, cotizaciones, caja...). Exigir `sedes.ver` dejaba vacios esos
+            # selectores en roles personalizados que no marcaban esa capacidad.
+            # HasClinicamente ya acota el queryset a la clinica activa.
+            permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
@@ -585,6 +605,12 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
             queryset = queryset.filter(ciudad__iexact=ciudad)
         if clinica and self.request.user.rol == "superadmin":
             queryset = queryset.filter(clinica_id=clinica)
+        # Usuarios acotados a sedes (perfil de colaborador) solo ven las suyas;
+        # quien gestiona sedes necesita verlas todas en configuracion.
+        if not user_has_permission(self.request.user, "sedes.gestionar", request=self.request):
+            sede_ids = user_sede_ids_acotadas(self.request.user)
+            if sede_ids is not None:
+                queryset = queryset.filter(id__in=sede_ids)
         return queryset
 
     def perform_create(self, serializer):
@@ -608,6 +634,45 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
         if sede_tiene_citas(instance):
             raise ValidationError({"error": "No se puede eliminar una sede con citas asociadas."})
         instance.delete()
+
+
+class FormaDePagoViewSet(ModelViewSet):
+    serializer_class = FormaDePagoSerializer
+    queryset = FormaDePago.objects.select_related("clinica").all()
+    ordering_fields = ("orden", "nombre", "created_at")
+    filterset_fields = ("activo", "tipo_base")
+
+    def get_permissions(self):
+        if self.action in {"create", "update", "partial_update", "destroy"}:
+            return [RequirePermission("configuracion.formas_pago.gestionar")()]
+        return [RequirePermission("configuracion.formas_pago.ver")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            queryset = queryset.filter(clinica=clinica)
+        elif self.request.user.rol != "superadmin":
+            queryset = queryset.none()
+        return queryset
+
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa.", "code": "CLINICA_REQUERIDA"})
+        serializer.save(clinica=clinica)
+
+    def perform_destroy(self, instance):
+        if instance.es_sistema:
+            raise ValidationError(
+                {"error": "Esta forma de pago viene por defecto: desactívala en vez de eliminarla.", "code": "FORMA_PAGO_SISTEMA"}
+            )
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError(
+                {"error": "No se puede eliminar: ya tiene pagos o cuotas registrados. Desactívala en su lugar.", "code": "FORMA_PAGO_EN_USO"}
+            )
 
 
 class ClinicaWriteMixin:
@@ -875,6 +940,7 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         template_token = request.data.get("template_token")
         tipo = request.data.get("tipo")
         orden = request.data.get("orden") or servicio.consentimientos_requeridos_set.filter(activo=True).count() + 1
+        requiere_firma_cada_vez = bool(request.data.get("requiere_firma_cada_vez", False))
         logger.warning(
             "DEBUG procedimiento consentimiento POST | user_id=%s servicio_id=%s clinica_id=%s payload=%s template_id=%s template_token=%s tipo=%s orden=%s",
             getattr(request.user, "id", None),
@@ -906,13 +972,14 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         relacion, created = ServicioConsentimiento.objects.get_or_create(
             servicio=servicio,
             template=template,
-            defaults={"orden": orden},
+            defaults={"orden": orden, "requiere_firma_cada_vez": requiere_firma_cada_vez},
         )
         if not created:
             if not relacion.activo:
                 relacion.activo = True
             relacion.orden = orden
-            relacion.save(update_fields=["activo", "orden", "updated_at"])
+            relacion.requiere_firma_cada_vez = requiere_firma_cada_vez
+            relacion.save(update_fields=["activo", "orden", "requiere_firma_cada_vez", "updated_at"])
         logger.warning(
             "DEBUG procedimiento consentimiento OK | user_id=%s servicio_id=%s relacion_id=%s template_uuid=%s template_token=%s created=%s orden=%s activo=%s",
             getattr(request.user, "id", None),
@@ -1185,6 +1252,7 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
         queryset = super().get_queryset()
         activo = self.request.query_params.get("activo")
         clinica = self.request.query_params.get("clinica")
+        queryset = queryset.annotate(_pacientes_con_tratamiento=Count("ejecuciones", distinct=True))
         if activo is not None:
             queryset = queryset.filter(activo=activo.lower() == "true")
         if clinica and self.request.user.rol == "superadmin":
@@ -1263,6 +1331,9 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
                 "nombre": tratamiento.nombre,
                 "precio_estimado": tratamiento.precio_estimado,
                 "total_sesiones": tratamiento.total_sesiones,
+                # Detalle de bloques (ya prefetcheado): la cotización lo muestra
+                # en el modal "ver sesiones" del tratamiento.
+                "tipos_sesion": TipoSesionSerializer(tratamiento.tipos_sesion.all(), many=True).data,
             }
             for tratamiento in queryset
         ]

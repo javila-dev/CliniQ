@@ -141,6 +141,23 @@ class Clinica(BaseModel):
         default=0,
         help_text="Días de gracia después del vencimiento antes de bloquear la agenda.",
     )
+    preparacion = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text=(
+            "Preferencias de la pantalla Preparar mi clínica: "
+            "{'modelo': 'procedimientos'|'tratamientos'|'ambos', 'omitidos': [claves de pasos opcionales]}. "
+            "El progreso no se guarda: se calcula desde los datos reales."
+        ),
+    )
+    filtrar_profesionales_por_procedimiento = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si True, al agendar solo se ofrecen los profesionales asociados al procedimiento "
+            "elegido (Colaborador.especialidades). Si False, cualquier profesional de la sede "
+            "puede atender cualquier procedimiento."
+        ),
+    )
     token_registro_publico = models.CharField(
         max_length=64,
         unique=True,
@@ -330,6 +347,13 @@ class ServicioConsentimiento(BaseModel):
         related_name="servicios_que_lo_requieren",
     )
     orden = models.PositiveIntegerField(default=1)
+    requiere_firma_cada_vez = models.BooleanField(
+        default=False,
+        help_text=(
+            "Si True, el paciente debe firmar este consentimiento en cada cita donde se "
+            "realice el procedimiento, en vez de reutilizar una firma vigente por meses."
+        ),
+    )
 
     class Meta:
         db_table = "servicios_consentimientos"
@@ -620,3 +644,47 @@ class ServicioGrupoZonas(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.servicio.nombre} → {self.grupo.nombre}"
+
+
+class FormaDePago(BaseModel):
+    """Catálogo de formas de pago de una clínica.
+
+    Unifica lo que antes eran varios enums sueltos (medio real de un pago
+    recibido, y tipo de plan declarado en una cotización/cuota): ambos ejes
+    usan el mismo catálogo porque en la práctica comparten vocabulario
+    (efectivo, transferencia, tarjeta...). `tipo_base` es fijo (no lo edita la
+    clínica) y es lo que debe usar cualquier lógica de negocio (p. ej. el
+    arqueo de caja filtrando efectivo) en vez del `nombre`, que sí es editable.
+    """
+
+    class TipoBase(models.TextChoices):
+        EFECTIVO = "efectivo", "Efectivo"
+        TRANSFERENCIA = "transferencia", "Transferencia"
+        TARJETA_DEBITO = "tarjeta_debito", "Tarjeta débito"
+        TARJETA_CREDITO = "tarjeta_credito", "Tarjeta crédito"
+        CREDITO = "credito", "Crédito"
+        CUOTAS = "cuotas", "Cuotas"
+        FINANCIAMIENTO = "financiamiento", "Financiamiento"
+        OTRO = "otro", "Otro"
+
+    clinica = models.ForeignKey(
+        "clinicas.Clinica",
+        on_delete=models.CASCADE,
+        related_name="formas_pago",
+    )
+    nombre = models.CharField(max_length=50)
+    tipo_base = models.CharField(max_length=20, choices=TipoBase.choices)
+    # Formas de pago sembradas por el sistema al crear la clínica; no se pueden
+    # borrar (solo desactivar) para no romper referencias históricas.
+    es_sistema = models.BooleanField(default=False)
+    orden = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        db_table = "formas_pago"
+        ordering = ["orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["clinica", "nombre"], name="uniq_forma_pago_nombre_por_clinica"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.nombre} ({self.clinica_id})"

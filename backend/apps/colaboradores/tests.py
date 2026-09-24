@@ -174,6 +174,27 @@ class ColaboradorApiTests(ColaboradoresBaseTests):
         profesional = next(item for item in response.json() if item["id"] == str(activo.user_id))
         self.assertEqual(profesional["especialidades"][0]["nombre"], self.servicio.nombre)
 
+    def test_profesionales_incluye_usuario_que_atiende_sin_perfil_colaborador(self):
+        legado = User.objects.create_user(
+            email="prof.legado@test.com",
+            password="Secret123!",
+            first_name="Andres",
+            last_name="Legado",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+            rol_dinamico=self.rol_profesional,
+        )
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.get("/api/v1/colaboradores/profesionales/")
+
+        self.assertEqual(response.status_code, 200, response.content)
+        profesional = next(item for item in response.json() if item["id"] == str(legado.id))
+        self.assertEqual(profesional["nombre_completo"], "Andres Legado")
+        self.assertIsNone(profesional["colaborador_id"])
+        self.assertEqual(profesional["especialidades"], [])
+
     def test_profesionales_filtra_por_sede_id(self):
         sede_secundaria = Sede.objects.create(
             clinica=self.clinica,

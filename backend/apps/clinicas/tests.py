@@ -1,4 +1,5 @@
 import tempfile
+from datetime import date
 from decimal import Decimal
 
 from django.contrib.auth import get_user_model
@@ -9,6 +10,7 @@ from rest_framework.test import APIClient
 from apps.clinicas.models import (
     Clinica,
     DiagramaCorporal,
+    FormaDePago,
     GrupoZonas,
     GrupoZonasDiagrama,
     PasoProtocolo,
@@ -88,6 +90,25 @@ class ServicioVigenciaTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["results"][0]["id"], str(procedimiento.id))
         self.assertEqual(response.json()["results"][0]["nombre"], "Peeling Quimico")
+
+    def test_procedimientos_activos_trae_todos_sin_paginar(self):
+        # Más que el tamaño de página por defecto: el selector del tratamiento debe verlos todos.
+        for i in range(30):
+            Servicio.objects.create(
+                clinica=self.clinica, nombre=f"Procedimiento {i:02d}", descripcion="", duracion_min=30,
+            )
+        Servicio.objects.create(clinica=self.clinica, nombre="Inactivo", descripcion="", duracion_min=30, activo=False)
+        otra = Clinica.objects.create(nombre="Otra clinica", nit="901999888")
+        Servicio.objects.create(clinica=otra, nombre="De otra clinica", descripcion="", duracion_min=30)
+
+        response = self.client.get("/api/v1/clinicas/procedimientos/activos/")
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 30)
+        self.assertNotIn("Inactivo", {p["nombre"] for p in data})
+        self.assertIn("consentimientos_requeridos", data[0])
 
     def test_procedimiento_create_toma_clinica_desde_header(self):
         response = self.client.post(
@@ -622,6 +643,9 @@ class CampanaStatsTests(TestCase):
             precio_campana="280000.00",
         )
 
+    def _forma_transferencia(self):
+        return str(FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia").id)
+
     def _crear_y_aceptar_cotizacion(self, *, valor="280000.00", num_citas=1, descuento="0.00"):
         # El plan de pagos debe sumar el total (cantidad x valor - descuento).
         total_plan = str((Decimal(valor) * num_citas * (Decimal("100") - Decimal(descuento)) / Decimal("100")).quantize(Decimal("0.01")))
@@ -639,7 +663,7 @@ class CampanaStatsTests(TestCase):
                         "descuento_porcentaje": descuento,
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": total_plan}],
+                "formas_pago": [{"tipo": self._forma_transferencia(), "descripcion": "Total", "valor": total_plan}],
             },
             format="json",
         )
@@ -658,7 +682,7 @@ class CampanaStatsTests(TestCase):
                         "descuento_porcentaje": descuento,
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": total_plan}],
+                "formas_pago": [{"tipo": self._forma_transferencia(), "descripcion": "Total", "valor": total_plan}],
             },
             format="json",
         )
@@ -700,7 +724,7 @@ class CampanaStatsTests(TestCase):
                         "valor_unitario": "280000.00",
                     }
                 ],
-                "formas_pago": [{"tipo": "transferencia", "descripcion": "Total", "valor": "280000.00"}],
+                "formas_pago": [{"tipo": self._forma_transferencia(), "descripcion": "Total", "valor": "280000.00"}],
             },
             format="json",
         )
@@ -719,3 +743,166 @@ class CampanaStatsTests(TestCase):
         stats = detail.json()["stats"]
         self.assertEqual(stats["items_vendidos"], 1)
         self.assertEqual(stats["monto_total"], "504000.00")
+
+
+class SedeListadoRolPersonalizadoTests(TestCase):
+    """Un rol personalizado sin la capacidad `sedes.ver` debe poder listar sedes
+    para los selectores (agenda, cotizaciones...), solo las de su clinica."""
+
+    def setUp(self):
+        from apps.users.models import Permiso, Rol, RolPermiso
+
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Rol Custom", nit="904000555")
+        self.otra = Clinica.objects.create(nombre="Otra Clinica", nit="904000556")
+        self.sede = Sede.objects.create(
+            clinica=self.clinica, nombre="Sede Centro", ciudad="Bogota",
+            direccion="Calle 3", telefono="3000000003", horario={},
+        )
+        Sede.objects.create(
+            clinica=self.otra, nombre="Sede Ajena", ciudad="Cali",
+            direccion="Calle 4", telefono="3000000004", horario={},
+        )
+        rol = Rol.objects.create(clinica=self.clinica, slug="agendador", nombre="Agendador")
+        for clave in ("agenda.citas.ver", "agenda.citas.crear"):
+            RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave=clave))
+        self.user = User.objects.create_user(
+            email="agendador@test.com", password="Secret123!",
+            first_name="Ana", last_name="Agenda",
+            rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        self.user.rol_dinamico = rol
+        self.user.save(update_fields=["rol_dinamico"])
+        self.client.force_authenticate(self.user)
+
+    def test_lista_sedes_de_su_clinica_sin_sedes_ver(self):
+        response = self.client.get("/api/v1/clinicas/sedes/", {"activa": "true"})
+        self.assertEqual(response.status_code, 200)
+        ids = [s["id"] for s in response.data["results"]]
+        self.assertEqual(ids, [str(self.sede.id)])
+
+    def test_no_puede_crear_sede_sin_sedes_gestionar(self):
+        response = self.client.post(
+            "/api/v1/clinicas/sedes/",
+            {"nombre": "Nueva", "ciudad": "Bogota", "direccion": "x", "telefono": "1", "horario": {}},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 403)
+
+
+class SedesAcotadasPorUsuarioTests(TestCase):
+    """Usuarios con sede en su perfil de colaborador ven solo sus sedes, en /me y en /sedes/."""
+
+    def setUp(self):
+        from apps.colaboradores.models import Colaborador
+        from apps.users.models import Permiso, Rol, RolPermiso
+
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Multi Sede", nit="905000666")
+
+        def sede(nombre, activo=True):
+            return Sede.objects.create(
+                clinica=self.clinica, nombre=nombre, ciudad="Bogota",
+                direccion="Calle", telefono="3000000000", horario={}, activo=activo,
+            )
+
+        self.principal = sede("Zeta Principal")
+        self.secundaria = sede("Alfa Secundaria")
+        self.inactiva = sede("Inactiva", activo=False)
+        self.ajena = sede("Ajena")
+
+        self.rol = Rol.objects.create(clinica=self.clinica, slug="agendador", nombre="Agendador")
+        RolPermiso.objects.create(rol=self.rol, permiso=Permiso.objects.get(clave="agenda.citas.ver"))
+        self.user = User.objects.create_user(
+            email="multi@test.com", password="Secret123!", first_name="Mia", last_name="Sede",
+            rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        self.user.rol_dinamico = self.rol
+        self.user.save(update_fields=["rol_dinamico"])
+        colaborador = Colaborador.objects.create(
+            user=self.user, sede_principal=self.principal,
+            tipo_contrato=Colaborador.TipoContrato.EMPLEADO,
+            fecha_ingreso=date.today(), numero_documento="99887766",
+        )
+        colaborador.sedes.set([self.secundaria, self.inactiva])
+        self.client.force_authenticate(self.user)
+
+    def test_me_devuelve_sedes_activas_con_la_principal_primero(self):
+        response = self.client.get("/api/v1/auth/me/")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            [s["id"] for s in response.data["sedes"]],
+            [str(self.principal.id), str(self.secundaria.id)],
+        )
+
+    def test_listado_de_sedes_acotado_a_las_del_usuario(self):
+        response = self.client.get("/api/v1/clinicas/sedes/", {"activa": "true"})
+        self.assertEqual(response.status_code, 200)
+        ids = {s["id"] for s in response.data["results"]}
+        self.assertEqual(ids, {str(self.principal.id), str(self.secundaria.id)})
+
+    def test_quien_gestiona_sedes_las_ve_todas(self):
+        from apps.users.models import Permiso, RolPermiso
+
+        RolPermiso.objects.create(rol=self.rol, permiso=Permiso.objects.get(clave="sedes.gestionar"))
+        response = self.client.get("/api/v1/clinicas/sedes/", {"activa": "true"})
+        ids = {s["id"] for s in response.data["results"]}
+        self.assertIn(str(self.ajena.id), ids)
+
+    def test_admin_ve_todas_y_me_devuelve_null(self):
+        admin = User.objects.create_user(
+            email="admin-multi@test.com", password="Secret123!", first_name="A", last_name="D",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client.force_authenticate(admin)
+        self.assertIsNone(self.client.get("/api/v1/auth/me/").data["sedes"])
+        response = self.client.get("/api/v1/clinicas/sedes/", {"activa": "true"})
+        self.assertEqual(len(response.data["results"]), 3)
+
+    def test_sede_ids_para_filtro(self):
+        from apps.users.authorization import sede_ids_para_filtro
+
+        self.assertEqual(set(sede_ids_para_filtro(self.user)), {self.principal.id, self.secundaria.id, self.inactiva.id})
+        self.assertEqual(sede_ids_para_filtro(self.user, str(self.secundaria.id)), [str(self.secundaria.id)])
+        self.assertEqual(sede_ids_para_filtro(self.user, str(self.ajena.id)), [])
+
+    def _bloqueos(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from apps.agenda.models import BloqueoAgenda
+        from apps.users.models import Permiso, RolPermiso
+
+        for clave in ("agenda.bloqueos.ver", "agenda.crear_bloqueo"):
+            RolPermiso.objects.create(rol=self.rol, permiso=Permiso.objects.get(clave=clave))
+        ahora = timezone.now()
+        crear = lambda sede: BloqueoAgenda.objects.create(  # noqa: E731
+            clinica=self.clinica, sede=sede, fecha_inicio=ahora, fecha_fin=ahora + timedelta(hours=1),
+        )
+        return crear(self.principal), crear(self.ajena), crear(None)
+
+    def test_bloqueos_acotados_a_sus_sedes_mas_los_de_toda_la_clinica(self):
+        propio, ajeno, general = self._bloqueos()
+        response = self.client.get("/api/v1/agenda/bloqueos/")
+        self.assertEqual(response.status_code, 200)
+        data = response.data["results"] if isinstance(response.data, dict) else response.data
+        ids = {b["id"] for b in data}
+        self.assertEqual(ids, {str(propio.id), str(general.id)})
+
+        response = self.client.get("/api/v1/agenda/bloqueos/", {"sede": str(self.ajena.id)})
+        data = response.data["results"] if isinstance(response.data, dict) else response.data
+        self.assertEqual(data, [])
+
+    def test_no_puede_crear_bloqueo_en_sede_ajena_ni_de_toda_la_clinica(self):
+        self._bloqueos()
+        base = {"fecha_inicio": "2030-01-01T10:00:00Z", "fecha_fin": "2030-01-01T11:00:00Z"}
+        self.assertEqual(
+            self.client.post("/api/v1/agenda/bloqueos/", {**base, "sede": str(self.ajena.id)}, format="json").status_code,
+            403,
+        )
+        self.assertIn(self.client.post("/api/v1/agenda/bloqueos/", base, format="json").status_code, {400, 403})
+        self.assertEqual(
+            self.client.post("/api/v1/agenda/bloqueos/", {**base, "sede": str(self.principal.id)}, format="json").status_code,
+            201,
+        )

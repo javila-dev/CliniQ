@@ -12,7 +12,7 @@ from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ReadOnlyModelViewSet
 
-from apps.cartera.models import AcuerdoPago, CUOTA_PENDIENTE_EXPR, Cartera, CuotaCartera, CuotaCarteraLog
+from apps.cartera.models import AbonoCuota, AcuerdoPago, CUOTA_PENDIENTE_EXPR, Cartera, CuotaCartera, CuotaCarteraLog
 from apps.cartera.serializers import (
     AcuerdoPagoSerializer,
     AnularAcuerdoPagoSerializer,
@@ -41,7 +41,7 @@ class CarteraViewSet(ReadOnlyModelViewSet):
     # Las cuotas anuladas (reemplazadas por un acuerdo de pago) no se muestran ni
     # cuentan: el prefetch ya las excluye para saldo/mora/listado.
     queryset = (
-        Cartera.objects.select_related("cotizacion", "paciente")
+        Cartera.objects.select_related("cotizacion__profesional", "paciente")
         .prefetch_related(
             Prefetch(
                 "cuotas",
@@ -118,6 +118,10 @@ class CarteraViewSet(ReadOnlyModelViewSet):
             queryset = self._filter_by_estado(queryset, estado)
         if self.action == "list":
             queryset = self._annotate_orden(queryset)
+        if self.action == "retrieve":
+            queryset = queryset.prefetch_related(
+                "cuotas__abonos__medio_pago", "cuotas__abonos__registrado_por"
+            )
         return queryset
 
     def _filter_by_estado(self, queryset, estado):
@@ -145,6 +149,97 @@ class CarteraViewSet(ReadOnlyModelViewSet):
 
     def _money(self, value):
         return f"{Decimal(value):.2f}"
+
+    # Orden del listado por paciente (?ordering=): clave -> función sobre el grupo.
+    ORDEN_POR_PACIENTE = {
+        "paciente": lambda g: g["paciente_nombre"].lower(),
+        "total": lambda g: g["_total"],
+        "cobrado": lambda g: g["_cobrado"],
+        "saldo": lambda g: g["_saldo"],
+        "prox": lambda g: (g["proxima_cuota_fecha"] is None, g["proxima_cuota_fecha"] or date.max),
+    }
+
+    @action(detail=False, methods=["get"], url_path="por-paciente")
+    def por_paciente(self, request, *args, **kwargs):
+        """Cartera agrupada por paciente: una fila con la suma de todas sus
+        cotizaciones y, dentro, cada cartera como en el listado normal.
+
+        Se agrupa en Python porque mora y próxima cuota salen de las cuotas
+        prefetcheadas (igual que en el listado); la búsqueda reutiliza
+        `search_fields` y la paginación es sobre pacientes, no sobre carteras."""
+        from rest_framework.filters import SearchFilter
+
+        queryset = SearchFilter().filter_queryset(request, self._annotate_orden(self.get_queryset()), self)
+        resumen_serializer = CarteraListSerializer()
+
+        grupos = {}
+        for cartera in queryset:
+            resumen = resumen_serializer._resumen_cuotas(cartera)
+            cuotas_vivas = resumen_serializer._cuotas_vivas(cartera)
+            g = grupos.get(cartera.paciente_id)
+            if g is None:
+                g = grupos[cartera.paciente_id] = {
+                    "paciente_id": str(cartera.paciente_id),
+                    "paciente_nombre": cartera.paciente.nombre_completo,
+                    "paciente_documento": cartera.paciente.numero_documento or "",
+                    "_total": Decimal("0"),
+                    "_cobrado": Decimal("0"),
+                    "_saldo": Decimal("0"),
+                    "_mora_valor": Decimal("0"),
+                    "cuotas_total": 0,
+                    "cuotas_pagadas": 0,
+                    "mora_dias": 0,
+                    "proxima_cuota_fecha": None,
+                    "_proxima_valor": None,
+                    "es_migracion": False,
+                    "_ultima": cartera.created_at,
+                    "_carteras": [],
+                }
+            g["_total"] += cartera.total
+            g["_cobrado"] += cartera.total_cobrado
+            g["_saldo"] += cartera.saldo
+            g["_mora_valor"] += resumen["mora_valor"]
+            g["cuotas_total"] += len(cuotas_vivas)
+            g["cuotas_pagadas"] += sum(1 for c in cuotas_vivas if c.saldo_pendiente <= 0)
+            g["mora_dias"] = max(g["mora_dias"], resumen["mora_dias"])
+            g["es_migracion"] = g["es_migracion"] or cartera.es_migracion
+            g["_ultima"] = max(g["_ultima"], cartera.created_at)
+            proxima = resumen["proxima"]
+            # La próxima cuota del paciente es la más cercana entre todas sus carteras
+            # (una cuota con fecha gana a una sin fecha).
+            if proxima is not None:
+                actual = g["proxima_cuota_fecha"]
+                if g["_proxima_valor"] is None or (
+                    proxima.fecha_esperada is not None and (actual is None or proxima.fecha_esperada < actual)
+                ):
+                    g["proxima_cuota_fecha"] = proxima.fecha_esperada
+                    g["_proxima_valor"] = proxima.saldo_pendiente
+            g["_carteras"].append(cartera)
+
+        filas = list(grupos.values())
+        orden = request.query_params.get("ordering", "")
+        clave = self.ORDEN_POR_PACIENTE.get(orden.lstrip("-"))
+        if clave:
+            filas.sort(key=clave, reverse=orden.startswith("-"))
+        else:
+            filas.sort(key=lambda g: g["_ultima"], reverse=True)
+
+        pagina = self.paginate_queryset(filas)
+        salida = []
+        for g in pagina:
+            carteras = sorted(g.pop("_carteras"), key=lambda c: c.created_at, reverse=True)
+            salida.append({
+                **{k: v for k, v in g.items() if not k.startswith("_")},
+                "total": self._money(g["_total"]),
+                "total_pagado": self._money(g["_cobrado"]),
+                "saldo_pendiente": self._money(g["_saldo"]),
+                "en_mora": g["mora_dias"] > 0,
+                "mora_valor": self._money(g["_mora_valor"]),
+                "proxima_cuota_valor": self._money(g["_proxima_valor"]) if g["_proxima_valor"] is not None else None,
+                "carteras_count": len(carteras),
+                "carteras": CarteraListSerializer(carteras, many=True, context=self.get_serializer_context()).data,
+            })
+        return self.get_paginated_response(salida)
 
     @action(detail=False, methods=["get"], url_path="resumen", pagination_class=None)
     def resumen(self, request, *args, **kwargs):
@@ -321,11 +416,20 @@ class CuotaCarteraViewSet(GenericViewSet):
             },
             user=request.user,
         )
+        AbonoCuota.objects.create(
+            cuota=cuota,
+            pago=pago,
+            valor=abono,
+            fecha=serializer.validated_data["fecha_pago"],
+            medio_pago=serializer.validated_data["medio_pago"],
+            observaciones=nueva_obs,
+            registrado_por=request.user,
+        )
         cuota.refresh_from_db()
         cobro.refresh_from_db()
         registrar_accion(request, "cuota.cobrar", cuota, {
             "valor_pagado": str(cuota.valor_pagado),
-            "medio_pago": cuota.medio_pago,
+            "medio_pago": cuota.medio_pago.nombre if cuota.medio_pago_id else None,
             "cobro_id": str(cobro.id),
         })
         return Response(

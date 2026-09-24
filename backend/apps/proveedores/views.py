@@ -11,6 +11,7 @@ from apps.proveedores.serializers import (
     RecepcionOrdenSerializer,
 )
 from apps.proveedores.services import recibir_orden
+from apps.users.authorization import sede_ids_para_filtro
 from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
@@ -71,8 +72,9 @@ class OrdenCompraViewSet(ModelViewSet):
             queryset = queryset.filter(fecha=fecha)
         if proveedor:
             queryset = queryset.filter(proveedor_id=proveedor)
-        if sede:
-            queryset = queryset.filter(sede_id=sede)
+        sede_ids = sede_ids_para_filtro(user, sede)
+        if sede_ids is not None:
+            queryset = queryset.filter(sede_id__in=sede_ids)
         if estado:
             queryset = queryset.filter(estado=estado)
         return queryset

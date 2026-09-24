@@ -13,6 +13,7 @@ from django.template.loader import render_to_string
 from django.utils import timezone
 from rest_framework import mixins, serializers, status
 from rest_framework.decorators import action
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 from weasyprint import HTML
@@ -53,6 +54,7 @@ from apps.historia_clinica.services import (
     iniciar_firma_consentimiento,
     marcar_consentimiento_firmado,
     registrar_consumo_insumo,
+    requiere_firma_cada_vez,
     url_firma_documenso,
 )
 from apps.core.logging import registrar_accion
@@ -65,7 +67,7 @@ from apps.notificaciones.services import (
     registrar_envio_whatsapp,
     verificar_disponibilidad_whatsapp,
 )
-from apps.users.authorization import user_is_tenant_admin
+from apps.users.authorization import user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
 
@@ -398,6 +400,37 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
         return Response(resultado, status=status.HTTP_200_OK)
 
 
+class NotaClinicaAccessPermission(BasePermission):
+    """
+    Crear/editar una nota clinica normalmente requiere `historia.notas.crear`.
+    La mini-atencion generada desde una cotizacion (campo `cotizacion` set) es
+    la excepcion: ahi basta con `cotizaciones.gestionar`, para que quien puede
+    cotizar pueda dejar motivo de consulta, seguimiento y fotos sin depender
+    de permisos clinicos generales que su rol puede no tener.
+    """
+
+    message = "No tienes permiso para gestionar esta nota clinica."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if view.action == "create":
+            if request.data.get("cotizacion"):
+                return user_has_permission(user, "historia.notas.crear", request=request) or \
+                    user_has_permission(user, "cotizaciones.gestionar", request=request)
+            return user_has_permission(user, "historia.notas.crear", request=request)
+        # partial_update / completar: el objeto (y su `cotizacion`) todavia no
+        # se conoce aca — se exige al menos uno de los dos permisos para poder
+        # llegar a `has_object_permission`, que hace la validacion precisa.
+        return user_has_permission(user, "historia.notas.crear", request=request) or \
+            user_has_permission(user, "cotizaciones.gestionar", request=request)
+
+    def has_object_permission(self, request, view, obj):
+        if view.action in {"partial_update", "completar"} and obj.cotizacion_id:
+            return user_has_permission(request.user, "historia.notas.crear", request=request) or \
+                user_has_permission(request.user, "cotizaciones.gestionar", request=request)
+        return user_has_permission(request.user, "historia.notas.crear", request=request)
+
+
 class NotaClinicaViewSet(
     mixins.ListModelMixin,
     mixins.RetrieveModelMixin,
@@ -417,7 +450,7 @@ class NotaClinicaViewSet(
 
     def get_permissions(self):
         if self.action in {"create", "partial_update", "completar"}:
-            permission_classes = (RequirePermission("historia.notas.crear"),)
+            permission_classes = (NotaClinicaAccessPermission,)
         else:
             permission_classes = (RequirePermission("historia.ver"),)
         return [permission() for permission in permission_classes]
@@ -435,6 +468,9 @@ class NotaClinicaViewSet(
         historia_id = self.request.query_params.get("historia")
         if historia_id:
             queryset = queryset.filter(historia_id=historia_id)
+        cotizacion_id = self.request.query_params.get("cotizacion")
+        if cotizacion_id:
+            queryset = queryset.filter(cotizacion_id=cotizacion_id)
         return queryset
 
     def perform_create(self, serializer):
@@ -507,16 +543,41 @@ class NotaClinicaViewSet(
         return Response({"diagramas": diagramas, "anotaciones": anotaciones_data})
 
 
+class FotoClinicaAccessPermission(BasePermission):
+    """Misma excepción que `NotaClinicaAccessPermission`: subir/eliminar fotos de
+    la mini-atención de una cotización solo requiere `cotizaciones.gestionar`."""
+
+    message = "No tienes permiso para gestionar fotos clinicas."
+
+    def has_permission(self, request, view):
+        user = request.user
+        if view.action == "create":
+            nota_id = request.data.get("nota")
+            es_de_cotizacion = bool(
+                nota_id and NotaClinica.objects.filter(id=nota_id, cotizacion__isnull=False).exists()
+            )
+            if es_de_cotizacion:
+                return user_has_permission(user, "historia.fotos.subir", request=request) or \
+                    user_has_permission(user, "cotizaciones.gestionar", request=request)
+            return user_has_permission(user, "historia.fotos.subir", request=request)
+        # destroy: el objeto todavia no se conoce aca — se exige al menos uno de
+        # los dos permisos para poder llegar a `has_object_permission`.
+        return user_has_permission(user, "historia.fotos.eliminar", request=request) or \
+            user_has_permission(user, "cotizaciones.gestionar", request=request)
+
+    def has_object_permission(self, request, view, obj):
+        if view.action == "destroy" and obj.nota.cotizacion_id:
+            return user_has_permission(request.user, "historia.fotos.eliminar", request=request) or \
+                user_has_permission(request.user, "cotizaciones.gestionar", request=request)
+        return user_has_permission(request.user, "historia.fotos.eliminar", request=request)
+
+
 class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, GenericViewSet):
     serializer_class = FotoClinicaSerializer
     queryset = FotoClinica.objects.select_related("nota", "nota__historia", "nota__historia__clinica").all()
 
     def get_permissions(self):
-        if self.action == "destroy":
-            permission_classes = (RequirePermission("historia.fotos.eliminar"),)
-        else:
-            permission_classes = (RequirePermission("historia.fotos.subir"),)
-        return [permission() for permission in permission_classes]
+        return [FotoClinicaAccessPermission()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -528,9 +589,11 @@ class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, Gene
     def perform_create(self, serializer):
         nota = serializer.validated_data["nota"]
         user = self.request.user
-        if user.rol == "profesional":
-            if not nota.cita or nota.cita.profesional_id != user.id:
-                raise serializers.ValidationError({"nota": "Solo puedes subir fotos a notas de tus propias citas."})
+        # Una nota sin cita (p. ej. la mini-atención generada desde una cotización)
+        # no tiene "dueño" por cita: solo se bloquea el cruce hacia la cita de otro
+        # profesional, no la ausencia de cita.
+        if user.rol == "profesional" and nota.cita_id and nota.cita.profesional_id != user.id:
+            raise serializers.ValidationError({"nota": "Solo puedes subir fotos a notas de tus propias citas."})
         serializer.save()
 
 
@@ -594,12 +657,19 @@ class ConsentimientoInformadoViewSet(
         self.perform_destroy(instance)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    def _reusable_consentimiento(self, *, paciente_id: str, template_token: str):
+    def _reusable_consentimiento(self, *, paciente_id: str, template_token: str, cita=None):
         hoy = timezone.localdate()
         queryset = self.get_queryset().filter(
             paciente_id=paciente_id,
             documenso_template_token=template_token,
         )
+
+        if requiere_firma_cada_vez(cita, template_token):
+            # Modo "cada vez": solo reutilizar un registro de esta misma cita
+            # (p. ej. si el usuario recarga la pantalla); una firma de otra cita no cuenta.
+            if cita is None:
+                return None
+            return queryset.filter(cita_id=cita.id).order_by("-firmado", "-created_at").first()
 
         vigente = (
             queryset.filter(firmado=True)
@@ -632,9 +702,11 @@ class ConsentimientoInformadoViewSet(
 
         paciente_id = serializer.validated_data["paciente"].id
         template_token = serializer.validated_data["documenso_template_token"]
+        cita = serializer.validated_data.get("cita")
         existing = self._reusable_consentimiento(
             paciente_id=str(paciente_id),
             template_token=template_token,
+            cita=cita,
         )
         if existing:
             template_nombre = serializer.validated_data.get("documenso_template_nombre")

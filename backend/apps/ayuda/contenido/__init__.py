@@ -87,7 +87,7 @@ CATEGORIAS = [
     },
     {
         "slug": "catalogo",
-        "nombre": "Catálogo de servicios",
+        "nombre": "Catálogo",
         "descripcion": "Procedimientos, tratamientos, sesiones y zonas del cuerpo.",
         "icono": "package",
     },

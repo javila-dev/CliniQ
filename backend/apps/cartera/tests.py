@@ -8,7 +8,7 @@ from rest_framework.test import APIClient
 
 from apps.agenda.models import Cita
 from apps.cartera.models import Cartera
-from apps.clinicas.models import Clinica, Sede, Servicio
+from apps.clinicas.models import Clinica, FormaDePago, Sede, Servicio
 from apps.cobros.models import Cobro
 from apps.cotizaciones.models import Cotizacion
 from apps.pacientes.models import Paciente
@@ -85,8 +85,12 @@ class CarteraFlowTests(TestCase):
             descuento_porcentaje="0.00",
         )
         self.item = item
-        self.cotizacion.formas_pago.create(tipo="transferencia", descripcion="Cuota 1", valor="350000.00")
-        self.cotizacion.formas_pago.create(tipo="transferencia", descripcion="Cuota 2", valor="350000.00")
+        forma_transferencia = FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia")
+        self.cotizacion.formas_pago.create(tipo=forma_transferencia, descripcion="Cuota 1", valor="350000.00")
+        self.cotizacion.formas_pago.create(tipo=forma_transferencia, descripcion="Cuota 2", valor="350000.00")
+
+    def _forma(self, tipo_base):
+        return FormaDePago.objects.get(clinica=self.clinica, tipo_base=tipo_base)
 
     def _crear_cita_payload(self):
         # Fecha fija dentro del horario de la sede (lunes-viernes 08:00-18:00):
@@ -131,7 +135,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "350000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "transferencia",
+                "medio_pago": str(self._forma("transferencia").id),
                 "observaciones": "Nequi",
             },
             format="json",
@@ -183,7 +187,7 @@ class CarteraFlowTests(TestCase):
             valor_unitario="200000.00",
             descuento_porcentaje="0.00",
         )
-        otra_cotizacion.formas_pago.create(tipo="efectivo", descripcion="Contado", valor="200000.00")
+        otra_cotizacion.formas_pago.create(tipo=self._forma("efectivo"), descripcion="Contado", valor="200000.00")
         self.client.post(
             f"/api/v1/cotizaciones/{otra_cotizacion.id}/cambiar_estado/",
             {"estado": "aceptada"},
@@ -225,7 +229,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "50000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "efectivo",
+                "medio_pago": str(self._forma("efectivo").id),
             },
             format="json",
         )
@@ -237,6 +241,87 @@ class CarteraFlowTests(TestCase):
         # Orden por saldo (Kelly debe 650k tras el abono; Zapata 200k).
         por_saldo_desc = self.client.get("/api/v1/cartera/", {"ordering": "-saldo"}).json()
         self.assertIn("Kelly", por_saldo_desc["results"][0]["paciente_nombre"])
+
+    def _aceptar_cotizacion(self, paciente, valor):
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica,
+            paciente=paciente,
+            profesional=self.superadmin,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        cotizacion.items.create(
+            descripcion="Peeling",
+            num_citas=1,
+            periodicidad="Única",
+            valor_unitario=valor,
+            descuento_porcentaje="0.00",
+        )
+        cotizacion.formas_pago.create(tipo=self._forma("efectivo"), descripcion="Contado", valor=valor)
+        self.client.post(
+            f"/api/v1/cotizaciones/{cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        return cotizacion
+
+    def test_cartera_por_paciente_agrupa_sus_cotizaciones(self):
+        # Kelly acepta dos cotizaciones (700k + 200k) y Bruno una (300k).
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        self._aceptar_cotizacion(self.paciente, "200000.00")
+        bruno = Paciente.objects.create(
+            clinica=self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento="111000222",
+            nombres="Bruno",
+            apellidos="Zapata",
+            fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.MASCULINO,
+            direccion="Calle 9",
+            telefono="3001112222",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            autoriza_datos=True,
+        )
+        self._aceptar_cotizacion(bruno, "300000.00")
+
+        cuota = Cartera.objects.get(cotizacion=self.cotizacion).cuotas.first()
+        self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "100000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": str(self._forma("efectivo").id),
+            },
+            format="json",
+        )
+
+        data = self.client.get("/api/v1/cartera/por-paciente/").json()
+        self.assertEqual(data["count"], 2)
+        kelly = next(r for r in data["results"] if "Kelly" in r["paciente_nombre"])
+        self.assertEqual(kelly["carteras_count"], 2)
+        self.assertEqual(len(kelly["carteras"]), 2)
+        self.assertEqual(kelly["total"], "900000.00")
+        self.assertEqual(kelly["total_pagado"], "100000.00")
+        self.assertEqual(kelly["saldo_pendiente"], "800000.00")
+        self.assertEqual(kelly["cuotas_total"], 3)
+
+        # Orden por saldo: Kelly (800k) antes que Bruno (300k), y al revés.
+        desc = self.client.get("/api/v1/cartera/por-paciente/", {"ordering": "-saldo"}).json()
+        self.assertIn("Kelly", desc["results"][0]["paciente_nombre"])
+        asc = self.client.get("/api/v1/cartera/por-paciente/", {"ordering": "saldo"}).json()
+        self.assertIn("Bruno", asc["results"][0]["paciente_nombre"])
+
+        # La búsqueda y la paginación son por paciente.
+        busqueda = self.client.get("/api/v1/cartera/por-paciente/", {"search": "zapata"}).json()
+        self.assertEqual(busqueda["count"], 1)
+        self.assertEqual(busqueda["results"][0]["carteras_count"], 1)
+        pagina = self.client.get("/api/v1/cartera/por-paciente/", {"page_size": 1}).json()
+        self.assertEqual(pagina["count"], 2)
+        self.assertEqual(len(pagina["results"]), 1)
+        self.assertIsNotNone(pagina["next"])
 
     def test_resumen_acotado_por_fecha_desde(self):
         self.client.post(
@@ -278,7 +363,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "100000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "efectivo",
+                "medio_pago": str(self._forma("efectivo").id),
             },
             format="json",
         )
@@ -306,7 +391,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "250000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "efectivo",
+                "medio_pago": str(self._forma("efectivo").id),
             },
             format="json",
         )
@@ -317,6 +402,10 @@ class CarteraFlowTests(TestCase):
 
         detalle = self.client.get(f"/api/v1/cartera/{cartera.id}/").json()
         self.assertFalse(detalle["en_mora"])
+        # Cada abono queda registrado por separado, en orden.
+        cuota_payload = next(c for c in detalle["cuotas"] if c["id"] == str(cuota.id))
+        self.assertEqual([a["valor"] for a in cuota_payload["abonos"]], ["100000.00", "250000.00"])
+        self.assertEqual(cuota_payload["abonos"][0]["medio_pago_nombre"], self._forma("efectivo").nombre)
 
     def test_registrar_pago_rechaza_monto_mayor_al_saldo(self):
         self.client.post(
@@ -331,7 +420,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "300000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "efectivo",
+                "medio_pago": str(self._forma("efectivo").id),
             },
             format="json",
         )
@@ -340,7 +429,7 @@ class CarteraFlowTests(TestCase):
             {
                 "valor_pagado": "100000.00",
                 "fecha_pago": timezone.localdate().isoformat(),
-                "medio_pago": "efectivo",
+                "medio_pago": str(self._forma("efectivo").id),
             },
             format="json",
         )

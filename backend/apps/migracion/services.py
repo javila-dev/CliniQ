@@ -28,6 +28,7 @@ from rest_framework.exceptions import ValidationError
 
 from apps.agenda.models import Cita
 from apps.cartera.models import Cartera, CuotaCartera
+from apps.clinicas.formas_pago import resolver_forma_pago_por_tipo_base
 from apps.cobros.models import Cobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.migracion.models import LoteMigracion
@@ -206,17 +207,22 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
     )
     cuota_ids = []
     if pagado > 0:
+        primer_medio = pagos[0]["medio_pago"] if pagos else None
+        tipo_inicial = (
+            primer_medio
+            if primer_medio is not None and primer_medio.tipo_base in {"efectivo", "transferencia"}
+            else resolver_forma_pago_por_tipo_base(clinica, "efectivo")
+        )
         c = CuotaCartera.objects.create(
             cartera=cartera,
-            tipo=(pagos[0]["medio_pago"] if pagos and pagos[0]["medio_pago"] in
-                  {"efectivo", "transferencia"} else "efectivo"),
+            tipo=tipo_inicial,
             descripcion="Abono previo (puesta en marcha)",
             valor_esperado=pagado,
             fecha_esperada=pagos[0]["fecha"] if pagos else None,
             pagada=True,
             valor_pagado=pagado,
             fecha_pago=pagos[-1]["fecha"] if pagos else None,
-            medio_pago=pagos[0]["medio_pago"] if pagos else "",
+            medio_pago=primer_medio,
             observaciones="Cargado por el asistente de puesta en marcha",
             registrado_por=actor,
         )
@@ -224,7 +230,7 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
     for cuota in plan:
         c = CuotaCartera.objects.create(
             cartera=cartera,
-            tipo=cuota.get("tipo", "efectivo"),
+            tipo=cuota["tipo"],
             descripcion=cuota.get("descripcion", "") or "Saldo pendiente",
             valor_esperado=Decimal(cuota["valor_esperado"]),
             fecha_esperada=cuota.get("fecha_esperada"),

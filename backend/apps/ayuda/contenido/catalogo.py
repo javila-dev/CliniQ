@@ -1,4 +1,4 @@
-"""Artículos de la categoría «Catálogo de servicios»."""
+"""Artículos de la categoría «Catálogo»."""
 
 ARTICULOS = [
     {
@@ -23,7 +23,6 @@ Define:
 - Cuánto **dura**, que es la duración que propone la agenda.
 - Cuánto **cuesta**.
 - Qué **consentimientos** exige.
-- Si tiene un **protocolo** de pasos.
 
 ## Tratamiento: el paquete comercial
 
@@ -33,7 +32,7 @@ posiblemente de distintos procedimientos, con un precio de conjunto.
 Define:
 
 - Qué **procedimientos** incluye y en qué cantidad.
-- Qué **tipos de sesión** lo componen y cuántas de cada uno.
+- Cuántas **sesiones** de cada procedimiento lo componen y en qué orden.
 - Un **precio estimado** de todo el plan.
 
 ## La relación entre los dos
@@ -79,8 +78,8 @@ ocho sesiones: da ocho paquetes cobrados.
         "keywords": "procedimiento, crear, duración, precio, consentimiento, catálogo, diagrama",
         "destacado": False,
         "contenido": """
-Los procedimientos se administran en **Configuración → Procedimientos**. Cada
-campo tiene un efecto concreto en la operación diaria.
+Los procedimientos se administran en **Catálogo → Procedimientos** (dentro de
+Ventas). Cada campo tiene un efecto concreto en la operación diaria.
 
 ## Los campos y su efecto
 
@@ -128,76 +127,103 @@ atención, marcar sobre el cuerpo qué zonas se trataron. Está explicado en
         "slug": "configurar-un-tratamiento-y-sus-sesiones",
         "categoria": "catalogo",
         "titulo": "Configurar un tratamiento y sus sesiones",
-        "resumen": "Cómo armar un paquete: los procedimientos que incluye, los tipos de sesión, cuáles cuentan como compromiso con el paciente y cómo eso define lo que se puede agendar.",
+        "resumen": "Cómo armar un paquete: en modo rápido o por bloques de sesiones, cuáles se agendan y cómo eso define lo que se puede agendar.",
         "area": "configuracion",
         "keywords": "tratamiento, paquete, sesiones, tipos de sesión, compromiso, control, catálogo, protocolo",
         "destacado": False,
         "contenido": """
-Los tratamientos se administran en **Configuración → Tratamientos**. Un
-tratamiento bien configurado hace que, al venderlo, la agenda y la cartera se
-comporten solas.
+Los tratamientos se administran en **Catálogo → Tratamientos** (dentro de
+Ventas). Un tratamiento bien configurado hace que, al venderlo, la agenda y la
+cartera se comporten solas.
 
-## Los datos generales
+## Crear un tratamiento rápido
 
-- **Nombre** y **descripción**: lo que verá el paciente en la cotización.
-- **Precio estimado**: el valor del paquete completo.
-- **Descuento máximo**: hasta cuánto se puede rebajar en una cotización.
+El caso más común es vender varias sesiones del mismo procedimiento. Para eso
+**Nuevo tratamiento** se abre en modo rápido, con una sola frase:
 
-## Los procedimientos que incluye
+> Vendo **5** sesiones de **Láser facial**
 
-Agrega los procedimientos que componen el tratamiento, con su cantidad y su
-orden. Es la composición clínica del paquete: qué se le va a hacer al paciente y
-cuántas veces.
+Eliges la cantidad y el procedimiento, y le pones el precio de lista. El nombre se
+propone solo («Láser facial ×5») y puedes cambiarlo. Si el procedimiento no está en
+la lista, puedes crearlo desde ahí sin salir del tratamiento.
 
-## Los tipos de sesión
+## Combinar procedimientos o agregar controles
 
-Es la parte que más efecto tiene y la que más se pasa por alto. Un tipo de sesión
-agrupa las visitas que son iguales entre sí. Por ejemplo, un tratamiento puede
-tener:
+Si el paquete mezcla procedimientos o incluye controles, pulsa **Combinar o agregar
+controles**. El formulario se amplía y cada parte del tratamiento es un **bloque de
+sesiones**: una cantidad y uno o varios procedimientos.
 
-- 6 sesiones de «Aplicación»
-- 2 sesiones de «Control»
+Por ejemplo, un tratamiento de rejuvenecimiento puede ser:
 
-De cada tipo de sesión se define:
+- 5 sesiones de «Láser facial»
+- 1 sesión de «Control médico»
+- 5 sesiones de «Láser facial»
 
-| Campo | Para qué |
-|---|---|
-| **Nombre** | Cómo se llama esa visita |
-| **Cantidad** | Cuántas visitas de ese tipo incluye el paquete |
-| **Duración** | Cuánto dura esa visita en la agenda |
-| **Orden** | En qué secuencia van |
-| **Cuenta como compromiso** | Si es una sesión que el paciente compró |
-| **Procedimientos** | Qué se ejecuta en esa visita |
+A la derecha, **Así lo verá el paciente** muestra el recorrido numerado, cuántas
+sesiones se pueden agendar y cuánto dura en total. Lo que ves ahí es lo que ofrecerá
+la agenda.
 
-## Qué significa «cuenta como compromiso»
+Con cada bloque puedes:
 
-Las sesiones marcadas como compromiso son las que **el paciente compró** y las que
-se pueden agendar contra la cotización. La suma de sus cantidades es el total de
-sesiones agendables del tratamiento.
+- Cambiar la **cantidad** y los **procedimientos**. Si pones varios en el mismo
+  bloque, es una sola visita que los combina.
+- Elegir si **Se agenda** o es **Solo informativa**.
+- **Reordenar**, **duplicar** o **quitar** el bloque.
+- **Insertar una sesión distinta** entre dos bloques.
+- **Intercalar** otra sesión dentro de un bloque: por ejemplo, partir «10 sesiones de
+  láser» en 5, un control y otras 5. El bloque se parte en dos y deja una sesión
+  vacía en medio para elegir el procedimiento.
 
-Las que no cuentan como compromiso, típicamente los controles de cortesía,
-aparecen en el plan pero no consumen sesiones del paquete.
+Mientras lo armas, el avance se guarda en tu navegador: si cierras la ventana sin
+querer, lo recuperas al volver a abrirla.
+
+## Qué significa «Se agenda»
+
+Los bloques que **se agendan** son las sesiones que el paciente compró: se pueden
+agendar contra la cotización. La suma de sus cantidades es el total de sesiones
+agendables del tratamiento.
+
+Los bloques **solo informativos**, típicamente los controles de cortesía, aparecen en
+el plan pero no consumen sesiones del paquete. Un tratamiento necesita al menos una
+sesión que se agende; si no, no se puede guardar.
 
 De ahí sale el número que ve recepción al agendar: «quedan 3 de 8 sesiones».
+
+## Lo que hereda de sus procedimientos
+
+El panel de la derecha también muestra los consentimientos que se pedirán, que
+vienen de cada procedimiento, y avisa si algún procedimiento no tiene profesionales
+asociados cuando tu clínica filtra por procedimiento. Para corregirlos, edita el
+procedimiento, no el tratamiento.
 
 ## Errores frecuentes
 
 - **Poner las sesiones como cantidad del ítem en la cotización.** Las sesiones se
   definen aquí, en el catálogo, no en la cotización.
-- **Marcar los controles como compromiso**, lo que infla el número de sesiones
-  vendidas.
-- **Dejar la duración en cero**, con lo que la agenda no sabe qué bloque reservar.
+- **Dejar como «Se agenda» los controles de cortesía**, lo que infla el número de
+  sesiones vendidas.
+- **Dejar un bloque sin procedimiento**: el formulario no deja guardar hasta que
+  todos tengan uno.
 
-## Cambiar un tratamiento ya vendido
+## Duplicar y cambiar un tratamiento ya vendido
 
-Si modificas la configuración de un tratamiento, los pacientes que ya lo
-compraron mantienen lo que se les vendió. Para cambios grandes conviene crear un
-tratamiento nuevo en vez de rehacer el existente, así las ventas viejas y las
-nuevas quedan separadas en los reportes.
+Para crear una variante sin empezar de cero, usa **Duplicar** en el menú del
+tratamiento.
 
-> Después de crear un tratamiento, pruébalo: cotízalo a un paciente de prueba,
-> acéptalo y mira cuántas sesiones te ofrece la agenda. Es la forma más rápida de
-> verificar que los tipos de sesión quedaron bien.
+**Lo que ya vendiste no cambia.** Al aceptar una cotización, las sesiones del
+tratamiento quedan guardadas tal como se vendieron. Editar el tratamiento después
+solo afecta a las próximas ventas: los pacientes que ya lo compraron conservan sus
+sesiones. Si abres un tratamiento ya vendido, el formulario te avisa cuántos
+pacientes lo tienen.
+
+Una cotización que todavía no se ha aceptado sí sigue al catálogo: si cambias el
+tratamiento antes de aceptarla, verá la versión nueva.
+
+Aun así, para cambios grandes conviene crear un tratamiento nuevo en vez de rehacer
+el existente, así las ventas viejas y las nuevas quedan separadas en los reportes.
+
+> Después de crear un tratamiento, pruébalo: cotízalo, acéptalo y mira cuántas
+> sesiones te ofrece la agenda. Es la forma más rápida de verificar que quedó bien.
 """,
     },
     {

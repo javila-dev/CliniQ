@@ -10,6 +10,7 @@ from apps.clinicas.models import (
     CampanaItem,
     Clinica,
     DiagramaCorporal,
+    FormaDePago,
     GrupoZonas,
     GrupoZonasDiagrama,
     PasoProtocolo,
@@ -92,6 +93,7 @@ class ClinicaSerializer(serializers.ModelSerializer):
             "slot_interval_min",
             "bloquear_agenda_por_deuda",
             "dias_gracia_deuda",
+            "filtrar_profesionales_por_procedimiento",
             "trial_expires_at",
             "trial_days_remaining",
             "onboarding_completado",
@@ -189,6 +191,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "whatsapp_habilitado",
             "whatsapp_uso",
             "modo_puesta_en_marcha",
+            "filtrar_profesionales_por_procedimiento",
         )
         read_only_fields = fields
 
@@ -223,6 +226,33 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     def get_whatsapp_uso(self, obj):
         from apps.notificaciones.services import uso_whatsapp_mes_actual
         return uso_whatsapp_mes_actual(obj)
+
+
+class FormaDePagoSerializer(serializers.ModelSerializer):
+    tipo_base_display = serializers.CharField(source="get_tipo_base_display", read_only=True)
+
+    class Meta:
+        model = FormaDePago
+        fields = (
+            "id",
+            "clinica",
+            "nombre",
+            "tipo_base",
+            "tipo_base_display",
+            "es_sistema",
+            "activo",
+            "orden",
+            "created_at",
+        )
+        read_only_fields = ("id", "clinica", "es_sistema", "created_at")
+
+    def validate_tipo_base(self, value):
+        # Inmutable: solo se elige al crear. Cambiarlo después rompería el
+        # supuesto de la lógica de negocio (p. ej. el arqueo de caja) de que
+        # `tipo_base` no cambia bajo una fila ya referenciada por pagos.
+        if self.instance is not None and value != self.instance.tipo_base:
+            raise serializers.ValidationError("El tipo base no se puede cambiar después de creada.")
+        return value
 
 
 class SedeSerializer(serializers.ModelSerializer):
@@ -324,7 +354,7 @@ class ServicioSerializer(serializers.ModelSerializer):
         request = self.context.get("request")
         if request and request.user.is_authenticated and request.user.rol != "superadmin":
             if value.id != request.user.clinica_id:
-                raise serializers.ValidationError("No puedes asignar servicios a otra clinica.")
+                raise serializers.ValidationError("No puedes asignar procedimientos a otra clinica.")
         return value
 
     def validate_nombre(self, value):
@@ -397,6 +427,7 @@ class ServicioSerializer(serializers.ModelSerializer):
                 "activo": relacion.template.activo,
                 "orden": relacion.orden,
                 "tipo": relacion.template.tipo,
+                "requiere_firma_cada_vez": relacion.requiere_firma_cada_vez,
             }
             for relacion in relaciones
         ]
@@ -553,6 +584,7 @@ class ServicioConsentimientoSerializer(serializers.ModelSerializer):
             "tipo",
             "activo_template",
             "orden",
+            "requiere_firma_cada_vez",
             "activo",
             "created_at",
             "updated_at",
@@ -677,6 +709,7 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
     nombre_clinica = serializers.CharField(source="clinica.nombre", read_only=True)
     total_sesiones = serializers.IntegerField(read_only=True)
     tipos_sesion = TipoSesionSerializer(many=True)
+    pacientes_con_tratamiento = serializers.SerializerMethodField()
 
     class Meta:
         model = TratamientoCatalogo
@@ -690,11 +723,14 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
             "descuento_maximo_pct",
             "activo",
             "total_sesiones",
+            "pacientes_con_tratamiento",
             "tipos_sesion",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_at", "updated_at", "nombre_clinica", "total_sesiones")
+        read_only_fields = (
+            "id", "created_at", "updated_at", "nombre_clinica", "total_sesiones", "pacientes_con_tratamiento",
+        )
         extra_kwargs = {
             "clinica": {"required": False},
             "descuento_maximo_pct": {"required": False},
@@ -706,6 +742,12 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
         if value < 0 or value > 100:
             raise serializers.ValidationError("El descuento máximo debe estar entre 0 y 100.")
         return value
+
+    def get_pacientes_con_tratamiento(self, obj):
+        """Cuántos pacientes ya tienen este tratamiento. Cambiar sus sesiones altera cuántas
+        les quedan por agendar, porque el total sale del catálogo vigente."""
+        anotado = getattr(obj, "_pacientes_con_tratamiento", None)
+        return anotado if anotado is not None else obj.ejecuciones.count()
 
     def to_representation(self, instance):
         data = super().to_representation(instance)

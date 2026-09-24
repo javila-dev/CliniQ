@@ -338,6 +338,26 @@ class CotizacionViewSet(ModelViewSet):
             consentimientos_requeridos_cotizacion(cotizacion, incluir_archivos=True), status=status.HTTP_200_OK,
         )
 
+    @action(detail=True, methods=["post"], url_path="nota_clinica")
+    def nota_clinica(self, request, pk=None):
+        """
+        Mini-atención (motivo de consulta, seguimiento y fotos) generada desde
+        la cotización, sin depender de una cita agendada. Vive bajo
+        `cotizaciones.gestionar` (no `historia.notas.crear`) a propósito: quien
+        puede cotizar debe poder dejar estos datos aunque su rol no tenga
+        permisos clínicos generales — devuelve la nota existente si ya se creó.
+        """
+        from apps.historia_clinica.models import HistoriaClinica, NotaClinica
+        from apps.historia_clinica.serializers import NotaClinicaSerializer
+
+        cotizacion = self.get_object()
+        nota = NotaClinica.objects.filter(cotizacion=cotizacion).first()
+        if nota is None:
+            historia = HistoriaClinica.objects.get(paciente_id=cotizacion.paciente_id)
+            nota = NotaClinica.objects.create(historia=historia, cotizacion=cotizacion)
+        serializer = NotaClinicaSerializer(nota, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):
         cotizacion = self.get_object()
@@ -505,12 +525,16 @@ class CotizacionViewSet(ModelViewSet):
             if item.tipo == "tratamiento" and item.tratamiento_id:
                 tipos_sesion = item.tratamiento.tipos_sesion_compromiso
                 sesiones_obsequio = item.sesiones_obsequio_extra()
-                num_citas = sum(ts.cantidad for ts in tipos_sesion) + sesiones_obsequio
+                # Mismo total que usa la agenda. Una vez aceptada la cotización sale de lo que se
+                # vendió, no del catálogo vigente: editar el tratamiento no cambia lo ya vendido.
+                num_citas = item.num_sesiones_efectivas()
                 duracion_min = max((ts.duracion_min for ts in tipos_sesion), default=0)
-                sesiones_detalle = [
-                    {"nombre": ts.nombre, "cantidad": ts.cantidad, "duracion_min": ts.duracion_min}
-                    for ts in tipos_sesion
-                ]
+                sesiones_detalle = item.bloques_vendidos()
+                if sesiones_detalle is None:
+                    sesiones_detalle = [
+                        {"nombre": ts.nombre, "cantidad": ts.cantidad, "duracion_min": ts.duracion_min}
+                        for ts in tipos_sesion
+                    ]
             else:
                 num_citas = item.num_citas
                 duracion_min = 0

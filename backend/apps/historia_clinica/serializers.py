@@ -106,6 +106,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "id",
             "historia",
             "cita",
+            "cotizacion",
             "estado",
             "motivo_consulta",
             "plan_manejo",
@@ -249,6 +250,7 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
         fields = (
             "id",
             "paciente",
+            "cita",
             "tipo",
             "documenso_template_token",
             "documenso_template_nombre",
@@ -277,6 +279,9 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        extra_kwargs = {
+            "cita": {"required": False, "allow_null": True},
+        }
 
     def get_archivo_url(self, obj):
         return generar_url_firmada_storage(obj.archivo)

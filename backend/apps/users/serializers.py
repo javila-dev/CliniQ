@@ -4,8 +4,9 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.core.models import ConfiguracionGlobal
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file, read_public_file
-from apps.users.authorization import get_user_permission_keys
+from apps.users.authorization import get_user_permission_keys, user_sede_ids_acotadas
 from apps.users.models import Permiso, Rol
+from apps.users.permissions_catalog import PERMISOS_SOLO_CHECK_ATIENDE
 from apps.users.services import validate_password_strength
 from apps.users.permissions import get_clinica_activa
 
@@ -39,6 +40,17 @@ def user_sede_id(user):
     if getattr(colaborador, "sede_principal_id", None):
         return str(colaborador.sede_principal_id)
     return None
+
+
+def user_sedes(user):
+    """Sedes activas del usuario como [{id, nombre}], o None si ve todas las de la clinica."""
+    from apps.clinicas.models import Sede
+
+    ids = user_sede_ids_acotadas(user)
+    if ids is None:
+        return None
+    por_id = {s.id: s for s in Sede.objects.filter(id__in=ids, activo=True)}
+    return [{"id": str(por_id[i].id), "nombre": por_id[i].nombre} for i in ids if i in por_id]
 
 
 def legacy_storage_role(slug: str) -> str:
@@ -171,13 +183,14 @@ class UserCreateSerializer(serializers.ModelSerializer):
         role = validated_data.pop("_rol_dinamico")
         validated_data.pop("role_id", None)
         validated_data.pop("rol", None)
-        validated_data.pop("es_profesional", None)
+        # Atiende pacientes si el rol es clinico o si se marco el check, sea cual sea el rol.
+        es_profesional = role.es_profesional or bool(validated_data.pop("es_profesional", False))
         user = User(
             **validated_data,
             clinica=get_clinica_activa(request),
             rol=legacy_storage_role(role.slug),
             rol_dinamico=role,
-            es_profesional=False,
+            es_profesional=es_profesional,
         )
         user.set_password(password)
         user.save()
@@ -211,7 +224,11 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         if role:
             instance.rol_dinamico = role
             instance.rol = legacy_storage_role(role.slug)
-            validated_data["es_profesional"] = False
+            # Cambiar de rol no desmarca el check "atiende pacientes": se conserva
+            # el valor enviado (o el actual), y un rol clinico lo fuerza.
+            validated_data["es_profesional"] = role.es_profesional or validated_data.get(
+                "es_profesional", instance.es_profesional
+            )
         return super().update(instance, validated_data)
 
 
@@ -225,11 +242,13 @@ class UserSerializer(serializers.ModelSerializer):
     permissions = serializers.SerializerMethodField()
     clinica_id = serializers.UUIDField(read_only=True)
     sede_id = serializers.SerializerMethodField()
+    sedes = serializers.SerializerMethodField()
     clinica_nombre = serializers.CharField(source="clinica.nombre", read_only=True)
     nombre_completo = serializers.CharField(read_only=True)
     is_staff = serializers.BooleanField(read_only=True)
     centro_ayuda_habilitado = serializers.SerializerMethodField()
     modo_puesta_en_marcha = serializers.SerializerMethodField()
+    filtrar_profesionales_por_procedimiento = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -248,8 +267,10 @@ class UserSerializer(serializers.ModelSerializer):
             "is_staff",
             "centro_ayuda_habilitado",
             "modo_puesta_en_marcha",
+            "filtrar_profesionales_por_procedimiento",
             "clinica_id",
             "sede_id",
+            "sedes",
             "clinica",
             "clinica_nombre",
             "telefono",
@@ -271,8 +292,10 @@ class UserSerializer(serializers.ModelSerializer):
             "is_staff",
             "centro_ayuda_habilitado",
             "modo_puesta_en_marcha",
+            "filtrar_profesionales_por_procedimiento",
             "clinica_id",
             "sede_id",
+            "sedes",
             "clinica",
             "clinica_nombre",
             "activo",
@@ -301,11 +324,17 @@ class UserSerializer(serializers.ModelSerializer):
     def get_sede_id(self, obj):
         return user_sede_id(obj)
 
+    def get_sedes(self, obj):
+        return user_sedes(obj)
+
     def get_centro_ayuda_habilitado(self, obj):
         return ConfiguracionGlobal.get_solo().centro_ayuda_habilitado
 
     def get_modo_puesta_en_marcha(self, obj):
         return obj.clinica.modo_puesta_en_marcha if obj.clinica_id else False
+
+    def get_filtrar_profesionales_por_procedimiento(self, obj):
+        return obj.clinica.filtrar_profesionales_por_procedimiento if obj.clinica_id else False
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
@@ -418,8 +447,12 @@ def build_auth_user_payload(user) -> dict:
         "is_staff": user.is_staff,
         "centro_ayuda_habilitado": ConfiguracionGlobal.get_solo().centro_ayuda_habilitado,
         "modo_puesta_en_marcha": user.clinica.modo_puesta_en_marcha if user.clinica_id else False,
+        "filtrar_profesionales_por_procedimiento": (
+            user.clinica.filtrar_profesionales_por_procedimiento if user.clinica_id else False
+        ),
         "clinica_id": str(user.clinica_id) if user.clinica_id else None,
         "sede_id": user_sede_id(user),
+        "sedes": user_sedes(user),
         "clinica_nombre": user.clinica.nombre if user.clinica_id else None,
     }
 
@@ -503,7 +536,9 @@ class RolPermisosUpdateSerializer(serializers.Serializer):
         # La capa de capacidades curadas define que se puede asignar a un rol,
         # asi que aceptamos cualquier permiso activo del catalogo (el flag
         # `assignable` solo ordena el modo tecnico avanzado, ya no restringe).
-        keys = sorted(set(value))
+        # Los permisos de atencion clinica van ligados al check "atiende
+        # pacientes" del usuario, no al rol: se descartan si vienen.
+        keys = sorted(set(value) - PERMISOS_SOLO_CHECK_ATIENDE)
         permisos = Permiso.objects.filter(clave__in=keys, activo=True)
         encontrados = set(permisos.values_list("clave", flat=True))
         faltantes = sorted(set(keys) - encontrados)

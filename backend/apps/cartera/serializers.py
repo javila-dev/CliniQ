@@ -3,7 +3,20 @@ from decimal import Decimal
 from django.utils import timezone
 from rest_framework import serializers
 
-from apps.cartera.models import AcuerdoPago, Cartera, CuotaCartera
+from apps.cartera.models import AbonoCuota, AcuerdoPago, Cartera, CuotaCartera
+from apps.clinicas.models import FormaDePago
+
+
+class AbonoCuotaSerializer(serializers.ModelSerializer):
+    medio_pago_nombre = serializers.CharField(source="medio_pago.nombre", read_only=True)
+    registrado_por_nombre = serializers.CharField(
+        source="registrado_por.nombre_completo", read_only=True, allow_null=True
+    )
+
+    class Meta:
+        model = AbonoCuota
+        fields = ("id", "valor", "fecha", "medio_pago_nombre", "observaciones", "registrado_por_nombre", "created_at")
+        read_only_fields = fields
 
 
 class CuotaCarteraSerializer(serializers.ModelSerializer):
@@ -15,12 +28,15 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
     )
     vencida = serializers.BooleanField(read_only=True)
     acuerdo_numero = serializers.IntegerField(source="acuerdo.numero", read_only=True, allow_null=True)
+    tipo_nombre = serializers.CharField(source="tipo.nombre", read_only=True)
+    medio_pago_nombre = serializers.CharField(source="medio_pago.nombre", read_only=True, allow_null=True)
 
     class Meta:
         model = CuotaCartera
         fields = (
             "id",
             "tipo",
+            "tipo_nombre",
             "descripcion",
             "valor_esperado",
             "fecha_esperada",
@@ -30,6 +46,7 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
             "vencida",
             "fecha_pago",
             "medio_pago",
+            "medio_pago_nombre",
             "observaciones",
             "excepcion_aprobada",
             "aprobada_por",
@@ -40,10 +57,23 @@ class CuotaCarteraSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
+class CuotaCarteraDetalleSerializer(CuotaCarteraSerializer):
+    """Cuota con su historial de abonos (solo en el detalle de la cartera)."""
+
+    abonos = AbonoCuotaSerializer(many=True, read_only=True)
+
+    class Meta(CuotaCarteraSerializer.Meta):
+        fields = CuotaCarteraSerializer.Meta.fields + ("abonos",)
+        read_only_fields = fields
+
+
 class CarteraListSerializer(serializers.ModelSerializer):
     cotizacion_id = serializers.UUIDField(read_only=True)
     paciente_id = serializers.UUIDField(read_only=True)
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
+    profesional_nombre = serializers.CharField(
+        source="cotizacion.profesional.nombre_completo", read_only=True, allow_null=True, default=None
+    )
     total_pagado = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     saldo_pendiente = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     cuotas_total = serializers.SerializerMethodField()
@@ -61,6 +91,7 @@ class CarteraListSerializer(serializers.ModelSerializer):
             "cotizacion_id",
             "paciente_id",
             "paciente_nombre",
+            "profesional_nombre",
             "total",
             "total_pagado",
             "saldo_pendiente",
@@ -194,7 +225,7 @@ class CarteraDetailSerializer(CarteraListSerializer):
     def get_cuotas(self, obj):
         # Solo el plan vigente: las cuotas anuladas por un acuerdo no se muestran.
         vivas = [c for c in obj.cuotas.all() if not c.anulada]
-        return CuotaCarteraSerializer(vivas, many=True).data
+        return CuotaCarteraDetalleSerializer(vivas, many=True).data
 
     def get_acuerdos(self, obj):
         return AcuerdoPagoSerializer(
@@ -210,7 +241,7 @@ class CarteraDetailSerializer(CarteraListSerializer):
 
 
 class CuotaPropuestaSerializer(serializers.Serializer):
-    tipo = serializers.ChoiceField(choices=CuotaCartera.Tipo.choices)
+    tipo = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
     valor_esperado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     fecha_esperada = serializers.DateField()
@@ -239,7 +270,7 @@ class ModificarPlazoCuotaSerializer(serializers.Serializer):
 class RegistrarPagoCuotaSerializer(serializers.Serializer):
     valor_pagado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     fecha_pago = serializers.DateField()
-    medio_pago = serializers.CharField(max_length=50)
+    medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     referencia = serializers.CharField(max_length=100, required=False, allow_blank=True)
     observaciones = serializers.CharField(max_length=300, required=False, allow_blank=True)
 

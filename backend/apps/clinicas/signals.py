@@ -1,7 +1,15 @@
 from django.db.models.signals import post_delete, post_save
 from django.dispatch import receiver
 
-from apps.clinicas.models import PasoProtocolo, Servicio
+from apps.clinicas.models import Clinica, PasoProtocolo, Servicio
+
+
+@receiver(post_save, sender=Clinica)
+def create_default_formas_pago_for_clinic(sender, instance, created, **kwargs):
+    if created:
+        from apps.clinicas.formas_pago import ensure_default_formas_pago_for_clinica
+
+        ensure_default_formas_pago_for_clinica(instance)
 
 
 def sync_servicio_tiene_protocolo(servicio_id):

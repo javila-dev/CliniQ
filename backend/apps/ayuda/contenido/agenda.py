@@ -24,7 +24,7 @@ formulario pide:
 2. **Tipo de cita**. Es lo más importante del formulario y lo explicamos abajo.
 3. **Sede** y **profesional**. La lista de profesionales muestra a quienes
    atienden en esa sede.
-4. **Servicio**, **fecha** y **horario disponible**. La rejilla de horarios usa
+4. **Procedimiento**, **fecha** y **horario disponible**. La rejilla de horarios usa
    la frecuencia de turnos que configuró la clínica, normalmente de 15 minutos.
 5. **Cómo agendó el paciente**: presencial, teléfono, web o redes. Sirve después
    para saber de dónde llegan tus pacientes.
@@ -33,11 +33,11 @@ formulario pide:
 
 ## Los tres tipos de cita
 
-![Selector de tipo de cita con las opciones Sesión de cotización, Por servicio y Consulta libre](/img/ayuda/agendar-una-cita/02-tipo-de-cita.png)
+![Selector de tipo de cita con las opciones Sesión de cotización, Por procedimiento y Consulta libre](/img/ayuda/agendar-una-cita/02-tipo-de-cita.png)
 
 | Tipo | Cuándo se usa | Qué implica |
 |---|---|---|
-| **Por servicio** | Una sesión suelta del catálogo | Toma la duración y el precio del procedimiento |
+| **Por procedimiento** | Una sesión suelta del catálogo | Toma la duración y el precio del procedimiento |
 | **Sesión de cotización** | Una sesión de un tratamiento ya vendido | Descuenta una sesión de la cotización aceptada; el cobro va por la cartera |
 | **Consulta libre** | Valoración, control, cita comercial | Escribes el motivo y defines la duración a mano |
 
@@ -46,7 +46,7 @@ consentimiento que se exige y el descuento de sesiones del tratamiento.
 
 ## La duración
 
-- En una cita **por servicio**, la duración sale del catálogo y puedes ajustarla
+- En una cita **por procedimiento**, la duración sale del catálogo y puedes ajustarla
   si ese paciente necesita más tiempo.
 - En una **sesión de cotización**, sale de la configuración del tipo de sesión.
 - En una **consulta libre**, la escribes tú.

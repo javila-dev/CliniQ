@@ -11,6 +11,7 @@ from rest_framework.test import APIClient
 
 from apps.clinicas.models import (
     Clinica,
+    FormaDePago,
     Sede,
     Servicio,
     ServicioConsentimiento,
@@ -99,7 +100,10 @@ class ObsequiosCotizacionTests(TestCase):
             "validez_dias": 30,
             "notas": "",
             "items": items,
-            "formas_pago": [{"tipo": "transferencia", "descripcion": "Banco", "valor": total}],
+            "formas_pago": [{
+                "tipo": str(FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia").id),
+                "descripcion": "Banco", "valor": total,
+            }],
         }
 
     def _crear(self, items, total="350000.00"):

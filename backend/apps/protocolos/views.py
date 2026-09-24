@@ -145,7 +145,8 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
     @action(detail=True, methods=["get"], url_path="consentimientos")
     def consentimientos(self, request, pk=None):
         sesion = self.get_object()
-        return Response(consentimiento_status_sesion(sesion), status=status.HTTP_200_OK)
+        cita_id = request.query_params.get("cita_id")
+        return Response(consentimiento_status_sesion(sesion, cita_id=cita_id), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="iniciar_checkin")
     def iniciar_checkin(self, request, pk=None):

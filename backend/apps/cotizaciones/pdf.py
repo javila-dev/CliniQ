@@ -35,7 +35,7 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
     # los subtotales.
     items = [item for item in todos if not item.es_obsequio]
     obsequios = [item for item in todos if item.es_obsequio]
-    formas_pago = list(cotizacion.formas_pago.filter(activo=True))
+    formas_pago = list(cotizacion.formas_pago.filter(activo=True).select_related("tipo"))
     subtotal_bruto = sum((Decimal(item.num_citas) * item.valor_unitario for item in items), Decimal("0.00"))
     total_descuentos = sum(
         (
@@ -87,7 +87,7 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
     ]
     formas_pago_payload = [
         {
-            "tipo": forma.get_tipo_display(),
+            "tipo": forma.tipo.nombre,
             "descripcion": forma.descripcion or "-",
             "valor": format_currency(forma.valor),
         }

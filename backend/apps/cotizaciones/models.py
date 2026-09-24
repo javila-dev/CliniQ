@@ -271,24 +271,61 @@ class ItemCotizacion(BaseModel):
     def citas_no_canceladas(self):
         return self.citas.exclude(estado="cancelada").count()
 
+    def sesiones_vendidas(self):
+        """Sesiones del tratamiento tal como quedaron al aceptar la cotización.
+
+        Al aceptar se guarda una copia de las sesiones en el seguimiento del paciente
+        (``TratamientoPaciente``). Esa copia, y no el catálogo, define lo que se vendió:
+        editar el tratamiento después solo afecta a las ventas futuras. Devuelve ``None``
+        si no hay copia (cotización sin aceptar, o una venta anterior a que se guardara).
+        Las sesiones obsequiadas no cuentan aquí: se suman aparte.
+        """
+        seguimiento = self.tratamientos_paciente.order_by("created_at").first()
+        if seguimiento is None:
+            return None
+        return seguimiento.sesiones.filter(item_obsequio__isnull=True).count()
+
+    def bloques_vendidos(self):
+        """Bloques de sesiones tal como se vendieron, o ``None`` si no hay copia guardada.
+
+        Cada bloque es ``{"nombre", "cantidad", "duracion_min"}``. La cantidad sale de las
+        sesiones guardadas al aceptar, no del catálogo vigente.
+        """
+        seguimiento = self.tratamientos_paciente.order_by("created_at").first()
+        if seguimiento is None:
+            return None
+        por_tipo = {}
+        sesiones = seguimiento.sesiones.filter(item_obsequio__isnull=True, tipo_sesion__isnull=False)
+        for sesion in sesiones.select_related("tipo_sesion"):
+            entrada = por_tipo.setdefault(sesion.tipo_sesion_id, {"tipo": sesion.tipo_sesion, "cantidad": 0})
+            entrada["cantidad"] += 1
+        return [
+            {"nombre": e["tipo"].nombre, "cantidad": e["cantidad"], "duracion_min": e["tipo"].duracion_min}
+            for e in sorted(por_tipo.values(), key=lambda e: e["tipo"].orden)
+        ]
+
     def num_sesiones_efectivas(self):
         """Sesiones agendables reales del ítem.
 
-        Para ítems de tratamiento el total lo define la configuración vigente
-        del catálogo (suma de ``TipoSesion`` de compromiso), no la columna
-        ``num_citas`` —que para tratamientos queda en 1 porque solo representa
-        una línea cotizada/cobrada—. A eso se suman las sesiones obsequiadas
-        clonadas de este tratamiento. El endpoint ``/cotizaciones/{id}/sesiones/``
-        usa esta misma fórmula; mantenerlas alineadas evita que el selector de
-        "Nueva cita" ofrezca sesiones que luego el backend rechaza.
+        Para ítems de tratamiento el total sale de las sesiones guardadas al aceptar
+        (ver ``sesiones_vendidas``): lo vendido es inmutable. Mientras la cotización no
+        se acepta, o si es una venta anterior sin esa copia, se usa la configuración
+        vigente del catálogo (suma de ``TipoSesion`` de compromiso). No se usa la columna
+        ``num_citas``, que para tratamientos queda en 1 porque solo representa una línea
+        cotizada/cobrada. A eso se suman las sesiones obsequiadas clonadas de este
+        tratamiento. El endpoint ``/cotizaciones/{id}/sesiones/`` usa esta misma fórmula;
+        mantenerlas alineadas evita que el selector de "Nueva cita" ofrezca sesiones que
+        luego el backend rechaza.
         """
         if not self.tiene_cupo_propio:
             return 0
         if self.tipo == self.Tipo.TRATAMIENTO and self.tratamiento_id:
-            total = sum(
-                ts.cantidad
-                for ts in self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
-            )
+            total = self.sesiones_vendidas()
+            if total is None:
+                total = sum(
+                    ts.cantidad
+                    for ts in self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
+                )
             return (total or self.num_citas) + self.sesiones_obsequio_extra()
         return self.num_citas
 
@@ -302,20 +339,16 @@ class ItemCotizacion(BaseModel):
 
 
 class FormaPagoCotizacion(BaseModel):
-    class Tipo(models.TextChoices):
-        EFECTIVO = "efectivo", "Efectivo"
-        TRANSFERENCIA = "transferencia", "Transferencia"
-        TARJETA_CREDITO = "tarjeta_credito", "Tarjeta de crédito"
-        TARJETA_DEBITO = "tarjeta_debito", "Tarjeta de débito"
-        CUOTAS = "cuotas", "Cuotas"
-        FINANCIAMIENTO = "financiamiento", "Financiamiento"
-
     cotizacion = models.ForeignKey(
         Cotizacion,
         on_delete=models.CASCADE,
         related_name="formas_pago",
     )
-    tipo = models.CharField(max_length=30, choices=Tipo.choices)
+    tipo = models.ForeignKey(
+        "clinicas.FormaDePago",
+        on_delete=models.PROTECT,
+        related_name="formas_pago_cotizacion",
+    )
     descripcion = models.CharField(max_length=200, blank=True)
     valor = models.DecimalField(max_digits=12, decimal_places=2)
     fecha = models.DateField(null=True, blank=True)

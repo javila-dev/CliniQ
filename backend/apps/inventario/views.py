@@ -1,7 +1,7 @@
 from django.db.models import Prefetch
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
@@ -15,7 +15,7 @@ from apps.inventario.serializers import (
     MovimientoInventarioSerializer,
 )
 from apps.inventario.services import registrar_ajuste
-from apps.users.authorization import user_has_permission
+from apps.users.authorization import sede_ids_para_filtro, user_has_permission
 from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
@@ -65,14 +65,21 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
 
     def _sede_en_contexto(self):
         """Sede cuyo stock se muestra: la pedida por query param, o la primera
-        sede activa de la clinica si no se especifico ninguna."""
+        sede activa de la clinica si no se especifico ninguna. Un usuario acotado
+        a sedes solo puede consultar las suyas."""
         sede_id = self.request.query_params.get("sede")
-        if sede_id:
-            return Sede.objects.filter(pk=sede_id).select_related("clinica").first()
         clinica = get_clinica_activa(self.request)
+        sedes = Sede.objects.select_related("clinica")
+        if clinica is not None:
+            sedes = sedes.filter(clinica=clinica)
+        sede_ids = sede_ids_para_filtro(self.request.user, sede_id)
+        if sede_ids is not None:
+            sedes = sedes.filter(id__in=sede_ids)
+        if sede_id:
+            return sedes.filter(pk=sede_id).first()
         if clinica is None:
             return None
-        return Sede.objects.filter(clinica=clinica, activo=True).order_by("created_at").first()
+        return sedes.filter(activo=True).order_by("created_at").first()
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -117,6 +124,8 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
         serializer = AjusteStockSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
+        if not sede_ids_para_filtro(request.user, serializer.validated_data["sede"].id):
+            raise PermissionDenied("No tienes acceso a esa sede.")
         movimiento = registrar_ajuste(
             insumo=insumo,
             sede=serializer.validated_data["sede"],
@@ -144,6 +153,9 @@ class KardexViewSet(ReadOnlyModelViewSet):
         user = self.request.user
         if user.rol != "superadmin":
             qs = qs.filter(insumo__clinica=user.clinica)
+        sede_ids = sede_ids_para_filtro(user)
+        if sede_ids is not None:
+            qs = qs.filter(sede_id__in=sede_ids)
         insumo_id = self.request.query_params.get("insumo")
         if insumo_id:
             qs = qs.filter(insumo_id=insumo_id)

@@ -2,6 +2,7 @@ from decimal import Decimal
 
 from rest_framework import serializers
 
+from apps.clinicas.models import FormaDePago
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
 
 
@@ -9,6 +10,7 @@ class PagoRecibidoSerializer(serializers.ModelSerializer):
     recibido_por_nombre = serializers.CharField(
         source="recibido_por.get_full_name", read_only=True
     )
+    medio_pago_nombre = serializers.CharField(source="medio_pago.nombre", read_only=True)
 
     class Meta:
         model = PagoRecibido
@@ -16,6 +18,7 @@ class PagoRecibidoSerializer(serializers.ModelSerializer):
             "id",
             "cobro",
             "medio_pago",
+            "medio_pago_nombre",
             "valor",
             "referencia",
             "fecha",
@@ -68,7 +71,7 @@ class ItemCobroCreateSerializer(serializers.Serializer):
 
 
 class PagoCreateSerializer(serializers.Serializer):
-    medio_pago = serializers.ChoiceField(choices=PagoRecibido.MedioPago.choices)
+    medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
     referencia = serializers.CharField(max_length=100, required=False, allow_blank=True)
     fecha = serializers.DateTimeField(required=False)

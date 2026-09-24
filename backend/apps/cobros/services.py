@@ -18,7 +18,7 @@ def agregar_item_cobro(cobro: Cobro, item_data: dict, user) -> ItemCobro:
         if not servicio:
             from rest_framework.exceptions import ValidationError
             raise ValidationError(
-                {"error": "El ítem de tipo servicio requiere un servicio.", "code": "SERVICIO_REQUERIDO"}
+                {"error": "El ítem de tipo procedimiento requiere un procedimiento.", "code": "SERVICIO_REQUERIDO"}
             )
         if not descripcion:
             descripcion = servicio.nombre

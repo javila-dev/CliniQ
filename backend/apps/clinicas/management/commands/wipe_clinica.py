@@ -58,6 +58,7 @@ TENANT_SCOPES: dict[str, str] = {
     "consentimientos.PlantillaAsistencia": "clinica_id",
     # --- Cartera ---
     "cartera.CuotaCarteraLog": "cuota__cartera__paciente__clinica_id",
+    "cartera.AbonoCuota": "cuota__cartera__paciente__clinica_id",
     "cartera.CuotaCartera": "cartera__paciente__clinica_id",
     "cartera.AcuerdoPago": "cartera__paciente__clinica_id",
     "cartera.Cartera": "paciente__clinica_id",

@@ -9,7 +9,7 @@ from apps.agenda.models import Cita
 from apps.cartera.models import Cartera
 from apps.cobros.models import Cobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion
-from apps.clinicas.models import Clinica, Sede
+from apps.clinicas.models import Clinica, FormaDePago, Sede
 from apps.migracion.models import LoteMigracion
 from apps.obesidad.models import MedicionAntropometrica
 from apps.pacientes.models import Paciente
@@ -47,6 +47,9 @@ class PacienteEnCursoTests(TestCase):
             autoriza_datos=True,
         )
 
+    def _forma_pago(self, tipo_base="efectivo"):
+        return str(FormaDePago.objects.get(clinica=self.clinica, tipo_base=tipo_base).id)
+
     def _payload(self, **over):
         base = {
             "paciente": str(self.paciente.id),
@@ -58,10 +61,10 @@ class PacienteEnCursoTests(TestCase):
                 "precio_total_pactado": "1800000.00",
             },
             "sesiones_realizadas": [{}, {}, {}],
-            "pagos": [{"valor": "1000000.00", "medio_pago": "efectivo", "fecha": "2026-01-15"}],
+            "pagos": [{"valor": "1000000.00", "medio_pago": self._forma_pago(), "fecha": "2026-01-15"}],
             "plan_saldo": [
-                {"valor_esperado": "400000.00", "fecha_esperada": "2026-04-15", "tipo": "efectivo"},
-                {"valor_esperado": "400000.00", "fecha_esperada": "2026-05-15", "tipo": "efectivo"},
+                {"valor_esperado": "400000.00", "fecha_esperada": "2026-04-15", "tipo": self._forma_pago()},
+                {"valor_esperado": "400000.00", "fecha_esperada": "2026-05-15", "tipo": self._forma_pago()},
             ],
         }
         base.update(over)
@@ -115,7 +118,7 @@ class PacienteEnCursoTests(TestCase):
             },
             sesiones_realizadas=[{}, {}, {}],
             plan_saldo=[
-                {"valor_esperado": "800000.00", "fecha_esperada": "2026-04-15", "tipo": "efectivo"},
+                {"valor_esperado": "800000.00", "fecha_esperada": "2026-04-15", "tipo": self._forma_pago()},
             ],
         )
         r = self.client.post(URL, p, format="json")
@@ -150,14 +153,14 @@ class PacienteEnCursoTests(TestCase):
         self.assertEqual(Cotizacion.objects.get().items.get().sesiones_previas_consumidas, 2)
 
     def test_pagado_mayor_que_total_falla(self):
-        p = self._payload(pagos=[{"valor": "2000000.00", "medio_pago": "efectivo", "fecha": "2026-01-15"}])
+        p = self._payload(pagos=[{"valor": "2000000.00", "medio_pago": self._forma_pago(), "fecha": "2026-01-15"}])
         r = self.client.post(URL, p, format="json")
         self.assertEqual(r.status_code, 400)
         self.assertIn("PAGADO_MAYOR_QUE_TOTAL", str(r.json()))
 
     def test_plan_no_cuadra_falla(self):
         p = self._payload(plan_saldo=[
-            {"valor_esperado": "100000.00", "fecha_esperada": "2026-04-15", "tipo": "efectivo"},
+            {"valor_esperado": "100000.00", "fecha_esperada": "2026-04-15", "tipo": self._forma_pago()},
         ])
         r = self.client.post(URL, p, format="json")
         self.assertEqual(r.status_code, 400)

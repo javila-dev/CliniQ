@@ -26,16 +26,16 @@ from apps.core.logging import registrar_accion
 logger = logging.getLogger(__name__)
 
 TOLERANCIA = Decimal("0.01")
-TIPOS_VALIDOS = {t.value for t in CuotaCartera.Tipo}
 
 
 def _dec(value) -> Decimal:
     return value if isinstance(value, Decimal) else Decimal(str(value))
 
 
-def validar_plan_propuesto(cuotas, *, saldo_objetivo) -> None:
+def validar_plan_propuesto(cuotas, *, saldo_objetivo, clinica=None) -> None:
     """Valida la estructura del plan nuevo. `cuotas` = lista de dicts con
-    `tipo`, `descripcion`, `valor_esperado` (Decimal/num), `fecha_esperada` (date).
+    `tipo` (instancia de FormaDePago), `descripcion`, `valor_esperado`
+    (Decimal/num), `fecha_esperada` (date).
     """
     if not cuotas:
         raise ValidationError({"error": "El acuerdo debe tener al menos una cuota.", "code": "PLAN_VACIO"})
@@ -44,7 +44,7 @@ def validar_plan_propuesto(cuotas, *, saldo_objetivo) -> None:
     total = Decimal("0")
     for i, c in enumerate(cuotas):
         tipo = c.get("tipo")
-        if tipo not in TIPOS_VALIDOS:
+        if tipo is None or (clinica is not None and tipo.clinica_id != clinica.id):
             raise ValidationError({"error": f"Cuota {i + 1}: tipo de pago inválido.", "code": "TIPO_INVALIDO"})
         try:
             valor = _dec(c["valor_esperado"])
@@ -118,12 +118,12 @@ def crear_acuerdo_pago(cartera, *, motivo, cuotas, request=None):
             "code": "FIRMA_NO_DISPONIBLE",
         })
 
-    validar_plan_propuesto(cuotas, saldo_objetivo=saldo)
+    validar_plan_propuesto(cuotas, saldo_objetivo=saldo, clinica=cartera.paciente.clinica)
 
     numero = (cartera.acuerdos.aggregate(m=models.Max("numero"))["m"] or 0) + 1
     plan_propuesto = [
         {
-            "tipo": c["tipo"],
+            "tipo": str(c["tipo"].id),
             "descripcion": (c.get("descripcion") or "").strip(),
             "valor_esperado": f"{_dec(c['valor_esperado']):.2f}",
             "fecha_esperada": (
@@ -219,7 +219,7 @@ def aplicar_acuerdo_pago(acuerdo, *, request=None):
         CuotaCartera.objects.create(
             cartera=cartera,
             acuerdo=acuerdo,
-            tipo=row["tipo"],
+            tipo_id=row["tipo"],
             descripcion=row.get("descripcion") or "Cuota (acuerdo de pago)",
             valor_esperado=_dec(row["valor_esperado"]),
             fecha_esperada=fecha,

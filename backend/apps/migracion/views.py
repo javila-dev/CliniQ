@@ -49,7 +49,7 @@ class MigracionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     def paciente_en_curso(self, request):
         clinica = _guard(request)
-        ser = PacienteEnCursoSerializer(data=request.data)
+        ser = PacienteEnCursoSerializer(data=request.data, context={"clinica": clinica})
         ser.is_valid(raise_exception=True)
         data = ser.validated_data
 

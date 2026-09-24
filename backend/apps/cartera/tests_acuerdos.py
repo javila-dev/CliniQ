@@ -7,7 +7,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.cartera.models import AcuerdoPago, Cartera
-from apps.clinicas.models import Clinica, Sede
+from apps.clinicas.models import Clinica, FormaDePago, Sede
 from apps.consentimientos.models import Consentimiento
 from apps.cotizaciones.models import Cotizacion
 from apps.pacientes.models import Paciente
@@ -43,8 +43,9 @@ class AcuerdosPagoTests(TestCase):
             descripcion="Tratamiento", num_citas=1, periodicidad="",
             valor_unitario="1000000.00", descuento_porcentaje="0.00",
         )
-        self.cotizacion.formas_pago.create(tipo="transferencia", descripcion="Cuota 1", valor="400000.00")
-        self.cotizacion.formas_pago.create(tipo="transferencia", descripcion="Cuota 2", valor="600000.00")
+        forma_transferencia = FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia")
+        self.cotizacion.formas_pago.create(tipo=forma_transferencia, descripcion="Cuota 1", valor="400000.00")
+        self.cotizacion.formas_pago.create(tipo=forma_transferencia, descripcion="Cuota 2", valor="600000.00")
 
         self.client.force_authenticate(self.admin)
         self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
@@ -57,9 +58,10 @@ class AcuerdosPagoTests(TestCase):
     # ── helpers ────────────────────────────────────────────────────────────
     def _plan(self, montos, dias=30):
         base = timezone.localdate()
+        forma_transferencia = str(FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia").id)
         return [
             {
-                "tipo": "transferencia",
+                "tipo": forma_transferencia,
                 "descripcion": f"Cuota acuerdo {i + 1}",
                 "valor_esperado": str(m),
                 "fecha_esperada": (base + timedelta(days=dias * (i + 1))).isoformat(),
@@ -145,7 +147,7 @@ class AcuerdosPagoTests(TestCase):
         r = self.client.patch(
             f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
             {"valor_pagado": "100000", "fecha_pago": timezone.localdate().isoformat(),
-             "medio_pago": "transferencia"},
+             "medio_pago": str(FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia").id)},
             format="json",
         )
         self.assertEqual(r.status_code, 400)

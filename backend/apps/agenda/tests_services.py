@@ -17,6 +17,7 @@ from apps.agenda.services import (
     verificar_horario_sede,
 )
 from apps.cartera.models import Cartera, CuotaCartera
+from apps.clinicas.models import FormaDePago
 from apps.core.tests.factories import ClinicaFixtureMixin, HORARIO_LUN_VIE
 from apps.cotizaciones.models import Cotizacion
 
@@ -134,7 +135,7 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
         )
         CuotaCartera.objects.create(
             cartera=cartera,
-            tipo=CuotaCartera.Tipo.TRANSFERENCIA,
+            tipo=FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia"),
             valor_esperado=Decimal("100000.00"),
             fecha_esperada=timezone.localdate() - timedelta(days=5),
             pagada=False,

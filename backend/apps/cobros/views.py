@@ -12,7 +12,6 @@ from rest_framework.viewsets import ModelViewSet
 
 from apps.clinicas.models import Servicio
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
-from apps.colaboradores.models import Colaborador
 from apps.cobros.serializers import (
     CobroCreateSerializer,
     CobroSerializer,
@@ -23,6 +22,7 @@ from apps.cobros.serializers import (
 )
 from apps.cobros.services import agregar_item_cobro, registrar_pago
 from apps.inventario.models import Insumo
+from apps.users.authorization import user_sede_ids_acotadas
 from apps.users.permissions import RequirePermission, get_clinica_activa
 from django.utils import timezone
 import logging
@@ -64,21 +64,11 @@ class CobroViewSet(ModelViewSet):
             qs = qs.filter(sede__clinica=clinica)
         elif user.rol != "superadmin":
             qs = qs.none()
-        # Usuarios no-admin (recepción / profesional) solo ven ingresos de las
-        # sedes que tienen asignadas en su perfil de colaborador. Sin colaborador
-        # o sin sedes asignadas se mantiene el alcance de clínica.
-        if not user.es_admin:
-            colaborador = (
-                Colaborador.objects.filter(user=user)
-                .prefetch_related("sedes")
-                .first()
-            )
-            if colaborador is not None:
-                sedes_ids = list(colaborador.sedes.values_list("id", flat=True))
-                if not sedes_ids and colaborador.sede_principal_id:
-                    sedes_ids = [colaborador.sede_principal_id]
-                if sedes_ids:
-                    qs = qs.filter(sede_id__in=sedes_ids)
+        # Usuarios acotados a sedes (perfil de colaborador) solo ven ingresos de
+        # sus sedes; admin o sin sede asignada mantiene el alcance de clínica.
+        sedes_ids = user_sede_ids_acotadas(user)
+        if sedes_ids is not None:
+            qs = qs.filter(sede_id__in=sedes_ids)
         origen = self.request.query_params.get("origen")
         cotizacion = self.request.query_params.get("cotizacion")
         fecha_desde = self.request.query_params.get("fecha_desde")
@@ -124,7 +114,7 @@ class CobroViewSet(ModelViewSet):
                 try:
                     item_data["servicio"] = Servicio.objects.get(pk=item_data["servicio"])
                 except Servicio.DoesNotExist:
-                    raise ValidationError({"items": {"servicio": "Servicio no encontrado."}})
+                    raise ValidationError({"items": {"servicio": "Procedimiento no encontrado."}})
             if item_data.get("insumo"):
                 try:
                     item_data["insumo"] = Insumo.objects.get(pk=item_data["insumo"])
@@ -163,7 +153,7 @@ class CobroViewSet(ModelViewSet):
             try:
                 data["servicio"] = Servicio.objects.get(pk=data["servicio"])
             except Servicio.DoesNotExist:
-                raise ValidationError({"servicio": "Servicio no encontrado."})
+                raise ValidationError({"servicio": "Procedimiento no encontrado."})
 
         if data.get("insumo"):
             try:

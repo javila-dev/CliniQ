@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 
 from django.conf import settings
@@ -56,25 +57,32 @@ class Cartera(BaseModel):
 
 
 class CuotaCartera(BaseModel):
-    class Tipo(models.TextChoices):
-        EFECTIVO = "efectivo", "Efectivo"
-        TRANSFERENCIA = "transferencia", "Transferencia"
-        CUOTAS = "cuotas", "Cuotas"
-        FINANCIAMIENTO = "financiamiento", "Financiamiento"
-
     cartera = models.ForeignKey(
         Cartera,
         on_delete=models.CASCADE,
         related_name="cuotas",
     )
-    tipo = models.CharField(max_length=30, choices=Tipo.choices)
+    # Forma de pago DECLARADA (el plan aceptado en la cotización); se copia de
+    # FormaPagoCotizacion.tipo al generar la cartera.
+    tipo = models.ForeignKey(
+        "clinicas.FormaDePago",
+        on_delete=models.PROTECT,
+        related_name="cuotas_por_tipo",
+    )
     descripcion = models.CharField(max_length=200, blank=True)
     valor_esperado = models.DecimalField(max_digits=14, decimal_places=2)
     fecha_esperada = models.DateField(null=True, blank=True)
     pagada = models.BooleanField(default=False)
     valor_pagado = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
     fecha_pago = models.DateField(null=True, blank=True)
-    medio_pago = models.CharField(max_length=50, blank=True)
+    # Medio REAL con que se cobró (solo tiene valor una vez que se registra un pago).
+    medio_pago = models.ForeignKey(
+        "clinicas.FormaDePago",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="cuotas_por_medio_pago",
+    )
     observaciones = models.CharField(max_length=300, blank=True)
     excepcion_aprobada = models.BooleanField(
         default=False,
@@ -207,6 +215,45 @@ class AcuerdoPago(BaseModel):
 
     def __str__(self) -> str:
         return f"Acuerdo de pago N°{self.numero} - cartera {self.cartera_id} ({self.estado})"
+
+
+class AbonoCuota(models.Model):
+    """Cada pago registrado sobre una cuota (la cuota solo guarda el acumulado
+    y el último medio/fecha). Los abonos anteriores a este modelo no existen:
+    la UI cae al resumen de la cuota cuando no hay registros."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cuota = models.ForeignKey(CuotaCartera, on_delete=models.CASCADE, related_name="abonos")
+    pago = models.ForeignKey(
+        "cobros.PagoRecibido",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="abonos_cuota",
+    )
+    valor = models.DecimalField(max_digits=14, decimal_places=2)
+    fecha = models.DateField()
+    medio_pago = models.ForeignKey(
+        "clinicas.FormaDePago",
+        on_delete=models.PROTECT,
+        related_name="abonos_cuota",
+    )
+    observaciones = models.CharField(max_length=300, blank=True)
+    registrado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="abonos_cuota_registrados",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "abonos_cuota"
+        ordering = ["fecha", "created_at"]
+
+    def __str__(self) -> str:
+        return f"Abono {self.valor} cuota {self.cuota_id}"
 
 
 class CuotaCarteraLog(models.Model):

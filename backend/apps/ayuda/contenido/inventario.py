@@ -52,7 +52,7 @@ el que se usa para valorar el stock y para calcular el costo de insumos en el
 reporte de resultados.
 
 De ahí que valga la pena registrar las entradas con su costo real: de ese número
-sale después el margen de cada servicio.
+sale después el margen de cada procedimiento.
 
 ## Stock bajo
 
@@ -133,7 +133,7 @@ y registra recepciones.
 
 > Registrar la compra con el precio real es lo que hace que el reporte de márgenes
 > signifique algo. Si las entradas se cargan con precios viejos, el margen de cada
-> servicio queda mejor de lo que es.
+> procedimiento queda mejor de lo que es.
 """,
     },
 ]

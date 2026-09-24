@@ -4,7 +4,7 @@ from django.db import models, transaction
 from django.db.models import Q
 from rest_framework import serializers
 
-from apps.clinicas.models import Sede
+from apps.clinicas.models import FormaDePago, Sede
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
@@ -216,9 +216,9 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                 servicio = None
 
         if servicio and cotizacion and servicio.clinica_id != cotizacion.clinica_id:
-            raise serializers.ValidationError({"servicio": "El servicio no pertenece a la clinica de la cotizacion."})
+            raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la clinica de la cotizacion."})
         if servicio and request and request.user.rol != "superadmin" and servicio.clinica_id != request.user.clinica_id:
-            raise serializers.ValidationError({"servicio": "El servicio no pertenece a tu clinica."})
+            raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a tu clinica."})
         if tratamiento and cotizacion and tratamiento.clinica_id != cotizacion.clinica_id:
             raise serializers.ValidationError({"tratamiento": "El tratamiento no pertenece a la clinica de la cotizacion."})
         if tratamiento and request and request.user.rol != "superadmin" and tratamiento.clinica_id != request.user.clinica_id:
@@ -604,10 +604,12 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
 class FormaPagoCotizacionSerializer(serializers.ModelSerializer):
     id = serializers.UUIDField(required=False)
+    tipo = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
+    tipo_nombre = serializers.CharField(source="tipo.nombre", read_only=True)
 
     class Meta:
         model = FormaPagoCotizacion
-        fields = ("id", "tipo", "descripcion", "valor", "fecha")
+        fields = ("id", "tipo", "tipo_nombre", "descripcion", "valor", "fecha")
 
     def validate_valor(self, value):
         if value <= 0:
@@ -642,6 +644,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
     total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     total_pagado = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
+    cartera_id = serializers.SerializerMethodField()
 
     class Meta:
         model = Cotizacion
@@ -662,6 +665,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total",
             "total_pagado",
             "saldo_pendiente",
+            "cartera_id",
             "es_migracion",
             "activo",
             "created_at",
@@ -674,6 +678,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total",
             "total_pagado",
             "saldo_pendiente",
+            "cartera_id",
             "created_at",
             "updated_at",
         )
@@ -708,6 +713,10 @@ class CotizacionSerializer(serializers.ModelSerializer):
             return None
         saldo = Decimal(obj.total) - self._total_pagado_valor(obj)
         return str(saldo.quantize(Decimal("0.01")))
+
+    def get_cartera_id(self, obj):
+        cartera = getattr(obj, "cartera", None)
+        return str(cartera.id) if cartera else None
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)
@@ -758,7 +767,18 @@ class CotizacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"sede": "La sede no pertenece a tu clinica."})
         if sede and clinica and sede.clinica_id != clinica.id:
             raise serializers.ValidationError({"sede": "La sede no pertenece a la clinica de la cotizacion."})
+        # Toda cotización es de una sede: de ella salen los precios de campaña, el
+        # stock de obsequios, la caja donde entran los pagos y la dirección del PDF.
+        if self.instance is not None and "sede" in attrs and attrs["sede"] is None:
+            raise serializers.ValidationError({"sede": "La cotizacion debe tener una sede."})
+        if "sede" in attrs and sede is not None and not sede.activo and sede != getattr(self.instance, "sede", None):
+            raise serializers.ValidationError({"sede": "La sede esta inactiva."})
+        if self.instance is None and sede is None and clinica and not clinica.sedes.filter(activo=True).exists():
+            raise serializers.ValidationError(
+                {"sede": "La clinica no tiene sedes activas. Crea una sede antes de cotizar.", "code": "SEDE_REQUERIDA"}
+            )
         self._validate_items_clinica(attrs.get("items"), clinica)
+        self._validate_formas_pago_clinica(attrs.get("formas_pago"), clinica)
         self._validate_obsequios(attrs.get("items"))
         if self.instance and self.instance.estado != Cotizacion.Estado.BORRADOR:
             raise serializers.ValidationError(
@@ -819,6 +839,16 @@ class CotizacionSerializer(serializers.ModelSerializer):
                             )
                         }
                     )
+
+    def _validate_formas_pago_clinica(self, formas_pago, clinica):
+        if not formas_pago or not clinica:
+            return
+        for index, forma in enumerate(formas_pago, start=1):
+            tipo = forma.get("tipo")
+            if tipo and tipo.clinica_id != clinica.id:
+                raise serializers.ValidationError(
+                    {"formas_pago": f"La forma de pago {index} no pertenece a la clinica de la cotizacion."}
+                )
 
     @staticmethod
     def _crear_items(cotizacion, items_data):

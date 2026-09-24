@@ -144,7 +144,9 @@ class CanChangeAppointmentState(BasePermission):
         user = request.user
         if user_has_permission(user, "agenda.citas.cambiar_estado", request=request):
             return True
-        return getattr(user, "rol", None) == "profesional" and getattr(obj, "profesional_id", None) == user.id
+        # Quien atiende pacientes (check del usuario, sea cual sea su rol) puede
+        # mover el estado de sus propias citas.
+        return bool(getattr(user, "es_profesional", False)) and getattr(obj, "profesional_id", None) == user.id
 
 
 class HasClinicamente:

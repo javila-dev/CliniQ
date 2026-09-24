@@ -5,7 +5,7 @@ from django.test import TestCase
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.clinicas.models import Clinica, Sede
+from apps.clinicas.models import Clinica, FormaDePago, Sede
 from apps.cobros.models import Cobro
 from apps.colaboradores.models import Colaborador
 from apps.cotizaciones.models import Cotizacion
@@ -145,21 +145,21 @@ class CobrosIngresosTests(TestCase):
         )
         hoy = timezone.now()
         cobro_cita.pagos.create(
-            medio_pago="efectivo",
+            medio_pago=FormaDePago.objects.get(clinica=self.clinica, tipo_base="efectivo"),
             valor="500000.00",
             referencia="CITA-1",
             fecha=hoy,
             recibido_por=self.superadmin,
         )
         cobro_cotizacion.pagos.create(
-            medio_pago="transferencia",
+            medio_pago=FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia"),
             valor="350000.00",
             referencia="COT-1",
             fecha=hoy,
             recibido_por=self.superadmin,
         )
         cobro_libre.pagos.create(
-            medio_pago="efectivo",
+            medio_pago=FormaDePago.objects.get(clinica=self.clinica, tipo_base="efectivo"),
             valor="30000.00",
             referencia="LIB-1",
             fecha=hoy,

@@ -27,6 +27,7 @@ from apps.users.permissions import IsAdmin, IsSuperAdmin, RequirePermission, get
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
     CAPABILITY_PERMISSIONS,
+    PERMISOS_SOLO_CHECK_ATIENDE,
     role_is_professional_from_keys,
 )
 from apps.users.serializers import (
@@ -570,7 +571,11 @@ class CapacidadListView(APIView):
     permission_classes = (RequirePermission("roles.ver"),)
 
     def get(self, request, *args, **kwargs):
-        permisos = list(Permiso.objects.filter(activo=True).order_by("modulo", "accion", "clave"))
+        permisos = list(
+            Permiso.objects.filter(activo=True)
+            .exclude(clave__in=PERMISOS_SOLO_CHECK_ATIENDE)
+            .order_by("modulo", "accion", "clave")
+        )
         claves_validas = {p.clave for p in permisos}
 
         areas = []
@@ -743,7 +748,11 @@ class RolViewSet(GenericViewSet):
             if rol.es_profesional != es_profesional:
                 rol.es_profesional = es_profesional
                 rol.save(update_fields=["es_profesional", "updated_at"])
-            rol.usuarios.exclude(es_profesional=es_profesional).update(es_profesional=es_profesional)
+            # El check "atiende pacientes" del usuario manda: un rol clinico marca a
+            # sus usuarios como profesionales, pero quitarle esas capacidades no
+            # desmarca a quienes atienden por su propio check.
+            if es_profesional:
+                rol.usuarios.filter(es_profesional=False).update(es_profesional=True)
             RolAuditoria.objects.create(
                 rol=rol,
                 usuario=request.user,

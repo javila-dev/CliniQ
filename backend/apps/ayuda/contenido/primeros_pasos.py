@@ -29,7 +29,7 @@ una sola vez** y que los demás módulos lo aprovechen.
 | **Resultados** | Facturación, costo de insumos, margen y caja de cada sede. |
 | **Consentimientos** | Documentos que el paciente firma, con su estado y su PDF. |
 | **Campañas** | Precios promocionales vigentes por temporada y por sede. |
-| **Configuración** | Catálogo de servicios, sedes, equipo, roles y preferencias. |
+| **Configuración** | Catálogo, sedes, equipo, roles y preferencias. |
 
 No todos los módulos aparecen para todo el mundo. El menú lateral se arma según
 los permisos de tu rol, así que si un compañero ve una opción que tú no ves, es
@@ -39,7 +39,7 @@ una diferencia de permisos y no un error. Lo explicamos en
 ## El camino típico de un paciente
 
 1. **Se crea la ficha del paciente** con sus datos de identificación y contacto.
-2. **Se agenda una cita** con profesional, sede y motivo o servicio.
+2. **Se agenda una cita** con profesional, sede y motivo o procedimiento.
 3. **El paciente llega** y recepción registra la llegada; queda en la cola de
    espera del día.
 4. **Antes de pasar**, el asistente de inicio de atención revisa lo que la
@@ -87,9 +87,12 @@ La conexión entre módulos es lo que evita el doble trabajo:
 Este es el orden que recomendamos para montar la clínica. Cada paso se apoya en
 el anterior, así que seguirlo evita tener que volver atrás a corregir.
 
+Para ver en qué punto está tu clínica, abre **Configuración → Preparar mi clínica**: ahí
+cada paso se marca solo cuando de verdad está hecho, con un botón que lleva a resolverlo.
+
 ## 1. Datos de la clínica
 
-En **Configuración → General** carga el nombre, el NIT, el teléfono y el logo.
+En **Configuración → Datos de la clínica** carga el nombre, el NIT, el teléfono y el logo.
 El logo aparece en los documentos que se generan, así que conviene subir una
 imagen de buena calidad.
 
@@ -112,9 +115,10 @@ los **usuarios** en Configuración → Usuarios. Hacerlo en ese orden te deja
 asignar el rol correcto desde el inicio, en vez de corregirlo después.
 
 Marca como profesionales a quienes atienden pacientes: solo ellos pueden
-aparecer en la agenda como responsables de una cita.
+aparecer en la agenda como responsables de una cita. Si tú también atiendes,
+usa el botón **Yo atiendo pacientes** de Preparar mi clínica.
 
-## 4. Catálogo de servicios
+## 4. Catálogo
 
 Es la parte que más tiempo toma y la que más rinde después.
 
@@ -136,7 +140,7 @@ acordarse.
 
 ## 6. Preferencias de atención y cobro
 
-- **Pantalla de atención** e **Historia clínica**: elige qué pestañas ve el
+- **Pantalla del profesional** e **Historia clínica**: elige qué pestañas ve el
   profesional, para no mostrar campos que tu clínica no usa.
 - **Otros documentos**: decide si al aceptar una cotización se exige el
   documento de aceptación y compromiso de pago firmado.
@@ -147,7 +151,7 @@ acordarse.
 
 Si ya venías trabajando con pacientes a mitad de tratamiento, no los cargues
 como si empezaran de cero. Usa el asistente de
-[puesta en marcha](/ayuda/articulo/puesta-en-marcha-cargar-pacientes-en-curso),
+[migrar pacientes en curso](/ayuda/articulo/puesta-en-marcha-cargar-pacientes-en-curso),
 que registra lo que ya pagaron, las sesiones que ya hicieron y el saldo que
 queda pendiente.
 
@@ -215,6 +219,12 @@ aplicación:
 Si tu clínica tiene más de una sede, casi todas las pantallas tienen un selector
 de sede. El filtro que elijas se mantiene mientras navegas, así que si un listado
 aparece vacío, revisa primero qué sede y qué rango de fechas tienes puestos.
+
+Cada persona del equipo solo ve las sedes que tiene asignadas en su ficha de
+**Equipo** (sede principal y sedes a las que tiene acceso): agenda, caja,
+ingresos, inventario, compras y reportes muestran únicamente esas sedes. Los
+administradores ven todas. Si a alguien le falta una sede en los selectores,
+agrégala en su ficha.
 
 > Una sola sesión por usuario: si inicias sesión en otro equipo o en otro
 > navegador, la sesión anterior se cierra. Las cuentas son personales y no se

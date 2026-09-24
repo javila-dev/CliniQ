@@ -1,6 +1,7 @@
 import asyncio
 
-from django.db.models import Q
+from django.db.models import Q, Value
+from django.db.models.functions import Concat
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -119,11 +120,14 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         if len(query) < 3:
             return Response([], status=status.HTTP_200_OK)
 
-        queryset = self.get_queryset().filter(
-            Q(nombres__icontains=query)
-            | Q(apellidos__icontains=query)
+        # nombre_completo_busqueda cubre "nombre apellido" escrito junto, que
+        # nombres/apellidos por separado no encuentran (ninguno lo contiene entero).
+        queryset = self.get_queryset().annotate(
+            nombre_completo_busqueda=Concat("nombres", Value(" "), "apellidos"),
+        ).filter(
+            Q(nombre_completo_busqueda__icontains=query)
             | Q(numero_documento__icontains=query)
-        )[:10]
+        )[:20]
         serializer = BusquedaPacienteSerializer(
             queryset, many=True, context=self.get_serializer_context()
         )

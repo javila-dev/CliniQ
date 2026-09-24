@@ -84,3 +84,21 @@ def confirmar_manual(cita: Cita, user, *, medio: str = "", nota: str = "") -> Ci
         nota=nota,
     )
     return cita
+
+
+# estado_resultante de un contacto en el que el paciente no confirmó: la cita no cambia de estado.
+NO_CONFIRMO = "no_confirmo"
+
+
+def registrar_no_confirmo(cita: Cita, user, *, medio: str = "", nota: str = "") -> Cita:
+    if cita.estado_confirmacion != Cita.EstadoConfirmacion.CONFIRMADO:
+        cita.estado_confirmacion = Cita.EstadoConfirmacion.SIN_RESPUESTA
+        cita.save(update_fields=["estado_confirmacion", "updated_at"])
+    crear_registro_confirmacion(
+        cita=cita,
+        estado_resultante=NO_CONFIRMO,
+        usuario=user,
+        medio=medio,
+        nota=nota,
+    )
+    return cita

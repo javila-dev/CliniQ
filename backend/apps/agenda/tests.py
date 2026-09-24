@@ -7,7 +7,7 @@ from rest_framework.test import APIClient
 
 from apps.agenda.models import Cita, RegistroConfirmacion
 from apps.cartera.models import Cartera, CuotaCartera
-from apps.clinicas.models import Clinica, Sede, Servicio, ServicioConsentimiento
+from apps.clinicas.models import Clinica, FormaDePago, Sede, Servicio, ServicioConsentimiento
 from apps.configuracion.models import DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion
 from apps.historia_clinica.models import ConsentimientoInformado
@@ -112,6 +112,56 @@ class CitaEnEsperaFlowTests(TestCase):
         )
         self.assertFalse(response.json()["consentimiento_info"]["todos_firmados"])
 
+    def test_list_filtra_varios_profesionales(self):
+        segundo = User.objects.create_user(
+            email="prof-dos@example.com",
+            password="secret123",
+            first_name="Beatriz",
+            last_name="Dos",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+        )
+        tercero = User.objects.create_user(
+            email="prof-tres@example.com",
+            password="secret123",
+            first_name="Carolina",
+            last_name="Tres",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+        )
+        segunda_cita = Cita.objects.create(
+            paciente=self.paciente,
+            sede=self.sede,
+            servicio=self.servicio,
+            profesional=segundo,
+            fecha_inicio=self.cita.fecha_inicio + timedelta(hours=1),
+            fecha_fin=self.cita.fecha_fin + timedelta(hours=1),
+            canal_confirmacion=self.paciente.canal_confirmacion,
+            canal_origen=Cita.CanalOrigen.PRESENCIAL,
+            created_by=self.superadmin,
+        )
+        excluida = Cita.objects.create(
+            paciente=self.paciente,
+            sede=self.sede,
+            servicio=self.servicio,
+            profesional=tercero,
+            fecha_inicio=self.cita.fecha_inicio + timedelta(hours=2),
+            fecha_fin=self.cita.fecha_fin + timedelta(hours=2),
+            canal_confirmacion=self.paciente.canal_confirmacion,
+            canal_origen=Cita.CanalOrigen.PRESENCIAL,
+            created_by=self.superadmin,
+        )
+
+        response = self.client.get(
+            "/api/v1/agenda/citas/",
+            {"profesional__in": f"{self.profesional.id},{segundo.id}"},
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        ids = {item["id"] for item in response.json()["results"]}
+        self.assertEqual(ids, {str(self.cita.id), str(segunda_cita.id)})
+        self.assertNotIn(str(excluida.id), ids)
+
     def test_profesional_asignado_puede_cambiar_estado_de_su_cita(self):
         self.client.force_authenticate(self.profesional)
 
@@ -212,7 +262,7 @@ class CitaEnEsperaFlowTests(TestCase):
         )
         cuota = CuotaCartera.objects.create(
             cartera=cartera,
-            tipo=CuotaCartera.Tipo.TRANSFERENCIA,
+            tipo=FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia"),
             valor_esperado="100000.00",
             fecha_esperada=timezone.localdate() - timedelta(days=5),
             pagada=False,
@@ -284,6 +334,80 @@ class CitaEnEsperaFlowTests(TestCase):
             "estado__in": "pendiente,confirmada,en_espera,en_curso",
         })
         self.assertEqual(r2.json()["count"], 1)
+
+    def test_no_confirmo_deja_registro_con_usuario_y_no_cambia_estado(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/no_confirmo/",
+            {"medio": RegistroConfirmacion.Medio.LLAMADA, "nota": "No contesta el teléfono"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.PENDIENTE)
+        self.assertEqual(self.cita.estado_confirmacion, Cita.EstadoConfirmacion.SIN_RESPUESTA)
+        registro = RegistroConfirmacion.objects.get(cita=self.cita, estado_resultante="no_confirmo")
+        self.assertEqual(registro.usuario, self.superadmin)
+        self.assertEqual(registro.nota, "No contesta el teléfono")
+
+    def test_no_confirmo_exige_motivo(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/no_confirmo/",
+            {"nota": "   "},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(RegistroConfirmacion.objects.filter(cita=self.cita).exists())
+
+    def test_pendiente_vencida_puede_marcarse_no_asistio(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.fecha_inicio = timezone.now() - timedelta(hours=1)
+        self.cita.fecha_fin = self.cita.fecha_inicio + timedelta(minutes=30)
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.NO_ASISTIO, "nota": "No llegó"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.NO_ASISTIO)
+        registro = RegistroConfirmacion.objects.get(cita=self.cita, estado_resultante=Cita.Estado.NO_ASISTIO)
+        self.assertEqual(registro.usuario, self.superadmin)
+
+    def test_pendiente_futura_no_puede_marcarse_no_asistio(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.NO_ASISTIO},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+
+    def test_no_confirmo_rechaza_cita_cerrada(self):
+        self.cita.estado = Cita.Estado.CANCELADA
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/no_confirmo/",
+            {"nota": "No contesta"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
 
 
 class CitaCotizacionItemTests(TestCase):

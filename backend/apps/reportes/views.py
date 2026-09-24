@@ -16,7 +16,7 @@ from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.inventario.models import Insumo
 from apps.notificaciones.services import uso_whatsapp_mes_actual
-from apps.users.authorization import user_has_permission
+from apps.users.authorization import sede_ids_para_filtro, user_has_permission, user_sede_ids_acotadas
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
@@ -64,7 +64,7 @@ class DashboardView(APIView):
 
     def get(self, request: Request):
         user = request.user
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
         fecha = _parse_date(request.query_params.get("fecha"), date.today())
 
         # Rango opcional: si llega `fecha_inicio`/`fecha_fin`, los agregados de
@@ -77,8 +77,8 @@ class DashboardView(APIView):
         rango_fin = _parse_date(rango_fin_raw, date.today())
 
         cita_qs = Cita.objects.filter(**_cita_clinica_scope(user))
-        if sede_id:
-            cita_qs = cita_qs.filter(sede_id=sede_id)
+        if sede_ids is not None:
+            cita_qs = cita_qs.filter(sede_id__in=sede_ids)
 
         # Citas del día (o del rango solicitado)
         if usar_rango:
@@ -129,8 +129,8 @@ class DashboardView(APIView):
             # Los datos previos cargados por el asistente de puesta en marcha no
             # son ingresos del periodo.
             cobro_qs = Cobro.objects.filter(**_clinica_scope(user)).exclude(es_migracion=True)
-            if sede_id:
-                cobro_qs = cobro_qs.filter(sede_id=sede_id)
+            if sede_ids is not None:
+                cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
             if usar_rango:
                 cobros_hoy_qs = cobro_qs.filter(
@@ -146,9 +146,9 @@ class DashboardView(APIView):
             )
             por_medio = (
                 PagoRecibido.objects.filter(cobro__in=cobros_hoy_qs)
-                .values("medio_pago")
+                .values("medio_pago__nombre")
                 .annotate(total=Sum("valor"))
-                .order_by("medio_pago")
+                .order_by("medio_pago__nombre")
             )
 
             fecha_inicio_semana = fecha - timedelta(days=6)
@@ -171,7 +171,7 @@ class DashboardView(APIView):
                 "pagados": cobros_agg["pagados"],
                 "pendientes": cobros_agg["pendientes"],
                 "por_medio_pago": [
-                    {"medio": row["medio_pago"], "total": str(row["total"])}
+                    {"medio": row["medio_pago__nombre"], "total": str(row["total"])}
                     for row in por_medio
                 ],
             }
@@ -185,7 +185,7 @@ class IngresosView(APIView):
 
     def get(self, request: Request):
         user = request.user
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
         hoy = date.today()
         fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy - timedelta(days=29))
         fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
@@ -200,8 +200,8 @@ class IngresosView(APIView):
             **_clinica_scope(user),
         ).exclude(estado="anulado").exclude(es_migracion=True)
 
-        if sede_id:
-            cobro_qs = cobro_qs.filter(sede_id=sede_id)
+        if sede_ids is not None:
+            cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
         cobros_por_periodo = (
             cobro_qs.annotate(periodo=trunc_fn("fecha"))
@@ -216,8 +216,8 @@ class IngresosView(APIView):
                 fecha__lte=fecha_fin,
                 **_clinica_scope(user),
             )
-            if sede_id:
-                gasto_qs = gasto_qs.filter(sede_id=sede_id)
+            if sede_ids is not None:
+                gasto_qs = gasto_qs.filter(sede_id__in=sede_ids)
 
             gastos_por_periodo = (
                 gasto_qs.annotate(periodo=trunc_fn("fecha"))
@@ -250,7 +250,7 @@ class ServiciosView(APIView):
 
     def get(self, request: Request):
         user = request.user
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
         hoy = date.today()
         fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
         fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
@@ -262,8 +262,8 @@ class ServiciosView(APIView):
         ) & ~Q(cobro__estado="anulado")
         if scope:
             cobro_filter &= Q(**{f"cobro__{k}": v for k, v in scope.items()})
-        if sede_id:
-            cobro_filter &= Q(cobro__sede_id=sede_id)
+        if sede_ids is not None:
+            cobro_filter &= Q(cobro__sede_id__in=sede_ids)
 
         servicios_qs = (
             ItemCobro.objects.filter(cobro_filter, tipo="servicio")
@@ -283,8 +283,8 @@ class ServiciosView(APIView):
         ) & ~Q(cobro__estado="anulado")
         if scope:
             insumo_filter &= Q(**{f"cobro__{k}": v for k, v in scope.items()})
-        if sede_id:
-            insumo_filter &= Q(cobro__sede_id=sede_id)
+        if sede_ids is not None:
+            insumo_filter &= Q(cobro__sede_id__in=sede_ids)
 
         costo_por_cobro = (
             ItemCobro.objects.filter(insumo_filter)
@@ -333,7 +333,7 @@ class CotizacionesReporteView(APIView):
         hoy = date.today()
         fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
         fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
 
         qs = Cotizacion.objects.filter(
             created_at__date__gte=fecha_inicio,
@@ -342,8 +342,8 @@ class CotizacionesReporteView(APIView):
         )
         if user.rol != "superadmin":
             qs = qs.filter(clinica=user.clinica)
-        if sede_id:
-            qs = qs.filter(sede_id=sede_id)
+        if sede_ids is not None:
+            qs = qs.filter(sede_id__in=sede_ids)
 
         agg = qs.aggregate(
             total_mes=Count("id"),
@@ -365,7 +365,7 @@ class PacientesSinReagendarView(APIView):
 
     def get(self, request: Request):
         user = request.user
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
         try:
             dias_minimos = int(request.query_params.get("dias_minimos", 30))
         except (ValueError, TypeError):
@@ -407,8 +407,8 @@ class PacientesSinReagendarView(APIView):
 
         if user.rol != "superadmin":
             items = items.filter(cotizacion__clinica=user.clinica)
-        if sede_id:
-            items = items.filter(cotizacion__sede_id=sede_id)
+        if sede_ids is not None:
+            items = items.filter(cotizacion__sede_id__in=sede_ids)
 
         items = items.select_related("cotizacion__paciente")
 
@@ -449,7 +449,7 @@ class OcupacionView(APIView):
 
     def get(self, request: Request):
         user = request.user
-        sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
         hoy = date.today()
         fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
         fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
@@ -459,8 +459,8 @@ class OcupacionView(APIView):
             fecha_inicio__date__lte=fecha_fin,
             **_cita_clinica_scope(user),
         )
-        if sede_id:
-            cita_qs = cita_qs.filter(sede_id=sede_id)
+        if sede_ids is not None:
+            cita_qs = cita_qs.filter(sede_id__in=sede_ids)
 
         rows = (
             cita_qs.values("profesional_id", "profesional__first_name", "profesional__last_name")
@@ -506,6 +506,7 @@ class EstadoFinancieroView(APIView):
         if inicio > fin:
             inicio, fin = fin, inicio
         sede_id = request.query_params.get("sede_id")
+        sede_ids = sede_ids_para_filtro(request.user, sede_id)
 
         # Scope de clínica: la activa (header X-Active-Clinica para superadmin;
         # user.clinica para el resto). None solo si es superadmin sin clínica
@@ -516,8 +517,8 @@ class EstadoFinancieroView(APIView):
         prev_fin = inicio - timedelta(days=1)
         prev_inicio = prev_fin - timedelta(days=dias - 1)
 
-        actual = self._bloque(clinica, inicio, fin, sede_id)
-        anterior = self._bloque(clinica, prev_inicio, prev_fin, sede_id)
+        actual = self._bloque(clinica, inicio, fin, sede_ids)
+        anterior = self._bloque(clinica, prev_inicio, prev_fin, sede_ids)
 
         payload = {
             "periodo": {"inicio": str(inicio), "fin": str(fin), "dias": dias},
@@ -527,11 +528,11 @@ class EstadoFinancieroView(APIView):
         }
 
         if not sede_id:
-            payload["por_sede"] = self._por_sede(clinica, inicio, fin)
+            payload["por_sede"] = self._por_sede(clinica, inicio, fin, request.user)
 
         return Response(payload)
 
-    def _bloque(self, clinica, inicio, fin, sede_id):
+    def _bloque(self, clinica, inicio, fin, sede_ids):
         scope = {"sede__clinica": clinica} if clinica else {}
 
         cobro_qs = (
@@ -539,8 +540,8 @@ class EstadoFinancieroView(APIView):
             .exclude(estado="anulado")
             .exclude(es_migracion=True)
         )
-        if sede_id:
-            cobro_qs = cobro_qs.filter(sede_id=sede_id)
+        if sede_ids is not None:
+            cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
         ingresos_facturado = cobro_qs.aggregate(s=Sum("total"))["s"] or Decimal("0")
         ingresos_recaudado = (
@@ -565,8 +566,8 @@ class EstadoFinancieroView(APIView):
             gasto_qs = GastoCaja.objects.filter(
                 fecha__gte=inicio, fecha__lte=fin, **scope
             )
-            if sede_id:
-                gasto_qs = gasto_qs.filter(sede_id=sede_id)
+            if sede_ids is not None:
+                gasto_qs = gasto_qs.filter(sede_id__in=sede_ids)
             gastos_operativos = gasto_qs.aggregate(s=Sum("valor"))["s"] or Decimal("0")
 
         margen = Decimal(ingresos_facturado) - Decimal(costo_insumos) - Decimal(gastos_operativos)
@@ -588,13 +589,16 @@ class EstadoFinancieroView(APIView):
             for k, v in bloque.items()
         }
 
-    def _por_sede(self, clinica, inicio, fin):
+    def _por_sede(self, clinica, inicio, fin, user):
         sedes = Sede.objects.filter(activo=True)
         if clinica is not None:
             sedes = sedes.filter(clinica=clinica)
+        acotadas = user_sede_ids_acotadas(user)
+        if acotadas is not None:
+            sedes = sedes.filter(id__in=acotadas)
         resultado = []
         for sede in sedes.order_by("nombre"):
-            b = self._bloque(clinica, inicio, fin, str(sede.id))
+            b = self._bloque(clinica, inicio, fin, [sede.id])
             resultado.append({
                 "sede_id": str(sede.id),
                 "sede_nombre": sede.nombre,

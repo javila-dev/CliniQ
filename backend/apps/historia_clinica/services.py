@@ -426,38 +426,88 @@ def verificar_firma_consentimiento_en_documenso(consentimiento) -> bool:
     return True
 
 
-def consentimiento_informado_vigente(paciente_id, template_token):
-    """Último ConsentimientoInformado firmado y no vencido del paciente para el template."""
+def requiere_firma_cada_vez(cita, template_token) -> bool:
+    """True si algún procedimiento de la cita exige firmar este consentimiento en cada
+    ejecución (en vez de reutilizar una firma vigente por meses)."""
+    from apps.clinicas.models import ServicioConsentimiento
+    from apps.protocolos.services import _sesion_vinculada_o_pendiente
+
+    if cita is None:
+        return False
+
+    procedimiento_ids = set()
+    if cita.servicio_id:
+        procedimiento_ids.add(cita.servicio_id)
+    sesion = _sesion_vinculada_o_pendiente(cita)
+    if sesion is not None:
+        if sesion.tipo_sesion_id:
+            procedimiento_ids.update(
+                sesion.tipo_sesion.procedimientos.filter(activo=True).values_list("procedimiento_id", flat=True)
+            )
+        if sesion.procedimiento_id:
+            procedimiento_ids.add(sesion.procedimiento_id)
+    if not procedimiento_ids:
+        return False
+    return ServicioConsentimiento.objects.filter(
+        servicio_id__in=procedimiento_ids,
+        activo=True,
+        requiere_firma_cada_vez=True,
+        template__template_token=template_token,
+    ).exists()
+
+
+def consentimiento_informado_vigente(paciente_id, template_token, *, cita_id=None, requiere_cada_vez=False):
+    """Último ConsentimientoInformado que satisface el requisito del paciente para el template.
+
+    En modo vigencia (default): la última firma no vencida, sin importar la cita.
+    En modo "cada vez" (``requiere_cada_vez``): exige una firma enlazada específicamente
+    a ``cita_id`` — una firma vigente de otra cita no cuenta.
+    """
     from django.db.models import Q
 
     from apps.historia_clinica.models import ConsentimientoInformado
 
+    queryset = ConsentimientoInformado.objects.filter(
+        paciente_id=paciente_id,
+        documenso_template_token=template_token,
+        firmado=True,
+    )
+
+    if requiere_cada_vez:
+        if not cita_id:
+            return None
+        return queryset.filter(cita_id=cita_id).order_by("-fecha_firma", "-created_at").first()
+
     hoy = timezone.localdate()
     return (
-        ConsentimientoInformado.objects.filter(
-            paciente_id=paciente_id,
-            documenso_template_token=template_token,
-            firmado=True,
-        )
-        .filter(Q(fecha_vencimiento__isnull=True) | Q(fecha_vencimiento__gte=hoy))
+        queryset.filter(Q(fecha_vencimiento__isnull=True) | Q(fecha_vencimiento__gte=hoy))
         .order_by("-fecha_firma", "-created_at")
         .first()
     )
 
 
-def consentimiento_satisfecho(paciente_id, template_token, *, informado=None) -> bool:
-    """True si el paciente tiene el consentimiento vigente en cualquiera de los dos modelos:
+def consentimiento_satisfecho(paciente_id, template_token, *, informado=None, cita_id=None, requiere_cada_vez=False) -> bool:
+    """True si el paciente tiene el consentimiento satisfecho en cualquiera de los dos modelos:
     ConsentimientoInformado (firma Documenso) o ConsentimientoPaciente (registro manual/legado).
+
+    ``requiere_cada_vez`` bifurca el chequeo: en modo vigencia (default) basta una firma no
+    vencida; en modo "cada vez" se exige una firma enlazada específicamente a ``cita_id``.
     """
     from apps.protocolos.models import ConsentimientoPaciente
 
-    if informado is not None or consentimiento_informado_vigente(paciente_id, template_token) is not None:
+    if informado is not None:
         return True
-    return ConsentimientoPaciente.objects.filter(
-        paciente_id=paciente_id,
-        template_token=template_token,
-        vigencia_hasta__gte=timezone.localdate(),
-    ).exists()
+    if consentimiento_informado_vigente(
+        paciente_id, template_token, cita_id=cita_id, requiere_cada_vez=requiere_cada_vez
+    ) is not None:
+        return True
+
+    queryset = ConsentimientoPaciente.objects.filter(paciente_id=paciente_id, template_token=template_token)
+    if requiere_cada_vez:
+        if not cita_id:
+            return False
+        return queryset.filter(cita_id=cita_id).exists()
+    return queryset.filter(vigencia_hasta__gte=timezone.localdate()).exists()
 
 
 def marcar_consentimiento_firmado(consentimiento, *, documenso_document_id: str | None = None):

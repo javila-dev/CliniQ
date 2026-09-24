@@ -122,21 +122,89 @@ class RolPermisosProfesionalDerivationTests(TestCase):
         )
 
     def test_capacidad_clinica_activa_es_profesional_y_propaga(self):
-        res = self._put(["pacientes.ver", "historia.notas.crear", "pacientes.antecedentes.editar"])
+        res = self._put(["pacientes.ver", "historia.fotos.eliminar"])
         self.assertEqual(res.status_code, 200, res.content)
         self.rol.refresh_from_db()
         self.miembro.refresh_from_db()
         self.assertTrue(self.rol.es_profesional)
         self.assertTrue(self.miembro.es_profesional)
 
-    def test_quitar_capacidad_clinica_revierte_es_profesional(self):
-        self._put(["historia.notas.crear", "pacientes.antecedentes.editar"])
+    def test_quitar_capacidad_clinica_no_desmarca_al_usuario(self):
+        # El rol deja de ser clinico, pero el usuario conserva "atiende pacientes":
+        # ese check es del usuario y manda sobre el rol.
+        self._put(["historia.fotos.eliminar"])
         res = self._put(["pacientes.ver", "cobros.ver"])
         self.assertEqual(res.status_code, 200, res.content)
         self.rol.refresh_from_db()
         self.miembro.refresh_from_db()
         self.assertFalse(self.rol.es_profesional)
-        self.assertFalse(self.miembro.es_profesional)
+        self.assertTrue(self.miembro.es_profesional)
+
+    def test_editar_rol_no_clinico_no_desmarca_check_atiende_pacientes(self):
+        self.miembro.es_profesional = True
+        self.miembro.save(update_fields=["es_profesional"])
+        res = self._put(["pacientes.ver", "agenda.citas.ver"])
+        self.assertEqual(res.status_code, 200, res.content)
+        self.miembro.refresh_from_db()
+        self.assertTrue(self.miembro.es_profesional)
+
+    def test_crear_usuario_con_check_atiende_pacientes_en_rol_no_clinico(self):
+        res = self.client.post(
+            "/api/v1/usuarios/",
+            {
+                "email": "nueva-check@example.com", "first_name": "Ana", "last_name": "Check",
+                "password": "Secret123!Aa", "role_id": str(self.rol.id), "es_profesional": True,
+            },
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertTrue(User.objects.get(email="nueva-check@example.com").es_profesional)
+
+    def test_cambiar_rol_conserva_check_atiende_pacientes(self):
+        otro = Rol.objects.create(clinica=self.clinica, slug="caja", nombre="Caja", es_sistema=False)
+        self.miembro.es_profesional = True
+        self.miembro.save(update_fields=["es_profesional"])
+        res = self.client.patch(
+            f"/api/v1/usuarios/{self.miembro.id}/", {"role_id": str(otro.id)}, format="json"
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.miembro.refresh_from_db()
+        self.assertTrue(self.miembro.es_profesional)
+
+    def test_permisos_de_atencion_no_se_asignan_por_rol(self):
+        res = self._put(["pacientes.ver", "historia.notas.crear", "historia.fotos.subir"])
+        self.assertEqual(res.status_code, 200, res.content)
+        claves = set(self.rol.permisos.values_list("clave", flat=True))
+        self.assertEqual(claves, {"pacientes.ver"})
+        self.rol.refresh_from_db()
+        self.assertFalse(self.rol.es_profesional)
+
+    def test_check_atiende_pacientes_da_permisos_de_atencion(self):
+        from apps.users.authorization import get_user_permission_keys
+        from apps.users.permissions_catalog import PERMISOS_ATIENDE_PACIENTES
+
+        self._put(["pacientes.ver"])
+        self.miembro.refresh_from_db()
+        self.assertFalse(PERMISOS_ATIENDE_PACIENTES & get_user_permission_keys(self.miembro))
+        self.miembro.es_profesional = True
+        self.miembro.save(update_fields=["es_profesional"])
+        self.assertTrue(PERMISOS_ATIENDE_PACIENTES <= get_user_permission_keys(self.miembro))
+
+    def test_capacidades_no_ofrecen_permisos_de_atencion(self):
+        from apps.users.permissions_catalog import PERMISOS_SOLO_CHECK_ATIENDE
+
+        res = self.client.get("/api/v1/usuarios/capacidades/")
+        self.assertEqual(res.status_code, 200, res.content)
+        en_capacidades = {k for a in res.data["areas"] for c in a["capacidades"] for k in c["permisos"]}
+        tecnicos = {p["clave"] for m in res.data["permisos_tecnicos"] for p in m["permisos"]}
+        self.assertFalse(PERMISOS_SOLO_CHECK_ATIENDE & (en_capacidades | tecnicos))
+
+    def test_consentimientos_de_atencion_siguen_asignables_por_rol(self):
+        res = self._put(["historia.consentimientos.gestionar"])
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertIn("historia.consentimientos.gestionar", set(self.rol.permisos.values_list("clave", flat=True)))
+        self.rol.refresh_from_db()
+        self.assertFalse(self.rol.es_profesional)
 
     def test_acepta_permiso_antes_no_asignable(self):
         res = self._put(["cartera.ver", "cartera.aprobar_excepcion", "cartera.modificar_plazo"])

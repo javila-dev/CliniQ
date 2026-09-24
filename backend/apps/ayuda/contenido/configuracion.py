@@ -20,7 +20,10 @@ de todo lo que se hace.
 2. Completa nombre, apellido, correo y teléfono.
 3. Elige el **rol**, que define sus permisos.
 4. Indica si **atiende pacientes**. Solo quienes están marcados como
-   profesionales pueden aparecer como responsables de una cita.
+   profesionales pueden aparecer como responsables de una cita. Este indicador
+   también les permite atender: escribir en la historia clínica, editar
+   antecedentes, subir fotos, gestionar consentimientos y registrar los insumos
+   usados, sin importar el rol que tengan.
 5. Guarda.
 
 La persona recibe un correo con un enlace para definir su contraseña. Ese enlace
@@ -95,8 +98,8 @@ Están agrupados por módulo. A grandes rasgos:
 | Grupo | Ejemplos de lo que controla |
 |---|---|
 | **Agenda** | Ver, crear, editar y cancelar citas; crear y aprobar bloqueos |
-| **Pacientes** | Ver, crear y editar fichas; ver datos sensibles; antecedentes |
-| **Historia clínica** | Leer la historia; escribir notas, que además habilita atenciones |
+| **Pacientes** | Ver, crear y editar fichas; ver datos sensibles; ver antecedentes |
+| **Historia clínica** | Leer la historia; eliminar fotos |
 | **Cotizaciones** | Ver, gestionar y cambiar precios |
 | **Cobros y cartera** | Ver, crear y anular cobros; aprobar excepciones; modificar plazos |
 | **Caja** | Registrar y aprobar gastos; abrir y cerrar caja; gestionar categorías |
@@ -113,8 +116,16 @@ Están agrupados por módulo. A grandes rasgos:
 cobros y cartera para registrar pagos, consentimientos para generarlos. Sin
 reportes financieros y sin configuración.
 
-**Profesional**: agenda de consulta, pacientes, historia clínica con escritura,
+**Profesional**: agenda de consulta, pacientes, lectura de la historia clínica,
 consentimientos. Normalmente sin cobros ni configuración.
+
+## Lo que no depende del rol: «atiende pacientes»
+
+Escribir en la historia clínica, editar antecedentes, subir fotos, gestionar
+consentimientos durante la atención y registrar los insumos usados no se asignan
+en el rol: los tiene cualquier persona marcada como **atiende pacientes** en su
+ficha de Equipo, sea cual sea su rol. Así, una cosmetóloga con un rol a la medida
+puede atender sin que tengas que armarle permisos clínicos uno a uno.
 
 **Administración**: casi todo, incluidos reportes financieros, caja y equipo.
 
