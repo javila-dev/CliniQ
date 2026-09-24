@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { protocolosApi } from '@/lib/api/protocolos'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -42,6 +42,7 @@ function ConsentimientoBadge({ cita, todosFirmadosOverride }: { cita: Cita; todo
 export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
   const { user } = useAuthStore()
   const router = useRouter()
+  const queryClient = useQueryClient()
   const puedeIniciarAtencion = canIniciarAtencion(user)
 
   const { data: wizardConfig } = useQuery({
@@ -77,6 +78,8 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     try {
       if (cita.estado === 'en_espera') {
         await agendaApi.citas.cambiarEstado(cita.id, { estado: 'en_curso' })
+        // Sin esto la atención abre con la cita guardada en caché, todavía "en espera".
+        await queryClient.invalidateQueries({ queryKey: ['citas'] })
       }
       router.push(`/atenciones/${cita.id}`)
     } catch (err) {

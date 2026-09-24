@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, CheckCircle, Clock, ChevronLeft, ChevronRight, XCircle, Loader2, AlertTriangle, Stethoscope,
   MessageSquare, ClipboardList, Activity, FlaskConical, ListChecks, FileText, Camera, Package,
-  PersonStanding, Microscope, Pill,
+  PersonStanding, Microscope, Pill, CheckCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -42,7 +42,7 @@ import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
-import { formatTime, formatDuracion } from '@/lib/utils'
+import { cn, formatTime, formatDuracion } from '@/lib/utils'
 
 interface Props {
   params: Promise<{ citaId: string }>
@@ -257,6 +257,8 @@ export default function AtencionCitaPage({ params }: Props) {
     },
     onError: (err: any) => {
       const data = err?.response?.data ?? {}
+      // El estado mostrado pudo quedar viejo (otra pestaña, la cola): se vuelve a cargar.
+      queryClient.invalidateQueries({ queryKey: ['citas', citaId] })
       if (esErrorFirmaProfesional(err)) {
         setFirmaProfesionalAbierta(true)
       } else if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
@@ -341,44 +343,68 @@ export default function AtencionCitaPage({ params }: Props) {
     const cerrada = ['completada', 'cancelada', 'no_asistio'].includes(cita.estado)
     const puedeIniciar =
       canIniciarAtencion(user) && ['confirmada', 'en_espera'].includes(cita.estado)
+    // En espera = la recepción ya completó la preparación; solo falta iniciar.
+    const lista = cita.estado === 'en_espera'
+    const onIniciar = () => {
+      if (lista && citaRequiereFirmaProfesional(cita)) setFirmaProfesionalAbierta(true)
+      else iniciarAtencion()
+    }
+
+    const titulo = cerrada
+      ? 'Esta atención ya está cerrada'
+      : lista ? 'El paciente está listo' : 'Falta preparar al paciente'
+    const detalle = cerrada
+      ? 'No se puede documentar una atención en este estado.'
+      : lista
+        ? puedeIniciar
+          ? 'La preparación está completa. Inicia la atención para empezar a documentar.'
+          : 'La preparación está completa. El profesional puede iniciar la atención.'
+        : 'Antes de iniciar, completa la preparación: llegada, consentimientos, pago y firma de asistencia.'
 
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <div className="max-w-md w-full text-center space-y-4 rounded-xl border bg-white p-8 shadow-sm">
-          <div className="mx-auto h-12 w-12 rounded-full bg-amber-50 flex items-center justify-center">
-            <AlertTriangle className="h-6 w-6 text-amber-500" />
+          <div className={cn(
+            'mx-auto h-12 w-12 rounded-full flex items-center justify-center',
+            lista ? 'bg-emerald-50' : 'bg-amber-50',
+          )}>
+            {lista
+              ? <CheckCircle2 className="h-6 w-6 text-emerald-600" />
+              : <AlertTriangle className="h-6 w-6 text-amber-500" />}
           </div>
           <div className="space-y-1">
-            <p className="text-base font-semibold">
-              {cerrada ? 'Esta atención ya está cerrada' : 'Esta atención aún no ha iniciado'}
-            </p>
+            <p className="text-base font-semibold">{titulo}</p>
             <p className="text-sm text-muted-foreground">
               {cita.paciente_nombre} · <span className="uppercase">{cita.servicio_nombre}</span> — estado:{' '}
               <span className="font-medium">{ESTADO_LABEL[cita.estado] ?? cita.estado}</span>
             </p>
-            <p className="text-sm text-muted-foreground">
-              {cerrada
-                ? 'No se puede documentar una atención en este estado.'
-                : 'Completa la llegada, consentimientos, pago y firma de asistencia antes de iniciar la atención clínica.'}
-            </p>
+            <p className="text-sm text-muted-foreground">{detalle}</p>
           </div>
 
           {!cerrada && (
             <div className="flex flex-col gap-2">
-              <Button variant="outline" onClick={() => setWizardAbierto(true)}>
-                Abrir preparación del paciente
-              </Button>
-              {puedeIniciar && (
-                <Button
-                  onClick={() => {
-                    if (cita.estado === 'en_espera' && citaRequiereFirmaProfesional(cita)) setFirmaProfesionalAbierta(true)
-                    else iniciarAtencion()
-                  }}
-                  disabled={iniciando}
-                >
-                  {iniciando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                  Iniciar atención
-                </Button>
+              {lista ? (
+                <>
+                  {puedeIniciar && (
+                    <Button onClick={onIniciar} disabled={iniciando}>
+                      {iniciando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                      Iniciar atención
+                    </Button>
+                  )}
+                  <Button variant="outline" onClick={() => setWizardAbierto(true)}>
+                    Revisar preparación
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button onClick={() => setWizardAbierto(true)}>Preparar al paciente</Button>
+                  {puedeIniciar && (
+                    <Button variant="outline" onClick={onIniciar} disabled={iniciando}>
+                      {iniciando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
+                      Iniciar atención
+                    </Button>
+                  )}
+                </>
               )}
             </div>
           )}
