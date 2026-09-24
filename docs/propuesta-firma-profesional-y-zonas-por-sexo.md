@@ -43,6 +43,8 @@ Un grupo que solo tenga diagramas `M` mostraría 0 diagramas para una paciente `
 
 ## B. Firma del médico tratante en consentimientos
 
+> **Reemplazada** (2026-09-23) por [plan-firma-profesional-consentimientos.md](plan-firma-profesional-consentimientos.md): un solo sobre de Documenso con firma diferida del profesional, en lugar de una atestación in-app.
+
 ### Problema
 
 Hoy solo se captura la **firma del paciente** (vía Documenso embed). Falta la firma del **médico tratante** en los consentimientos informados (y, opcionalmente, órdenes médicas / plan de manejo / nota de evolución).

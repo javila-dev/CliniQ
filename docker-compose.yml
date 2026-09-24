@@ -78,11 +78,13 @@ services:
     volumes:
       - ./frontend:/app
       - /app/node_modules
+      - /app/.next
       - ./docs:/app/docs
     ports:
       - "3000:3000"
     environment:
       NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_DEV_POLLING: "true"
     depends_on:
       - backend
     networks:

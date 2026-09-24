@@ -444,3 +444,42 @@ lista de categorías, la agregación de artículos, validaciones y la función `
 Pendiente: ningún artículo tiene `video_url` todavía (la videoteca queda vacía hasta
 cargar URLs del canal de YouTube) y la ayuda contextual (`helpSlug`) sigue cableada solo
 en Pacientes, Cotizaciones, Cartera y Equipo.
+
+## Capturas de pantalla (2026-09-12)
+
+Piloto con tres flujos críticos ilustrados: agendar una cita, el asistente de
+inicio de atención y registrar un pago (más la cola de atención, que salía del
+mismo recorrido).
+
+**Datos.** `python manage.py seed_demo_ayuda` crea la clínica ficticia «Clínica
+Aurora» (sede, equipo, catálogo, 5 pacientes, agenda del día y una cotización
+aceptada con cartera en mora). Solo corre con `DEBUG=True` salvo `--force`.
+Ninguna captura puede salir de una clínica real: el contenido es global.
+
+**Captura.** `e2e/capturas/ayuda.spec.ts` con su propia config
+(`e2e/capturas.config.ts`), 1440x900 a 2x, sin animaciones. Se corre **desde el
+host**, no desde el contenedor de Playwright: el front resuelve la API en
+`localhost:8000`, que dentro del contenedor apunta al contenedor mismo.
+
+```
+cd e2e
+BASE_URL=http://localhost:3000 BACKEND_URL=http://localhost:8000 \
+  node node_modules/@playwright/test/cli.js test -c capturas.config.ts
+cp -r capturas-out/* ../frontend/public/img/ayuda/
+```
+
+**Almacenamiento.** Las imágenes viven en `frontend/public/img/ayuda/<slug>/` y
+el Markdown las referencia con ruta relativa (`/img/ayuda/...`). No se suben al
+bucket: así viajan versionadas con el artículo y no dependen del entorno.
+`e2e/capturas-out/` está en `.gitignore`.
+
+**Aprendido al hacerlo:**
+
+- Una imagen dentro de una lista numerada **corta la numeración** en Markdown.
+  Van antes o después de la lista, nunca en medio.
+- Las capturas corrigieron dos imprecisiones del texto: los tipos de cita reales
+  son «Por servicio», «Sesión de cotización» y «Consulta libre», y el formulario
+  de pago no tiene campo de referencia.
+- El rol de recepción no ve datos sensibles, así que sus capturas salen con el
+  documento y el teléfono enmascarados. Conviene capturar con ese rol cuando la
+  pantalla muestre datos de paciente.

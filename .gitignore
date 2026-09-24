@@ -2,6 +2,9 @@
 e2e/playwright/.auth/
 e2e/test-results/
 e2e/playwright-report/
+e2e/test-results-capturas/
+# Salida de las capturas de ayuda: se copian a frontend/public/img/ayuda/
+e2e/capturas-out/
 e2e/node_modules/
 
 # Environment
