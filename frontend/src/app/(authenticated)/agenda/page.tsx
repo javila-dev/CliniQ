@@ -523,6 +523,14 @@ function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase()
 }
 
+// Si el paciente ya llegó (o no vendrá), la confirmación ya no aplica: no se muestra
+// "Por confirmar" ni se cuenta como pendiente.
+const ESTADOS_CON_LLEGADA = ['en_espera', 'en_curso', 'completada']
+const ESTADOS_SIN_CONFIRMACION = [...ESTADOS_CON_LLEGADA, 'cancelada', 'no_asistio']
+const cuentaComoConfirmada = (c: Cita) =>
+  c.estado_confirmacion === 'confirmado' || ESTADOS_CON_LLEGADA.includes(c.estado)
+const pideConfirmacion = (c: Cita) => !ESTADOS_SIN_CONFIRMACION.includes(c.estado)
+
 function DayListCard({
   cita, selected, onClick, density,
 }: {
@@ -531,6 +539,7 @@ function DayListCard({
   const color = ESTADO_COLORS[cita.estado]
   const estado = ESTADO_CITA_CONFIG[cita.estado]?.label ?? cita.estado
   const confirmada = cita.estado_confirmacion === 'confirmado'
+  const mostrarConfirmacion = pideConfirmacion(cita)
 
   return (
     <button
@@ -569,7 +578,7 @@ function DayListCard({
           </div>
 
           <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
-            {confirmada ? (
+            {mostrarConfirmacion && (confirmada ? (
               <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">
                 <CircleCheck className="h-3.5 w-3.5" /> Paciente confirmó
               </span>
@@ -577,7 +586,7 @@ function DayListCard({
               <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
                 <CircleDashed className="h-3.5 w-3.5" /> Por confirmar
               </span>
-            )}
+            ))}
             <ChevronRight className="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
           </div>
         </div>
@@ -602,7 +611,8 @@ function DayListView({
   const activeIds = new Set(active.map((c) => c.id))
   const upcoming = sorted.filter((c) => !activeIds.has(c.id) && (isFuture || (isToday && new Date(c.fecha_inicio) > now)))
   const earlier = sorted.filter((c) => !activeIds.has(c.id) && !upcoming.some((upcomingCita) => upcomingCita.id === c.id))
-  const confirmed = sorted.filter((c) => c.estado_confirmacion === 'confirmado').length
+  const confirmed = sorted.filter(cuentaComoConfirmada).length
+  const porConfirmar = sorted.filter((c) => pideConfirmacion(c) && c.estado_confirmacion !== 'confirmado').length
 
   const sections: { title: string; eyebrow?: string; citas: Cita[] }[] = isFuture
     ? [{ title: 'Agenda del día', citas: sorted }]
@@ -629,7 +639,7 @@ function DayListView({
           </div>
           <div className="rounded-xl border border-gray-200 bg-white px-3 py-3 shadow-sm sm:px-4">
             <div className="flex items-center gap-2 text-muted-foreground"><UsersRound className="h-4 w-4" /><span className="text-[11px] font-medium uppercase tracking-wide">Pendientes</span></div>
-            <p className="mt-1 text-xl font-semibold text-amber-700">{Math.max(0, sorted.length - confirmed)}</p>
+            <p className="mt-1 text-xl font-semibold text-amber-700">{porConfirmar}</p>
           </div>
         </div>
 
@@ -691,7 +701,7 @@ function PeriodListView({
     }))
     .filter((group) => group.citas.length > 0)
   const allAppointments = visibleGroups.flatMap((group) => group.citas)
-  const confirmed = allAppointments.filter((cita) => cita.estado_confirmacion === 'confirmado').length
+  const confirmed = allAppointments.filter(cuentaComoConfirmada).length
 
   return (
     <div className="flex-1 overflow-auto bg-gradient-to-b from-slate-50/80 to-white">

@@ -427,9 +427,10 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 ]
                 const tieneEnEspera = transiciones.includes('en_espera')
                 const tieneEnCurso = transiciones.includes('en_curso')
+                // Con la atención en curso (o cerrada) ya no hay nada que hacer desde la agenda.
                 const necesitaAccion = tieneEnEspera || tieneEnCurso
-                  || (cita.estado === 'en_curso' && cita.firma_asistencia_estado !== 'firmada')
-                const tieneRecordatorio = !['cancelada', 'completada', 'no_asistio'].includes(cita.estado)
+                // El recordatorio solo sirve antes de que el paciente llegue.
+                const tieneRecordatorio = ['pendiente', 'confirmada'].includes(cita.estado) && !isPasada
                 if (!necesitaAccion && accionesModal.length === 0 && !tieneRecordatorio) return null
                 // Desde 'confirmada' el asistente solo checkea la llegada (→ en_espera): el
                 // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
