@@ -32,6 +32,11 @@ import { TabFarmacologico } from '@/components/obesidad/TabFarmacologico'
 import { TabZonas } from '@/components/historia/TabZonas'
 import { TabInsumos } from '@/components/historia/TabInsumos'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
+import {
+  FirmaProfesionalModal,
+  citaRequiereFirmaProfesional,
+  esErrorFirmaProfesional,
+} from '@/components/atenciones/FirmaProfesionalModal'
 import { useAtencionConfig } from '@/store/atencionConfigStore'
 import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
 import { useAuthStore } from '@/store/authStore'
@@ -242,6 +247,7 @@ export default function AtencionCitaPage({ params }: Props) {
   // ── Gate: atención aún no en curso ─────────────────────────────────────────
 
   const [wizardAbierto, setWizardAbierto] = useState(false)
+  const [firmaProfesionalAbierta, setFirmaProfesionalAbierta] = useState(false)
 
   const { mutate: iniciarAtencion, isPending: iniciando } = useMutation({
     mutationFn: () => agendaApi.citas.cambiarEstado(citaId, { estado: 'en_curso' }),
@@ -251,7 +257,9 @@ export default function AtencionCitaPage({ params }: Props) {
     },
     onError: (err: any) => {
       const data = err?.response?.data ?? {}
-      if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
+      if (esErrorFirmaProfesional(err)) {
+        setFirmaProfesionalAbierta(true)
+      } else if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
         toast.error('Consentimientos pendientes', `Falta firmar: ${(data.pendientes ?? []).join(', ')}`)
       } else {
         toast.error('No se pudo iniciar la atención', data.error ?? 'Revisa el estado de la cita.')
@@ -361,7 +369,13 @@ export default function AtencionCitaPage({ params }: Props) {
                 Abrir preparación del paciente
               </Button>
               {puedeIniciar && (
-                <Button onClick={() => iniciarAtencion()} disabled={iniciando}>
+                <Button
+                  onClick={() => {
+                    if (cita.estado === 'en_espera' && citaRequiereFirmaProfesional(cita)) setFirmaProfesionalAbierta(true)
+                    else iniciarAtencion()
+                  }}
+                  disabled={iniciando}
+                >
                   {iniciando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
                   Iniciar atención
                 </Button>
@@ -379,6 +393,16 @@ export default function AtencionCitaPage({ params }: Props) {
           onClose={() => {
             setWizardAbierto(false)
             queryClient.invalidateQueries({ queryKey: ['citas', citaId] })
+          }}
+        />
+
+        <FirmaProfesionalModal
+          citaId={firmaProfesionalAbierta ? citaId : null}
+          pacienteNombre={cita.paciente_nombre}
+          onClose={() => setFirmaProfesionalAbierta(false)}
+          onFirmado={() => {
+            setFirmaProfesionalAbierta(false)
+            iniciarAtencion()
           }}
         />
       </div>

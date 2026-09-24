@@ -18,6 +18,7 @@ import { agendaApi } from '@/lib/api/agenda'
 import { notificacionesFallidasApi } from '@/lib/api/notificaciones'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useAuthStore } from '@/store/authStore'
+import { AvisoDatosProfesionales } from '@/components/shared/AvisoDatosProfesionales'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
@@ -670,6 +671,8 @@ function DashboardContent() {
           <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
         </div>
 
+        <AvisoDatosProfesionales />
+
         {/* KPIs simples */}
         <div className="grid grid-cols-2 gap-4">
           <KPICard
@@ -819,6 +822,8 @@ function DashboardContent() {
       </div>
 
       <PuestaEnMarchaBanner />
+
+      <AvisoDatosProfesionales />
 
       {/* Filtros (sede + periodo) — encima de los KPI */}
       {filtrosLinea}

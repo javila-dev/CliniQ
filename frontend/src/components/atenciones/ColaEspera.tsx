@@ -19,6 +19,11 @@ import { formatTime } from '@/lib/utils'
 import { mensajeErrorDeuda } from '@/lib/deuda'
 import { toast } from '@/hooks/use-toast'
 import type { Cita } from '@/types/agenda'
+import {
+  FirmaProfesionalModal,
+  citaRequiereFirmaProfesional,
+  esErrorFirmaProfesional,
+} from '@/components/atenciones/FirmaProfesionalModal'
 
 interface ColaEsperaProps {
   citas: Cita[]
@@ -65,11 +70,9 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     return activeSteps.length > 0 && activeSteps.every((s) => doneMap[s])
   }
 
-  async function handleIniciar(cita: Cita) {
-    if (citaActiva) {
-      setBloqueoPorActiva(cita)
-      return
-    }
+  const [firmaProfesionalCita, setFirmaProfesionalCita] = useState<Cita | null>(null)
+
+  async function iniciar(cita: Cita) {
     setIniciandoCitaId(cita.id)
     try {
       if (cita.estado === 'en_espera') {
@@ -78,9 +81,26 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
       router.push(`/atenciones/${cita.id}`)
     } catch (err) {
       setIniciandoCitaId(null)
+      // El paciente ya firmó y falta la firma del profesional (mismo documento).
+      if (esErrorFirmaProfesional(err)) {
+        setFirmaProfesionalCita(cita)
+        return
+      }
       const deuda = mensajeErrorDeuda(err)
       if (deuda) toast.error('Atención bloqueada por mora', deuda)
     }
+  }
+
+  function handleIniciar(cita: Cita) {
+    if (citaActiva) {
+      setBloqueoPorActiva(cita)
+      return
+    }
+    if (cita.estado === 'en_espera' && citaRequiereFirmaProfesional(cita)) {
+      setFirmaProfesionalCita(cita)
+      return
+    }
+    iniciar(cita)
   }
 
   if (!citas.length) {
@@ -207,6 +227,17 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <FirmaProfesionalModal
+        citaId={firmaProfesionalCita?.id ?? null}
+        pacienteNombre={firmaProfesionalCita?.paciente_nombre}
+        onClose={() => setFirmaProfesionalCita(null)}
+        onFirmado={() => {
+          const cita = firmaProfesionalCita
+          setFirmaProfesionalCita(null)
+          if (cita) iniciar(cita)
+        }}
+      />
     </>
   )
 }

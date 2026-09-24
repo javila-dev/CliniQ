@@ -234,6 +234,10 @@ export interface ConsentimientoInformado {
   vigencia_meses: number
   fecha_vencimiento: string | null
   vigente: boolean
+  /** Firma diferida: el profesional que atiende la primera cita firma el mismo documento. */
+  requiere_firma_profesional?: boolean
+  pendiente_firma_profesional?: boolean
+  fecha_firma_profesional?: string | null
   notas: string
   created_at: string
   updated_at: string

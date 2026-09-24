@@ -42,6 +42,7 @@ export function ConsentimientoFirmaContent({
 }: ConsentimientoFirmaContentProps) {
   const queryClient = useQueryClient()
   const [signed, setSigned] = useState(false)
+  const [pendienteProfesional, setPendienteProfesional] = useState(false)
   const [embedReady, setEmbedReady] = useState(false)
   const [embedError, setEmbedError] = useState<string | null>(null)
   const [signingToken, setSigningToken] = useState<string | null>(null)
@@ -87,7 +88,8 @@ export function ConsentimientoFirmaContent({
   const { mutate: completarFirma, isPending: completando } = useMutation({
     mutationFn: ({ id, docId }: { id: string; docId: string }) =>
       historiaClinicaApi.consentimientosInformados.completarFirma(id, docId),
-    onSuccess: () => {
+    onSuccess: (consentimiento) => {
+      setPendienteProfesional(Boolean(consentimiento.pendiente_firma_profesional))
       queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })
       queryClient.invalidateQueries({ queryKey: ['consentimientos-lista', pacienteId] })
       queryClient.invalidateQueries({ queryKey: ['citas'] })
@@ -108,6 +110,7 @@ export function ConsentimientoFirmaContent({
     if (!linkConsentimientoId) return false
     const consentimiento = await historiaClinicaApi.consentimientosInformados.verificarFirma(linkConsentimientoId)
     if (!consentimiento.firmado) return false
+    setPendienteProfesional(Boolean(consentimiento.pendiente_firma_profesional))
     queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })
     queryClient.invalidateQueries({ queryKey: ['consentimientos-lista', pacienteId] })
     queryClient.invalidateQueries({ queryKey: ['citas'] })
@@ -152,7 +155,9 @@ export function ConsentimientoFirmaContent({
           <div>
             <p className="font-semibold text-lg">Consentimiento firmado</p>
             <p className="text-sm text-muted-foreground mt-1">
-              El documento ha sido firmado correctamente. El PDF llegará en breve.
+              {pendienteProfesional
+                ? 'El paciente firmó correctamente. El documento se completará cuando el profesional lo firme en la primera atención.'
+                : 'El documento ha sido firmado correctamente. El PDF llegará en breve.'}
             </p>
           </div>
         </div>

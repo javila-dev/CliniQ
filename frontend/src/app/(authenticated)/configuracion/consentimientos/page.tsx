@@ -43,7 +43,18 @@ function PlantillaCard({
               ? <><CheckCircle2 className="h-3.5 w-3.5" /> Campos mapeados</>
               : <><AlertCircle className="h-3.5 w-3.5" /> Sin campos</>}
           </span>
+          {plantilla.tiene_campos && !plantilla.incompleta && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              {plantilla.requiere_firma_profesional ? 'Paciente y profesional' : 'Solo paciente'}
+            </span>
+          )}
         </div>
+        {plantilla.tiene_campos && plantilla.incompleta && (
+          <p className="flex items-center gap-1 text-xs text-amber-700 mt-1">
+            <AlertCircle className="h-3.5 w-3.5" />
+            Incompleta: faltan campos del profesional. Mientras tanto se firma solo con el paciente.
+          </p>
+        )}
       </div>
 
       <div className="flex items-center gap-2 shrink-0">

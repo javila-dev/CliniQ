@@ -10,6 +10,10 @@ export interface ConsentimientoInfoItem {
   consentimiento_id: string | null
   archivo_url: string | null
   requiere_firma_cada_vez: boolean
+  /** El documento lo firma también el profesional que atiende (firma diferida). */
+  requiere_firma_profesional?: boolean
+  firmado_profesional?: boolean
+  fecha_firma_paciente?: string | null
 }
 
 export interface ConsentimientoInfo {

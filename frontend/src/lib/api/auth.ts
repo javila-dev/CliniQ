@@ -17,7 +17,13 @@ export const authApi = {
     return res.data
   },
 
-  updateMe: async (data: { first_name?: string; last_name?: string; telefono?: string; foto_perfil?: string }): Promise<AuthUser> => {
+  updateMe: async (data: {
+    first_name?: string
+    last_name?: string
+    telefono?: string
+    foto_perfil?: string
+    registro_profesional?: string
+  }): Promise<AuthUser> => {
     const res = await apiClient.patch<AuthUser>('/auth/me/', data)
     return res.data
   },
