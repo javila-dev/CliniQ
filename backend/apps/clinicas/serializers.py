@@ -254,6 +254,22 @@ class FormaDePagoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("El tipo base no se puede cambiar después de creada.")
         return value
 
+    def validate_nombre(self, value):
+        # `clinica` es read-only (la pone la vista), así que DRF no genera el
+        # validador de la restricción única clinica+nombre: sin esto un
+        # duplicado revienta como IntegrityError (500).
+        from apps.users.permissions import get_clinica_activa
+
+        request = self.context.get("request")
+        clinica = self.instance.clinica if self.instance else (get_clinica_activa(request) if request else None)
+        if clinica is not None:
+            duplicadas = FormaDePago.objects.filter(clinica=clinica, nombre__iexact=value.strip())
+            if self.instance is not None:
+                duplicadas = duplicadas.exclude(pk=self.instance.pk)
+            if duplicadas.exists():
+                raise serializers.ValidationError("Ya existe una forma de pago con ese nombre.")
+        return value.strip()
+
 
 class SedeSerializer(serializers.ModelSerializer):
     nombre_clinica = serializers.SerializerMethodField()
