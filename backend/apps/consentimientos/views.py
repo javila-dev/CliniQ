@@ -2,6 +2,7 @@ from django.db import transaction
 from django.utils import timezone
 from rest_framework import mixins, status
 from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
@@ -32,7 +33,9 @@ class PlantillaConsentimientoViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve"}:
-            permission_classes = (RequirePermission("consentimientos.plantillas.ver"),)
+            # El modal de generar consentimiento lista las plantillas: quien tiene
+            # `consentimientos.generar` sin `plantillas.ver` lo veía vacío.
+            permission_classes = (IsAuthenticated,)
         else:
             permission_classes = (RequirePermission("consentimientos.plantillas.gestionar"),)
         return [permission() for permission in permission_classes]

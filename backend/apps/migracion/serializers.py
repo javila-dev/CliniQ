@@ -18,12 +18,15 @@ class SesionRealizadaSerializer(serializers.Serializer):
 
 class PagoPrevioSerializer(serializers.Serializer):
     valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
-    medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
+    # Opcional: el asistente ya no lo pregunta; sin él se registra como "Otro".
+    medio_pago = serializers.PrimaryKeyRelatedField(
+        queryset=FormaDePago.objects.filter(activo=True), required=False, allow_null=True
+    )
     fecha = serializers.DateField()
 
     def validate_medio_pago(self, value):
         clinica = self.context.get("clinica")
-        if clinica is not None and value.clinica_id != clinica.id:
+        if value is not None and clinica is not None and value.clinica_id != clinica.id:
             raise serializers.ValidationError("La forma de pago no pertenece a esta clínica.")
         return value
 

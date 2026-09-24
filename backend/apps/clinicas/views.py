@@ -119,6 +119,14 @@ class ClinicaViewSet(ModelViewSet):
             permission_classes = (IsSuperAdmin,)
         elif self.action == "plan_usage":
             permission_classes = (IsAdmin,)
+        elif self.action == "mi_clinica":
+            # El GET trae nombre, logo y módulos habilitados que necesita toda la
+            # app (agenda, atención, banner de prueba): no exige `clinicas.ver`.
+            permission_classes = (
+                (RequirePermission("clinicas.editar"),)
+                if self.request.method.lower() == "patch"
+                else (IsAuthenticated,)
+            )
         else:
             permission_classes = (RequirePermission("clinicas.ver"),)
         return [permission() for permission in permission_classes]
@@ -645,7 +653,11 @@ class FormaDePagoViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action in {"create", "update", "partial_update", "destroy"}:
             return [RequirePermission("configuracion.formas_pago.gestionar")()]
-        return [RequirePermission("configuracion.formas_pago.ver")()]
+        # Leer el catálogo no exige `configuracion.formas_pago.ver`: lo usan
+        # cotizaciones, cobros, cartera y la puesta en marcha, y un rol
+        # personalizado sin permisos de configuración igual necesita los
+        # dropdowns. El queryset ya queda acotado a la clínica activa.
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -730,7 +742,11 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         elif self.action in {"consentimientos", "pasos"} and self.request.method.lower() == "post":
             permission_classes = (RequirePermission("servicios.gestionar"),)
         else:
-            permission_classes = (RequirePermission("servicios.ver"),)
+            # Catálogo de referencia para los selectores de agenda, cotizaciones y
+            # puesta en marcha: leerlo no exige `servicios.ver` (un rol personalizado
+            # sin esa capacidad dejaba vacíos esos selectores). HasClinicamente ya
+            # acota el queryset a la clínica activa.
+            permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):
@@ -1245,7 +1261,11 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
         if self.action in {"create", "update", "partial_update", "destroy", "agregar_tipo", "editar_tipo", "eliminar_tipo"}:
             permission_classes = (RequirePermission("servicios.gestionar"),)
         else:
-            permission_classes = (RequirePermission("servicios.ver"),)
+            # Catálogo de referencia para los selectores de agenda, cotizaciones y
+            # puesta en marcha: leerlo no exige `servicios.ver` (un rol personalizado
+            # sin esa capacidad dejaba vacíos esos selectores). HasClinicamente ya
+            # acota el queryset a la clínica activa.
+            permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
 
     def get_queryset(self):

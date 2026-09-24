@@ -3,6 +3,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
@@ -46,7 +47,9 @@ class CategoriaGastoViewSet(ModelViewSet):
     def get_permissions(self):
         if self.action in ("create", "update", "partial_update", "destroy"):
             return [RequirePermission("caja.categorias.gestionar")()]
-        return [RequirePermission("caja.categorias.ver")()]
+        # Quien registra un gasto necesita elegir categoría aunque su rol no tenga
+        # "Ver gastos y categorías": leer el catálogo solo exige estar autenticado.
+        return [IsAuthenticated()]
 
     def get_queryset(self):
         qs = super().get_queryset()

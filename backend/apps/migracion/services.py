@@ -151,7 +151,11 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         lote_migracion=lote.id,
     )
     pago_ids = []
+    medio_por_defecto = None
     for p in pagos:
+        if not p.get("medio_pago"):
+            medio_por_defecto = medio_por_defecto or resolver_forma_pago_por_tipo_base(clinica, "otro")
+            p["medio_pago"] = medio_por_defecto
         pr = PagoRecibido.objects.create(
             cobro=cobro,
             medio_pago=p["medio_pago"],
