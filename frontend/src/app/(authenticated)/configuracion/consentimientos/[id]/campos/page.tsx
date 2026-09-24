@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
@@ -17,8 +17,10 @@ function mensajeError(error: unknown) {
 
 export default function CamposMapperPage() {
   const { id } = useParams<{ id: string }>()
+  const router = useRouter()
   const qc = useQueryClient()
-  const [guardado, setGuardado] = useState(false)
+  // Al guardar se vuelve al listado; el botón sigue "guardando" hasta que la página cambie.
+  const [redirigiendo, setRedirigiendo] = useState(false)
 
   const { data: plantilla } = useQuery({
     queryKey: ['plantillas-consentimiento', id],
@@ -32,9 +34,9 @@ export default function CamposMapperPage() {
     mutationFn: ({ campos, requiere }: { campos: CampoPlantilla[]; requiere: boolean }) =>
       configuracionApi.plantillasConsentimiento.guardarCampos(id, campos, requiere),
     onSuccess: () => {
+      setRedirigiendo(true)
       qc.invalidateQueries({ queryKey: ['plantillas-consentimiento'] })
-      setGuardado(true)
-      setTimeout(() => setGuardado(false), 2500)
+      router.push('/configuracion/consentimientos')
     },
   })
 
@@ -59,8 +61,7 @@ export default function CamposMapperPage() {
       campos={plantilla?.campos ?? []}
       requiereFirmaProfesional={plantilla?.requiere_firma_profesional ?? true}
       pasoInicial={2}
-      guardando={saveMutation.isPending}
-      guardado={guardado}
+      guardando={saveMutation.isPending || redirigiendo}
       error={saveMutation.isError ? mensajeError(saveMutation.error) : null}
       onGuardar={(campos, requiere) => saveMutation.mutate({ campos, requiere })}
       encabezado={
