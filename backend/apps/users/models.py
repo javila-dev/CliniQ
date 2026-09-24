@@ -195,3 +195,40 @@ class PasswordResetToken(BaseModel):
     @property
     def is_used(self) -> bool:
         return self.used_at is not None
+
+
+class CapturaFirmaToken(BaseModel):
+    """Enlace temporal (QR) para que un profesional dibuje su firma desde el celular.
+
+    De un solo uso y de vida corta: quien abre el enlace puede reemplazar la firma
+    del usuario sin iniciar sesión.
+    """
+
+    VIGENCIA_MINUTOS = 10
+
+    user = models.ForeignKey(
+        "users.User",
+        on_delete=models.CASCADE,
+        related_name="capturas_firma",
+    )
+    token = models.CharField(max_length=128, unique=True, db_index=True)
+    expira_en = models.DateTimeField()
+    usado_en = models.DateTimeField(null=True, blank=True)
+    ip_captura = models.GenericIPAddressField(null=True, blank=True)
+    user_agent_captura = models.CharField(max_length=500, blank=True, default="")
+
+    class Meta:
+        db_table = "captura_firma_tokens"
+        ordering = ["-created_at"]
+
+    @property
+    def vencido(self) -> bool:
+        return timezone.now() >= self.expira_en
+
+    @property
+    def usado(self) -> bool:
+        return self.usado_en is not None
+
+    @property
+    def vigente(self) -> bool:
+        return not self.usado and not self.vencido

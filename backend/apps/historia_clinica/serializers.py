@@ -244,6 +244,11 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
     vigente = serializers.SerializerMethodField()
     template_nombre = serializers.CharField(source="documenso_template_nombre", read_only=True)
     archivo_url = serializers.SerializerMethodField()
+    firmado_profesional_por_nombre = serializers.CharField(
+        source="firmado_profesional_por.nombre_completo", read_only=True, default=None
+    )
+    pendiente_firma_profesional = serializers.BooleanField(read_only=True)
+    completo = serializers.BooleanField(read_only=True)
 
     class Meta:
         model = ConsentimientoInformado
@@ -264,6 +269,12 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
             "vigencia_meses",
             "fecha_vencimiento",
             "vigente",
+            "requiere_firma_profesional",
+            "firmado_profesional_por",
+            "firmado_profesional_por_nombre",
+            "fecha_firma_profesional",
+            "pendiente_firma_profesional",
+            "completo",
             "notas",
             "created_at",
             "updated_at",
@@ -276,6 +287,9 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
             "documenso_document_id",
             "fecha_vencimiento",
             "vigente",
+            "requiere_firma_profesional",
+            "firmado_profesional_por",
+            "fecha_firma_profesional",
             "created_at",
             "updated_at",
         )

@@ -632,7 +632,11 @@ class ConsentimientoInformadoViewSet(
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
-        sin_pdf = [c for c in queryset if c.firmado and not c.archivo and c.documenso_document_id]
+        # Los pendientes de la firma del profesional aún no están sellados: no hay PDF que recuperar.
+        sin_pdf = [
+            c for c in queryset
+            if c.firmado and not c.archivo and c.documenso_document_id and not c.pendiente_firma_profesional
+        ]
         for consentimiento in sin_pdf:
             try:
                 pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
@@ -794,9 +798,7 @@ class ConsentimientoInformadoViewSet(
         documenso_document_id = request.data.get("documenso_document_id", "")
 
         if consentimiento.firmado:
-            if documenso_document_id and consentimiento.documenso_document_id != documenso_document_id:
-                consentimiento.documenso_document_id = documenso_document_id
-                consentimiento.save(update_fields=["documenso_document_id", "updated_at"])
+            marcar_consentimiento_firmado(consentimiento, documenso_document_id=documenso_document_id or None)
             return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
         marcar_consentimiento_firmado(

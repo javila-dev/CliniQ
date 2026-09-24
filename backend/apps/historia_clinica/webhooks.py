@@ -3,6 +3,7 @@ import json
 import logging
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -45,8 +46,20 @@ def _resolve_by_signing_token(model, field: str, recipients: list):
     return None
 
 
+_EVENTOS_COMPLETADO = {"DOCUMENT_COMPLETED", "document.completed"}
+_EVENTOS_FIRMA_PARCIAL = {"DOCUMENT_SIGNED", "document.signed"}
+
+
 def _handle_consentimiento_informado(consentimiento, document_id: str | None) -> None:
     marcar_consentimiento_firmado(consentimiento, documenso_document_id=document_id)
+
+    # Sobre sellado = firmaron todos. Si el profesional firmó por fuera de la app (p. ej. una
+    # plantilla de Documenso con el profesional ya asignado), se registra la fecha para la vigencia.
+    if consentimiento.requiere_firma_profesional and consentimiento.fecha_firma_profesional is None:
+        from django.utils import timezone
+
+        consentimiento.fecha_firma_profesional = timezone.now()
+        consentimiento.save(update_fields=["fecha_firma_profesional", "updated_at"])
 
     pdf_bytes = descargar_pdf_documenso(document_id) if document_id is not None else None
     if pdf_bytes:
@@ -194,6 +207,9 @@ class DocumensoWebhookView(APIView):
 
         event = body.get("event")
         payload = body.get("payload") or {}
+        if event in _EVENTOS_FIRMA_PARCIAL:
+            return self._firma_parcial_consentimiento(payload)
+
         handled_events = {
             "DOCUMENT_COMPLETED", "document.completed",
             "DOCUMENT_DECLINED", "document.declined",
@@ -260,4 +276,28 @@ class DocumensoWebhookView(APIView):
 
         _handle_consentimiento_informado(consentimiento, str(document_id) if document_id is not None else None)
 
+        return Response({"ok": True}, status=200)
+
+    def _firma_parcial_consentimiento(self, payload: dict):
+        """Firmó un destinatario pero el sobre sigue pendiente. Solo importa en consentimientos
+        con firma diferida del profesional: si el que firmó es el paciente, queda firmado."""
+        from apps.historia_clinica.services import paciente_firmo_en_envelope
+
+        consentimiento = None
+        external_id = payload.get("externalId")
+        if external_id:
+            try:
+                consentimiento = ConsentimientoInformado.objects.filter(id=external_id).first()
+            except (ValueError, ValidationError):
+                consentimiento = None
+        if consentimiento is None:
+            consentimiento = _resolve_by_signing_token(
+                ConsentimientoInformado, "documenso_signing_token", payload.get("recipients") or []
+            )
+        if consentimiento is None or not consentimiento.requiere_firma_profesional:
+            return Response({"ok": True, "skipped": True}, status=200)
+
+        if not consentimiento.firmado and paciente_firmo_en_envelope(consentimiento, payload):
+            marcar_consentimiento_firmado(consentimiento)
+            logger.info("Webhook Documenso: firma del paciente registrada | consentimiento_id=%s", consentimiento.id)
         return Response({"ok": True}, status=200)

@@ -196,19 +196,58 @@ class ConsentimientoInformado(BaseModel):
     vigencia_meses = models.PositiveIntegerField(default=12)
     fecha_vencimiento = models.DateField(null=True, blank=True, editable=False)
     notas = models.TextField(blank=True)
+    # Firma diferida del profesional: el sobre de Documenso lleva al paciente (firma al
+    # aceptar la cotización) y a un profesional provisional que se reemplaza por el que
+    # atiende la primera cita. `firmado` sigue significando "el paciente firmó".
+    requiere_firma_profesional = models.BooleanField(
+        default=False,
+        help_text="Copia de la plantilla al crear el sobre: el documento lo firma también el profesional.",
+    )
+    requiere_tp_profesional = models.BooleanField(
+        default=False,
+        help_text="El documento lleva el campo de tarjeta profesional: solo lo firma quien tenga TP.",
+    )
+    documenso_recipient_paciente_id = models.CharField(max_length=50, blank=True, default="")
+    documenso_recipient_profesional_id = models.CharField(max_length=50, blank=True, default="")
+    firmado_profesional_por = models.ForeignKey(
+        "users.User",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="consentimientos_firmados_profesional",
+    )
+    fecha_firma_profesional = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "consentimientos_informados"
         ordering = ["documenso_template_nombre", "tipo"]
 
+    @property
+    def pendiente_firma_profesional(self) -> bool:
+        return self.firmado and self.requiere_firma_profesional and self.fecha_firma_profesional is None
+
+    @property
+    def completo(self) -> bool:
+        return self.firmado and not self.pendiente_firma_profesional
+
+    def _fecha_base_vigencia(self):
+        """La vigencia corre desde que el documento queda completo: la firma del profesional
+        si la requiere, o la del paciente si no. Mientras falta el profesional no vence."""
+        if self.requiere_firma_profesional:
+            if self.fecha_firma_profesional is None:
+                return None
+            return timezone.localdate(self.fecha_firma_profesional)
+        return self.fecha_firma
+
     def save(self, *args, **kwargs):
         update_fields = kwargs.get("update_fields")
 
-        if self.firmado and self.fecha_firma:
-            self.fecha_vencimiento = self.fecha_firma + relativedelta(months=self.vigencia_meses)
+        fecha_base = self._fecha_base_vigencia()
+        if self.firmado and fecha_base:
+            self.fecha_vencimiento = fecha_base + relativedelta(months=self.vigencia_meses)
             if update_fields is not None:
                 update_fields = set(update_fields) | {"fecha_vencimiento"}
-        elif not self.firmado:
+        elif not self.firmado or self.pendiente_firma_profesional:
             self.fecha_vencimiento = None
             if update_fields is not None:
                 update_fields = set(update_fields) | {"fecha_vencimiento"}

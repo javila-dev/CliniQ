@@ -1133,3 +1133,100 @@ class ConsoleUsuarioViewSet(GenericViewSet):
             {"resumen": f"Invitación reenviada a {user.email}", "email_enviado": email_enviado},
         )
         return Response({"ok": True, "email_enviado": email_enviado})
+
+
+def _firma_desde_data_url(valor) -> bytes:
+    import base64
+    import binascii
+
+    prefijo = "data:image/png;base64,"
+    if not isinstance(valor, str) or not valor.startswith(prefijo):
+        return b""
+    try:
+        return base64.b64decode(valor[len(prefijo):], validate=True)
+    except (binascii.Error, ValueError):
+        return b""
+
+
+class CapturaFirmaView(APIView):
+    """Crea el enlace temporal (QR) para dibujar la firma desde el celular."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        from apps.users.captura_firma import crear_captura_firma, puede_tener_firma
+
+        if not puede_tener_firma(request.user):
+            return error_response(
+                "Solo los profesionales pueden cargar una firma.", "FIRMA_NO_PERMITIDA", status.HTTP_403_FORBIDDEN,
+            )
+        captura = crear_captura_firma(request.user)
+        return Response(
+            {"token": captura.token, "expira_en": captura.expira_en, "ruta": f"/firma-movil/{captura.token}"},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class CapturaFirmaEstadoView(APIView):
+    """El navegador del PC consulta si la firma ya llegó desde el celular."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request, token, *args, **kwargs):
+        from apps.core.storage import get_public_url
+        from apps.users.captura_firma import estado_captura
+        from apps.users.models import CapturaFirmaToken
+
+        captura = CapturaFirmaToken.objects.filter(token=token, user=request.user).first()
+        if captura is None:
+            return error_response("Enlace de firma no encontrado.", "CAPTURA_NO_ENCONTRADA", status.HTTP_404_NOT_FOUND)
+        estado = estado_captura(captura)
+        request.user.refresh_from_db(fields=["firma_digital"])
+        firma_url = get_public_url(request.user.firma_digital.name) if estado == "completado" and request.user.firma_digital else None
+        return Response({"estado": estado, "expira_en": captura.expira_en, "firma_url": firma_url})
+
+
+class FirmaMovilPublicaView(APIView):
+    """Página pública del celular: muestra de quién es la firma y la recibe (sin sesión)."""
+
+    authentication_classes = ()
+    permission_classes = ()
+
+    def _captura_vigente(self, token):
+        from apps.users.models import CapturaFirmaToken
+
+        captura = CapturaFirmaToken.objects.select_related("user").filter(token=token).first()
+        return captura if captura is not None and captura.vigente else None
+
+    def get(self, request, token, *args, **kwargs):
+        captura = self._captura_vigente(token)
+        if captura is None:
+            return error_response(
+                "Este enlace ya se usó o venció. Genera un nuevo código QR en el computador.",
+                "CAPTURA_NO_VIGENTE", status.HTTP_404_NOT_FOUND,
+            )
+        return Response({"nombre": captura.user.nombre_completo, "expira_en": captura.expira_en})
+
+    def post(self, request, token, *args, **kwargs):
+        from apps.core.logging import get_client_ip
+        from apps.users.captura_firma import FirmaInvalidaError, completar_captura_firma
+        from apps.users.models import CapturaFirmaToken
+
+        datos = _firma_desde_data_url(request.data.get("imagen"))
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        try:
+            captura = completar_captura_firma(token, datos, ip=get_client_ip(request), user_agent=user_agent)
+        except CapturaFirmaToken.DoesNotExist:
+            return error_response(
+                "Este enlace ya se usó o venció. Genera un nuevo código QR en el computador.",
+                "CAPTURA_NO_VIGENTE", status.HTTP_404_NOT_FOUND,
+            )
+        except FirmaInvalidaError as exc:
+            return error_response(str(exc), "FIRMA_INVALIDA", status.HTTP_400_BAD_REQUEST)
+
+        registrar_accion(
+            request, "usuario.firma_capturada", captura.user,
+            {"origen": "movil", "user_agent": user_agent[:500]},
+            actor=captura.user, clinica=captura.user.clinica,
+        )
+        return Response({"ok": True}, status=status.HTTP_200_OK)

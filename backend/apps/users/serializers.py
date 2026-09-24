@@ -367,6 +367,18 @@ class MeUpdateSerializer(serializers.ModelSerializer):
             delete_public_file(previous_path)
         return update_fields
 
+    def _quitar_image_field(self, instance, field_name):
+        previous_path = getattr(instance, field_name).name if getattr(instance, field_name) else ""
+        setattr(instance, field_name, None)
+        if previous_path:
+            delete_public_file(previous_path)
+        return [field_name, "updated_at"]
+
+    def _pide_quitar(self, field_name) -> bool:
+        """El cliente envía el campo vacío ('' en multipart o null en JSON) para eliminar la imagen."""
+        initial = getattr(self, "initial_data", None) or {}
+        return field_name in initial and initial.get(field_name) in ("", None)
+
     def update(self, instance, validated_data):
         foto_perfil = validated_data.pop("foto_perfil", None)
         firma_digital = validated_data.pop("firma_digital", None)
@@ -374,8 +386,12 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         extra_fields: list[str] = []
         if foto_perfil is not None:
             extra_fields += self._upload_image_field(instance, "foto_perfil", foto_perfil)
+        elif self._pide_quitar("foto_perfil"):
+            extra_fields += self._quitar_image_field(instance, "foto_perfil")
         if firma_digital is not None:
             extra_fields += self._upload_image_field(instance, "firma_digital", firma_digital)
+        elif self._pide_quitar("firma_digital"):
+            extra_fields += self._quitar_image_field(instance, "firma_digital")
         if extra_fields:
             instance.save(update_fields=list(set(extra_fields)))
         return instance

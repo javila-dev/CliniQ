@@ -133,10 +133,22 @@ def _fetch_documenso_json(method: str, path: str, *, json_payload: dict | None =
         raise DocumensoIntegrationError("Error al crear el documento en Documenso.") from exc
 
 
+def _firmantes_por_orden(recipients: list[dict]) -> list[dict]:
+    """Firmantes (SIGNER) ordenados por signingOrder: el primero es el paciente y, si hay
+    otro, es el profesional que firma en la primera atención."""
+    firmantes = [r for r in recipients if str(r.get("role") or "SIGNER").upper() == "SIGNER"]
+    return sorted(firmantes, key=lambda r: (r.get("signingOrder") is None, r.get("signingOrder") or 0))
+
+
+def _signatario_paciente_de_template(template: dict) -> dict | None:
+    firmantes = _firmantes_por_orden(template.get("recipients") or [])
+    return firmantes[0] if firmantes else _buscar_signatario(template.get("recipients") or [])
+
+
 def _resolver_template_documenso(template_token: str) -> tuple[dict, dict]:
     if template_token.isdigit():
         template = _fetch_documenso_json("GET", f"/api/v2/template/{template_token}")
-        signer = _buscar_signatario(template.get("recipients") or [])
+        signer = _signatario_paciente_de_template(template)
         if not signer:
             raise DocumensoIntegrationError("Error al crear el documento en Documenso.")
         return template, signer
@@ -155,7 +167,7 @@ def _resolver_template_documenso(template_token: str) -> tuple[dict, dict]:
                 _extraer_template_token(template),
             }
             if template_token in {candidate for candidate in candidates if candidate}:
-                signer = _buscar_signatario(template.get("recipients") or [])
+                signer = _signatario_paciente_de_template(template)
                 if not signer:
                     raise DocumensoIntegrationError("Error al crear el documento en Documenso.")
                 return template, signer
@@ -272,14 +284,61 @@ def iniciar_firma_consentimiento(consentimiento) -> tuple[str, str]:
         )
         raise DocumensoIntegrationError("Error al crear el documento en Documenso.")
 
+    # Plantilla de Documenso con un segundo firmante: es el profesional (convención por
+    # signingOrder) y se asigna al profesional real en la primera atención.
+    otros_firmantes = [
+        r for r in _firmantes_por_orden(payload.get("recipients") or [])
+        if str(r.get("id")) != str((recipient or {}).get("id"))
+    ]
     consentimiento.documenso_document_id = str(document_id)
     consentimiento.documenso_signing_token = signing_token
-    consentimiento.save(update_fields=["documenso_document_id", "documenso_signing_token", "updated_at"])
+    consentimiento.documenso_recipient_paciente_id = str((recipient or {}).get("id") or "")
+    consentimiento.requiere_firma_profesional = bool(otros_firmantes)
+    consentimiento.documenso_recipient_profesional_id = str(otros_firmantes[0]["id"]) if otros_firmantes else ""
+    consentimiento.requiere_tp_profesional = bool(otros_firmantes) and any(
+        str(f.get("recipientId")) == consentimiento.documenso_recipient_profesional_id
+        and str(f.get("type") or "").upper() == "TEXT"
+        for f in payload.get("fields") or []
+    )
+    consentimiento.save(update_fields=[
+        "documenso_document_id",
+        "documenso_signing_token",
+        "documenso_recipient_paciente_id",
+        "requiere_firma_profesional",
+        "requiere_tp_profesional",
+        "documenso_recipient_profesional_id",
+        "updated_at",
+    ])
     return signing_token, consentimiento.documenso_document_id
+
+
+def _id_documento_v1(document_id: str) -> str | None:
+    """La API v1 de documentos pide el id numérico. Los sobres creados por la API v2 se guardan
+    con su id ``envelope_...``: se traduce con el ``secondaryId`` (``document_514`` → ``514``)."""
+    document_id = str(document_id or "")
+    if not document_id.startswith("envelope_"):
+        return document_id or None
+    try:
+        envelope = _fetch_documenso_json("GET", f"/api/v2/envelope/{document_id}")
+    except DocumensoIntegrationError:
+        return None
+    secondary = str(envelope.get("secondaryId") or "").removeprefix("document_")
+    return secondary if secondary.isdigit() else None
+
+
+def id_documento_para_guardar(actual: str | None, nuevo: str | None) -> str | None:
+    """El id ``envelope_...`` es el que usan la firma del profesional y las consultas v2: no se
+    reemplaza por el id numérico que envían el embed o el webhook."""
+    if actual and str(actual).startswith("envelope_"):
+        return actual
+    return nuevo or actual
 
 
 def descargar_pdf_documenso(document_id: str) -> bytes | None:
     if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY or not document_id:
+        return None
+    document_id = _id_documento_v1(document_id)
+    if not document_id:
         return None
 
     base = settings.DOCUMENSO_API_URL.rstrip("/")
@@ -334,6 +393,9 @@ def documento_documenso_sellado(document_id: str) -> bool:
     el PDF original SIN firma. Ante cualquier error responde False (no se guarda nada).
     """
     if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY or not document_id:
+        return False
+    document_id = _id_documento_v1(document_id)
+    if not document_id:
         return False
     try:
         resp = requests.get(
@@ -411,19 +473,31 @@ def verificar_firma_consentimiento_en_documenso(consentimiento) -> bool:
     if not consentimiento.documenso_document_id:
         return False
 
-    from apps.consentimientos.services import _estado_firma_desde_envelope
+    from apps.historia_clinica.documenso_firmantes import resolver_envelope_id
 
     try:
-        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{consentimiento.documenso_document_id}")
+        envelope_id = resolver_envelope_id(consentimiento.documenso_document_id)
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
     except DocumensoIntegrationError:
         logger.warning(
             "No se pudo consultar el envelope para verificar la firma | consentimiento_id=%s", consentimiento.id,
         )
         return False
-    if _estado_firma_desde_envelope(payload) != "firmada":
+    if not paciente_firmo_en_envelope(consentimiento, payload):
         return False
     marcar_consentimiento_firmado(consentimiento)
     return True
+
+
+def paciente_firmo_en_envelope(consentimiento, payload: dict) -> bool:
+    """True si el paciente ya firmó. Con firma diferida del profesional el sobre sigue
+    pendiente tras la firma del paciente, así que se mira solo su destinatario."""
+    from apps.consentimientos.services import _estado_firma_desde_envelope
+    from apps.historia_clinica.documenso_firmantes import destinatario_firmo
+
+    if consentimiento.requiere_firma_profesional and consentimiento.documenso_recipient_paciente_id:
+        return destinatario_firmo(payload, consentimiento.documenso_recipient_paciente_id)
+    return _estado_firma_desde_envelope(payload) == "firmada"
 
 
 def requiere_firma_cada_vez(cita, template_token) -> bool:
@@ -511,6 +585,7 @@ def consentimiento_satisfecho(paciente_id, template_token, *, informado=None, ci
 
 
 def marcar_consentimiento_firmado(consentimiento, *, documenso_document_id: str | None = None):
+    documenso_document_id = id_documento_para_guardar(consentimiento.documenso_document_id, documenso_document_id)
     if consentimiento.firmado:
         if documenso_document_id and consentimiento.documenso_document_id != documenso_document_id:
             consentimiento.documenso_document_id = documenso_document_id
@@ -520,7 +595,7 @@ def marcar_consentimiento_firmado(consentimiento, *, documenso_document_id: str 
     consentimiento.firmado = True
     consentimiento.fecha_firma = timezone.localdate()
     update_fields = ["firmado", "fecha_firma", "updated_at"]
-    if documenso_document_id:
+    if documenso_document_id and documenso_document_id != consentimiento.documenso_document_id:
         consentimiento.documenso_document_id = documenso_document_id
         update_fields.append("documenso_document_id")
     consentimiento.save(update_fields=update_fields)
@@ -590,3 +665,26 @@ def eliminar_consumo_insumo(consumo, user):
     )
     consumo.activo = False
     consumo.save(update_fields=["activo", "updated_at"])
+
+
+def descargar_pdf_documento_original(envelope_id: str) -> bytes | None:
+    """PDF del primer documento del sobre tal como está (sin sellar). Para mostrarlo antes de firmar."""
+    if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY or not envelope_id:
+        return None
+    from apps.historia_clinica.documenso_firmantes import resolver_envelope_id
+
+    try:
+        envelope = _fetch_documenso_json("GET", f"/api/v2/envelope/{resolver_envelope_id(envelope_id)}")
+        items = envelope.get("envelopeItems") or []
+        if not items:
+            return None
+        resp = requests.get(
+            f"{settings.DOCUMENSO_API_URL.rstrip('/')}/api/v2/envelope/item/{items[0]['id']}/download",
+            headers={"Authorization": _documenso_api_key()},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.content
+    except Exception:
+        logger.exception("No fue posible descargar el documento original de Documenso | envelope_id=%s", envelope_id)
+        return None

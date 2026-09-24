@@ -112,7 +112,7 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequirePermission("agenda.citas.crear"),)
         elif self.action in {"update", "partial_update"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action == "cambiar_estado":
+        elif self.action in {"cambiar_estado", "firma_profesional", "firma_profesional_documento"}:
             permission_classes = (CanChangeAppointmentState,)
         elif self.action == "destroy":
             permission_classes = (RequirePermission("agenda.citas.eliminar"),)
@@ -337,6 +337,23 @@ class CitaViewSet(ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+            # El paciente ya firmó; falta la firma del profesional que atiende (mismo sobre).
+            from apps.historia_clinica.firma_profesional import (
+                consentimientos_pendientes_firma_profesional,
+                serializar_pendiente,
+            )
+
+            pendientes_profesional = consentimientos_pendientes_firma_profesional(cita)
+            if pendientes_profesional:
+                return Response(
+                    {
+                        "error": "Hay consentimientos pendientes de la firma del profesional.",
+                        "code": "FIRMA_PROFESIONAL_REQUERIDA",
+                        "documentos": [serializar_pendiente(c) for c in pendientes_profesional],
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
         cita.estado = nuevo_estado
         update_fields = ["estado", "updated_at"]
 
@@ -389,6 +406,115 @@ class CitaViewSet(ModelViewSet):
         elif nuevo_estado == Cita.Estado.COMPLETADA:
             registrar_accion(request, "cita.completar", cita)
         return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get", "post"], url_path="firma_profesional")
+    def firma_profesional(self, request, pk=None):
+        """Consentimientos de la cita pendientes de la firma del profesional.
+
+        GET: documentos pendientes y si el usuario puede firmar (con el motivo si no).
+        POST: firma todos los pendientes con la firma, nombre y TP del perfil del usuario.
+        """
+        from apps.core.logging import get_client_ip
+        from apps.core.storage import get_public_url
+        from apps.historia_clinica.firma_profesional import (
+            MOTIVO_SIN_FIRMA,
+            FirmaNoDisponibleError,
+            consentimientos_pendientes_firma_profesional,
+            firmar_consentimientos_profesional,
+            motivo_no_puede_firmar,
+            serializar_pendiente,
+        )
+
+        cita = self.get_object()
+        user = request.user
+        pendientes = consentimientos_pendientes_firma_profesional(cita)
+        motivo = motivo_no_puede_firmar(user, cita, pendientes)
+
+        if request.method == "GET":
+            return Response(
+                {
+                    "documentos": [serializar_pendiente(c) for c in pendientes],
+                    "puede_firmar": motivo is None,
+                    "motivo": motivo,
+                    "profesional": {
+                        "nombre": user.nombre_completo,
+                        "registro_profesional": user.registro_profesional,
+                        "firma_url": get_public_url(user.firma_digital.name) if user.firma_digital else None,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if motivo is not None:
+            return Response(motivo, status=status.HTTP_400_BAD_REQUEST)
+
+        ip = get_client_ip(request)
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        try:
+            resultados = firmar_consentimientos_profesional(cita, user, ip=ip, user_agent=user_agent)
+        except FirmaNoDisponibleError as exc:
+            return Response({"code": MOTIVO_SIN_FIRMA, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        for resultado in resultados:
+            registrar_accion(
+                request,
+                "consentimiento.firma_profesional" if resultado["ok"] else "consentimiento.firma_profesional_fallida",
+                cita,
+                {
+                    "consentimiento_id": resultado["id"],
+                    "documento": resultado["nombre"],
+                    "user_agent": user_agent,
+                    **({"error": resultado["error"]} if not resultado["ok"] else {}),
+                },
+            )
+
+        fallidos = [r for r in resultados if not r["ok"]]
+        cuerpo = {"resultados": resultados, "consentimiento_info": build_consentimiento_info(cita)}
+        if fallidos:
+            cuerpo.update(
+                error="No se pudo firmar: " + ", ".join(r["nombre"] for r in fallidos) + ". Intenta de nuevo.",
+                code="FIRMA_PROFESIONAL_FALLIDA",
+            )
+            return Response(cuerpo, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(cuerpo, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True, methods=["get"],
+        url_path=r"firma_profesional/documento/(?P<consentimiento_id>[0-9a-f-]+)",
+    )
+    def firma_profesional_documento(self, request, pk=None, consentimiento_id=None):
+        """PDF de un consentimiento pendiente de la firma del profesional, para leerlo antes de firmar.
+
+        Mientras falta el profesional Documenso no entrega el PDF con la firma del paciente:
+        se muestra el documento de la plantilla (su contenido completo).
+        """
+        from django.http import HttpResponse
+
+        from apps.historia_clinica.firma_profesional import consentimientos_pendientes_firma_profesional
+        from apps.historia_clinica.services import descargar_pdf_documento_original
+
+        cita = self.get_object()
+        consentimiento = next(
+            (c for c in consentimientos_pendientes_firma_profesional(cita) if str(c.id) == consentimiento_id),
+            None,
+        )
+        if consentimiento is None:
+            return Response({"error": "Documento no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        pdf_bytes = None
+        if consentimiento.plantilla_id and consentimiento.plantilla.pdf_file:
+            consentimiento.plantilla.pdf_file.open("rb")
+            try:
+                pdf_bytes = consentimiento.plantilla.pdf_file.read()
+            finally:
+                consentimiento.plantilla.pdf_file.close()
+        if not pdf_bytes and consentimiento.documenso_document_id:
+            pdf_bytes = descargar_pdf_documento_original(consentimiento.documenso_document_id)
+        if not pdf_bytes:
+            return Response({"error": "No se pudo obtener el documento."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="consentimiento-{consentimiento.id}.pdf"'
+        return response
 
     @action(detail=False, methods=["get"], url_path="slots_disponibles", pagination_class=None)
     def slots_disponibles(self, request, *args, **kwargs):

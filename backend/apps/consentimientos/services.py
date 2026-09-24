@@ -771,25 +771,17 @@ def iniciar_registro_asistencia_documenso(cita) -> dict:
 
 
 def iniciar_firma_consentimiento_desde_plantilla(consentimiento) -> tuple[str, str]:
-    """Crea envelope en Documenso usando el PDF y campos mapeados en la plantilla self-service.
+    """Crea el sobre en Documenso con el PDF y los campos mapeados en la plantilla self-service.
 
-    Flujo:
-    1. POST /envelope/create (multipart, sin campos) → envelopeId
-    2. POST /envelope/recipient/create-many → recipientId
-    3. GET /envelope/{id} → envelopeItemId (PDF procesado)
-    4. POST /envelope/field/create-many → campos con posición
-    5. POST /envelope/distribute → signing token
+    Si la plantilla usa firma del profesional, el sobre lleva al paciente (orden 1) y a un
+    profesional provisional (orden 2) que se reemplaza en la primera atencion. Guarda en el
+    consentimiento los ids de los destinatarios y si requiere la firma del profesional.
     """
-    import json as _json
-
-    from apps.historia_clinica.services import (
-        DocumensoIntegrationError,
-        _buscar_signatario,
-        _documenso_api_key,
-        _extraer_signing_token,
-        _fetch_documenso_json,
-        _obtener_email_destinatario,
+    from apps.historia_clinica.documenso_firmantes import (
+        crear_sobre_consentimiento,
+        email_profesional_provisional,
     )
+    from apps.historia_clinica.services import DocumensoIntegrationError, _obtener_email_destinatario
 
     plantilla = consentimiento.plantilla
     if not plantilla or not plantilla.pdf_file:
@@ -804,95 +796,30 @@ def iniciar_firma_consentimiento_desde_plantilla(consentimiento) -> tuple[str, s
     if not pdf_bytes:
         raise DocumensoIntegrationError("El archivo PDF de la plantilla está vacío o no se pudo leer.")
 
-    if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY:
-        raise DocumensoIntegrationError("La integración con Documenso no está configurada.")
-
-    recipient_email = _obtener_email_destinatario(consentimiento)
-    nombre_paciente = consentimiento.paciente.nombre_completo
-    base = settings.DOCUMENSO_API_URL.rstrip("/")
-    auth = _documenso_api_key()
-
-    # ── Paso 1: crear envelope con PDF + recipient, sin campos ────────────
-    # Incluir el recipient inline en create (como asistencia) para evitar endpoint separado.
-    nombre_archivo = f"consentimiento_{str(consentimiento.id)[:8]}.pdf"
-    create_payload = {
-        "type": "DOCUMENT",
-        "title": plantilla.nombre or "Consentimiento Informado",
-        "recipients": [
-            {"email": recipient_email, "name": nombre_paciente, "role": "SIGNER", "fields": []}
-        ],
-    }
-    try:
-        resp = _requests.post(
-            f"{base}/api/v2/envelope/create",
-            headers={"Authorization": auth},
-            data={"payload": _json.dumps(create_payload)},
-            files={"files": (nombre_archivo, pdf_bytes, "application/pdf")},
-            timeout=30,
-        )
-        logger.info("[firma_desde_plantilla] create | status=%s | body=%s", resp.status_code, resp.text[:500])
-        resp.raise_for_status()
-    except _requests.RequestException as exc:
-        body = getattr(getattr(exc, "response", None), "text", "")[:500]
-        logger.error("[firma_desde_plantilla] error crear envelope | exc=%s | body=%s", exc, body)
-        raise DocumensoIntegrationError("Error al crear el documento en Documenso.") from exc
-
-    create_data = resp.json()
-    envelope_id = create_data.get("id")
-    if not envelope_id:
-        raise DocumensoIntegrationError("Documenso no devolvió id de envelope.")
-
-    # Extraer recipient_id del response del create
-    recipients_in_create = create_data.get("recipients") or []
-    recipient_id = recipients_in_create[0].get("id") if recipients_in_create else None
-    logger.info("[firma_desde_plantilla] envelope_id=%s | recipient_id=%s", envelope_id, recipient_id)
-
-    # ── Paso 2: GET envelope → envelopeItemId + recipient_id si faltó ────
-    envelope_detail = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
-    logger.info("[firma_desde_plantilla] envelope_detail keys=%s", list(envelope_detail.keys()))
-    items = envelope_detail.get("envelopeItems") or envelope_detail.get("items") or []
-    envelope_item_id = items[0].get("id") if items else None
-    if not recipient_id:
-        detail_recipients = envelope_detail.get("recipients") or []
-        recipient_id = detail_recipients[0].get("id") if detail_recipients else None
-    logger.info("[firma_desde_plantilla] envelope_item_id=%s | recipient_id=%s", envelope_item_id, recipient_id)
-
-    # ── Paso 4: crear campos ───────────────────────────────────────────────
-    fields_data = []
-    for campo in campos:
-        raw_type = (campo.get("type") or "SIGNATURE").upper()
-        field_entry = {
-            "type": raw_type,
-            "recipientId": recipient_id,
-            "page": campo.get("page", 1),
-            "positionX": campo.get("positionX", 10.0),
-            "positionY": campo.get("positionY", 75.0),
-            "width": campo.get("width", 30.0),
-            "height": campo.get("height", 8.0),
-        }
-        if envelope_item_id:
-            field_entry["envelopeItemId"] = envelope_item_id
-        fields_data.append(field_entry)
-
-    _fetch_documenso_json(
-        "POST",
-        "/api/v2/envelope/field/create-many",
-        json_payload={"envelopeId": envelope_id, "data": fields_data},
+    con_profesional = plantilla.usa_firma_profesional
+    sobre = crear_sobre_consentimiento(
+        pdf_bytes=pdf_bytes,
+        nombre_archivo=f"consentimiento_{str(consentimiento.id)[:8]}.pdf",
+        titulo=plantilla.nombre or "Consentimiento Informado",
+        paciente_nombre=consentimiento.paciente.nombre_completo,
+        paciente_email=_obtener_email_destinatario(consentimiento),
+        campos=campos,
+        con_profesional=con_profesional,
+        email_profesional=email_profesional_provisional(consentimiento.id),
     )
-    logger.info("[firma_desde_plantilla] campos creados | count=%d", len(fields_data))
 
-    # ── Paso 5: distribuir ─────────────────────────────────────────────────
-    distribute = _fetch_documenso_json(
-        "POST", "/api/v2/envelope/distribute", json_payload={"envelopeId": envelope_id}
-    )
-    recipients_dist = distribute.get("recipients") or []
-    recipient = _buscar_signatario(recipients_dist, email=recipient_email)
-    signing_token = _extraer_signing_token(recipient or {})
-
-    if not signing_token:
-        raise DocumensoIntegrationError("Documenso no devolvió signing token.")
-
-    return signing_token, str(envelope_id)
+    consentimiento.requiere_firma_profesional = con_profesional
+    consentimiento.requiere_tp_profesional = con_profesional and plantilla.pide_tp_profesional
+    consentimiento.documenso_recipient_paciente_id = sobre["recipient_paciente_id"]
+    consentimiento.documenso_recipient_profesional_id = sobre["recipient_profesional_id"]
+    consentimiento.save(update_fields=[
+        "requiere_firma_profesional",
+        "requiere_tp_profesional",
+        "documenso_recipient_paciente_id",
+        "documenso_recipient_profesional_id",
+        "updated_at",
+    ])
+    return sobre["signing_token"], sobre["envelope_id"]
 
 
 def recuperar_pdf_asistencia(cita, *, reemplazar: bool = False) -> bool:

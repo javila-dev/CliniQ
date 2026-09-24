@@ -94,7 +94,11 @@ class PlantillaConsentimientoViewSet(GenericViewSet):
         ser = PlantillaCamposSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         plantilla.campos = ser.validated_data["campos"]
-        plantilla.save(update_fields=["campos", "updated_at"])
+        update_fields = ["campos", "updated_at"]
+        if "requiere_firma_profesional" in ser.validated_data:
+            plantilla.requiere_firma_profesional = ser.validated_data["requiere_firma_profesional"]
+            update_fields.append("requiere_firma_profesional")
+        plantilla.save(update_fields=update_fields)
         return Response(DocumensoConsentimientoTemplateSerializer(plantilla).data)
 
     @action(detail=True, methods=["get"], url_path="pdf")

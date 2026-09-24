@@ -26,6 +26,8 @@ class DocumensoConsentimientoTemplateSerializer(serializers.ModelSerializer):
     label = serializers.SerializerMethodField()
     tiene_pdf = serializers.SerializerMethodField()
     tiene_campos = serializers.SerializerMethodField()
+    campos_profesional_completos = serializers.BooleanField(read_only=True)
+    incompleta = serializers.SerializerMethodField()
 
     class Meta:
         model = DocumensoConsentimientoTemplate
@@ -38,11 +40,21 @@ class DocumensoConsentimientoTemplateSerializer(serializers.ModelSerializer):
             "tiene_pdf",
             "tiene_campos",
             "campos",
+            "requiere_firma_profesional",
+            "campos_profesional_completos",
+            "incompleta",
             "activo",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "label", "tiene_pdf", "tiene_campos", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "label", "tiene_pdf", "tiene_campos", "campos_profesional_completos", "incompleta",
+            "created_at", "updated_at",
+        )
+
+    def get_incompleta(self, obj):
+        """Plantilla propia (con PDF) que requiere la firma del profesional pero aún no tiene sus campos."""
+        return bool(obj.pdf_file) and obj.requiere_firma_profesional and not obj.campos_profesional_completos
 
     def get_label(self, obj):
         if obj.nombre:
@@ -74,7 +86,47 @@ class PlantillaConsentimientoUploadSerializer(serializers.Serializer):
 
 
 class PlantillaCamposSerializer(serializers.Serializer):
+    """Campos del mapeador. Los del paciente son libres; los del profesional son tres
+    fijos (firma, nombre, TP), uno de cada uno, y su tipo lo define el rol."""
+
     campos = serializers.ListField(child=serializers.DictField(), allow_empty=True)
+    requiere_firma_profesional = serializers.BooleanField(required=False)
+
+    def validate(self, attrs):
+        from apps.historia_clinica.documenso_firmantes import (
+            FIRMANTE_PACIENTE,
+            FIRMANTE_PROFESIONAL,
+            ROLES_PROFESIONAL,
+        )
+
+        campos_paciente = []
+        campos_profesional = []
+        for campo in attrs["campos"]:
+            firmante = campo.get("firmante") or FIRMANTE_PACIENTE
+            if firmante not in {FIRMANTE_PACIENTE, FIRMANTE_PROFESIONAL}:
+                raise serializers.ValidationError({"campos": f"Firmante no válido: {firmante}."})
+            campo["firmante"] = firmante
+            if firmante == FIRMANTE_PROFESIONAL:
+                rol = campo.get("rol")
+                if rol not in ROLES_PROFESIONAL:
+                    raise serializers.ValidationError({"campos": "Cada campo del profesional debe ser firma, nombre o TP."})
+                campo["type"] = ROLES_PROFESIONAL[rol]
+                campos_profesional.append(campo)
+            else:
+                campo.pop("rol", None)
+                campos_paciente.append(campo)
+
+        if not any((c.get("type") or "").upper() == "SIGNATURE" for c in campos_paciente):
+            raise serializers.ValidationError({"campos": "Ubica al menos una firma del paciente."})
+
+        roles = [c["rol"] for c in campos_profesional]
+        if len(roles) != len(set(roles)):
+            raise serializers.ValidationError({"campos": "Cada campo del profesional se ubica una sola vez."})
+
+        if attrs.get("requiere_firma_profesional") is False:
+            # La plantilla se sella solo con el paciente: se descartan los campos del profesional.
+            attrs["campos"] = campos_paciente
+        return attrs
 
 
 class ConfiguracionSignosVitalesSerializer(serializers.ModelSerializer):

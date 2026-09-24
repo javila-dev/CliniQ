@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 def _archivo_url(consentimiento) -> str | None:
     if not consentimiento:
         return None
-    if not consentimiento.archivo and consentimiento.documenso_document_id:
+    # Pendiente del profesional: Documenso aún no lo sella, no tiene sentido consultarlo.
+    if not consentimiento.archivo and consentimiento.documenso_document_id and not consentimiento.pendiente_firma_profesional:
         try:
             pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
             if pdf_bytes:
@@ -34,6 +35,17 @@ def _archivo_url(consentimiento) -> str | None:
         except Exception:
             logger.exception("Auto-recuperacion PDF fallida | consentimiento_id=%s", consentimiento.id)
     return get_signed_url(consentimiento.archivo.name) if consentimiento.archivo else None
+
+
+def _datos_firma_profesional(consentimiento) -> dict:
+    """Estado de la firma diferida del profesional para un ítem de consentimiento_info."""
+    if not consentimiento:
+        return {"requiere_firma_profesional": False, "firmado_profesional": False, "fecha_firma_paciente": None}
+    return {
+        "requiere_firma_profesional": consentimiento.requiere_firma_profesional,
+        "firmado_profesional": consentimiento.fecha_firma_profesional is not None,
+        "fecha_firma_paciente": consentimiento.fecha_firma,
+    }
 
 
 class RegistroConfirmacionSerializer(serializers.ModelSerializer):
@@ -93,6 +105,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
                     "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                     "archivo_url": _archivo_url(consentimiento),
                     "requiere_firma_cada_vez": cada_vez,
+                    **_datos_firma_profesional(consentimiento),
                 }
             )
 
@@ -137,6 +150,7 @@ def build_consentimiento_info(cita):
                 "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                 "archivo_url": _archivo_url(consentimiento),
                 "requiere_firma_cada_vez": cada_vez,
+                **_datos_firma_profesional(consentimiento),
             }
         )
     return {"todos_firmados": todos_firmados, "consentimientos": resultado}

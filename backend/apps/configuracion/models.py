@@ -44,7 +44,18 @@ class DocumensoConsentimientoTemplate(BaseModel):
     campos = models.JSONField(
         default=list,
         blank=True,
-        help_text="Lista de campos de firma/texto/fecha/checkbox con posición en el PDF",
+        help_text=(
+            "Lista de campos de firma/texto/fecha/checkbox con posición en el PDF. Cada campo "
+            "indica su firmante (paciente|profesional); los del profesional llevan un rol fijo "
+            "(firma|nombre|tp) que se llena automáticamente al firmar."
+        ),
+    )
+    requiere_firma_profesional = models.BooleanField(
+        default=True,
+        help_text=(
+            "Si True, el documento lo firma también el profesional que atiende la primera cita. "
+            "Si False, se sella solo con la firma del paciente."
+        ),
     )
 
     class Meta:
@@ -60,6 +71,33 @@ class DocumensoConsentimientoTemplate(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.clinica_id}:{self.tipo}"
+
+    @property
+    def roles_profesional_ubicados(self) -> set[str]:
+        return {
+            campo.get("rol")
+            for campo in self.campos or []
+            if campo.get("firmante") == "profesional" and campo.get("rol")
+        }
+
+    @property
+    def campos_profesional_completos(self) -> bool:
+        from apps.historia_clinica.documenso_firmantes import ROLES_PROFESIONAL_OBLIGATORIOS
+
+        return ROLES_PROFESIONAL_OBLIGATORIOS <= self.roles_profesional_ubicados
+
+    @property
+    def pide_tp_profesional(self) -> bool:
+        """El documento lleva el campo de tarjeta profesional: solo lo firma quien tenga TP."""
+        from apps.historia_clinica.documenso_firmantes import ROL_TP
+
+        return ROL_TP in self.roles_profesional_ubicados
+
+    @property
+    def usa_firma_profesional(self) -> bool:
+        """El sobre lleva al profesional como segundo firmante. Una plantilla que lo requiere
+        pero aún no tiene la firma del profesional ubicada se sigue usando solo con el paciente."""
+        return self.requiere_firma_profesional and self.campos_profesional_completos
 
 
 class ConfiguracionSignosVitales(BaseModel):
