@@ -1,9 +1,9 @@
 import hmac
 import json
 import logging
+import uuid
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -20,6 +20,25 @@ logger = logging.getLogger(__name__)
 
 _ASISTENCIA_PREFIX = "asistencia:"
 _COMPROMISO_PAGO_PREFIX = "compromiso_pago:"
+
+
+def _external_id_reconocido(external_id) -> str | None:
+    """``externalId`` si es uno de los nuestros (prefijo conocido o UUID de consentimiento).
+
+    La instancia de Documenso es compartida: un sobre creado a mano o por otro sistema puede
+    traer un ``externalId`` arbitrario, que no debe romper el filtro por UUID.
+    """
+    if not external_id:
+        return None
+    external_id = str(external_id).strip()
+    if external_id.startswith((_ASISTENCIA_PREFIX, _COMPROMISO_PAGO_PREFIX)):
+        return external_id
+    try:
+        uuid.UUID(external_id)
+    except ValueError:
+        logger.warning("Webhook Documenso con externalId ajeno | external_id=%s", external_id)
+        return None
+    return external_id
 
 
 def _resolve_asistencia_by_token(recipients: list):
@@ -217,7 +236,7 @@ class DocumensoWebhookView(APIView):
         if event not in handled_events:
             return Response({"ok": True, "skipped": True}, status=200)
 
-        external_id = payload.get("externalId")
+        external_id = _external_id_reconocido(payload.get("externalId"))
         document_id = payload.get("id")
         if not external_id:
             # externalId is absent when the envelope was created via multipart upload
@@ -284,12 +303,9 @@ class DocumensoWebhookView(APIView):
         from apps.historia_clinica.services import paciente_firmo_en_envelope
 
         consentimiento = None
-        external_id = payload.get("externalId")
-        if external_id:
-            try:
-                consentimiento = ConsentimientoInformado.objects.filter(id=external_id).first()
-            except (ValueError, ValidationError):
-                consentimiento = None
+        external_id = _external_id_reconocido(payload.get("externalId"))
+        if external_id and not external_id.startswith((_ASISTENCIA_PREFIX, _COMPROMISO_PAGO_PREFIX)):
+            consentimiento = ConsentimientoInformado.objects.filter(id=external_id).first()
         if consentimiento is None:
             consentimiento = _resolve_by_signing_token(
                 ConsentimientoInformado, "documenso_signing_token", payload.get("recipients") or []

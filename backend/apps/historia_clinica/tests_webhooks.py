@@ -247,3 +247,22 @@ class RecuperarPdfCompromisoPagoTests(TestCase):
         verificar_firma_compromiso_pago_en_documenso(self.consentimiento)
         self.consentimiento.refresh_from_db()
         self.assertTrue(self.consentimiento.pdf_archivo)
+
+
+@override_settings(DOCUMENSO_WEBHOOK_SECRET=WEBHOOK_SECRET)
+class WebhookExternalIdAjenoTests(TestCase):
+    """La instancia de Documenso es compartida: un sobre con un ``externalId`` que no es
+    nuestro (ni prefijo conocido ni UUID) antes reventaba con ValueError en el filtro por id."""
+
+    def _post(self, event, external_id="doc-creado-a-mano"):
+        payload = {"event": event, "payload": {"externalId": external_id, "id": 99, "recipients": []}}
+        return APIClient().post(
+            "/webhooks/documenso/", data=json.dumps(payload), content_type="application/json",
+            HTTP_X_DOCUMENSO_SECRET=WEBHOOK_SECRET,
+        )
+
+    def test_documento_completado_con_external_id_ajeno_no_falla(self):
+        self.assertEqual(self._post("DOCUMENT_COMPLETED").status_code, 200)
+
+    def test_firma_parcial_con_external_id_ajeno_no_falla(self):
+        self.assertEqual(self._post("DOCUMENT_SIGNED").status_code, 200)

@@ -256,6 +256,8 @@ class ProcedimientoNombreUnicoTests(TestCase):
             Servicio.objects.create(clinica=self.clinica, nombre=" botox facial ", duracion_min=30)
 
 
+# El diagrama sube su imagen: en CI no hay MinIO, así que se usa el disco.
+@override_settings(DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage", MEDIA_ROOT=tempfile.gettempdir())
 class ProcedimientoFiltrosTests(TestCase):
     def setUp(self):
         self.client = APIClient()
