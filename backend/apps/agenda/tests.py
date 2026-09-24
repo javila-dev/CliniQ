@@ -223,6 +223,15 @@ class CitaEnEsperaFlowTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.json()["estado"], Cita.Estado.EN_CURSO)
 
+    def test_no_se_envia_recordatorio_a_una_cita_en_curso(self):
+        self.cita.estado = Cita.Estado.EN_CURSO
+        self.cita.save(update_fields=["estado", "updated_at"])
+
+        for accion in ("enviar_recordatorio_inmediato", "solicitar_recordatorio"):
+            response = self.client.post(f"/api/v1/agenda/citas/{self.cita.id}/{accion}/", {}, format="json")
+            self.assertEqual(response.status_code, 400, accion)
+            self.assertEqual(response.json()["code"], "ESTADO_INVALIDO")
+
     def test_en_espera_a_en_curso_valida_consentimiento(self):
         self.cita.estado = Cita.Estado.EN_ESPERA
         self.cita.save(update_fields=["estado", "updated_at"])

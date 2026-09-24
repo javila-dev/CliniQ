@@ -780,7 +780,7 @@ class CitaViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="solicitar_recordatorio")
     def solicitar_recordatorio(self, request, pk=None):
         cita = self.get_object()
-        if cita.estado in {Cita.Estado.CANCELADA, Cita.Estado.COMPLETADA, Cita.Estado.NO_ASISTIO}:
+        if cita.estado not in {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}:
             return Response(
                 {"error": "No se puede solicitar recordatorio para una cita en este estado.", "code": "ESTADO_INVALIDO"},
                 status=status.HTTP_400_BAD_REQUEST,
@@ -793,7 +793,7 @@ class CitaViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="enviar_recordatorio_inmediato")
     def enviar_recordatorio_inmediato(self, request, pk=None):
         cita = self.get_object()
-        if cita.estado in {Cita.Estado.CANCELADA, Cita.Estado.COMPLETADA, Cita.Estado.NO_ASISTIO}:
+        if cita.estado not in {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}:
             return Response(
                 {"error": "No se puede enviar recordatorio para una cita en este estado.", "code": "ESTADO_INVALIDO"},
                 status=status.HTTP_400_BAD_REQUEST,
