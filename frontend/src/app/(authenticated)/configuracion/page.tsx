@@ -36,6 +36,8 @@ export default function ConfiguracionPage() {
   const listos = (checklist?.items ?? []).filter((i) => i.completado && i.resumen)
   const faltan = checklist ? checklist.total - checklist.completados : 0
   const pct = checklist?.total ? Math.round((checklist.completados / checklist.total) * 100) : 0
+  // Con todos los pasos completos la tarjeta de puesta en marcha ya no aporta.
+  const mostrarPuestaEnMarcha = !!checklist && checklist.completados < checklist.total
 
   return (
     <div className="max-w-4xl space-y-[22px]">
@@ -53,8 +55,9 @@ export default function ConfiguracionPage() {
 
       <PuestaEnMarchaBanner dismissible={false} />
 
-      {checklist && (
+      {checklist && (mostrarPuestaEnMarcha || listos.length > 0) && (
         <div className="grid gap-3 md:grid-cols-2">
+          {mostrarPuestaEnMarcha && (
           <Bloque
             titulo="Puesta en marcha"
             extra={
@@ -82,6 +85,7 @@ export default function ConfiguracionPage() {
               </Button>
             </div>
           </Bloque>
+          )}
 
           {listos.length > 0 && (
             <Bloque titulo="Resumen">
