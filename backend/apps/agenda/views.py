@@ -4,6 +4,7 @@ import hmac
 import logging
 
 from django.conf import settings
+from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from rest_framework import status
@@ -41,6 +42,7 @@ from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
     enviar_recordatorio_cita_webhook,
     registrar_envio_whatsapp,
+    uso_whatsapp_mes_actual,
     verificar_disponibilidad_whatsapp,
 )
 from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
@@ -49,6 +51,29 @@ from apps.users.permissions import CanChangeAppointmentState, RequirePermission,
 
 
 logger = logging.getLogger(__name__)
+
+
+def _filtrar_por_disponibilidad_whatsapp(citas: list[Cita]) -> list[Cita]:
+    """Deja solo las citas cuya clinica puede enviar WhatsApp: addon activo y, si
+    tiene cupo mensual, solo tantas citas como envios le queden (en el orden
+    recibido). El descuento real ocurre en marcar_recordatorio_enviado."""
+    restantes_por_clinica: dict = {}
+    resultado = []
+    for cita in citas:
+        clinica = cita.sede.clinica
+        if clinica.id not in restantes_por_clinica:
+            uso = uso_whatsapp_mes_actual(clinica)
+            if not uso["habilitado"]:
+                restantes_por_clinica[clinica.id] = 0
+            else:
+                restantes_por_clinica[clinica.id] = None if uso["sin_limite"] else uso["envios_restantes"]
+        restantes = restantes_por_clinica[clinica.id]
+        if restantes is None:
+            resultado.append(cita)
+        elif restantes > 0:
+            resultado.append(cita)
+            restantes_por_clinica[clinica.id] = restantes - 1
+    return resultado
 
 
 def _n8n_secret_ok(request) -> bool:
@@ -761,6 +786,7 @@ class CitaViewSet(ModelViewSet):
                 seen.add(cita.id)
                 citas.append(cita)
 
+        citas = _filtrar_por_disponibilidad_whatsapp(citas)
         serializer = RecordatorioPendienteSerializer(citas, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -769,13 +795,20 @@ class CitaViewSet(ModelViewSet):
         if not _n8n_secret_ok(request):
             return Response({"error": "No autorizado.", "code": "N8N_UNAUTHORIZED"}, status=status.HTTP_401_UNAUTHORIZED)
 
-        cita = self.get_object()
-        cita.recordatorio_enviado = True
-        cita.recordatorio_manual_pendiente = False
-        if cita.estado_confirmacion == Cita.EstadoConfirmacion.SIN_ENVIAR:
-            cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
-        cita.save(update_fields=["recordatorio_enviado", "recordatorio_manual_pendiente", "estado_confirmacion", "updated_at"])
-        return Response(self.get_serializer(cita).data, status=status.HTTP_200_OK)
+        pk = self.get_object().pk
+        with transaction.atomic():
+            # Bloqueo de fila: si n8n reintenta o llama dos veces en paralelo, solo
+            # la primera llamada descuenta cupo.
+            cita = Cita.objects.select_for_update().select_related("sede__clinica", "paciente").get(pk=pk)
+            ya_marcada = cita.recordatorio_enviado and not cita.recordatorio_manual_pendiente
+            if not ya_marcada:
+                cita.recordatorio_enviado = True
+                cita.recordatorio_manual_pendiente = False
+                if cita.estado_confirmacion == Cita.EstadoConfirmacion.SIN_ENVIAR:
+                    cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
+                cita.save(update_fields=["recordatorio_enviado", "recordatorio_manual_pendiente", "estado_confirmacion", "updated_at"])
+                registrar_envio_whatsapp(cita.sede.clinica, EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita.paciente)
+        return Response(self.get_serializer(self.get_object()).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="solicitar_recordatorio")
     def solicitar_recordatorio(self, request, pk=None):
