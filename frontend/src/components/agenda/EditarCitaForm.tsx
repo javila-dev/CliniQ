@@ -12,7 +12,7 @@ import { clinicasApi } from '@/lib/api/clinicas'
 import { carteraApi } from '@/lib/api/cartera'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
-import { todayISO } from '@/lib/utils'
+import { cn, todayISO } from '@/lib/utils'
 import { ProfesionalSelect } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
@@ -27,7 +27,7 @@ import type { Cita } from '@/types/agenda'
 const schema = z.object({
   sede: z.string().min(1, 'Selecciona una sede'),
   profesional: z.string().min(1, 'Selecciona un profesional'),
-  servicio: z.string().min(1, 'Selecciona un servicio'),
+  servicio: z.string().min(1, 'Selecciona un procedimiento'),
   fecha: z.string().min(1, 'Selecciona una fecha'),
   slot: z.string().min(1, 'Selecciona un horario'),
   canal_origen: z.enum(['presencial', 'telefono', 'web', 'redes']),
@@ -72,6 +72,10 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   const fecha = watch('fecha')
   const slot = watch('slot')
 
+  // Con el filtro por procedimiento activo, el profesional se elige después del procedimiento
+  // y solo aparecen quienes lo realizan.
+  const filtroActivo = Boolean(user?.filtrar_profesionales_por_procedimiento)
+
   const { data: sedesData } = useQuery({
     queryKey: ['sedes'],
     queryFn: () => clinicasApi.sedes.list({ activa: true }),
@@ -115,7 +119,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
     const entries = Object.entries(data)
     if (entries.length > 0) {
       const labels: Record<string, string> = {
-        sede: 'Sede', profesional: 'Profesional', servicio: 'Servicio',
+        sede: 'Sede', profesional: 'Profesional', servicio: 'Procedimiento',
         fecha_inicio: 'Fecha/Hora', canal_origen: '¿Cómo agendó el paciente?',
       }
       return entries.map(([f, m]) => `${labels[f] ?? f}: ${Array.isArray(m) ? m[0] : m}`).join(' | ')
@@ -159,7 +163,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
+        <div className={cn('space-y-1.5', filtroActivo && 'order-2')}>
           <Label>Profesional *</Label>
           <Controller
             name="profesional"
@@ -170,21 +174,27 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
                 onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
                 sedeId={sedeId}
                 disabled={!sedeId}
+                filtro={servicioId ? { servicioIds: [servicioId] } : undefined}
+                esperando={filtroActivo && (!sedeId || !servicioId) ? 'Elige sede y procedimiento primero' : undefined}
               />
             )}
           />
           {errors.profesional && <p className="text-xs text-destructive">{errors.profesional.message}</p>}
         </div>
 
-        <div className="space-y-1.5">
-          <Label>Servicio *</Label>
+        <div className={cn('space-y-1.5', filtroActivo && 'order-1')}>
+          <Label>Procedimiento *</Label>
           <Controller
             name="servicio"
             control={control}
             render={({ field }) => (
               <ServicioSelect
                 value={field.value}
-                onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
+                onValueChange={(v) => {
+                  field.onChange(v)
+                  setValue('slot', '')
+                  if (filtroActivo) setValue('profesional', '')
+                }}
                 clinicaId={clinicaId}
               />
             )}

@@ -4,9 +4,16 @@ import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Check, ChevronDown, Search } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
+import { useAuthStore } from '@/store/authStore'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
+
+export interface ProfesionalFiltro {
+  servicioIds?: string[]
+  itemCotizacionId?: string | null
+  sesionEjecutadaId?: string | null
+}
 
 interface ProfesionalSelectProps {
   value: string
@@ -14,6 +21,11 @@ interface ProfesionalSelectProps {
   sedeId?: string
   placeholder?: string
   disabled?: boolean
+  /** Procedimiento por el que se filtra. Solo tiene efecto si la clínica activó el parámetro. */
+  filtro?: ProfesionalFiltro
+  /** Con el filtro activo, texto que se muestra mientras aún falta elegir el procedimiento.
+   *  Mientras esté presente el selector queda inactivo. */
+  esperando?: string
 }
 
 export function ProfesionalSelect({
@@ -22,13 +34,22 @@ export function ProfesionalSelect({
   sedeId,
   placeholder = 'Seleccionar profesional',
   disabled,
+  filtro,
+  esperando,
 }: ProfesionalSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
+  const { user } = useAuthStore()
+  const filtroActivo = Boolean(user?.filtrar_profesionales_por_procedimiento)
+  const hayFiltro = Boolean(filtro?.servicioIds?.length || filtro?.itemCotizacionId || filtro?.sesionEjecutadaId)
 
   const { data, isLoading } = useQuery({
-    queryKey: ['profesionales', sedeId],
-    queryFn: () => colaboradoresApi.profesionales(sedeId),
+    queryKey: [
+      'profesionales', sedeId,
+      filtro?.servicioIds?.join(',') ?? '', filtro?.itemCotizacionId ?? '', filtro?.sesionEjecutadaId ?? '',
+    ],
+    queryFn: () => colaboradoresApi.profesionales(sedeId, filtro),
+    enabled: !esperando,
   })
 
   const seleccionado = data?.find((p) => p.id === value)
@@ -40,16 +61,18 @@ export function ProfesionalSelect({
     return opciones.filter((p) => p.nombre_completo.toLowerCase().includes(q))
   }, [data, query])
 
+  const sinProfesionalesParaElProcedimiento = filtroActivo && hayFiltro && (data?.length ?? 0) === 0
+
   return (
     <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery('') }}>
       <PopoverTrigger asChild>
         <button
           type="button"
-          disabled={disabled || isLoading}
+          disabled={disabled || !!esperando || isLoading}
           className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className={cn('truncate', !seleccionado && 'text-muted-foreground')}>
-            {isLoading ? 'Cargando...' : seleccionado ? toTitleCase(seleccionado.nombre_completo) : placeholder}
+            {esperando ? esperando : isLoading ? 'Cargando...' : seleccionado ? toTitleCase(seleccionado.nombre_completo) : placeholder}
           </span>
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
         </button>
@@ -67,7 +90,11 @@ export function ProfesionalSelect({
         </div>
         <div className="max-h-60 overflow-y-auto py-1" onWheel={scrollWheelFallback}>
           {filtrados.length === 0 ? (
-            <p className="px-3 py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
+            <p className="px-3 py-3 text-sm text-muted-foreground text-center">
+              {sinProfesionalesParaElProcedimiento
+                ? 'Ningún profesional realiza este procedimiento en esta sede. Asígnalo desde Configuración o desde el perfil del profesional.'
+                : 'Sin resultados'}
+            </p>
           ) : (
             filtrados.map((p) => (
               <button

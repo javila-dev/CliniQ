@@ -17,7 +17,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
 import type { Colaborador, CreateHorarioColaboradorRequest } from '@/types/colaboradores'
 import type { Rol } from '@/types/usuarios'
@@ -102,7 +103,7 @@ function EspecialidadesSelect({
   const seleccionadas = opciones.filter((s) => value.includes(s.id))
 
   if (servicios && !servicios.length) return (
-    <p className="text-xs text-muted-foreground">No hay servicios activos</p>
+    <p className="text-xs text-muted-foreground">No hay procedimientos activos</p>
   )
 
   return (
@@ -113,8 +114,8 @@ function EspecialidadesSelect({
             className="w-full justify-between font-normal">
             <span className={cn(!seleccionadas.length && 'text-muted-foreground')}>
               {seleccionadas.length
-                ? `${seleccionadas.length} servicio${seleccionadas.length > 1 ? 's' : ''}`
-                : 'Seleccionar servicios…'}
+                ? `${seleccionadas.length} procedimiento${seleccionadas.length > 1 ? 's' : ''}`
+                : 'Seleccionar procedimientos…'}
             </span>
             <ChevronsUpDown className="h-4 w-4 opacity-50 shrink-0" />
           </Button>
@@ -123,7 +124,7 @@ function EspecialidadesSelect({
           <div className="flex items-center border-b px-3">
             <Search className="h-4 w-4 shrink-0 opacity-50" />
             <input autoFocus value={q} onChange={(e) => setQ(e.target.value)}
-              placeholder="Buscar servicio…"
+              placeholder="Buscar procedimiento…"
               className="flex h-9 w-full bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground" />
           </div>
           <div className="max-h-60 overflow-y-auto p-1">
@@ -270,8 +271,7 @@ function HorariosSection({
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <Label>Horarios de atención por sede</Label>
+      <div className="flex items-center justify-end">
         <Button
           type="button"
           variant="outline"
@@ -380,7 +380,9 @@ function HorariosSection({
       {isLoading ? (
         <p className="text-xs text-muted-foreground">Cargando horarios…</p>
       ) : horarios.length === 0 ? (
-        <p className="text-xs text-muted-foreground">Sin horarios definidos</p>
+        <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
+          Sin horarios propios: atiende en el horario de cada sede.
+        </p>
       ) : (
         <div className="divide-y rounded-lg border overflow-hidden">
           {horarios.map((h) => {
@@ -413,7 +415,45 @@ function HorariosSection({
   )
 }
 
-// ─── Sheet ────────────────────────────────────────────────────
+// ─── Layout del formulario ────────────────────────────────────
+
+/** Sección con título y descripción a la izquierda y sus campos en dos columnas a la derecha. */
+function Seccion({ titulo, descripcion, children }: { titulo: string; descripcion: string; children: React.ReactNode }) {
+  return (
+    <section className="grid gap-4 border-t pt-6 first:border-t-0 first:pt-0 md:grid-cols-[11rem_minmax(0,1fr)] md:gap-8">
+      <div>
+        <h3 className="text-sm font-semibold">{titulo}</h3>
+        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">{descripcion}</p>
+      </div>
+      <div className="grid content-start gap-4 sm:grid-cols-2">{children}</div>
+    </section>
+  )
+}
+
+function Campo({ label, ayuda, error, className, children }: {
+  label: string
+  ayuda?: string
+  error?: string
+  className?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div className={cn('space-y-1.5', className)}>
+      <Label>{label}</Label>
+      {children}
+      {ayuda && <p className="text-xs leading-relaxed text-muted-foreground">{ayuda}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  )
+}
+
+function iniciales(nombre: string) {
+  const partes = nombre.trim().split(/\s+/).filter(Boolean)
+  if (partes.length >= 2) return (partes[0][0] + partes[1][0]).toUpperCase()
+  return nombre.slice(0, 2).toUpperCase()
+}
+
+// ─── Modal ────────────────────────────────────────────────────
 
 interface Props {
   open: boolean
@@ -422,7 +462,7 @@ interface Props {
   puedeAgregar?: boolean
 }
 
-export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar = true }: Props) {
+export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgregar = true }: Props) {
   const qc = useQueryClient()
   const isEdit = !!colaborador
 
@@ -564,18 +604,18 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     !Array.isArray(serverErrorData) &&
     Object.keys(serverErrorData).some((k) => knownFormFields.includes(k))
 
-  // Shared fields renderer (avoids duplication between create/edit)
-  const renderCommonFields = (
-    _register: any,
+  // Campos compartidos entre crear y editar, agrupados por sección.
+  // `camposExtra` agrega lo que solo existe en un modo (correo al crear, estado al editar).
+  const renderSecciones = (
     control: any,
     errors: any,
     watchRoleId: string,
     watchSedePrincipal: string,
-    watchSedesIds: string[],
-    watchEsProfesional?: boolean,
+    watchEsProfesional: boolean | undefined,
+    camposExtra: { personales?: React.ReactNode; acceso?: React.ReactNode },
   ) => {
     // El rol puede tener es_profesional inherente (ej. rol "Profesional").
-    // Para roles que no lo tienen (ej. Admin, Recepción) se muestra el checkbox manual.
+    // Para roles que no lo tienen (ej. Admin, Recepción) se muestra la opción manual.
     const selectedRol = roles.find(r => r.id === watchRoleId)
     const rolInherenteProfesional = selectedRol
       ? (selectedRol.es_profesional ?? selectedRol.slug === 'profesional')
@@ -584,190 +624,160 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
     const mostrarCheckbox = !!selectedRol && !rolInherenteProfesional
 
     return (
-    <>
-      {/* Nombre */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label>Nombres</Label>
-          <Controller
-            name="first_name"
-            control={control}
-            render={({ field }) => <Input {...field} placeholder="Ana" />}
-          />
-          {errors.first_name && <p className="text-xs text-destructive">{errors.first_name.message}</p>}
-        </div>
-        <div className="space-y-1.5">
-          <Label>Apellidos</Label>
-          <Controller
-            name="last_name"
-            control={control}
-            render={({ field }) => <Input {...field} placeholder="García" />}
-          />
-          {errors.last_name && <p className="text-xs text-destructive">{errors.last_name.message}</p>}
-        </div>
-      </div>
+      <>
+        <Seccion titulo="Datos personales" descripcion="Cómo aparece en la agenda, las atenciones y los documentos.">
+          <Campo label="Nombres" error={errors.first_name?.message}>
+            <Controller name="first_name" control={control}
+              render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="Ana" />} />
+          </Campo>
+          <Campo label="Apellidos" error={errors.last_name?.message}>
+            <Controller name="last_name" control={control}
+              render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="García" />} />
+          </Campo>
+          <Campo label="Número de documento" error={errors.numero_documento?.message}>
+            <Controller name="numero_documento" control={control}
+              render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="CC / NIT / Pasaporte" />} />
+          </Campo>
+          <Campo label="Teléfono">
+            <Controller name="telefono" control={control}
+              render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="+57 300 000 0000" />} />
+          </Campo>
+          {camposExtra.personales}
+        </Seccion>
 
-      {/* Número de documento */}
-      <div className="space-y-1.5">
-        <Label>Número de documento</Label>
-        <Controller
-          name="numero_documento"
-          control={control}
-          render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="CC / NIT / Pasaporte" />}
-        />
-        {errors.numero_documento && <p className="text-xs text-destructive">{errors.numero_documento.message}</p>}
-      </div>
+        <Seccion titulo="Rol y acceso" descripcion="Qué puede ver y hacer en CliniQ, y si atiende pacientes.">
+          <Campo label="Rol" error={errors.role_id?.message}>
+            <Controller name="role_id" control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger>
+                  <SelectContent>
+                    {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )} />
+          </Campo>
+          {camposExtra.acceso}
 
-      {/* Teléfono */}
-      <div className="space-y-1.5">
-        <Label>Teléfono</Label>
-        <Controller
-          name="telefono"
-          control={control}
-          render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="+57 300 000 0000" />}
-        />
-      </div>
+          {/* ¿Atiende pacientes? Junto al rol, porque de esto depende aparecer en la agenda.
+              Si el rol ya es profesional se muestra como dato; si no, como opción. */}
+          {selectedRol && (mostrarCheckbox ? (
+            <Controller name="es_profesional" control={control}
+              render={({ field }) => (
+                <label className="sm:col-span-2 flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer select-none">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">Atiende pacientes</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Aparecerá en la agenda y podrá atender citas: escribir en la historia clínica,
+                      editar antecedentes, subir fotos, gestionar consentimientos y registrar los
+                      insumos que use, sin importar su rol.
+                    </p>
+                  </div>
+                  <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                </label>
+              )} />
+          ) : (
+            <div className="sm:col-span-2 flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
+              <Check className="h-4 w-4 shrink-0 text-primary" />
+              <p className="text-sm">
+                <span className="font-medium">Atiende pacientes.</span>{' '}
+                <span className="text-muted-foreground">
+                  Lo define el rol {selectedRol.nombre}. Podrá atender citas y escribir en la historia clínica.
+                </span>
+              </p>
+            </div>
+          ))}
 
-      {/* Rol */}
-      <div className="space-y-1.5">
-        <Label>Rol</Label>
-        <Controller
-          name="role_id"
-          control={control}
-          render={({ field }) => (
-            <Select value={field.value} onValueChange={field.onChange}>
-              <SelectTrigger>
-                <SelectValue placeholder="Seleccionar rol" />
-              </SelectTrigger>
-              <SelectContent>
-                {roles.map(r => (
-                  <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {esProfesional && (
+            <Campo label="Procedimientos que realiza" className="sm:col-span-2">
+              <Controller name="especialidades" control={control}
+                render={({ field }) => <EspecialidadesSelect value={field.value} onChange={field.onChange} />} />
+            </Campo>
           )}
-        />
-        {errors.role_id && <p className="text-xs text-destructive">{errors.role_id.message}</p>}
-      </div>
+        </Seccion>
 
-      {/* Sede principal + Contrato */}
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label>Sede principal</Label>
-          <Controller
-            name="sede_principal"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Sede" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sedes.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          />
-          {errors.sede_principal && <p className="text-xs text-destructive">{errors.sede_principal.message}</p>}
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Tipo contrato</Label>
-          <Controller
-            name="tipo_contrato"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="empleado">Empleado</SelectItem>
-                  <SelectItem value="contratista">Contratista</SelectItem>
-                  <SelectItem value="socio">Socio</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
-      </div>
-
-      {/* Sedes adicionales — solo si hay más de una sede disponible */}
-      {sedes.length > 1 && (
-        <div className="space-y-2">
-          <Label>Sedes donde atiende</Label>
-          <Controller
-            name="sedes_ids"
-            control={control}
-            render={({ field }) => (
-              <SedesCheckboxes
-                value={field.value}
-                onChange={field.onChange}
-                sedePrincipalId={watchSedePrincipal}
-                sedes={sedes}
-              />
-            )}
-          />
-        </div>
-      )}
-
-      {/* Fecha ingreso */}
-      <div className="space-y-1.5">
-        <Label>Fecha de ingreso</Label>
-        <Controller
-          name="fecha_ingreso"
-          control={control}
-          render={({ field }) => <Input type="date" {...field} value={field.value ?? ''} />}
-        />
-        {errors.fecha_ingreso && <p className="text-xs text-destructive">{errors.fecha_ingreso.message}</p>}
-      </div>
-
-      {/* Checkbox "también atiende pacientes" — solo para roles sin perfil profesional inherente */}
-      {mostrarCheckbox && (
-        <Controller
-          name="es_profesional"
-          control={control}
-          render={({ field }) => (
-            <label className="flex items-center gap-2.5 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                className="accent-primary h-4 w-4"
-                checked={!!field.value}
-                onChange={(e) => field.onChange(e.target.checked)}
-              />
-              <span className="text-sm">También atiende pacientes</span>
-            </label>
+        <Seccion
+          titulo="Sedes y vinculación"
+          descripcion="Dónde trabaja, a qué sedes tiene acceso y desde cuándo. Las sedes también limitan lo que ve en el sistema, no solo dónde atiende."
+        >
+          <Campo
+            label="Sede principal"
+            ayuda={sedes.length > 1 ? undefined : 'Solo verá la información de esta sede. Los administradores ven todas.'}
+            error={errors.sede_principal?.message}
+          >
+            <Controller name="sede_principal" control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger><SelectValue placeholder="Sede" /></SelectTrigger>
+                  <SelectContent>
+                    {sedes.map((s) => <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )} />
+          </Campo>
+          <Campo label="Fecha de ingreso" error={errors.fecha_ingreso?.message}>
+            <Controller name="fecha_ingreso" control={control}
+              render={({ field }) => <Input type="date" {...field} value={field.value ?? ''} />} />
+          </Campo>
+          <Campo label="Tipo de contrato">
+            <Controller name="tipo_contrato" control={control}
+              render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="empleado">Empleado</SelectItem>
+                    <SelectItem value="contratista">Contratista</SelectItem>
+                    <SelectItem value="socio">Socio</SelectItem>
+                  </SelectContent>
+                </Select>
+              )} />
+          </Campo>
+          {/* Sedes adicionales — solo si hay más de una sede disponible */}
+          {sedes.length > 1 && (
+            <Campo
+              label="Sedes a las que tiene acceso"
+              ayuda="Además de atender en ellas, solo verá la agenda, caja, ingresos, inventario, compras y reportes de estas sedes. Los administradores ven todas."
+              className="sm:col-span-2"
+            >
+              <Controller name="sedes_ids" control={control}
+                render={({ field }) => (
+                  <SedesCheckboxes value={field.value} onChange={field.onChange}
+                    sedePrincipalId={watchSedePrincipal} sedes={sedes} />
+                )} />
+            </Campo>
           )}
-        />
-      )}
-
-      {/* Especialidades — si el rol es profesional o se activó el checkbox */}
-      {esProfesional && (
-        <div className="space-y-2">
-          <Label>Especialidades / Servicios que realiza</Label>
-          <Controller
-            name="especialidades"
-            control={control}
-            render={({ field }) => (
-              <EspecialidadesSelect value={field.value} onChange={field.onChange} />
-            )}
-          />
-        </div>
-      )}
-    </>
+        </Seccion>
+      </>
     )
   }
 
-  return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent className="w-full sm:max-w-lg flex flex-col p-0 overflow-hidden">
-        <SheetHeader className="px-6 py-4 border-b shrink-0">
-          <SheetTitle>{isEdit ? 'Editar colaborador' : 'Nuevo colaborador'}</SheetTitle>
-        </SheetHeader>
+  const nombreEdit = [editForm.watch('first_name'), editForm.watch('last_name')].filter(Boolean).join(' ')
+    || colaborador?.nombre_completo || ''
+  const reactivacionBloqueada = isEdit && !colaborador?.activo && !puedeAgregar
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="px-6 py-4 pr-12 border-b shrink-0 space-y-0">
+          {isEdit ? (
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-semibold text-primary">
+                {iniciales(nombreEdit)}
+              </div>
+              <div className="min-w-0 text-left">
+                <DialogTitle className="truncate">{nombreEdit || 'Editar colaborador'}</DialogTitle>
+                <DialogDescription className="truncate">{colaborador?.email}</DialogDescription>
+              </div>
+            </div>
+          ) : (
+            <div className="text-left">
+              <DialogTitle>Nuevo colaborador</DialogTitle>
+              <DialogDescription>Le llegará un correo de invitación para crear su contraseña.</DialogDescription>
+            </div>
+          )}
+        </DialogHeader>
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6">
           {isEdit ? (
             // ── EDIT FORM ──
             (isLoadingDetail || isLoadingUsuario) ? (
@@ -775,55 +785,62 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               </div>
             ) : (
-            <form id="colaborador-form" onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-4">
-              {renderCommonFields(
-                null,
-                editForm.control,
-                editForm.formState.errors,
-                editForm.watch('role_id'),
-                editForm.watch('sede_principal'),
-                editForm.watch('sedes_ids'),
-                editForm.watch('es_profesional'),
-              )}
-
-              {/* Estado activo/inactivo */}
-              <div className="space-y-1.5">
-                <Label>Estado</Label>
-                <Controller
-                  name="activo"
-                  control={editForm.control}
-                  render={({ field }) => (
-                    <Select
-                      value={field.value ? 'true' : 'false'}
-                      onValueChange={(v) => field.onChange(v === 'true')}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem
-                          value="true"
-                          disabled={!colaborador?.activo && !puedeAgregar}
-                        >
-                          Activo
-                        </SelectItem>
-                        <SelectItem value="false">Inactivo</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {!colaborador?.activo && !puedeAgregar && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1">
-                    <span>⚠</span>
-                    Límite de usuarios activos alcanzado. No es posible reactivar este colaborador.
-                  </p>
+              <form id="colaborador-form" onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-6">
+                {renderSecciones(
+                  editForm.control,
+                  editForm.formState.errors,
+                  editForm.watch('role_id'),
+                  editForm.watch('sede_principal') ?? '',
+                  editForm.watch('es_profesional'),
+                  {
+                    acceso: (
+                      <Controller name="activo" control={editForm.control}
+                        render={({ field }) => (
+                          <Campo label="Estado">
+                            <label className={cn(
+                              'flex h-10 items-center justify-between gap-3 rounded-md border px-3',
+                              reactivacionBloqueada && !field.value ? 'cursor-not-allowed opacity-70' : 'cursor-pointer',
+                            )}>
+                              <span className="text-sm">{field.value ? 'Activo' : 'Inactivo'}</span>
+                              <Switch
+                                checked={field.value}
+                                onCheckedChange={field.onChange}
+                                disabled={reactivacionBloqueada && !field.value}
+                              />
+                            </label>
+                            {reactivacionBloqueada && (
+                              <p className="text-xs text-amber-600">
+                                Límite de usuarios activos alcanzado. No es posible reactivarlo.
+                              </p>
+                            )}
+                          </Campo>
+                        )} />
+                    ),
+                  },
                 )}
-              </div>
-            </form>
+
+                {/* ── Horarios por sede (solo en edición) ── */}
+                {colaborador && (
+                  <Seccion titulo="Horarios" descripcion="Opcional. Úsalo si atiende menos horas que la sede. Los días sin horario usan el de la sede.">
+                    <div className="sm:col-span-2">
+                      <HorariosSection
+                        colaboradorId={colaborador.id}
+                        sedes={
+                          // solo mostrar sedes a las que el colaborador pertenece
+                          sedes.filter((s) => {
+                            const sedesIds = editForm.watch('sedes_ids') ?? []
+                            return s.id === editForm.watch('sede_principal') || sedesIds.includes(s.id)
+                          })
+                        }
+                      />
+                    </div>
+                  </Seccion>
+                )}
+              </form>
             )
           ) : (
             // ── CREATE FORM ──
-            <form id="colaborador-form" onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-4">
+            <form id="colaborador-form" onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-6">
               {/* Bloqueo por límite de plan */}
               {!puedeAgregar && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3">
@@ -834,45 +851,21 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
                 </div>
               )}
 
-              {/* Email solo en creación */}
-              <div className="space-y-1.5">
-                <Label>Correo electrónico</Label>
-                <Input
-                  type="email"
-                  {...createForm.register('email')}
-                  placeholder="colaborador@clinica.com"
-                />
-                {createForm.formState.errors.email && (
-                  <p className="text-xs text-destructive">{createForm.formState.errors.email.message}</p>
-                )}
-              </div>
-
-              {renderCommonFields(
-                null,
+              {renderSecciones(
                 createForm.control,
                 createForm.formState.errors,
                 createForm.watch('role_id'),
                 createForm.watch('sede_principal'),
-                createForm.watch('sedes_ids'),
                 createForm.watch('es_profesional'),
+                {
+                  personales: (
+                    <Campo label="Correo electrónico" className="sm:col-span-2" error={createForm.formState.errors.email?.message}>
+                      <Input type="email" {...createForm.register('email')} placeholder="colaborador@clinica.com" />
+                    </Campo>
+                  ),
+                },
               )}
             </form>
-          )}
-
-          {/* ── Horarios por sede (solo en edición) ── */}
-          {isEdit && colaborador && (
-            <div className="mt-6 pt-5 border-t space-y-1">
-              <HorariosSection
-                colaboradorId={colaborador.id}
-                sedes={
-                  // solo mostrar sedes a las que el colaborador pertenece
-                  sedes.filter((s) => {
-                    const sedesIds = editForm.watch('sedes_ids') ?? []
-                    return s.id === editForm.watch('sede_principal') || sedesIds.includes(s.id)
-                  })
-                }
-              />
-            </div>
           )}
 
           {serverError && !hasFieldSpecificError && (
@@ -887,7 +880,7 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
           )}
         </div>
 
-        <div className="shrink-0 border-t px-6 py-4 flex justify-end gap-3 bg-white">
+        <div className="shrink-0 border-t px-6 py-4 flex justify-end gap-3 bg-white sm:rounded-b-lg">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
             Cancelar
           </Button>
@@ -898,14 +891,14 @@ export function ColaboradorSheet({ open, onOpenChange, colaborador, puedeAgregar
               isPending ||
               (isEdit && (isLoadingDetail || isLoadingUsuario)) ||
               (!isEdit && !puedeAgregar) ||
-              (isEdit && !colaborador?.activo && !puedeAgregar && editForm.watch('activo') === true)
+              (reactivacionBloqueada && editForm.watch('activo') === true)
             }
           >
             {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {isEdit ? 'Guardar cambios' : 'Crear colaborador'}
           </Button>
         </div>
-      </SheetContent>
-    </Sheet>
+      </DialogContent>
+    </Dialog>
   )
 }

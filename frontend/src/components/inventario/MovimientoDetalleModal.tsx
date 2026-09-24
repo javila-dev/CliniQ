@@ -100,7 +100,7 @@ export function MovimientoDetalleModal({
                 </Link>
               </Fila>
               {ctx.servicio_nombre && (
-                <Fila label="Servicio / tratamiento"><span className="font-medium">{ctx.servicio_nombre}</span></Fila>
+                <Fila label="Procedimiento / tratamiento"><span className="font-medium">{ctx.servicio_nombre}</span></Fila>
               )}
               {ctx.cita_fecha && (
                 <Fila label="Fecha de la cita"><span>{fmtDateTime(ctx.cita_fecha)}</span></Fila>

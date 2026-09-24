@@ -7,22 +7,26 @@
 #   .\build-and-push.ps1 -Commit ed225ed  -> buildea ESE commit puntual (ya pusheado a origin),
 #                                             en un worktree temporal aparte. No toca tu working
 #                                             dir actual aunque tengas cambios sin commitear sueltos.
+#   .\build-and-push.ps1 -NoCache         -> build limpio (--no-cache --pull); combinable con lo anterior.
+#                                             Por defecto se reusa la cache de Docker.
 #
 # Requiere: docker login (una sola vez)
 
 param(
     [string]$Tag = (Get-Date -Format "yyyyMMdd-HHmm"),
-    # Por defecto se buildea SIN cache (+ --pull del base): evita imagenes
-    # viejas por capas cacheadas o contexto stale. Pasa -Cache para reusar
-    # capas en iteraciones rapidas.
-    [switch]$Cache,
+    # Por defecto se reusa la cache de Docker: es segura porque `COPY . .` se
+    # cachea por contenido (cualquier cambio de codigo/.env.production/BACKEND_URL
+    # invalida las capas siguientes) y solo se reutiliza `pnpm install`, que corre
+    # con --frozen-lockfile. Pasa -NoCache para forzar un build limpio
+    # (--no-cache --pull): refrescar node:22-alpine, o si sospechas de la cache.
+    [switch]$NoCache,
     # Commit/tag/branch ya pusheado a buildear de forma aislada (ver uso arriba).
     [string]$Commit
 )
 
 $ErrorActionPreference = "Stop"
 $Image = "jorgeavilag/cliniq"
-$CacheFlags = if ($Cache) { @() } else { @('--no-cache', '--pull') }
+$CacheFlags = if ($NoCache) { @('--no-cache', '--pull') } else { @() }
 $DeployHook = "https://dokploy.2asoft.tech/api/deploy/compose/viH0zT3ehn_xXnZWUFMM3"
 
 # Compila y sube la imagen desde $BuildContext/$DockerfileName. $ExtraTags se

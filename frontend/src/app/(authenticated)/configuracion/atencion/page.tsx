@@ -68,9 +68,8 @@ export default function ConfiguracionAtencionPage() {
     <div className="space-y-6">
       <PageHeader
         helpSlug="que-pestanas-mostrar-en-historia-y-atencion"
-        title="Pantalla de atención"
+        title="Pantalla del profesional"
         description="Configura qué pestañas ve el profesional durante una atención."
-        backHref="/configuracion"
       />
 
       <div className="rounded-lg border divide-y">

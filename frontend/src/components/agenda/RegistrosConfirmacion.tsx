@@ -18,6 +18,7 @@ const MEDIO_CONFIG: Record<MedioConfirmacion, { label: string; icon: React.Eleme
 const ESTADO_LABEL: Record<string, { label: string; color: string }> = {
   confirmada:  { label: 'Confirmó',        color: 'text-green-700 bg-green-50 border-green-200' },
   cancelada:   { label: 'Canceló',         color: 'text-red-700 bg-red-50 border-red-200' },
+  no_confirmo: { label: 'No confirmó',     color: 'text-amber-700 bg-amber-50 border-amber-200' },
   no_asistio:  { label: 'No asistió',      color: 'text-gray-700 bg-gray-50 border-gray-200' },
   en_curso:    { label: 'Inició atención', color: 'text-rose-700 bg-rose-50 border-rose-200' },
 }

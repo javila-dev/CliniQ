@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
 
 export default function ServiciosRedirect() {
-  redirect('/configuracion/procedimientos')
+  redirect('/catalogo?tab=procedimientos')
 }

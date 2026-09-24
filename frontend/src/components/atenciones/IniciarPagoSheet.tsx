@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { Loader2, AlertTriangle, CheckCircle2 } from 'lucide-react'
@@ -12,16 +12,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { mensajeErrorDeuda } from '@/lib/deuda'
+import { useFormasPago } from '@/hooks/useFormasPago'
 import type { Cita } from '@/types/agenda'
-import type { MedioPago } from '@/types/cobros'
-
-const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
-  efectivo:        'Efectivo',
-  tarjeta_debito:  'Tarjeta débito',
-  tarjeta_credito: 'Tarjeta crédito',
-  transferencia:   'Transferencia',
-  otro:            'Otro',
-}
 
 interface Props {
   open: boolean
@@ -35,11 +27,16 @@ export function IniciarPagoSheet({ open, onOpenChange, cita, soloRegistrar = fal
   const router = useRouter()
   const qc = useQueryClient()
   const precioServicio = cita.servicio_precio ?? '0'
+  const { formasPago } = useFormasPago({ soloMedioReal: true })
 
-  const [medioPago, setMedioPago] = useState<MedioPago>('efectivo')
+  const [medioPago, setMedioPago] = useState<string>('')
   const [valor, setValor] = useState(precioServicio)
   const [error, setError] = useState<string | null>(null)
   const [registrado, setRegistrado] = useState(false)
+
+  useEffect(() => {
+    if (!medioPago && formasPago.length > 0) setMedioPago(formasPago[0].id)
+  }, [formasPago, medioPago])
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -88,7 +85,7 @@ export function IniciarPagoSheet({ open, onOpenChange, cita, soloRegistrar = fal
   }
 
   function reset() {
-    setMedioPago('efectivo')
+    setMedioPago(formasPago[0]?.id ?? '')
     setValor(precioServicio)
     setError(null)
     setRegistrado(false)
@@ -122,11 +119,11 @@ export function IniciarPagoSheet({ open, onOpenChange, cita, soloRegistrar = fal
 
               <div className="space-y-1.5">
                 <Label htmlFor="medio-pago">Medio de pago</Label>
-                <Select value={medioPago} onValueChange={(v) => setMedioPago(v as MedioPago)}>
+                <Select value={medioPago} onValueChange={setMedioPago}>
                   <SelectTrigger id="medio-pago"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {(Object.entries(MEDIO_PAGO_LABEL) as [MedioPago, string][]).map(([k, label]) => (
-                      <SelectItem key={k} value={k}>{label}</SelectItem>
+                    {formasPago.map((f) => (
+                      <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>

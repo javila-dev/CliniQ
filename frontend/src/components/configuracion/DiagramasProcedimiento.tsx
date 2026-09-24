@@ -141,7 +141,7 @@ export function DiagramasProcedimiento({ servicioId }: Props) {
         err?.response?.data?.detail ??
         err?.response?.data?.error ??
         (err?.response?.status === 403
-          ? 'No tienes permiso para gestionar procedimientos (servicios.gestionar).'
+          ? 'No tienes permiso para gestionar procedimientos.'
           : 'Error al agregar el grupo')
       toast({ title: detail, variant: 'destructive' })
     },

@@ -583,7 +583,6 @@ function RolesContent() {
           helpSlug="roles-y-permisos"
           title="Roles y permisos"
           description="Define qué puede ver y hacer cada rol en la clínica."
-          backHref="/configuracion"
         />
         {canCreate && (
           <Button onClick={() => setRolSheet({ open: true, rol: null })} className="shrink-0">

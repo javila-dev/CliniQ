@@ -1,6 +1,7 @@
 import { apiClient } from './client'
 import type {
   Cartera,
+  CarteraPaciente,
   ResumenCartera,
   RegistrarPagoPayload,
   CuotaCartera,
@@ -28,6 +29,12 @@ export interface CarteraFilter {
 export const carteraApi = {
   list: async (params?: CarteraFilter): Promise<Paginated<Cartera>> => {
     const res = await apiClient.get<Paginated<Cartera>>('/cartera/', { params })
+    return res.data
+  },
+
+  /** Una fila por paciente; `ordering`: paciente | total | cobrado | saldo | prox (con - para descendente). */
+  porPaciente: async (params?: Pick<CarteraFilter, 'search' | 'ordering' | 'page' | 'page_size'>): Promise<Paginated<CarteraPaciente>> => {
+    const res = await apiClient.get<Paginated<CarteraPaciente>>('/cartera/por-paciente/', { params })
     return res.data
   },
 

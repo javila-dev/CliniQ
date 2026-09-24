@@ -393,6 +393,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
                 templateNombre={pendienteConsentimiento.template_nombre}
                 consentimientoId={pendienteConsentimiento.consentimiento_id}
                 vigenciaMeses={undefined}
+                citaId={citaId}
                 onInicioFirma={() => {
                   setFirmandoConsentimiento(true)
                   setMaximized(true)

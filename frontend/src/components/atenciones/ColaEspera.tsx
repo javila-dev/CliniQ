@@ -102,8 +102,8 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
   const siguienteSesionId = siguienteCitaEnEspera?.sesion_ejecutada_id ?? null
 
   const { data: sesionConsentData } = useQuery({
-    queryKey: ['sesion-consents-cola', siguienteSesionId],
-    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(siguienteSesionId!),
+    queryKey: ['sesion-consents-cola', siguienteSesionId, siguienteCitaEnEspera?.id],
+    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(siguienteSesionId!, siguienteCitaEnEspera?.id),
     enabled: Boolean(siguienteSesionId),
   })
 

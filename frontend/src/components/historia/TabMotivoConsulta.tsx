@@ -37,8 +37,11 @@ export function TabMotivoConsulta({ historia, notas, notaId }: TabMotivoConsulta
   })
 
   // ── Modo historia: timeline de notas completadas (solo lectura) ──────────
+  // Las mini-atenciones generadas desde una cotización no tienen un paso de
+  // "completar" propio (siguen editables como borrador), así que se muestran
+  // igual apenas tengan contenido, sin esperar ese estado.
   const timeline = notas
-    .filter((n) => n.estado === 'completada' && (n.motivo_consulta ?? n.anamnesis)?.trim())
+    .filter((n) => (n.estado === 'completada' || !!n.cotizacion) && (n.motivo_consulta ?? n.anamnesis)?.trim())
     .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
 
   if (modoAtencion) {

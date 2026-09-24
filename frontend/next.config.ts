@@ -4,6 +4,31 @@ const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8000'
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // `dev` corre en Webpack (ver package.json), no en Turbopack: su watcher nativo
+  // no detecta cambios en el volumen montado de Docker en Windows (bug conocido de
+  // Next 15 - vercel/next.js#68255), ni con `watchOptions.pollIntervalMs` abajo.
+  // Este bloque queda listo para cuando se resuelva río arriba.
+  experimental: {
+    turbo: {
+      resolveAlias: {
+        // pdfjs intenta resolver el paquete nativo de Node aun en rutas cliente.
+        // En el navegador usa Canvas API, así que este módulo vacío equivale al
+        // alias `canvas: false` de la configuración Webpack.
+        canvas: './src/lib/canvas-stub.ts',
+      },
+      rules: {
+        '*.svg': {
+          loaders: ['@svgr/webpack'],
+          as: '*.js',
+        },
+      },
+    },
+  },
+  // inotify no funciona a través del boundary Docker↔Windows; el polling lo resuelve.
+  // Se traduce a `webpack.watchOptions.poll` automáticamente (build/webpack-config.js).
+  ...(process.env.NEXT_DEV_POLLING === 'true' && {
+    watchOptions: { pollIntervalMs: 800 },
+  }),
   images: {
     remotePatterns: [
       { protocol: 'http',  hostname: '**' },
@@ -26,16 +51,7 @@ const nextConfig: NextConfig = {
       },
     ]
   },
-  webpack: (config, { dev }) => {
-    if (dev) {
-      // Polling para file-watching en Docker sobre Windows/WSL2
-      // inotify no funciona a través del boundary Docker↔WSL2, el polling lo resuelve
-      config.watchOptions = {
-        poll: 800,
-        aggregateTimeout: 300,
-      }
-    }
-
+  webpack: (config) => {
     // SVGs como componentes React (necesario para MapaCorporal interactivo)
     config.module.rules.push({
       test: /\.svg$/,

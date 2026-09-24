@@ -77,8 +77,10 @@ export const protocolosApi = {
       return res.data
     },
 
-    getConsentimientos: async (id: string): Promise<ConsentimientosSesionResponse> => {
-      const res = await apiClient.get<ConsentimientosSesionResponse>(`/protocolos/sesiones/${id}/consentimientos/`)
+    getConsentimientos: async (id: string, citaId?: string | null): Promise<ConsentimientosSesionResponse> => {
+      const res = await apiClient.get<ConsentimientosSesionResponse>(`/protocolos/sesiones/${id}/consentimientos/`, {
+        params: citaId ? { cita_id: citaId } : undefined,
+      })
       return res.data
     },
   },

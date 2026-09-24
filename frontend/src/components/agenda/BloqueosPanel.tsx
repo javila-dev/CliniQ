@@ -4,9 +4,9 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Check, X, Ban } from 'lucide-react'
 import { agendaApi } from '@/lib/api/agenda'
-import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { useAuthStore } from '@/store/authStore'
+import { useUserSedes } from '@/hooks/useUserSedes'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -83,10 +83,8 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
   const [formMotivo, setFormMotivo] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
 
-  const { data: sedes } = useQuery({
-    queryKey: ['sedes'],
-    queryFn: () => clinicasApi.sedes.list({ activa: true }),
-  })
+  // Usuario acotado: solo sus sedes, y no puede bloquear toda la clínica.
+  const { sedes, isAllSedes } = useUserSedes()
 
   const { data: profesionales } = useQuery({
     queryKey: ['profesionales', filterSede],
@@ -174,13 +172,17 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
 
           {/* Filters */}
           <div className="flex gap-2 px-6 py-3 border-b shrink-0 flex-wrap">
-            <Select value={filterSede || 'all'} onValueChange={(v) => setFilterSede(v === 'all' ? '' : v)}>
+            <Select
+              value={filterSede || 'all'}
+              onValueChange={(v) => setFilterSede(v === 'all' ? '' : v)}
+              disabled={!isAllSedes && sedes.length <= 1}
+            >
               <SelectTrigger className="h-8 text-xs w-36">
                 <SelectValue placeholder="Todas las sedes" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todas las sedes</SelectItem>
-                {sedes?.results.map((s) => (
+                {(isAllSedes || sedes.length > 1) && <SelectItem value="all">Todas las sedes</SelectItem>}
+                {sedes.map((s) => (
                   <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
                 ))}
               </SelectContent>
@@ -237,8 +239,8 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
                     <SelectValue placeholder="Todas las sedes" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Todas las sedes</SelectItem>
-                    {sedes?.results.map((s) => (
+                    {isAllSedes && <SelectItem value="none">Todas las sedes</SelectItem>}
+                    {sedes.map((s) => (
                       <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
                     ))}
                   </SelectContent>

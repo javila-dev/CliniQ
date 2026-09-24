@@ -1,6 +1,7 @@
 import { apiClient } from './client'
 import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
+import type { NotaClinica } from '@/types/historia'
 import type { Paginated } from '@/types/common'
 
 export interface ConsentimientoPendienteCotizacion {
@@ -80,6 +81,14 @@ export const cotizacionesApi = {
 
   consentimientosPendientes: async (id: string): Promise<ConsentimientoPendienteCotizacion[]> => {
     const res = await apiClient.get<ConsentimientoPendienteCotizacion[]>(`/cotizaciones/${id}/consentimientos_pendientes/`)
+    return res.data
+  },
+
+  // Mini-atención (motivo/seguimiento/fotos) de la cotización: la crea (sin
+  // cita) la primera vez y luego siempre devuelve la misma. Vive bajo
+  // cotizaciones.gestionar — no requiere permisos clínicos generales.
+  notaClinica: async (id: string): Promise<NotaClinica> => {
+    const res = await apiClient.post<NotaClinica>(`/cotizaciones/${id}/nota_clinica/`)
     return res.data
   },
 

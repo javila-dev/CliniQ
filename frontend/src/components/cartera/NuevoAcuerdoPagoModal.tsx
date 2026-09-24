@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   AlertTriangle, ArrowRight, Check, Loader2, Plus, Trash2, X,
@@ -8,6 +8,7 @@ import {
 import { carteraApi } from '@/lib/api/cartera'
 import { toast } from '@/hooks/use-toast'
 import { formatDate, todayISO } from '@/lib/utils'
+import { useFormasPago } from '@/hooks/useFormasPago'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -23,13 +24,6 @@ function cop(value: string | number): string {
   }).format(Number(value) || 0)
 }
 
-const TIPOS = [
-  { value: 'transferencia', label: 'Transferencia' },
-  { value: 'efectivo', label: 'Efectivo' },
-  { value: 'cuotas', label: 'Cuotas' },
-  { value: 'financiamiento', label: 'Financiamiento' },
-]
-
 type Fila = { tipo: string; descripcion: string; monto: string; fecha: string }
 type Paso = 'situacion' | 'plan' | 'confirmar' | 'firma'
 
@@ -42,6 +36,7 @@ interface Props {
 
 export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }: Props) {
   const queryClient = useQueryClient()
+  const { formasPago } = useFormasPago()
   const saldo = Number(cartera.saldo_pendiente)
 
   // Cuotas del plan actual que se reemplazan (pendientes, no anuladas).
@@ -54,9 +49,19 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
   const [paso, setPaso] = useState<Paso>('situacion')
   const [motivo, setMotivo] = useState('')
   const [filas, setFilas] = useState<Fila[]>([
-    { tipo: 'transferencia', descripcion: 'Cuota 1', monto: '', fecha: '' },
+    { tipo: '', descripcion: 'Cuota 1', monto: '', fecha: '' },
   ])
   const [acuerdo, setAcuerdo] = useState<AcuerdoPago | null>(null)
+
+  const tipoPorDefecto = useMemo(
+    () => formasPago.find((f) => f.tipo_base === 'transferencia')?.id ?? formasPago[0]?.id ?? '',
+    [formasPago],
+  )
+
+  useEffect(() => {
+    if (!tipoPorDefecto) return
+    setFilas((prev) => prev.map((f) => (f.tipo ? f : { ...f, tipo: tipoPorDefecto })))
+  }, [tipoPorDefecto])
 
   const sumaFilas = filas.reduce((acc, f) => acc + (Number(f.monto) || 0), 0)
   const diferencia = Math.round((sumaFilas - saldo) * 100) / 100
@@ -69,7 +74,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
   function resetear() {
     setPaso('situacion')
     setMotivo('')
-    setFilas([{ tipo: 'transferencia', descripcion: 'Cuota 1', monto: '', fecha: '' }])
+    setFilas([{ tipo: tipoPorDefecto, descripcion: 'Cuota 1', monto: '', fecha: '' }])
     setAcuerdo(null)
   }
 
@@ -84,7 +89,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
   function agregarFila() {
     setFilas((prev) => [
       ...prev,
-      { tipo: 'transferencia', descripcion: `Cuota ${prev.length + 1}`, monto: '', fecha: '' },
+      { tipo: tipoPorDefecto, descripcion: `Cuota ${prev.length + 1}`, monto: '', fecha: '' },
     ])
   }
   function quitarFila(i: number) {
@@ -96,7 +101,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
     const resto = Math.round(saldo - base * n)
     setFilas(
       Array.from({ length: n }, (_, i) => ({
-        tipo: 'transferencia',
+        tipo: tipoPorDefecto,
         descripcion: `Cuota ${i + 1} de ${n}`,
         monto: String(i === n - 1 ? base + resto : base),
         fecha: '',
@@ -174,7 +179,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
                 {cuotasAReemplazar.map((c) => (
                   <div key={c.id} className="flex items-center justify-between py-1.5">
                     <span className="text-muted-foreground">
-                      {c.fecha_esperada ? formatDate(c.fecha_esperada) : 'Sin fecha'} · {c.descripcion || c.tipo}
+                      {c.fecha_esperada ? formatDate(c.fecha_esperada) : 'Sin fecha'} · {c.descripcion || c.tipo_nombre}
                     </span>
                     <span className="tabular-nums line-through text-muted-foreground">{cop(c.valor_esperado)}</span>
                   </div>
@@ -250,7 +255,7 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
                     <Select value={f.tipo} onValueChange={(v) => setFila(i, { tipo: v })}>
                       <SelectTrigger className="h-9 w-[130px] shrink-0 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        {TIPOS.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                        {formasPago.map((t) => <SelectItem key={t.id} value={t.id}>{t.nombre}</SelectItem>)}
                       </SelectContent>
                     </Select>
                     <Input

@@ -44,9 +44,19 @@ export const colaboradoresApi = {
     await apiClient.delete(`/colaboradores/${id}/`)
   },
 
-  profesionales: async (sede_id?: string): Promise<ColaboradorProfesional[]> => {
+  /** Profesionales que se pueden elegir al agendar. El servidor solo filtra por
+   *  procedimiento si la clínica activó ese parámetro; si no, ignora el filtro. */
+  profesionales: async (
+    sede_id?: string,
+    filtro?: { servicioIds?: string[]; itemCotizacionId?: string | null; sesionEjecutadaId?: string | null },
+  ): Promise<ColaboradorProfesional[]> => {
+    const params: Record<string, string> = {}
+    if (sede_id) params.sede_id = sede_id
+    if (filtro?.servicioIds?.length) params.servicio_ids = filtro.servicioIds.join(',')
+    if (filtro?.itemCotizacionId) params.item_cotizacion_id = filtro.itemCotizacionId
+    if (filtro?.sesionEjecutadaId) params.sesion_ejecutada_id = filtro.sesionEjecutadaId
     const res = await apiClient.get<ColaboradorProfesional[]>('/colaboradores/profesionales/', {
-      params: sede_id ? { sede_id } : undefined,
+      params: Object.keys(params).length ? params : undefined,
     })
     return res.data
   },

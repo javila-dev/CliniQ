@@ -171,7 +171,7 @@ export const historiaClinicaApi = {
       )
       return Array.isArray(res.data) ? res.data : res.data.results
     },
-    create: async (data: { paciente: string; documenso_template_token: string; documenso_template_nombre: string; vigencia_meses?: number; notas?: string }): Promise<ConsentimientoInformado> => {
+    create: async (data: { paciente: string; documenso_template_token: string; documenso_template_nombre: string; vigencia_meses?: number; cita?: string; notas?: string }): Promise<ConsentimientoInformado> => {
       const res = await apiClient.post<ConsentimientoInformado>(`/historia-clinica/consentimientos/`, data)
       return res.data
     },

@@ -99,7 +99,7 @@ export default function ConsoleLoginPage() {
 
       <div className="relative w-full max-w-sm">
         <div className="mb-6 flex flex-col items-center text-center">
-          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={140} height={46} className="mb-3 object-contain brightness-110" />
+          <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={140} height={44} className="mb-3 h-auto w-[140px] object-contain" />
           <span className="rounded-full bg-white/10 px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
             Console
           </span>

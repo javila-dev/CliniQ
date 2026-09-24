@@ -35,7 +35,6 @@ export default function ConfiguracionCarteraPage() {
         helpSlug="el-compromiso-de-pago"
         title="Otros documentos"
         description="Configuración de los documentos adicionales que maneja la clínica."
-        backHref="/configuracion"
       />
 
       <div className="flex items-baseline gap-2.5">

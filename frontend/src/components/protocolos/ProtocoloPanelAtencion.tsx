@@ -214,6 +214,7 @@ function GrupoSesionPanel({
             <ConsentimientosSesionCheck
               sesionId={proxPendiente.id}
               pacienteId={pacienteId}
+              citaId={citaId}
               onPuedeContinuar={setPuedeEjecutar}
             />
           )}
@@ -319,7 +320,7 @@ export function ProtocoloPanelAtencion({ pacienteId, citaId, itemCotizacionId }:
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">Protocolo activo</p>
+      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide px-1">Tratamiento activo</p>
       {mostrar.map((t) =>
         // Si el backend devuelve grupos (H27), usar la vista nueva; si no, vista legacy
         t.grupos && t.grupos.length > 0

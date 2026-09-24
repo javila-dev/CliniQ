@@ -42,7 +42,7 @@ export default function VerificarClinicaPage() {
       <div className="w-full max-w-sm text-center space-y-6">
 
         <div className="flex justify-center mb-2">
-          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={160} height={160} className="object-contain brightness-[1.15]" />
+          <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={160} height={50} className="h-auto w-[160px] object-contain" />
         </div>
 
         {state === 'loading' && (

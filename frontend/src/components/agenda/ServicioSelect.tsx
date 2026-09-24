@@ -16,7 +16,7 @@ export function ServicioSelect({
   value,
   onValueChange,
   clinicaId,
-  placeholder = 'Seleccionar servicio',
+  placeholder = 'Seleccionar procedimiento',
   disabled,
 }: ServicioSelectProps) {
   const { data, isLoading } = useQuery({

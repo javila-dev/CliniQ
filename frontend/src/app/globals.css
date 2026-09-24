@@ -27,6 +27,7 @@
     --input: 220 13% 91%;
     --ring: 334 72% 55%;
     --radius: 0.5rem;
+    --font-display: "Avenir Next", "Segoe UI", sans-serif;
   }
 }
 
@@ -56,4 +57,106 @@
 }
 .sidebar-nav::-webkit-scrollbar-thumb:hover {
   background: hsl(var(--primary) / 0.38);
+}
+
+/* Movimiento editorial de la landing: sutil, progresivo y accesible. */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(24px);
+  transition:
+    opacity 700ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-reveal-delay='1'] {
+  transition-delay: 120ms;
+}
+
+[data-reveal][data-visible='true'] {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.landing-cta {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  transition: transform 220ms ease, box-shadow 220ms ease, background-color 220ms ease;
+}
+
+.landing-cta::before {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  content: '';
+  background: linear-gradient(105deg, transparent 25%, rgb(255 255 255 / 18%) 48%, transparent 70%);
+  transform: translateX(-120%);
+  transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 18px 35px -18px rgb(190 24 93 / 70%);
+}
+
+.landing-cta:hover::before {
+  transform: translateX(120%);
+}
+
+.landing-float {
+  animation: landing-float 7s ease-in-out infinite;
+}
+
+.landing-role-swap {
+  animation: landing-role-swap 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.landing-dashboard {
+  transform: perspective(1400px) rotateX(2deg);
+  transform-origin: 50% 100%;
+  transition: transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.landing-dashboard:hover {
+  transform: perspective(1400px) rotateX(0deg) translateY(-5px);
+}
+
+.landing-orbit {
+  border-radius: 50%;
+  animation: landing-orbit 8s ease-in-out infinite;
+}
+
+@keyframes landing-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-8px); }
+}
+
+@keyframes landing-role-swap {
+  from { opacity: 0; transform: translateX(18px) scale(0.985); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+
+@keyframes landing-orbit {
+  0%, 100% { transform: translate3d(0, 0, 0) rotate(-2deg); }
+  50% { transform: translate3d(-8px, 8px, 0) rotate(3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .landing-float,
+  .landing-role-swap,
+  .landing-orbit {
+    animation: none;
+  }
+
+  .landing-cta,
+  .landing-dashboard,
+  .landing-cta::before {
+    transition: none;
+  }
 }

@@ -95,7 +95,6 @@ export default function ConsentimientosConfigPage() {
         helpSlug="consentimientos-informados-como-funcionan"
         title="Plantillas de consentimiento"
         description="Sube tus PDFs de consentimiento, mapea los campos y asócialos a procedimientos."
-        backHref="/configuracion"
         action={
           <Button asChild>
             <Link href="/configuracion/consentimientos/nuevo">

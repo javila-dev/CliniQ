@@ -71,7 +71,6 @@ export default function ConfiguracionHistoriaClinicaPage() {
         helpSlug="que-pestanas-mostrar-en-historia-y-atencion"
         title="Historia Clínica"
         description="Configura qué pestañas se muestran en la historia clínica de cada paciente."
-        backHref="/configuracion"
       />
 
       <div className="rounded-lg border divide-y">

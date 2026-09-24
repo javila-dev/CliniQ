@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search, Receipt, CreditCard, ChevronLeft, ChevronRight,
@@ -23,7 +23,8 @@ import { FinanzasTabs } from '@/components/finanzas/FinanzasTabs'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
-import type { Cobro, EstadoCobro, MedioPago, OrigenCobro } from '@/types/cobros'
+import type { Cobro, EstadoCobro, OrigenCobro } from '@/types/cobros'
+import { useFormasPago } from '@/hooks/useFormasPago'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 
 // ─── constants ───────────────────────────────────────────────
@@ -33,14 +34,6 @@ const ESTADO_CONFIG: Record<EstadoCobro, { label: string; icon: React.ElementTyp
   pagado_parcial: { label: 'Pago parcial', icon: AlertCircle,  className: 'bg-blue-50 text-blue-600 ring-blue-200'    },
   pagado:         { label: 'Pagado',       icon: CheckCircle2, className: 'bg-green-50 text-green-700 ring-green-200' },
   anulado:        { label: 'Anulado',      icon: XCircle,      className: 'bg-gray-100 text-gray-500 ring-gray-200'   },
-}
-
-const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
-  efectivo:        'Efectivo',
-  tarjeta_debito:  'Tarjeta débito',
-  tarjeta_credito: 'Tarjeta crédito',
-  transferencia:   'Transferencia',
-  otro:            'Otro',
 }
 
 const ORIGEN_CONFIG: Record<OrigenCobro, { label: string; icon: React.ElementType; className: string }> = {
@@ -67,20 +60,25 @@ function fmtFechaTabla(d: string) {
 // ─── Registrar pago sheet ─────────────────────────────────────
 
 const pagoSchema = z.object({
-  medio_pago: z.enum(['efectivo', 'tarjeta_debito', 'tarjeta_credito', 'transferencia', 'otro']),
+  medio_pago: z.string().min(1, 'Selecciona un medio de pago'),
   valor: z.string().min(1, 'Ingresa el valor'),
   referencia: z.string().optional(),
 })
 
 function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
-  const { register, handleSubmit, reset, formState: { errors } } = useForm({
+  const { formasPago } = useFormasPago({ soloMedioReal: true })
+  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(pagoSchema),
-    defaultValues: { medio_pago: 'efectivo' as MedioPago },
+    defaultValues: { medio_pago: '' },
   })
 
+  useEffect(() => {
+    if (formasPago.length > 0) setValue('medio_pago', formasPago[0].id)
+  }, [formasPago, setValue])
+
   const mutation = useMutation({
-    mutationFn: (data: { medio_pago: MedioPago; valor: string; referencia?: string }) =>
+    mutationFn: (data: { medio_pago: string; valor: string; referencia?: string }) =>
       cobrosApi.registrarPago(cobro!.id, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['ingresos'] })
@@ -115,8 +113,8 @@ function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; ope
           <div className="space-y-1.5">
             <Label>Medio de pago *</Label>
             <select {...register('medio_pago')} className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm">
-              {Object.entries(MEDIO_PAGO_LABEL).map(([v, l]) => (
-                <option key={v} value={v}>{l}</option>
+              {formasPago.map((f) => (
+                <option key={f.id} value={f.id}>{f.nombre}</option>
               ))}
             </select>
           </div>
@@ -252,7 +250,7 @@ function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; op
                   {cobro.pagos.map((pago) => (
                     <div key={pago.id} className="flex items-center justify-between py-2 px-3 rounded-lg bg-green-50 text-sm">
                       <div>
-                        <p className="font-medium text-foreground">{MEDIO_PAGO_LABEL[pago.medio_pago]}</p>
+                        <p className="font-medium text-foreground">{pago.medio_pago_nombre ?? '—'}</p>
                         <p className="text-xs text-muted-foreground">{fmtDateTime(pago.fecha)}{pago.referencia && ` · ${pago.referencia}`}</p>
                       </div>
                       <p className="font-semibold text-green-700">{COP.format(Number(pago.valor))}</p>

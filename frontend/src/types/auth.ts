@@ -13,6 +13,11 @@ export interface AuthUser {
   clinica_id: string | null
   clinica_nombre: string | null
   sede_id: string | null
+  /**
+   * Sedes activas a las que está acotado el usuario (la principal primero).
+   * null = ve todas las sedes de la clínica (admin o sin sede en su perfil).
+   */
+  sedes?: { id: string; nombre: string }[] | null
   es_profesional: boolean
   es_admin: boolean
   is_staff: boolean
@@ -20,6 +25,8 @@ export interface AuthUser {
   centro_ayuda_habilitado: boolean
   /** true cuando un superadmin activó el modo puesta en marcha para esta clínica. */
   modo_puesta_en_marcha: boolean
+  /** true cuando la clínica solo ofrece, al agendar, los profesionales asociados al procedimiento. */
+  filtrar_profesionales_por_procedimiento?: boolean
   telefono: string | null
   foto_perfil: string | null
   firma_digital_url: string | null

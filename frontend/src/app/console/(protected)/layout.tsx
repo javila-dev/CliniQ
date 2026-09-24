@@ -73,7 +73,7 @@ function ConsoleTopBar() {
     <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#0b0d12]">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
         <Link href="/console/clinicas" className="flex shrink-0 items-center gap-2.5">
-          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={92} height={30} className="object-contain brightness-110" />
+          <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={96} height={30} className="h-auto w-[96px] object-contain" />
           <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
             Console
           </span>

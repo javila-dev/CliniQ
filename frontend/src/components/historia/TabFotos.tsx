@@ -9,7 +9,7 @@ import { Badge } from '@/components/ui/badge'
 import { SubirFotosModal } from './SubirFotosModal'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { formatDate } from '@/lib/utils'
-import type { HistoriaClinica, NotaClinica } from '@/types/historia'
+import type { GaleriaFoto, HistoriaClinica, NotaClinica } from '@/types/historia'
 
 interface TabFotosProps {
   historia: HistoriaClinica
@@ -34,20 +34,30 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
     queryFn: () => historiaClinicaApi.historias.galeria(historia.id),
   })
 
-  // Agrupar fotos por sesión (cita)
-  const sesionesPorCita = galeria?.fotos.reduce<Record<string, typeof galeria.fotos>>((acc, foto) => {
-    const key = foto.cita
+  // Agrupar fotos por sesión (cita); las de una mini-atención sin cita (p. ej.
+  // generada desde una cotización) van todas juntas bajo una key sintética.
+  const SIN_CITA = 'sin-cita'
+  const sesionesPorCita = galeria?.fotos.reduce<Record<string, GaleriaFoto[]>>((acc, foto) => {
+    const key = foto.cita ?? SIN_CITA
     if (!acc[key]) acc[key] = []
     acc[key].push(foto)
     return acc
   }, {}) ?? {}
 
+  function fechaGrupo(fotos: GaleriaFoto[]) {
+    return fotos[0].cita_fecha ?? fotos[0].created_at
+  }
+
   const sesiones = Object.entries(sesionesPorCita).sort(
-    ([, a], [, b]) => new Date(b[0].cita_fecha).getTime() - new Date(a[0].cita_fecha).getTime()
+    ([, a], [, b]) => new Date(fechaGrupo(b)).getTime() - new Date(fechaGrupo(a)).getTime()
   )
 
   // Encontrar una nota disponible para adjuntar fotos (la más reciente)
   const notaReciente = notas[0]
+  // Si esa nota ya tiene su propio grupo de fotos más abajo, ese grupo ya trae
+  // su propio botón "Agregar" — mostrar también el de acá sería el mismo botón
+  // dos veces.
+  const notaRecienteYaTieneGrupo = sesiones.some(([, fotos]) => fotos[0].nota === notaReciente?.id)
 
   return (
     <div className="space-y-4">
@@ -56,7 +66,7 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
         <p className="text-sm text-muted-foreground">
           {galeria ? `${galeria.total} foto${galeria.total !== 1 ? 's' : ''} en total` : ''}
         </p>
-        {notaReciente && (
+        {notaReciente && !notaRecienteYaTieneGrupo && (
           <Button size="sm" variant="outline" onClick={() => setNotaParaFoto(notaReciente.id)}>
             <Upload className="h-3.5 w-3.5 mr-1.5" />
             Agregar fotos
@@ -98,21 +108,26 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
         <div className="space-y-6">
           {sesiones.map(([citaId, fotos]) => {
             const primeraFoto = fotos[0]
+            const sinCita = citaId === SIN_CITA
             return (
               <div key={citaId} className={modoAtencion ? 'rounded-lg border p-4 space-y-3' : 'space-y-2'}>
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm font-medium">{formatDate(primeraFoto.cita_fecha)}</p>
-                    <p className="text-xs text-muted-foreground"><span className="uppercase">{primeraFoto.servicio_nombre}</span> · {fotos.length} foto{fotos.length !== 1 ? 's' : ''}</p>
+                    <p className="text-sm font-medium">
+                      {sinCita ? formatDate(primeraFoto.created_at) : formatDate(primeraFoto.cita_fecha)}
+                    </p>
+                    <p className="text-xs text-muted-foreground">
+                      {sinCita
+                        ? 'Sin cita asociada'
+                        : <span className="uppercase">{primeraFoto.servicio_nombre}</span>}
+                      {' '}· {fotos.length} foto{fotos.length !== 1 ? 's' : ''}
+                    </p>
                   </div>
                   <Button
                     size="sm"
                     variant="ghost"
                     className="h-7 text-xs"
-                    onClick={() => {
-                      const notaDeCita = notas.find((n) => n.cita === citaId)
-                      if (notaDeCita) setNotaParaFoto(notaDeCita.id)
-                    }}
+                    onClick={() => setNotaParaFoto(primeraFoto.nota)}
                   >
                     <Upload className="h-3 w-3 mr-1" />
                     Agregar

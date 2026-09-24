@@ -18,7 +18,7 @@ import { hasPermission, PERM } from '@/lib/permissions'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
-import { ProfesionalSelect } from './ProfesionalSelect'
+import { ProfesionalSelect, type ProfesionalFiltro } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
 import { SlotPicker } from './SlotPicker'
@@ -127,6 +127,21 @@ export function NuevaCitaModal({
   const fecha       = watch('fecha')
   const slot        = watch('slot')
 
+  // Filtro por procedimiento (parámetro de la clínica): el profesional se elige después
+  // de la sede y del procedimiento, y solo aparecen quienes lo realizan. En consulta libre
+  // no hay procedimiento, así que no se filtra.
+  const filtroActivo = Boolean(user?.filtrar_profesionales_por_procedimiento)
+  const filtroProfesional: ProfesionalFiltro | undefined =
+    modo === 'servicio' && servicioId ? { servicioIds: [servicioId] }
+    : modo === 'cotizacion' && itemCotizacion ? { itemCotizacionId: itemCotizacion, sesionEjecutadaId: sesionEjecutada }
+    : undefined
+  const esperandoProfesional =
+    filtroActivo && modo === 'servicio' && (!sedeId || !servicioId) ? 'Elige sede y procedimiento primero'
+    : filtroActivo && modo === 'cotizacion' && (!sedeId || !itemCotizacion) ? 'Elige sede e ítem primero'
+    : undefined
+  // Al cambiar el procedimiento el profesional elegido puede dejar de ser válido.
+  const limpiarProfesionalSiFiltra = () => { if (filtroActivo) setValue('profesional', '') }
+
   // Sincroniza la fecha y la pre-carga cada vez que el modal se abre
   useEffect(() => {
     if (!open) return
@@ -218,6 +233,7 @@ export function NuevaCitaModal({
     setModo(nuevoModo)
     setValue('slot', '')
     setValue('servicio', '')
+    limpiarProfesionalSiFiltra()
     setItemCotizacion(null)
     setItemCotizacionTipo(null)
     setItemCotizacionError(false)
@@ -272,7 +288,7 @@ export function NuevaCitaModal({
       setItemCotizacionError(true); return
     }
     if (modo === 'servicio' && !values.servicio) {
-      setServerError('Selecciona un servicio'); return
+      setServerError('Selecciona un procedimiento'); return
     }
     if (modo === 'libre' && !duracionLibre) {
       setDuracionError(true); return
@@ -324,7 +340,7 @@ export function NuevaCitaModal({
         if (data.detail) { setServerError(String(data.detail)); return }
         const fieldLabels: Record<string, string> = {
           paciente: 'Paciente', sede: 'Sede', profesional: 'Profesional',
-          servicio: 'Servicio', fecha_inicio: 'Fecha/Hora', canal_origen: '¿Cómo agendó el paciente?',
+          servicio: 'Procedimiento', fecha_inicio: 'Fecha/Hora', canal_origen: '¿Cómo agendó el paciente?',
           duracion_min: 'Duración', item_cotizacion: 'Ítem de cotización',
         }
         const entries = Object.entries(data)
@@ -422,7 +438,7 @@ export function NuevaCitaModal({
                   activo={modo === 'servicio'}
                   onClick={() => cambiarModo('servicio')}
                   icon={<Stethoscope className="h-4 w-4" />}
-                  label={<>Por<br/>servicio</>}
+                  label={<>Por<br/>procedimiento</>}
                 />
                 <ModoBtn
                   activo={modo === 'libre'}
@@ -448,6 +464,7 @@ export function NuevaCitaModal({
                   setItemCotizacionTipo(found?.tipo ?? null)
                   setItemCotizacionError(false)
                   setValue('slot', '')
+                  limpiarProfesionalSiFiltra()
                 }}
               >
                 <SelectTrigger className={itemCotizacionError ? 'border-destructive' : ''}>
@@ -504,7 +521,7 @@ export function NuevaCitaModal({
               ) : (
                 <Select
                   value={sesionEjecutada ?? 'none'}
-                  onValueChange={(v) => setSesionEjecutada(v === 'none' ? null : v)}
+                  onValueChange={(v) => { setSesionEjecutada(v === 'none' ? null : v); limpiarProfesionalSiFiltra() }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecciona la sesión (opcional)" />
@@ -615,9 +632,10 @@ export function NuevaCitaModal({
             </div>
           </div>
 
-          {/* ── Profesional + Servicio (servicio solo en modo 'servicio') ── */}
+          {/* ── Profesional + Procedimiento (procedimiento solo en modo 'servicio').
+              Con el filtro activo el procedimiento va primero. ── */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
+            <div className={cn('space-y-1.5', filtroActivo && modo === 'servicio' && 'order-2')}>
               <Label>Profesional *</Label>
               <Controller
                 name="profesional"
@@ -628,6 +646,8 @@ export function NuevaCitaModal({
                     onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
                     sedeId={sedeId}
                     disabled={!sedeId}
+                    filtro={filtroProfesional}
+                    esperando={esperandoProfesional}
                   />
                 )}
               />
@@ -637,15 +657,15 @@ export function NuevaCitaModal({
             </div>
 
             {modo === 'servicio' && (
-              <div className="space-y-1.5">
-                <Label>Servicio *</Label>
+              <div className={cn('space-y-1.5', filtroActivo && 'order-1')}>
+                <Label>Procedimiento *</Label>
                 <Controller
                   name="servicio"
                   control={control}
                   render={({ field }) => (
                     <ServicioSelect
                       value={field.value ?? ''}
-                      onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
+                      onValueChange={(v) => { field.onChange(v); setValue('slot', ''); limpiarProfesionalSiFiltra() }}
                       clinicaId={clinicaId}
                     />
                   )}

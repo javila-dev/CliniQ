@@ -48,13 +48,14 @@ function ConsentimientoFila({ c, pacienteId }: { c: ConsentimientoSesionEstado; 
 interface Props {
   sesionId: string
   pacienteId: string
+  citaId?: string | null
   onPuedeContinuar?: (puede: boolean) => void
 }
 
-export function ConsentimientosSesionCheck({ sesionId, pacienteId, onPuedeContinuar }: Props) {
+export function ConsentimientosSesionCheck({ sesionId, pacienteId, citaId, onPuedeContinuar }: Props) {
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['sesion-consentimientos', sesionId],
-    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(sesionId),
+    queryKey: ['sesion-consentimientos', sesionId, citaId],
+    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(sesionId, citaId),
   })
 
   // Notify parent when data changes

@@ -1,7 +1,6 @@
 import type { Consentimiento } from './consentimientos'
 
 export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida' | 'descartada'
-export type TipoFormaPago = 'efectivo' | 'transferencia' | 'tarjeta_credito'
 export type CanalEnvio = 'whatsapp' | 'email' | 'pdf'
 export type TipoItemCotizacion = 'tratamiento' | 'procedimiento' | 'libre'
 /** Un obsequio de producto usa `insumo`; solo existe como obsequio (es_obsequio = true). */
@@ -112,7 +111,8 @@ export interface HistorialSesionesCotizacion {
 
 export interface FormaPagoCotizacion {
   id: string
-  tipo: TipoFormaPago
+  tipo: string                  // id de FormaDePago
+  tipo_nombre?: string
   descripcion: string
   valor: string                 // Decimal como string (DRF)
   fecha: string | null
@@ -137,6 +137,7 @@ export interface Cotizacion {
   total_pagado: string | null   // Abonado en cartera; null si aún no hay cartera (p. ej. borrador)
   es_migracion?: boolean
   saldo_pendiente: string | null // Saldo por cobrar; null si aún no hay cartera
+  cartera_id?: string | null    // id de la cartera asociada; null si aún no hay cartera
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
   created_at: string
@@ -182,7 +183,7 @@ export interface EntregarObsequioRequest {
 }
 
 export interface CreateFormaPago {
-  tipo: TipoFormaPago
+  tipo: string                  // id de FormaDePago
   descripcion: string
   valor: number
   fecha?: string | null

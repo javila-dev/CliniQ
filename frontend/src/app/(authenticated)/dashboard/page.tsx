@@ -41,14 +41,6 @@ const COP = new Intl.NumberFormat('es-CO', {
   style: 'currency', currency: 'COP', maximumFractionDigits: 0,
 })
 
-const MEDIO_LABEL: Record<string, string> = {
-  efectivo: 'Efectivo',
-  tarjeta_debito: 'Débito',
-  tarjeta_credito: 'Crédito',
-  transferencia: 'Transferencia',
-  otro: 'Otro',
-}
-
 const ESTADO_LEFT: Record<EstadoCita, string> = {
   pendiente: 'border-l-yellow-400',
   confirmada: 'border-l-blue-400',
@@ -1012,7 +1004,7 @@ function DashboardContent() {
             <div className="space-y-2">
               {kpis.cobros_hoy.por_medio_pago.map(({ medio, total }) => (
                 <div key={medio} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                  <span className="text-sm text-muted-foreground">{MEDIO_LABEL[medio] ?? medio}</span>
+                  <span className="text-sm text-muted-foreground">{medio}</span>
                   <span className="text-sm font-semibold">{COP.format(Number(total))}</span>
                 </div>
               ))}

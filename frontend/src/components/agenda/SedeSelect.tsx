@@ -3,6 +3,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
+import { isAdminOrSuperAdmin } from '@/lib/permissions'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 interface SedeSelectProps {
@@ -20,9 +21,9 @@ export function SedeSelect({ value, onValueChange, placeholder = 'Seleccionar se
   })
 
   const sedes = data?.results ?? []
-  const sedesVisibles = user?.sede_id
-    ? sedes.filter((s) => s.id === user.sede_id)
-    : sedes
+  // Usuario acotado: solo sus sedes (principal + asignadas) de /auth/me.
+  const idsUsuario = isAdminOrSuperAdmin(user) ? null : (user?.sedes?.map((s) => s.id) ?? null)
+  const sedesVisibles = idsUsuario ? sedes.filter((s) => idsUsuario.includes(s.id)) : sedes
 
   return (
     <Select value={value} onValueChange={onValueChange} disabled={disabled || isLoading}>

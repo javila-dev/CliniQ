@@ -9,14 +9,14 @@ export interface SesionRealizadaInput {
 
 export interface PagoPrevioInput {
   valor: string
-  medio_pago: 'efectivo' | 'tarjeta_debito' | 'tarjeta_credito' | 'transferencia' | 'otro'
+  medio_pago: string          // id de FormaDePago
   fecha: string
 }
 
 export interface CuotaPlanInput {
   valor_esperado: string
   fecha_esperada?: string | null
-  tipo?: 'efectivo' | 'transferencia' | 'cuotas' | 'financiamiento'
+  tipo: string                // id de FormaDePago
   descripcion?: string
 }
 

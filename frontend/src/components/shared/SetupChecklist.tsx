@@ -4,18 +4,17 @@ import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import {
   CheckCircle2, Circle, ArrowRight, Rocket,
-  Building2, MapPin, Users, Stethoscope, FileText,
+  MapPin, Users, Stethoscope, CalendarDays,
 } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 
 const ITEM_ICONS: Record<string, React.ElementType> = {
-  clinica:        Building2,
-  sedes:          MapPin,
-  usuarios:       Users,
-  servicios:      Stethoscope,
-  consentimientos: FileText,
+  sede:           MapPin,
+  equipo:         Users,
+  procedimientos: Stethoscope,
+  primera_cita:   CalendarDays,
 }
 
 export function useSetupChecklist() {
@@ -29,16 +28,18 @@ export function useSetupChecklist() {
     staleTime: 0,
   })
 
-  const allDone = !data || data.items.every(i => i.completado)
+  // Solo cuentan los pasos requeridos: los opcionales no mantienen el aviso encendido.
+  const allDone = !data || data.todo_listo
   return { data, isLoading, enabled, allDone }
 }
 
+/** Resumen compacto para el dashboard. El recorrido completo está en /preparar-clinica. */
 export function SetupChecklist() {
   const { data, isLoading, enabled, allDone } = useSetupChecklist()
 
   if (!enabled || isLoading || !data || allDone) return null
 
-  const doneCount = data.items.filter(i => i.completado).length
+  const requeridos = data.items.filter(i => i.requerido)
 
   return (
     <div className="bg-white rounded-xl border border-primary/20 shadow-sm overflow-hidden h-full flex flex-col">
@@ -48,14 +49,14 @@ export function SetupChecklist() {
           <Rocket className="h-3.5 w-3.5 text-primary" />
         </div>
         <div className="flex-1 min-w-0">
-          <h2 className="font-semibold text-sm leading-tight">Configura tu clínica</h2>
+          <h2 className="font-semibold text-sm leading-tight">Prepara tu clínica</h2>
           <p className="text-[11px] text-muted-foreground mt-0.5">
-            {doneCount} de {data.items.length} completados
+            {data.completados} de {data.total} pasos
           </p>
         </div>
         {/* Progress dots */}
         <div className="flex gap-1 shrink-0">
-          {data.items.map(item => (
+          {requeridos.map(item => (
             <div
               key={item.key}
               className={cn(
@@ -69,7 +70,7 @@ export function SetupChecklist() {
 
       {/* Items */}
       <div className="divide-y divide-gray-50 flex-1">
-        {data.items.map(item => {
+        {requeridos.map(item => {
           const Icon = ITEM_ICONS[item.key] ?? Circle
           return (
             <Link
@@ -111,6 +112,14 @@ export function SetupChecklist() {
           )
         })}
       </div>
+
+      <Link
+        href="/preparar-clinica"
+        className="flex items-center justify-between gap-2 px-4 py-2.5 border-t text-xs font-medium text-primary hover:bg-primary/5 transition-colors"
+      >
+        Ver todos los pasos
+        <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
     </div>
   )
 }

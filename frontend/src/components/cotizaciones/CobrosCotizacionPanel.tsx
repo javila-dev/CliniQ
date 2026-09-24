@@ -6,7 +6,7 @@ import { cobrosApi } from '@/lib/api/cobros'
 import { formatFechaLocal } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { EstadoCobro, MedioPago, Cobro } from '@/types/cobros'
+import type { EstadoCobro, Cobro } from '@/types/cobros'
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
@@ -15,14 +15,6 @@ const ESTADO_CONFIG: Record<EstadoCobro, { label: string; icon: React.ElementTyp
   pagado_parcial: { label: 'Pago parcial', icon: AlertCircle,  className: 'bg-blue-50 text-blue-700 ring-1 ring-blue-200'    },
   pagado:         { label: 'Pagado',       icon: CheckCircle2, className: 'bg-green-50 text-green-700 ring-1 ring-green-200' },
   anulado:        { label: 'Anulado',      icon: XCircle,      className: 'bg-gray-100 text-gray-500 ring-1 ring-gray-200'   },
-}
-
-const MEDIO_PAGO_LABEL: Record<MedioPago, string> = {
-  efectivo:        'Efectivo',
-  tarjeta_debito:  'Tarjeta débito',
-  tarjeta_credito: 'Tarjeta crédito',
-  transferencia:   'Transferencia',
-  otro:            'Otro',
 }
 
 function EstadoBadge({ estado }: { estado: EstadoCobro }) {
@@ -67,7 +59,7 @@ function CobroRow({ cobro }: { cobro: Cobro }) {
             <div key={pago.id} className="flex items-center justify-between text-xs text-muted-foreground">
               <span className="flex items-center gap-1.5">
                 <CreditCard className="h-3 w-3 shrink-0" />
-                {MEDIO_PAGO_LABEL[pago.medio_pago]}
+                {pago.medio_pago_nombre ?? '—'}
                 {pago.referencia && <span className="text-gray-400">· {pago.referencia}</span>}
               </span>
               <span className="tabular-nums font-medium text-foreground">{COP.format(parseFloat(pago.valor))}</span>

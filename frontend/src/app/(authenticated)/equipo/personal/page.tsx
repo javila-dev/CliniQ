@@ -1,11 +1,11 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Search, Users, Stethoscope, PhoneCall, ShieldCheck, UserCog,
-  Pencil, ToggleLeft, ToggleRight, LogIn, AlertCircle, Mail,
+  Pencil, LogIn, AlertCircle, Mail, MoreHorizontal, UserCheck, UserX,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { usuariosApi } from '@/lib/api/usuarios'
@@ -15,8 +15,12 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem,
+  DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
-import { ColaboradorSheet } from '@/components/colaboradores/ColaboradorSheet'
+import { ColaboradorDialog } from '@/components/colaboradores/ColaboradorDialog'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
@@ -47,12 +51,6 @@ function initials(name: string) {
   return parts.length >= 2
     ? (parts[0][0] + parts[1][0]).toUpperCase()
     : name.slice(0, 2).toUpperCase()
-}
-
-const CONTRATO_CONFIG: Record<string, { label: string; className: string }> = {
-  empleado:    { label: 'Empleado',    className: 'bg-blue-50 text-blue-700 ring-blue-200/60'       },
-  contratista: { label: 'Contratista', className: 'bg-amber-50 text-amber-700 ring-amber-200/60'    },
-  socio:       { label: 'Socio',       className: 'bg-violet-50 text-violet-700 ring-violet-200/60' },
 }
 
 const ROL_CONFIG: Record<string, { label: string; icon: React.ElementType; className: string }> = {
@@ -141,7 +139,6 @@ function ColaboradorRow({
   canActivate: boolean
 }) {
   const rol = resolverRol(colaborador)
-  const contrato = CONTRATO_CONFIG[colaborador.tipo_contrato]
   const RolIcon = rol?.icon ?? Stethoscope
 
   const toggleDisabled = !colaborador.activo && !canActivate
@@ -182,18 +179,7 @@ function ColaboradorRow({
         )}
       </div>
 
-      <div className="hidden lg:flex justify-center w-24 shrink-0">
-        {contrato && (
-          <span className={cn(
-            'inline-flex items-center px-2 py-1 rounded-md text-xs font-medium ring-1',
-            contrato.className
-          )}>
-            {contrato.label}
-          </span>
-        )}
-      </div>
-
-      <div className="hidden xl:flex justify-center items-center gap-1 w-48 min-w-0 shrink-0 flex-wrap">
+      <div className="hidden xl:flex justify-center items-center gap-1 w-44 min-w-0 shrink-0 flex-wrap">
         {(colaborador.especialidades_detalle ?? []).length === 0 ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
@@ -210,7 +196,7 @@ function ColaboradorRow({
         )}
       </div>
 
-      <div className="shrink-0">
+      <div className="w-[88px] shrink-0">
         {colaborador.invitacion_pendiente ? (
           <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1 bg-amber-50 text-amber-700 ring-amber-200/60"
             title="El colaborador fue invitado pero aún no activa su cuenta. Ocupa un cupo del plan.">
@@ -230,64 +216,50 @@ function ColaboradorRow({
         )}
       </div>
 
-      <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-        {onImpersonate && (
-          <button
-            onClick={(e) => { e.stopPropagation(); onImpersonate() }}
-            className="flex items-center justify-center h-7 w-7 rounded-md hover:bg-amber-50 text-muted-foreground hover:text-amber-600 transition-colors"
-            title="Ingresar como este usuario"
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0 text-muted-foreground"
+            aria-label={`Acciones para ${colaborador.nombre_completo}`}
           >
-            <LogIn className="h-3.5 w-3.5" />
-          </button>
-        )}
-        {colaborador.invitacion_pendiente && (
-          <button
-            onClick={(e) => { e.stopPropagation(); if (!resending) onResend() }}
-            disabled={resending}
-            className="flex items-center justify-center h-7 w-7 rounded-md hover:bg-amber-50 text-muted-foreground hover:text-amber-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Reenviar invitación por correo"
-          >
-            <Mail className="h-3.5 w-3.5" />
-          </button>
-        )}
-        <button
-          onClick={(e) => { e.stopPropagation(); onEdit() }}
-          className="flex items-center justify-center h-7 w-7 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-          title="Editar"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </button>
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <button
-                  onClick={(e) => { e.stopPropagation(); if (!toggleDisabled) onToggle() }}
-                  disabled={toggleDisabled}
-                  className={cn(
-                    'flex items-center justify-center h-7 w-7 rounded-md transition-colors',
-                    toggleDisabled
-                      ? 'opacity-40 cursor-not-allowed text-muted-foreground'
-                      : colaborador.activo
-                        ? 'hover:bg-red-50 text-muted-foreground hover:text-red-500'
-                        : 'hover:bg-green-50 text-muted-foreground hover:text-green-600'
-                  )}
-                  title={toggleDisabled ? 'Límite de usuarios alcanzado' : colaborador.activo ? 'Desactivar' : 'Activar'}
-                >
-                  {colaborador.activo
-                    ? <ToggleRight className="h-4 w-4" />
-                    : <ToggleLeft className="h-4 w-4" />}
-                </button>
-              </span>
-            </TooltipTrigger>
-            {toggleDisabled && (
-              <TooltipContent>
-                Límite de usuarios alcanzado. Actualiza tu plan para agregar más.
-              </TooltipContent>
-            )}
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+            <MoreHorizontal className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-56">
+          <DropdownMenuItem onClick={onEdit}>
+            <Pencil className="mr-2 h-3.5 w-3.5" />Editar
+          </DropdownMenuItem>
+          {colaborador.invitacion_pendiente && (
+            <DropdownMenuItem onClick={onResend} disabled={resending}>
+              <Mail className="mr-2 h-3.5 w-3.5" />Reenviar invitación
+            </DropdownMenuItem>
+          )}
+          {onImpersonate && (
+            <DropdownMenuItem onClick={onImpersonate}>
+              <LogIn className="mr-2 h-3.5 w-3.5" />Ingresar como este usuario
+            </DropdownMenuItem>
+          )}
+          <DropdownMenuSeparator />
+          {colaborador.activo ? (
+            <DropdownMenuItem onClick={onToggle} className="text-red-600 focus:text-red-600">
+              <UserX className="mr-2 h-3.5 w-3.5" />Desactivar
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem
+              onClick={onToggle}
+              disabled={toggleDisabled}
+              className="flex-col items-start text-green-600 focus:text-green-600"
+            >
+              <span className="flex items-center"><UserCheck className="mr-2 h-3.5 w-3.5" />Activar</span>
+              {toggleDisabled && (
+                <span className="pl-[22px] text-[11px] text-muted-foreground">Límite de usuarios alcanzado. Actualiza tu plan para agregar más.</span>
+              )}
+            </DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 }
@@ -303,7 +275,6 @@ function SkeletonRow() {
         <div className="h-3 w-48 rounded bg-gray-100" />
       </div>
       <div className="hidden md:block h-6 w-24 rounded bg-gray-100" />
-      <div className="hidden lg:block h-6 w-20 rounded bg-gray-100" />
       <div className="h-6 w-16 rounded bg-gray-100" />
       <div className="h-6 w-14 rounded bg-gray-100" />
     </div>
@@ -347,6 +318,8 @@ function StatsBar({ data }: { data: Colaborador[] }) {
 export default function PersonalPage() {
   const qc = useQueryClient()
   const router = useRouter()
+  // También se muestra como Configuración → Equipo → Usuarios, con el menú lateral de Configuración.
+  const enConfiguracion = usePathname().startsWith('/configuracion')
   const { user: currentUser, impersonate } = useAuthStore()
   const canImpersonate = isSuperAdmin(currentUser)
   const isAdmin = hasPermission(currentUser, PERM.USUARIOS_CREAR)
@@ -354,7 +327,7 @@ export default function PersonalPage() {
   const [search, setSearch] = useState('')
   const [filtroRol, setFiltroRol] = useState('todos')
   const [filtroEstado, setFiltroEstado] = useState('activos')
-  const [sheetOpen, setSheetOpen] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Colaborador | null>(null)
   const [toggleTarget, setToggleTarget] = useState<Colaborador | null>(null)
   const [resendingId, setResendingId] = useState<string | null>(null)
@@ -430,16 +403,16 @@ export default function PersonalPage() {
     ? allColaboradores
     : allColaboradores.filter((c) => c.rol === filtroRol)
 
-  const handleEdit = (c: Colaborador) => { setEditTarget(c); setSheetOpen(true) }
-  const handleNew  = () => { setEditTarget(null); setSheetOpen(true) }
+  const handleEdit = (c: Colaborador) => { setEditTarget(c); setDialogOpen(true) }
+  const handleNew  = () => { setEditTarget(null); setDialogOpen(true) }
 
   return (
     <div className="space-y-5">
 
       <PageHeader
-        title="Equipo"
+        title={enConfiguracion ? 'Usuarios' : 'Equipo'}
         description="Gestiona los colaboradores y usuarios de tu clínica."
-        backHref="/configuracion"
+        backHref={enConfiguracion ? undefined : '/configuracion'}
         helpSlug="crear-usuarios-y-asignar-roles"
       />
 
@@ -514,16 +487,13 @@ export default function PersonalPage() {
           <div className="hidden md:flex justify-center w-28 shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Rol</span>
           </div>
-          <div className="hidden lg:flex justify-center w-24 shrink-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Contrato</span>
-          </div>
-          <div className="hidden xl:flex justify-center w-48 shrink-0">
+          <div className="hidden xl:flex justify-center w-44 shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Especialidades</span>
           </div>
-          <div className="w-[76px] shrink-0">
+          <div className="w-[88px] shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Estado</span>
           </div>
-          <div className="w-14 shrink-0" />
+          <div className="w-8 shrink-0" />
         </div>
 
         {isLoading ? (
@@ -565,9 +535,9 @@ export default function PersonalPage() {
         )}
       </div>
 
-      <ColaboradorSheet
-        open={sheetOpen}
-        onOpenChange={(v) => { setSheetOpen(v); if (!v) setEditTarget(null) }}
+      <ColaboradorDialog
+        open={dialogOpen}
+        onOpenChange={(v) => { setDialogOpen(v); if (!v) setEditTarget(null) }}
         colaborador={editTarget}
         puedeAgregar={puedeAgregar}
       />

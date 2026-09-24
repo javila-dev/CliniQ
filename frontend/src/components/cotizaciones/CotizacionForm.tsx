@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Search, Receipt, Lock, Zap, FileSignature } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -21,18 +21,22 @@ import { CotizacionEstadoBadge } from './CotizacionEstadoBadge'
 import { EnviarCotizacionModal } from './EnviarCotizacionModal'
 import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
+import { DetalleSesionesTratamientoModal } from './DetalleSesionesTratamientoModal'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { CobrosCotizacionModal } from './CobrosCotizacionPanel'
+import { DatosClinicosCotizacionModal } from './DatosClinicosCotizacionModal'
+import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
-import { ObsequiosCotizacionPanel } from './ObsequiosCotizacionPanel'
+import { BuscadorPopover } from '@/components/ui/buscador-popover'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
+import { useFormasPago } from '@/hooks/useFormasPago'
 import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
@@ -79,7 +83,7 @@ const itemSchema = z.object({
 
 const pagoSchema = z.object({
   fecha: z.string().nullable(),
-  tipo: z.enum(['efectivo', 'transferencia', 'tarjeta_credito']),
+  tipo: z.string().min(1, 'Selecciona una forma de pago'),
   descripcion: z.string(),
   valor: z.number().min(0),
 })
@@ -141,64 +145,24 @@ function TratamientoSelector({
   tratamientos: TratamientoCatalogo[]
   onSelect: (t: TratamientoCatalogo) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
   const selected = tratamientos.find((t) => t.id === value)
-  const filtered = q
-    ? tratamientos.filter((t) => t.nombre.toLowerCase().includes(q.toLowerCase()))
-    : tratamientos
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-8 w-full items-center gap-1.5 rounded-md border border-dashed border-input bg-transparent px-2 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
-      >
-        <Package2 className="h-3 w-3 shrink-0" />
-        <span className="truncate">{selected?.nombre ?? 'Seleccionar tratamiento…'}</span>
-      </button>
-    )
-  }
-
   return (
-    <div className="relative">
-      <div className="rounded-lg border bg-white shadow-md overflow-hidden z-20 w-64">
-        <div className="flex items-center gap-2 px-2.5 py-2 border-b">
-          <Search className="h-3 w-3 text-muted-foreground shrink-0" />
-          <input
-            autoFocus
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar tratamiento…"
-            className="flex-1 text-xs outline-none bg-transparent"
-            onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setQ('') } }}
-          />
-        </div>
-        <div className="max-h-44 overflow-y-auto divide-y">
-          {filtered.map((t) => (
-            <button key={t.id} type="button"
-              onClick={() => { onSelect(t); setOpen(false); setQ('') }}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
-            >
-              <span className="text-xs font-medium truncate uppercase">{t.nombre}</span>
-              {t.precio_estimado && (
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(t.precio_estimado))}
-                </span>
-              )}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="px-3 py-2.5 text-xs text-muted-foreground">Sin resultados</p>
-          )}
-        </div>
-        <div className="border-t px-3 py-2 flex justify-end">
-          <button type="button" onClick={() => { setOpen(false); setQ('') }}
-            className="text-[10px] text-muted-foreground hover:text-foreground">Cerrar</button>
-        </div>
-      </div>
-    </div>
+    <BuscadorPopover
+      etiqueta={selected?.nombre}
+      placeholder="Seleccionar tratamiento…"
+      icono={Package2}
+      opciones={tratamientos.map((t) => ({
+        id: t.id,
+        label: t.nombre,
+        hint: t.precio_estimado
+          ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(t.precio_estimado))
+          : undefined,
+      }))}
+      onSelect={(id) => {
+        const t = tratamientos.find((x) => x.id === id)
+        if (t) onSelect(t)
+      }}
+    />
   )
 }
 
@@ -212,64 +176,24 @@ function ProcedimientoSelector({
   procedimientos: Procedimiento[]
   onSelect: (p: Procedimiento) => void
 }) {
-  const [open, setOpen] = useState(false)
-  const [q, setQ] = useState('')
   const selected = procedimientos.find((p) => p.id === value)
-  const filtered = q
-    ? procedimientos.filter((p) => p.nombre.toLowerCase().includes(q.toLowerCase()))
-    : procedimientos
-
-  if (!open) {
-    return (
-      <button
-        type="button"
-        onClick={() => setOpen(true)}
-        className="flex h-8 w-full items-center gap-1.5 rounded-md border border-dashed border-input bg-transparent px-2 text-xs text-muted-foreground hover:border-primary/50 hover:text-foreground transition-colors"
-      >
-        <Stethoscope className="h-3 w-3 shrink-0" />
-        <span className="truncate">{selected?.nombre ?? 'Seleccionar procedimiento…'}</span>
-      </button>
-    )
-  }
-
   return (
-    <div className="relative">
-      <div className="rounded-lg border bg-white shadow-md overflow-hidden z-20 w-64">
-        <div className="flex items-center gap-2 px-2.5 py-2 border-b">
-          <Search className="h-3 w-3 text-muted-foreground shrink-0" />
-          <input
-            autoFocus
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Buscar procedimiento…"
-            className="flex-1 text-xs outline-none bg-transparent"
-            onKeyDown={(e) => { if (e.key === 'Escape') { setOpen(false); setQ('') } }}
-          />
-        </div>
-        <div className="max-h-44 overflow-y-auto divide-y">
-          {filtered.map((p) => (
-            <button key={p.id} type="button"
-              onClick={() => { onSelect(p); setOpen(false); setQ('') }}
-              className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left hover:bg-gray-50 transition-colors"
-            >
-              <span className="text-xs font-medium truncate">{p.nombre}</span>
-              {p.precio_referencia && (
-                <span className="text-[10px] text-muted-foreground shrink-0">
-                  {new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(p.precio_referencia))}
-                </span>
-              )}
-            </button>
-          ))}
-          {filtered.length === 0 && (
-            <p className="px-3 py-2.5 text-xs text-muted-foreground">Sin resultados</p>
-          )}
-        </div>
-        <div className="border-t px-3 py-2 flex justify-end">
-          <button type="button" onClick={() => { setOpen(false); setQ('') }}
-            className="text-[10px] text-muted-foreground hover:text-foreground">Cerrar</button>
-        </div>
-      </div>
-    </div>
+    <BuscadorPopover
+      etiqueta={selected?.nombre}
+      placeholder="Seleccionar procedimiento…"
+      icono={Stethoscope}
+      opciones={procedimientos.map((p) => ({
+        id: p.id,
+        label: p.nombre,
+        hint: p.precio_referencia
+          ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(p.precio_referencia))
+          : undefined,
+      }))}
+      onSelect={(id) => {
+        const p = procedimientos.find((x) => x.id === id)
+        if (p) onSelect(p)
+      }}
+    />
   )
 }
 
@@ -356,16 +280,23 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
+  // Quien puede gestionar la cotización puede dejar la mini-atención (motivo,
+  // seguimiento, fotos) aunque su rol no tenga permisos clínicos generales —
+  // el backend acepta lo mismo (cotizaciones.gestionar) para estas notas.
+  const puedeDatosClinicos = canGestionar || hasPermission(user, 'historia.notas.crear')
   // Sin cotizaciones.gestionar el formulario es de solo lectura (p. ej. recepción,
   // que tiene cotizaciones.ver pero no puede crear/editar). El backend responde 403
   // a create/patch/cambiar_estado, así que aquí evitamos la UI editable + submit fallido.
   const soloLectura = !!(cotizacion && cotizacion.estado !== 'borrador') || !canGestionar
   const [descModal, setDescModal] = useState<{ idx: number; texto: string } | null>(null)
+  const [pagoObsModal, setPagoObsModal] = useState<{ idx: number; texto: string } | null>(null)
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
   const [crearPacienteNombre, setCrearPacienteNombre] = useState('')
   const [crearPacienteLoading, setCrearPacienteLoading] = useState(false)
   const [enviarOpen, setEnviarOpen] = useState(false)
   const [cobrosOpen, setCobrosOpen] = useState(false)
+  const [datosClinicosOpen, setDatosClinicosOpen] = useState(false)
+  const [detalleSesiones, setDetalleSesiones] = useState<TratamientoCatalogo | null>(null)
 
   const { data: tratamientos } = useQuery({
     queryKey: ['tratamientos-activos'],
@@ -382,6 +313,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   })
 
   const { sedes } = useUserSedes()
+  const { formasPago } = useFormasPago()
 
   const pagosRef = useRef<HTMLDivElement>(null)
   const { register, control, handleSubmit, reset, setValue, getValues, setError, formState: { errors } } = useForm<FormValues>({
@@ -403,6 +335,14 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const items = useWatch({ control, name: 'items' })
   const validez = useWatch({ control, name: 'validez_dias' })
   const sedeSeleccionada = useWatch({ control, name: 'sede' })
+
+  // Toda cotización lleva sede: si el usuario no tiene una propia (o es una
+  // cotización antigua sin sede), se propone la primera disponible.
+  useEffect(() => {
+    if (!soloLectura && !sedeSeleccionada && sedes.length > 0) {
+      setValue('sede', sedes[0].id)
+    }
+  }, [soloLectura, sedeSeleccionada, sedes, setValue])
 
   // Precios de campaña vigentes para la sede elegida. El backend solo calcula
   // precio_campana_disponible sobre ítems ya guardados, así que aquí lo
@@ -546,7 +486,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const buildPayload = (values: FormValues) => {
     const payload = {
       paciente: values.paciente?.id ?? cotizacion!.paciente,
-      sede: values.sede ?? null,
+      // Sin sede elegida el backend asigna la principal al crear; al editar no se puede quitar.
+      ...(values.sede ? { sede: values.sede } : {}),
       validez_dias: values.validez_dias,
       notas: values.notas,
       items: values.items.map((i) => {
@@ -736,6 +677,65 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
   const guardando = creando || actualizando
 
+  // Tarjeta de "Aceptación y compromiso de pago": se calcula una sola vez para
+  // no duplicar su JSX entre el layout de cotización aceptada (comparte fila
+  // con Seguimiento de sesiones) y el de borrador (compromiso pendiente, sola).
+  const compromisoCard = mostrarCompromiso && cotizacion?.compromiso_pago && (() => {
+    const cp = cotizacion.compromiso_pago!
+    const enBorrador = cotizacion.estado === 'borrador'
+    const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
+    const tone = cp.estado === 'firmado'
+      ? { badge: 'bg-green-50 text-green-700 ring-green-200/60', dot: 'bg-green-500' }
+      : cp.estado === 'revocado'
+        ? { badge: 'bg-gray-100 text-gray-500 ring-gray-200/60', dot: 'bg-gray-400' }
+        : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
+    return (
+      <div className="bg-white rounded-xl border p-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <FileSignature className="h-4 w-4 text-primary shrink-0" />
+          <div className="min-w-0">
+            <p className="text-sm font-medium">Aceptación y compromiso de pago</p>
+            <p className="text-xs text-muted-foreground">
+              {cp.estado === 'firmado'
+                ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
+                : cp.estado === 'revocado'
+                  ? 'Revocado'
+                  : enBorrador
+                    ? 'Firma pendiente — al firmarlo, la cotización se acepta automáticamente'
+                    : 'Pendiente de firma'}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1', tone.badge)}>
+            <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
+            {label}
+          </span>
+          {cp.pdf_url ? (
+            <Button variant="outline" size="sm" asChild>
+              <a href={cp.pdf_url} target="_blank" rel="noopener noreferrer">
+                <FileText className="h-3.5 w-3.5 mr-1.5" />
+                Ver PDF
+              </a>
+            </Button>
+          ) : cp.estado === 'firmado' ? (
+            <Button variant="outline" size="sm" disabled={recuperandoCompromiso} onClick={() => verCompromisoFirmado(cp.id)}>
+              {recuperandoCompromiso
+                ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                : <FileText className="h-3.5 w-3.5 mr-1.5" />}
+              Ver documento firmado
+            </Button>
+          ) : cp.estado === 'pendiente' && canGestionar ? (
+            <Button variant="outline" size="sm" onClick={() => setCompromisoPagoId(cp.id)}>
+              <FileSignature className="h-3.5 w-3.5 mr-1.5" />
+              Firmar
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    )
+  })()
+
   // Crear una cotización requiere cotizaciones.gestionar. Sin ese permiso no
   // mostramos el formulario vacío (terminaría en un 403 silencioso al enviar).
   if (esNueva && !canGestionar) {
@@ -769,7 +769,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     <div className="min-h-screen bg-gray-50">
       {/* ── Topbar ─────────────────────────────────────────────────────────── */}
       <div className="sticky top-0 z-20 bg-white border-b shadow-sm">
-        <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
+        <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
               <Link href="/cotizaciones"><ArrowLeft className="h-4 w-4" /></Link>
@@ -802,6 +802,12 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 PDF
               </Button>
             )}
+            {cotizacion?.estado === 'aceptada' && puedeDatosClinicos && (
+              <Button variant="outline" size="sm" onClick={() => setDatosClinicosOpen(true)}>
+                <ClipboardList className="h-3.5 w-3.5 mr-1.5" />
+                Datos clínicos
+              </Button>
+            )}
             {cotizacion?.estado === 'aceptada' && (
               <Button
                 size="sm"
@@ -812,7 +818,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Cobros
               </Button>
             )}
-            {cotizacion && canGestionar && (
+            {cotizacion && canGestionar && cotizacion.estado !== 'aceptada' && (
               <Button
                 size="sm"
                 variant="outline"
@@ -874,86 +880,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       </div>
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
-      <div className="max-w-5xl mx-auto px-4 py-6 space-y-4">
+      <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
 
-        {/* ── Seguimiento de sesiones (solo cuando está aceptada) ─────────── */}
-        {cotizacion?.estado === 'aceptada' && (
-          <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
-        )}
-
-        {/* ── Obsequios: estado y entrega de productos (solo cuando está aceptada) ── */}
-        {cotizacion?.estado === 'aceptada' && <ObsequiosCotizacionPanel cotizacion={cotizacion} />}
-
-        {/* ── Compromiso de pago (vive aquí, no en /consentimientos) ──────── */}
-        {(mostrarCompromiso || hayConsentimientos) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {mostrarCompromiso && cotizacion?.compromiso_pago && (() => {
-          const cp = cotizacion.compromiso_pago
-          const enBorrador = cotizacion.estado === 'borrador'
-          const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
-          const tone = cp.estado === 'firmado'
-            ? { badge: 'bg-green-50 text-green-700 ring-green-200/60', dot: 'bg-green-500' }
-            : cp.estado === 'revocado'
-              ? { badge: 'bg-gray-100 text-gray-500 ring-gray-200/60', dot: 'bg-gray-400' }
-              : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
-          return (
-            <div className={cn('bg-white rounded-xl border p-4 flex items-center justify-between gap-3', !hayConsentimientos && 'md:col-span-2')}>
-              <div className="flex items-center gap-2.5 min-w-0">
-                <FileSignature className="h-4 w-4 text-primary shrink-0" />
-                <div className="min-w-0">
-                  <p className="text-sm font-medium">Aceptación y compromiso de pago</p>
-                  <p className="text-xs text-muted-foreground">
-                    {cp.estado === 'firmado'
-                      ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
-                      : cp.estado === 'revocado'
-                        ? 'Revocado'
-                        : enBorrador
-                          ? 'Firma pendiente — al firmarlo, la cotización se acepta automáticamente'
-                          : 'Pendiente de firma'}
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 shrink-0">
-                <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1', tone.badge)}>
-                  <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
-                  {label}
-                </span>
-                {cp.pdf_url ? (
-                  <Button variant="outline" size="sm" asChild>
-                    <a href={cp.pdf_url} target="_blank" rel="noopener noreferrer">
-                      <FileText className="h-3.5 w-3.5 mr-1.5" />
-                      Ver PDF
-                    </a>
-                  </Button>
-                ) : cp.estado === 'firmado' ? (
-                  <Button variant="outline" size="sm" disabled={recuperandoCompromiso} onClick={() => verCompromisoFirmado(cp.id)}>
-                    {recuperandoCompromiso
-                      ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      : <FileText className="h-3.5 w-3.5 mr-1.5" />}
-                    Ver documento firmado
-                  </Button>
-                ) : cp.estado === 'pendiente' && canGestionar ? (
-                  <Button variant="outline" size="sm" onClick={() => setCompromisoPagoId(cp.id)}>
-                    <FileSignature className="h-3.5 w-3.5 mr-1.5" />
-                    Firmar
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          )
-        })()}
-        {hayConsentimientos && consentimientosRequeridos && (
-          <ConsentimientosCotizacionPanel
-            consentimientos={consentimientosRequeridos}
-            canFirmar={canFirmarConsentimientos}
-            onFirmar={() => setConsentimientosWizardOpen(true)}
-            className={!mostrarCompromiso ? 'md:col-span-2' : undefined}
-          />
-        )}
-        </div>
-        )}
-
-        {/* ── Fila 1: Cliente + Meta ──────────────────────────────────────── */}
+        {/* ── Fila 1: Cliente + Sede/Detalles ──────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {/* Cliente */}
           <div className="bg-white rounded-xl border p-5 space-y-3">
@@ -997,7 +926,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           <div className="bg-white rounded-xl border p-5 space-y-3">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Detalles</p>
             <div className="space-y-2">
-              {sedes.length > 0 && (
+              {/* Con una sola sede se asigna sola; con varias es obligatorio elegir. */}
+              {sedes.length > 1 && (
                 <div className="flex items-center justify-between gap-3">
                   <Label className="text-sm text-muted-foreground shrink-0">Sede</Label>
                   <Controller
@@ -1005,15 +935,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     name="sede"
                     render={({ field }) => (
                       <Select
-                        value={field.value ?? '__sin_sede__'}
-                        onValueChange={(v) => field.onChange(v === '__sin_sede__' ? null : v)}
+                        value={field.value ?? undefined}
+                        onValueChange={field.onChange}
                         disabled={soloLectura}
                       >
                         <SelectTrigger className="h-8 text-sm flex-1">
-                          <SelectValue placeholder="Sin sede" />
+                          <SelectValue placeholder="Elige una sede" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="__sin_sede__">Sin sede</SelectItem>
                           {sedes.map((s) => (
                             <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
                           ))}
@@ -1048,6 +977,29 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           </div>
         </div>
 
+        {/* ── Fila 2: Seguimiento de sesiones + (Avance de cartera, Compromiso, Consentimientos) ── */}
+        {cotizacion?.estado === 'aceptada' && (
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 items-start">
+            <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
+            {/* Misma columna/ancho para las tres: Avance de cartera siempre está
+               (cotización aceptada), Compromiso y Consentimientos son opcionales. */}
+            <div className="space-y-4">
+              <CarteraAvanceCotizacionPanel cotizacion={cotizacion} />
+              {compromisoCard}
+              {hayConsentimientos && consentimientosRequeridos && (
+                <ConsentimientosCotizacionPanel
+                  consentimientos={consentimientosRequeridos}
+                  canFirmar={canFirmarConsentimientos}
+                  onFirmar={() => setConsentimientosWizardOpen(true)}
+                />
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ── Compromiso de pago pendiente en borrador (aún no aceptada) ──── */}
+        {cotizacion?.estado !== 'aceptada' && compromisoCard}
+
         {/* ── Ítems de cotización (3 secciones) ──────────────────────────── */}
         <div className="bg-white rounded-xl border overflow-hidden">
 
@@ -1062,7 +1014,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             }
             // Columnas y encabezados por sección
             const GRID: Record<TipoItemCotizacion, string> = {
-              tratamiento:   'md:grid-cols-[2fr_120px_70px_100px_36px]',
+              tratamiento:   'md:grid-cols-[minmax(0,1fr)_90px_160px_70px_110px_36px]',
               procedimiento: 'md:grid-cols-[2fr_60px_120px_70px_130px_100px_36px]',
               libre:         'md:grid-cols-[1fr_60px_120px_70px_130px_100px_36px]',
             }
@@ -1070,6 +1022,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               tratamiento: (
                 <>
                   <span>Tratamiento</span>
+                  <span className="text-center">Sesiones</span>
                   <span className="text-right">Precio</span>
                   <span className="text-right">Desc %</span>
                   <span className="text-right">Subtotal</span>
@@ -1328,22 +1281,35 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           <div>
                             <p className="text-xs text-muted-foreground md:hidden mb-1">Tratamiento</p>
                             {!soloLectura ? (
-                              <>
-                                <TratamientoSelector
-                                  value={items[idx]?.tratamiento ?? ''}
-                                  tratamientos={tratamientos ?? []}
-                                  onSelect={(t) => onTratamientoChange(idx, t)}
-                                />
-                                {(() => {
-                                  const t = tratamientos?.find(t => t.id === items[idx]?.tratamiento)
-                                  return t?.total_sesiones ? (
-                                    <p className="text-xs text-muted-foreground mt-1">{t.total_sesiones} sesiones incluidas</p>
-                                  ) : null
-                                })()}
-                              </>
+                              <TratamientoSelector
+                                value={items[idx]?.tratamiento ?? ''}
+                                tratamientos={tratamientos ?? []}
+                                onSelect={(t) => onTratamientoChange(idx, t)}
+                              />
                             ) : (
                               <span className="text-xs">{items[idx]?.descripcion ?? '—'}</span>
                             )}
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs text-muted-foreground md:hidden mb-1">Sesiones</p>
+                            {(() => {
+                              const t = tratamientos?.find((x) => x.id === items[idx]?.tratamiento)
+                              if (!t) return <span className="text-sm">—</span>
+                              return (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <span className="text-sm tabular-nums">{t.total_sesiones}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setDetalleSesiones(t)}
+                                    className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                                    aria-label={`Ver las sesiones de ${t.nombre}`}
+                                    title="Ver detalle de sesiones"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                  </button>
+                                </span>
+                              )
+                            })()}
                           </div>
                           {precioField('Precio')}
                           {descField}
@@ -1432,7 +1398,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             )
           })}
 
-          {/* Obsequios: no suman al total; el valor de referencia es solo informativo */}
+          {/* Obsequios: no suman al total; el valor de referencia es solo informativo.
+             En lectura (cotización guardada) también vive aquí la entrega de productos. */}
           <ObsequiosCotizacionSection
             control={control}
             register={register}
@@ -1445,6 +1412,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             sedeId={sedeSeleccionada ?? null}
             onAdd={(item) => addItem(item)}
             onRemove={(idx) => removeItem(idx)}
+            cotizacion={cotizacion}
           />
 
           {(errors.items?.root?.message || (errors.items as any)?.message) && (
@@ -1481,7 +1449,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           </div>
         </div>
 
-        {/* ── Formas de pago ─────────────────────────────────────────────── */}
+        {/* ── Fila final: Formas de pago (60%) + Notas (40%) ──────────────── */}
+        <div className="grid grid-cols-1 md:grid-cols-[3fr_2fr] gap-4 items-start">
         <div ref={pagosRef} className="bg-white rounded-xl border p-5 space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Formas de pago</p>
@@ -1491,7 +1460,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs text-primary"
-                onClick={() => addPago({ fecha: hoy(), tipo: 'efectivo', descripcion: '', valor: total })}
+                onClick={() => addPago({ fecha: hoy(), tipo: formasPago[0]?.id ?? '', descripcion: '', valor: total })}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Agregar
@@ -1544,22 +1513,36 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                               <SelectValue />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="efectivo">Efectivo</SelectItem>
-                              <SelectItem value="transferencia">Transferencia</SelectItem>
-                              <SelectItem value="tarjeta_credito">Tarjeta de crédito</SelectItem>
+                              {formasPago.map((forma) => (
+                                <SelectItem key={forma.id} value={forma.id}>{forma.nombre}</SelectItem>
+                              ))}
                             </SelectContent>
                           </Select>
                         )}
                       />
                     </div>
 
-                    {/* Observaciones */}
+                    {/* Observaciones: abre un modal porque no cabe mucho texto en el input */}
                     <div>
                       <p className="text-xs text-muted-foreground md:hidden mb-1">Observaciones</p>
-                      <Input
-                        className="h-8 text-xs"
-                        disabled={soloLectura}
-                        {...register(`formas_pago.${idx}.descripcion`)}
+                      <Controller
+                        control={control}
+                        name={`formas_pago.${idx}.descripcion`}
+                        render={({ field: f }) => (
+                          <button
+                            type="button"
+                            disabled={soloLectura}
+                            onClick={() => setPagoObsModal({ idx, texto: f.value ?? '' })}
+                            className={cn(
+                              'flex h-8 w-full items-center rounded-md border border-input bg-transparent px-2.5 text-xs text-left transition-colors',
+                              soloLectura ? 'opacity-60' : 'hover:border-primary/50 cursor-pointer',
+                            )}
+                          >
+                            <span className={cn('truncate', !f.value && 'text-muted-foreground')}>
+                              {f.value || 'Agregar observación…'}
+                            </span>
+                          </button>
+                        )}
                       />
                     </div>
 
@@ -1618,6 +1601,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             {...register('notas')}
           />
         </div>
+        </div>
 
         {/* ── Historial de envíos ────────────────────────────────────────── */}
         {cotizacion && (
@@ -1629,6 +1613,19 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
         <div className="pb-8" />
       </div>
+
+      {/* ── Modal datos clínicos (mini-atención sin cita) ─────────────────── */}
+      {cotizacion && (
+        <DatosClinicosCotizacionModal
+          cotizacionId={cotizacion.id}
+          pacienteId={cotizacion.paciente}
+          open={datosClinicosOpen}
+          onOpenChange={setDatosClinicosOpen}
+        />
+      )}
+
+      {/* ── Modal detalle de sesiones de un tratamiento (informativo) ─── */}
+      <DetalleSesionesTratamientoModal tratamiento={detalleSesiones} onClose={() => setDetalleSesiones(null)} />
 
       {/* ── Modal cobros ───────────────────────────────────────────────── */}
       {cotizacion?.estado === 'aceptada' && (
@@ -1696,6 +1693,36 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             initialNombre={crearPacienteNombre}
             compact
           />
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal observaciones de forma de pago ──────────────────────────── */}
+      <Dialog open={!!pagoObsModal} onOpenChange={(open) => !open && setPagoObsModal(null)}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Observaciones de la forma de pago</DialogTitle>
+          </DialogHeader>
+          <Textarea
+            rows={6}
+            className="resize-none text-sm mt-1"
+            placeholder="Referencia de la transacción, banco, últimos dígitos de la tarjeta…"
+            value={pagoObsModal?.texto ?? ''}
+            onChange={(e) => setPagoObsModal((d) => d ? { ...d, texto: e.target.value } : d)}
+            autoFocus
+          />
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPagoObsModal(null)}>Cancelar</Button>
+            <Button
+              onClick={() => {
+                if (pagoObsModal !== null) {
+                  setValue(`formas_pago.${pagoObsModal.idx}.descripcion`, pagoObsModal.texto, { shouldDirty: true })
+                }
+                setPagoObsModal(null)
+              }}
+            >
+              Aplicar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

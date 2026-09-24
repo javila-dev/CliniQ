@@ -127,11 +127,11 @@ export default function RegistroPublicoPage() {
         {/* Top bar: CliniQ izq — logo clínica der */}
         <div className="flex items-center justify-between mb-8">
           <Image
-            src="/imagotipo cliniq.png"
+            src="/brand/cliniq-logo-on-dark.svg"
             alt="CliniQ"
-            width={72}
-            height={24}
-            className="object-contain opacity-55"
+            width={80}
+            height={25}
+            className="h-auto w-[80px] object-contain opacity-55"
           />
           {logoUrl ? (
             <div className="h-11 w-11 rounded-xl bg-white/10 ring-1 ring-white/15 overflow-hidden flex items-center justify-center shadow-lg">

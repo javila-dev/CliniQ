@@ -20,7 +20,7 @@ const PLACEHOLDER: Record<string, string> = {
   profesional: 'profesional',
   sede:        'sede',
   fecha:       'fecha',
-  fuente:      'servicio o duración',
+  fuente:      'procedimiento o duración',
 }
 
 export function SlotPicker({

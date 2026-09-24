@@ -111,6 +111,7 @@ export interface NotaClinica {
   id: string
   historia: string
   cita: string | null
+  cotizacion: string | null
   estado: 'borrador' | 'completada'
   motivo_consulta: string | null   // TabMotivoConsulta
   plan_manejo: string | null       // TabPlanManejo
@@ -150,9 +151,9 @@ export interface ProductoUsado {
 }
 
 export interface GaleriaFoto extends FotoClinica {
-  cita: string
-  cita_fecha: string
-  servicio_nombre: string
+  cita: string | null
+  cita_fecha: string | null
+  servicio_nombre: string | null
 }
 
 export interface GaleriaResponse {

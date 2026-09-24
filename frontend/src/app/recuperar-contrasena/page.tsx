@@ -101,11 +101,11 @@ function RecuperarContrasenaContent() {
       <div className="w-full max-w-sm">
         <div className="flex justify-center mb-8">
           <Image
-            src="/logo cliniq.png"
+            src="/brand/cliniq-logo-horizontal.svg"
             alt="CliniQ"
-            width={120}
+            width={128}
             height={40}
-            className="object-contain"
+            className="h-auto w-[128px] object-contain"
           />
         </div>
 

@@ -76,7 +76,7 @@ export default function RegistroClinicaPage() {
 
         <div className="relative flex flex-col h-full px-10 py-6">
           <div className="flex items-center justify-center">
-            <Image src="/imagotipo cliniq.png" alt="CliniQ" width={350} height={350} className="object-contain brightness-[1.15]" />
+            <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={352} height={110} className="h-auto w-[352px] object-contain" />
           </div>
 
           <div className="flex-1 flex flex-col justify-center mt-6">
@@ -117,7 +117,7 @@ export default function RegistroClinicaPage() {
 
           {/* Mobile logo */}
           <div className="mb-8 lg:hidden">
-            <Image src="/imagotipo cliniq.png" alt="CliniQ" width={100} height={100} className="object-contain" />
+            <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={112} height={35} className="h-auto w-[112px] object-contain" />
           </div>
 
           {submitted ? (

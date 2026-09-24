@@ -56,6 +56,11 @@ export function CambiarProfesionalDialog({ cita, open, onOpenChange }: CambiarPr
             value={profesionalId}
             onValueChange={setProfesionalId}
             sedeId={cita.sede}
+            filtro={{
+              servicioIds: cita.servicio ? [cita.servicio] : undefined,
+              itemCotizacionId: cita.item_cotizacion_id,
+              sesionEjecutadaId: cita.sesion_ejecutada_id,
+            }}
           />
           <p className="text-[11px] text-muted-foreground">Actual: {cita.profesional_nombre}</p>
         </div>

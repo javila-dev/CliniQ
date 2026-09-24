@@ -9,6 +9,7 @@ export interface ConsentimientoInfoItem {
   vigente: boolean
   consentimiento_id: string | null
   archivo_url: string | null
+  requiere_firma_cada_vez: boolean
 }
 
 export interface ConsentimientoInfo {
@@ -64,6 +65,7 @@ export interface Cita {
   duracion_min: number | null
   fecha_inicio_real: string | null
   fecha_fin_real: string | null
+  ultimo_registro_confirmacion?: RegistroConfirmacion | null
   consentimiento_info?: ConsentimientoInfo
   item_cotizacion_id?: string | null
   sesion_ejecutada_id?: string | null
@@ -117,7 +119,8 @@ export interface CambiarEstadoRequest {
 
 export interface RegistroConfirmacion {
   id: string
-  estado_resultante: EstadoCita
+  /** 'no_confirmo': se contactó al paciente y no confirmó (la cita no cambia de estado). */
+  estado_resultante: EstadoCita | 'no_confirmo'
   usuario_nombre: string
   medio: MedioConfirmacion | ''
   nota: string

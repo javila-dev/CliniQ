@@ -59,7 +59,7 @@ export default function PuestaEnMarchaPage() {
     <div className="space-y-8 max-w-5xl mx-auto">
       <PageHeader
         helpSlug="puesta-en-marcha-cargar-pacientes-en-curso"
-        title="Puesta en marcha"
+        title="Migrar pacientes en curso"
         description="Carga tus pacientes que vienen a mitad de un tratamiento: lo que ya pagaron, las sesiones hechas y el saldo pendiente."
         action={
           <Button asChild variant="outline" size="sm">

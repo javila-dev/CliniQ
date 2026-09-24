@@ -26,6 +26,7 @@ import {
   Package,
   Truck,
   ShoppingCart,
+  Layers,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -48,9 +49,10 @@ type NavEntry = NavItem | NavGroup
 // items sin permission se muestran siempre (ej: perfil, no aplica aquí).
 const NAV = {
   dashboard:      { href: '/dashboard',      label: 'Dashboard',       icon: LayoutDashboard, perm: PERM.REPORTES_VER          },
-  atenciones:     { href: '/atenciones',     label: 'Atenciones',      icon: Stethoscope,     perm: PERM.HISTORIA_ESCRIBIR     },
+  atenciones:     { href: '/atenciones',     label: 'Atenciones',      icon: Stethoscope,     perm: PERM.HISTORIA_NOTAS_CREAR  },
   agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER            },
   pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
+  catalogo:       { href: '/catalogo',       label: 'Catálogo',        icon: Layers,          perm: PERM.SERVICIOS_VER         },
   cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER      },
   cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.CARTERA_VER           },
   consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER   },
@@ -76,7 +78,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
   const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
-  const ventasItems: NavItem[]   = [n.cotizaciones, n.campanas].filter(vis)
+  const ventasItems: NavItem[]   = [n.catalogo, n.cotizaciones, n.campanas].filter(vis)
   const insumosItems: NavItem[]  = [n.insumos, n.compras, n.proveedores].filter(vis)
   const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
 
@@ -229,10 +231,10 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
         style={{ background: 'radial-gradient(circle, hsla(334,60%,55%,0.08) 0%, transparent 70%)' }} />
 
       {/* ── Logo ── */}
-      <div className="flex items-center justify-between shrink-0 px-5 pt-5 pb-4">
-        <Image src="/imagotipo cliniq.png" alt="CliniQ" width={120} height={40} className="object-contain brightness-110" />
+      <div className="relative flex items-center justify-center shrink-0 px-5 pt-5 pb-4">
+        <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={128} height={40} className="h-auto w-[128px] object-contain" />
         {onClose && (
-          <button onClick={onClose} className="text-white/30 hover:text-white/70 lg:hidden transition-colors">
+          <button onClick={onClose} className="absolute right-5 text-white/30 hover:text-white/70 lg:hidden transition-colors">
             <X className="h-4.5 w-4.5" />
           </button>
         )}
@@ -412,7 +414,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <button onClick={() => setMobileOpen(true)} className="text-muted-foreground hover:text-foreground">
             <Menu className="h-5 w-5" />
           </button>
-          <Image src="/imagotipo cliniq.png" alt="CliniQ" width={100} height={45} className="object-contain" />
+          <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={112} height={35} className="h-auto w-[112px] object-contain" />
         </header>
 
         <NavigationProgress />

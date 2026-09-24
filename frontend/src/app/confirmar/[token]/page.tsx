@@ -71,7 +71,7 @@ export default function ConfirmarCitaPage({ params }: Props) {
                   Hola <strong>{data.paciente_nombre}</strong>, tu cita ha sido confirmada.
                 </p>
                 <div className="rounded-md bg-muted/50 p-3 text-left space-y-1.5 text-sm">
-                  <p><span className="text-muted-foreground">Servicio:</span> {data.servicio_nombre}</p>
+                  <p><span className="text-muted-foreground">Procedimiento:</span> {data.servicio_nombre}</p>
                   <p><span className="text-muted-foreground">Profesional:</span> {data.profesional_nombre}</p>
                   <p><span className="text-muted-foreground">Fecha:</span> {formatDateTime(data.fecha_inicio)}</p>
                 </div>

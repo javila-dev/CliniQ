@@ -191,7 +191,7 @@ export function TodasLasAtenciones() {
                   <tr className="border-b bg-muted/40">
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Fecha</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Paciente</th>
-                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Tratamiento / Servicio</th>
+                    <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Tratamiento / Procedimiento</th>
                     <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Profesional</th>
                     {hasMultipleSedes && (
                       <th className="text-left px-4 py-2.5 font-medium text-muted-foreground text-xs">Sede</th>

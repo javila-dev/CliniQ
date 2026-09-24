@@ -143,7 +143,7 @@ export default function ProcedimientoDetailPage({ params }: { params: Promise<{ 
     <div className="space-y-6">
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" asChild className="gap-1 text-muted-foreground">
-          <Link href="/configuracion/procedimientos">
+          <Link href="/catalogo?tab=procedimientos">
             <ArrowLeft className="h-4 w-4" />
             Procedimientos
           </Link>
@@ -153,7 +153,7 @@ export default function ProcedimientoDetailPage({ params }: { params: Promise<{ 
       <PageHeader
         helpSlug="configurar-un-procedimiento"
         title={servicio.nombre}
-        backHref="/configuracion/procedimientos"
+        backHref="/catalogo?tab=procedimientos"
         description={
           <div className="flex items-center gap-3 mt-1">
             <span className="flex items-center gap-1 text-sm text-muted-foreground">

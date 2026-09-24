@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 740 232" role="img" aria-labelledby="title desc">
+  <title id="title">CliniQ blanco</title>
+  <desc id="desc">Logotipo horizontal blanco de CliniQ para fondos oscuros.</desc>
+  <g transform="translate(8)">
+    <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M169 165A80 80 0 1 1 190 108" stroke-width="28"/>
+      <path d="M160 182l24 24 47-44" stroke-width="26"/>
+    </g>
+    <g fill="#FFFFFF">
+      <rect x="98" y="65" width="28" height="86" rx="9"/>
+      <rect x="69" y="94" width="86" height="28" rx="9"/>
+    </g>
+  </g>
+  <text x="264" y="177" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="158" font-weight="700" letter-spacing="-4">CliniQ</text>
+</svg>

@@ -1,269 +1,124 @@
 'use client'
 
 import Link from 'next/link'
-import {
-  Settings2, Building2, Stethoscope, Users, ShieldCheck,
-  ClipboardList, ScrollText, Package2, ChevronRight, FileSignature, ClipboardCheck, Receipt, Wallet,
-} from 'lucide-react'
-import { PageHeader } from '@/components/shared/PageHeader'
+import { ChevronRight, CircleDashed } from 'lucide-react'
 import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
+import { HelpButton } from '@/components/ayuda/HelpButton'
+import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
+import { useChecklistConfiguracion } from '@/components/configuracion/ConfiguracionShell'
+import { categoriaDeRuta, categoriasVisibles } from '@/components/configuracion/navegacion'
 
-// ── Definición de secciones ───────────────────────────────────
+// Resumen de Configuración. En escritorio acompaña al menú lateral; en celular
+// el menú se muestra encima (lo pone ConfiguracionShell).
 
-interface ConfigItem {
-  href: string
-  label: string
-  description: string
-  icon: React.ElementType
-  color: string     // color del ícono
-  bg: string        // fondo del ícono
-  perm?: 'clinicas_editar' | 'usuarios_ver' | 'roles_ver' | 'core_ver_log' | 'caja_cajas_gestionar' | 'servicios_ver' | 'sedes_ver' | 'consentimientos_plantillas_ver'
-}
-
-interface ConfigSection {
-  title: string
-  description: string
-  items: ConfigItem[]
-}
-
-const SECTIONS: ConfigSection[] = [
-  {
-    title: 'Tu clínica',
-    description: 'Información general y ubicaciones',
-    items: [
-      {
-        href: '/configuracion/clinica',
-        label: 'General',
-        description: 'Logo, nombre, NIT, teléfono, frecuencia de turnos y recordatorios.',
-        icon: Settings2,
-        color: 'text-rose-500',
-        bg: 'bg-rose-50',
-        perm: 'clinicas_editar',
-      },
-      {
-        href: '/configuracion/sedes',
-        label: 'Sedes',
-        description: 'Sucursales, horarios de atención y contacto.',
-        icon: Building2,
-        color: 'text-violet-500',
-        bg: 'bg-violet-50',
-        perm: 'sedes_ver',
-      },
-    ],
-  },
-  {
-    title: 'Equipo y accesos',
-    description: 'Quién puede hacer qué',
-    items: [
-      {
-        href: '/equipo',
-        label: 'Usuarios',
-        description: 'Crea y gestiona las cuentas del equipo.',
-        icon: Users,
-        color: 'text-amber-500',
-        bg: 'bg-amber-50',
-        perm: 'usuarios_ver',
-      },
-      {
-        href: '/configuracion/roles',
-        label: 'Roles y permisos',
-        description: 'Define roles personalizados y sus privilegios.',
-        icon: ShieldCheck,
-        color: 'text-sky-500',
-        bg: 'bg-sky-50',
-        perm: 'roles_ver',
-      },
-      {
-        href: '/configuracion/log-acciones',
-        label: 'Log de acciones',
-        description: 'Historial auditable de quién hizo qué y cuándo en el sistema.',
-        icon: ClipboardCheck,
-        color: 'text-slate-500',
-        bg: 'bg-slate-50',
-        perm: 'core_ver_log',
-      },
-    ],
-  },
-  {
-    title: 'Catálogo de servicios',
-    description: 'Qué ofreces y cómo lo agrupas',
-    items: [
-      {
-        href: '/configuracion/procedimientos',
-        label: 'Procedimientos',
-        description: 'Unidades clínicas: duración, protocolo de pasos y consentimientos.',
-        icon: Stethoscope,
-        color: 'text-emerald-600',
-        bg: 'bg-emerald-50',
-        perm: 'servicios_ver',
-      },
-      {
-        href: '/configuracion/tratamientos',
-        label: 'Tratamientos (Protocolos)',
-        description: 'Planes que agrupan procedimientos con precio estimado.',
-        icon: Package2,
-        color: 'text-cyan-600',
-        bg: 'bg-cyan-50',
-        perm: 'servicios_ver',
-      },
-    ],
-  },
-  {
-    title: 'Consentimientos y documentos',
-    description: 'Firmas electrónicas de pacientes',
-    items: [
-      {
-        href: '/configuracion/consentimientos',
-        label: 'Consentimientos informados',
-        description: 'Sube PDFs, mapea campos de firma y asócialos a procedimientos.',
-        icon: FileSignature,
-        color: 'text-indigo-500',
-        bg: 'bg-indigo-50',
-        perm: 'consentimientos_plantillas_ver',
-      },
-      {
-        href: '/configuracion/cartera',
-        label: 'Otros documentos',
-        description: 'Configuración de documentos adicionales que maneja la clínica. Por ahora: aceptación y compromiso de pago al aceptar una cotización.',
-        icon: Receipt,
-        color: 'text-rose-500',
-        bg: 'bg-rose-50',
-        perm: 'clinicas_editar',
-      },
-    ],
-  },
-  {
-    title: 'Historia clínica',
-    description: 'Plantillas, secciones activas y documentos',
-    items: [
-      {
-        href: '/configuracion/historia-clinica',
-        label: 'Historia clínica',
-        description: 'Activa o desactiva las pestañas de la historia de cada paciente.',
-        icon: ClipboardList,
-        color: 'text-teal-600',
-        bg: 'bg-teal-50',
-        perm: 'clinicas_editar',
-      },
-      {
-        href: '/configuracion/atencion',
-        label: 'Pantalla de atención',
-        description: 'Elige qué pestañas ve el profesional durante una atención.',
-        icon: Stethoscope,
-        color: 'text-rose-500',
-        bg: 'bg-rose-50',
-        perm: 'clinicas_editar',
-      },
-      {
-        href: '/configuracion/plantillas-ordenes',
-        label: 'Plantillas de órdenes',
-        description: 'Plantillas reutilizables para órdenes médicas, laboratorios e imágenes.',
-        icon: ScrollText,
-        color: 'text-orange-500',
-        bg: 'bg-orange-50',
-        perm: 'clinicas_editar',
-      },
-    ],
-  },
-  {
-    title: 'Finanzas',
-    description: 'Caja física y categorías de gasto',
-    items: [
-      {
-        href: '/configuracion/cajas',
-        label: 'Cajas y categorías',
-        description: 'Fondo inicial y responsable de la caja de cada sede, y el catálogo de categorías de gasto.',
-        icon: Wallet,
-        color: 'text-green-600',
-        bg: 'bg-green-50',
-        perm: 'caja_cajas_gestionar',
-      },
-    ],
-  },
-]
-
-// ── Componentes ───────────────────────────────────────────────
-
-function ConfigCard({ item }: { item: ConfigItem }) {
+function Bloque({ titulo, extra, children }: { titulo: string; extra?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <Link
-      href={item.href}
-      className="group flex items-start gap-3.5 rounded-xl border border-gray-100 bg-white p-4
-                 hover:border-gray-200 hover:shadow-sm transition-all duration-150"
-    >
-      <div className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-lg', item.bg)}>
-        <item.icon className={cn('h-4.5 w-4.5', item.color)} />
+    <section className="overflow-hidden rounded-xl border bg-white">
+      <div className="flex items-center justify-between gap-2 border-b px-4 py-3 text-[13.5px] font-semibold">
+        {titulo}
+        {extra}
       </div>
-      <div className="flex-1 min-w-0 pt-0.5">
-        <p className="text-sm font-semibold text-gray-900 leading-tight">{item.label}</p>
-        <p className="text-xs text-gray-400 mt-0.5 leading-snug">{item.description}</p>
-      </div>
-      <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-gray-400 shrink-0 mt-1 transition-colors" />
-    </Link>
+      <div className="divide-y divide-border/60">{children}</div>
+    </section>
   )
 }
-
-function ConfigSection({ section, visibleHrefs }: { section: ConfigSection; visibleHrefs: Set<string> }) {
-  const visibleItems = section.items.filter((item) => visibleHrefs.has(item.href))
-  if (visibleItems.length === 0) return null
-
-  return (
-    <div className="space-y-3">
-      {/* Section header */}
-      <div className="flex items-baseline gap-2.5">
-        <h2 className="text-sm font-semibold text-gray-800">{section.title}</h2>
-        <span className="text-xs text-gray-400">{section.description}</span>
-      </div>
-
-      {/* Cards en grid: 1 col móvil, 2 col sm+, 3 col si hay 3 items */}
-      <div className={cn(
-        'grid gap-2.5',
-        visibleItems.length >= 3
-          ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-          : 'grid-cols-1 sm:grid-cols-2',
-      )}>
-        {visibleItems.map((item) => (
-          <ConfigCard key={item.href} item={item} />
-        ))}
-      </div>
-    </div>
-  )
-}
-
-// ── Page ─────────────────────────────────────────────────────
 
 export default function ConfiguracionPage() {
   const { user } = useAuthStore()
+  const categorias = categoriasVisibles(user)
+  const checklist = useChecklistConfiguracion()
 
-  const visibleHrefs = new Set(
-    SECTIONS.flatMap((s) => s.items).filter((item) => {
-      if (item.perm === 'usuarios_ver')  return hasPermission(user, PERM.USUARIOS_VER)
-      if (item.perm === 'roles_ver')     return hasPermission(user, PERM.ROLES_VER)
-      if (item.perm === 'core_ver_log')  return hasPermission(user, PERM.CORE_VER_LOG_ACCIONES)
-      if (item.perm === 'caja_cajas_gestionar') return hasPermission(user, PERM.CAJA_CAJAS_GESTIONAR)
-      if (item.perm === 'servicios_ver')  return hasPermission(user, PERM.SERVICIOS_VER)
-      if (item.perm === 'sedes_ver')      return hasPermission(user, PERM.SEDES_VER)
-      if (item.perm === 'consentimientos_plantillas_ver') return hasPermission(user, PERM.CONSENTIMIENTOS_PLANTILLAS_VER)
-      return hasPermission(user, PERM.CLINICAS_EDITAR)
-    }).map((item) => item.href)
-  )
+  const porRevisar = (checklist?.items ?? [])
+    .filter((i) => !i.completado && !i.omitido)
+    .sort((a, b) => Number(b.requerido) - Number(a.requerido))
+  const listos = (checklist?.items ?? []).filter((i) => i.completado && i.resumen)
+  const faltan = checklist ? checklist.total - checklist.completados : 0
+  const pct = checklist?.total ? Math.round((checklist.completados / checklist.total) * 100) : 0
 
   return (
-    <div className="space-y-8 max-w-5xl mx-auto">
-      <PageHeader
-        helpSlug="checklist-de-configuracion-inicial"
-        title="Configuración"
-        description="Administra los parámetros de tu clínica."
-      />
+    <div className="max-w-4xl space-y-[22px]">
+      <div>
+        <div className="flex items-center gap-1.5">
+          <h1 className="text-[22px] font-semibold tracking-tight">Resumen de tu clínica</h1>
+          <HelpButton slug="checklist-de-configuracion-inicial" />
+        </div>
+        <p className="mt-1 max-w-[62ch] text-sm text-muted-foreground">
+          {checklist
+            ? 'Lo que falta para dejar la clínica lista, y el estado de lo que ya está.'
+            : 'Elige una categoría para ver y cambiar sus ajustes.'}
+        </p>
+      </div>
 
       <PuestaEnMarchaBanner dismissible={false} />
 
-      {SECTIONS.map((section) => (
-        <ConfigSection key={section.title} section={section} visibleHrefs={visibleHrefs} />
-      ))}
+      {checklist && (
+        <div className="grid gap-3 md:grid-cols-2">
+          <Bloque
+            titulo="Puesta en marcha"
+            extra={
+              <span className={cn(
+                'rounded-full px-2.5 py-0.5 text-[11.5px] font-medium',
+                checklist.todo_listo ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700',
+              )}>
+                {checklist.todo_listo ? 'Lista' : `${checklist.completados} de ${checklist.total}`}
+              </span>
+            }
+          >
+            <div className="flex items-center gap-4 px-4 py-3.5">
+              <div className="min-w-0 flex-1">
+                <p className="text-[28px] font-semibold leading-tight tracking-tight tabular-nums">
+                  {pct}<span className="text-sm font-normal text-muted-foreground">%</span>
+                </p>
+                <p className="text-[12.5px] text-muted-foreground">
+                  {checklist.todo_listo
+                    ? 'Tu clínica está lista para agendar y atender.'
+                    : `${faltan === 1 ? 'Falta 1 paso' : `Faltan ${faltan} pasos`} para agendar y atender sin tropiezos.`}
+                </p>
+              </div>
+              <Button asChild size="sm" variant={checklist.todo_listo ? 'outline' : 'default'}>
+                <Link href="/preparar-clinica">{checklist.todo_listo ? 'Ver pasos' : 'Continuar'}</Link>
+              </Button>
+            </div>
+          </Bloque>
+
+          {listos.length > 0 && (
+            <Bloque titulo="Resumen">
+              {listos.slice(0, 3).map((item) => (
+                <div key={item.key} className="px-4 py-3.5">
+                  <p className="text-sm font-medium">{item.label}</p>
+                  <p className="text-[12.5px] text-muted-foreground">{item.resumen}</p>
+                </div>
+              ))}
+            </Bloque>
+          )}
+        </div>
+      )}
+
+      {porRevisar.length > 0 && (
+        <Bloque titulo="Te falta revisar">
+          {porRevisar.map((item) => {
+            const Icono = categoriaDeRuta(categorias, item.href.split('?')[0])?.icon ?? CircleDashed
+            return (
+              <Link key={item.key} href={item.href} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/50">
+                <Icono className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{item.label}</span>
+                  <span className="block text-[12.5px] text-muted-foreground">{item.por_que}</span>
+                </span>
+                {item.requerido && (
+                  <span className="inline-flex items-center gap-1.5 font-mono text-[10.5px] text-muted-foreground">
+                    <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                    Pendiente
+                  </span>
+                )}
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+              </Link>
+            )
+          })}
+        </Bloque>
+      )}
     </div>
   )
 }

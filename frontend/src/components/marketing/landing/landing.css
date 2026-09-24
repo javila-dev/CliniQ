@@ -1,0 +1,176 @@
+/* CliniQ landing v3 — negro-ciruela, magenta como única luz. */
+
+.lv3 {
+  --lv3-bg: #07040a;
+  --lv3-sheet: #0b0710;
+  --lv3-surface: #120b18;
+  --lv3-surface-2: #1a1022;
+  --lv3-line: rgb(255 255 255 / 0.09);
+  --lv3-text: #f7f2f5;
+  --lv3-muted: rgb(247 242 245 / 0.66);
+  --lv3-faint: rgb(247 242 245 / 0.58);
+  --lv3-magenta: #d9226f;
+  --lv3-lit: #ff6aa9;
+  --lv3-ok: #34d399;
+  --lv3-warn: #fbbf24;
+
+  font-family: var(--font-lv3-sans), ui-sans-serif, system-ui, sans-serif;
+  color: var(--lv3-text);
+  background: var(--lv3-bg);
+  color-scheme: dark;
+  -webkit-font-smoothing: antialiased;
+  scrollbar-color: #2b1a35 transparent;
+}
+
+body:has(.lv3) {
+  background: #07040a;
+}
+
+.lv3-display {
+  font-family: var(--font-lv3-display), Georgia, serif;
+  font-weight: 400;
+  word-spacing: 0.03em;
+}
+
+.lv3-mono {
+  font-family: var(--font-lv3-mono), ui-monospace, SFMono-Regular, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.lv3 ::selection {
+  background: rgb(217 34 111 / 0.5);
+  color: #fff;
+}
+
+.lv3 :focus-visible {
+  outline: 2px solid var(--lv3-lit);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.lv3 summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Grano fino: rompe el degradado plano del fondo. */
+.lv3-grain::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0.07;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .6 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Estado final de cada pieza del teatro: es lo que ve quien pide menos movimiento. */
+.lv3-t-typing { opacity: 0; }
+.lv3-t-pill-a { opacity: 0; }
+.lv3-t-cuota-a { opacity: 0; }
+.lv3-t-pip { background-color: var(--lv3-lit); }
+.lv3-t-sign { stroke-dasharray: 1 2; stroke-dashoffset: 0; }
+.lv3-d { opacity: 1; }
+.lv3-otp-ok { opacity: 1; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .lv3-rise { animation: lv3-rise 900ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+  .lv3-rise-1 { animation-delay: 90ms; }
+  .lv3-rise-2 { animation-delay: 190ms; }
+  .lv3-rise-3 { animation-delay: 300ms; }
+
+  .lv3-t-typing { animation: lv3-typing 14s linear infinite both; }
+  .lv3-t-in { animation: lv3-in 14s cubic-bezier(0.22, 1, 0.36, 1) infinite both; }
+  .lv3-t-reply { animation: lv3-reply 14s cubic-bezier(0.22, 1, 0.36, 1) infinite both; }
+  .lv3-t-pill-a { animation: lv3-pill-a 14s linear infinite both; }
+  .lv3-t-pill-b { animation: lv3-pill-b 14s linear infinite both; }
+  .lv3-t-row { animation: lv3-row 14s linear infinite both; }
+  .lv3-t-sign { animation: lv3-sign 14s cubic-bezier(0.45, 0, 0.2, 1) infinite both; }
+  .lv3-t-stamp { animation: lv3-stamp 14s cubic-bezier(0.22, 1, 0.36, 1) infinite both; }
+  .lv3-t-cuota-a { animation: lv3-cuota-a 14s linear infinite both; }
+  .lv3-t-cuota-b { animation: lv3-cuota-b 14s linear infinite both; }
+  .lv3-t-pip { animation: lv3-pip 14s linear infinite both; }
+
+  .lv3-d1 { animation: lv3-d1 9s linear infinite both; }
+  .lv3-d2 { animation: lv3-d2 9s linear infinite both; }
+  .lv3-d3 { animation: lv3-d3 9s linear infinite both; }
+  .lv3-d4 { animation: lv3-d4 9s linear infinite both; }
+  .lv3-otp-ok { animation: lv3-otp-ok 9s linear infinite both; }
+}
+
+@keyframes lv3-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes lv3-typing {
+  0% { opacity: 0; }
+  3%, 11% { opacity: 1; }
+  12%, 100% { opacity: 0; }
+}
+
+@keyframes lv3-in {
+  0%, 11% { opacity: 0; transform: translateY(8px); }
+  14%, 95% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes lv3-reply {
+  0%, 25% { opacity: 0; transform: translateY(8px); }
+  28%, 95% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes lv3-pill-a {
+  0%, 31% { opacity: 1; }
+  33%, 97% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes lv3-pill-b {
+  0%, 31% { opacity: 0; }
+  33%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes lv3-row {
+  0%, 31% { background-color: transparent; }
+  34% { background-color: rgb(217 34 111 / 0.14); }
+  50%, 100% { background-color: transparent; }
+}
+
+@keyframes lv3-sign {
+  0%, 46% { stroke-dashoffset: 1.05; }
+  62%, 95% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 1.05; }
+}
+
+@keyframes lv3-stamp {
+  0%, 63% { opacity: 0; transform: scale(0.96); }
+  67%, 95% { opacity: 1; transform: none; }
+  100% { opacity: 0; }
+}
+
+@keyframes lv3-cuota-a {
+  0%, 77% { opacity: 1; }
+  79%, 97% { opacity: 0; }
+  100% { opacity: 1; }
+}
+
+@keyframes lv3-cuota-b {
+  0%, 77% { opacity: 0; }
+  79%, 95% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes lv3-pip {
+  0%, 77% { background-color: rgb(255 255 255 / 0.12); }
+  80%, 95% { background-color: var(--lv3-lit); }
+  100% { background-color: rgb(255 255 255 / 0.12); }
+}
+
+@keyframes lv3-d1 { 0%, 4% { opacity: 0; } 8%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lv3-d2 { 0%, 16% { opacity: 0; } 20%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lv3-d3 { 0%, 28% { opacity: 0; } 32%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lv3-d4 { 0%, 40% { opacity: 0; } 44%, 92% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lv3-otp-ok { 0%, 56% { opacity: 0; } 62%, 92% { opacity: 1; } 100% { opacity: 0; } }

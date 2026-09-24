@@ -95,7 +95,7 @@ export interface UpdateColaboradorRequest {
 
 export interface ColaboradorProfesional {
   id: string                       // user.id del profesional — usado en citas (campo profesional) y slots
-  colaborador_id: string           // UUID del perfil laboral (Colaborador) — usado en horarios y bloqueos
+  colaborador_id: string | null    // UUID del perfil laboral; null para usuarios legados que aún no tienen perfil
   nombre_completo: string
   first_name?: string
   last_name?: string

@@ -16,6 +16,8 @@ interface ConsentimientoFirmaContentProps {
   templateNombre: string
   consentimientoId?: string | null
   vigenciaMeses?: number
+  /** Cita en curso: se enlaza a la firma para procedimientos que exigen firmar en cada ejecución. */
+  citaId?: string | null
   onCompleted?: () => void
   onInicioFirma?: () => void
   onFinFirma?: () => void
@@ -32,6 +34,7 @@ export function ConsentimientoFirmaContent({
   templateNombre,
   consentimientoId,
   vigenciaMeses,
+  citaId,
   onCompleted,
   onInicioFirma,
   onFinFirma,
@@ -63,6 +66,7 @@ export function ConsentimientoFirmaContent({
         documenso_template_token: token,
         documenso_template_nombre: templateNombre,
         ...(vigenciaMeses !== undefined && { vigencia_meses: vigenciaMeses }),
+        ...(citaId && { cita: citaId }),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })

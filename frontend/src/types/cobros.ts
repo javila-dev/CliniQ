@@ -1,12 +1,12 @@
 export type EstadoCobro = 'pendiente' | 'pagado_parcial' | 'pagado' | 'anulado'
 export type TipoItemCobro = 'servicio' | 'insumo_consumo' | 'producto_retail'
-export type MedioPago = 'efectivo' | 'tarjeta_debito' | 'tarjeta_credito' | 'transferencia' | 'otro'
 export type OrigenCobro = 'cita' | 'cotizacion' | 'libre'
 
 export interface PagoRecibido {
   id: string
   cobro: string
-  medio_pago: MedioPago
+  medio_pago: string             // id de FormaDePago
+  medio_pago_nombre?: string
   valor: string
   referencia: string
   fecha: string
@@ -80,7 +80,7 @@ export interface AgregarItemRequest {
 }
 
 export interface RegistrarPagoRequest {
-  medio_pago: MedioPago
+  medio_pago: string             // id de FormaDePago
   valor: string
   referencia?: string
 }

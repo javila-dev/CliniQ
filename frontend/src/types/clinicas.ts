@@ -43,6 +43,7 @@ export interface Clinica {
   whatsapp_habilitado?: boolean
   whatsapp_uso?: WhatsAppUso
   modo_puesta_en_marcha?: boolean
+  filtrar_profesionales_por_procedimiento?: boolean
   created_at: string
   updated_at: string
 }
@@ -52,6 +53,7 @@ export interface UpdateClinicaRequest {
   nit?: string
   telefono?: string
   slot_interval_min?: number
+  filtrar_profesionales_por_procedimiento?: boolean
   activo?: boolean
   tab_personal_requerido?: boolean
   tab_salud_requerido?: boolean
@@ -138,6 +140,7 @@ export interface ServicioConsentimientoRequerido {
   template_nombre: string
   orden: number
   activo: boolean
+  requiere_firma_cada_vez: boolean
 }
 
 export interface Servicio {
@@ -217,6 +220,7 @@ export interface TratamientoCatalogo {
   precio_estimado: string | null  // Decimal como string (DRF)
   descuento_maximo_pct?: string | null // tope de descuento en cotizaciones sobre precio_estimado
   total_sesiones: number          // sum(tipo.cantidad) donde es_compromiso=true
+  pacientes_con_tratamiento?: number  // pacientes que ya lo tienen; cambiar sus sesiones altera las que les quedan
   activo: boolean
   tipos_sesion: TipoSesion[]
   created_at: string
@@ -230,6 +234,8 @@ export interface TipoSesionProcedimientoInput {
 }
 
 export interface CreateTipoSesionRequest {
+  /** Id del bloque si ya existe: se envía para actualizarlo en lugar de recrearlo. */
+  id?: string
   nombre: string
   cantidad: number
   orden: number

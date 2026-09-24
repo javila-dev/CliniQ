@@ -1,8 +1,19 @@
 export type EstadoCuota = 'pagada' | 'pendiente' | 'vencida' | 'parcial'
 
+export interface AbonoCuota {
+  id: string
+  valor: string
+  fecha: string
+  medio_pago_nombre: string
+  observaciones: string
+  registrado_por_nombre: string | null
+  created_at: string
+}
+
 export interface CuotaCartera {
   id: string
-  tipo: string
+  tipo: string             // id de FormaDePago (plan declarado en la cotización)
+  tipo_nombre?: string
   descripcion: string
   valor_esperado: string   // Decimal como string
   fecha_esperada: string | null
@@ -11,10 +22,12 @@ export interface CuotaCartera {
   saldo_pendiente: string  // valor_esperado - abonos
   vencida: boolean
   fecha_pago: string | null
-  medio_pago: string
+  medio_pago: string | null  // id de FormaDePago (medio real del pago); null hasta que se registre
+  medio_pago_nombre?: string | null
   observaciones: string
   anulada?: boolean
   acuerdo_numero?: number | null   // != null → cuota del plan de un acuerdo de pago
+  abonos?: AbonoCuota[]            // solo en el detalle; vacío para pagos anteriores al historial
 }
 
 export type AcuerdoEstado = 'pendiente_firma' | 'vigente' | 'anulado' | 'requiere_revision'
@@ -73,6 +86,26 @@ export interface Cartera {
   cuotas?: CuotaCartera[]
   acuerdos?: AcuerdoPago[]
   acuerdo_pendiente?: AcuerdoPago | null
+}
+
+/** Cartera agrupada por paciente: la suma de todas sus cotizaciones y cada una adentro. */
+export interface CarteraPaciente {
+  paciente_id: string
+  paciente_nombre: string
+  paciente_documento: string
+  total: string
+  total_pagado: string
+  saldo_pendiente: string
+  cuotas_total: number
+  cuotas_pagadas: number
+  proxima_cuota_fecha: string | null
+  proxima_cuota_valor: string | null
+  en_mora: boolean
+  mora_dias: number
+  mora_valor: string
+  es_migracion: boolean
+  carteras_count: number
+  carteras: Cartera[]
 }
 
 export interface CuotaVencida {

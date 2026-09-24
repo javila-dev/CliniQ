@@ -8,11 +8,18 @@ export type SlotsParams =
   | (SlotsBase & { item_cotizacion_id: string })
   | (SlotsBase & { duracion_min: number })
 
+export interface CitasSinConfirmar {
+  total: number
+  fecha_desde: string | null
+  fecha_hasta: string | null
+}
+
 export interface CitasFilter {
   estado?: string
   estado__in?: string
   estado_confirmacion?: string
   profesional?: string
+  profesional__in?: string
   sede?: string
   paciente?: string
   fecha_inicio__date?: string
@@ -41,6 +48,10 @@ export const agendaApi = {
       const res = await apiClient.get<Cita[]>('/agenda/citas/hoy/')
       return res.data
     },
+    sinConfirmarProximoDiaHabil: async (): Promise<CitasSinConfirmar> => {
+      const res = await apiClient.get<CitasSinConfirmar>('/agenda/citas/sin_confirmar_proximo_dia_habil/')
+      return res.data
+    },
     create: async (data: CreateCitaRequest): Promise<Cita> => {
       const res = await apiClient.post<Cita>('/agenda/citas/', data)
       return res.data
@@ -58,6 +69,10 @@ export const agendaApi = {
     },
     confirmarManual: async (id: string, data?: { medio?: string; nota?: string }): Promise<Cita> => {
       const res = await apiClient.patch<Cita>(`/agenda/citas/${id}/confirmar_manual/`, data ?? {})
+      return res.data
+    },
+    noConfirmo: async (id: string, data: { medio?: string; nota: string }): Promise<Cita> => {
+      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/no_confirmo/`, data)
       return res.data
     },
     registrosConfirmacion: async (id: string): Promise<RegistroConfirmacion[]> => {

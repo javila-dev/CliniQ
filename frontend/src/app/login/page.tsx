@@ -158,11 +158,11 @@ export default function LoginPage() {
           {/* Logo */}
           <div className="flex items-center justify-center">
             <Image
-              src="/imagotipo cliniq.png"
+              src="/brand/cliniq-logo-on-dark.svg"
               alt="CliniQ"
-              width={350}
-              height={350}
-              className="object-contain brightness-[1.15]"
+              width={352}
+              height={110}
+              className="h-auto w-[352px] object-contain"
             />
           </div>
 
@@ -223,8 +223,8 @@ export default function LoginPage() {
             <div className="w-full shrink-0 px-7 pb-2">
 
               {/* Mobile logo */}
-              <div className="mb-8 lg:hidden">
-                <Image src="/imagotipo cliniq.png" alt="CliniQ" width={100} height={100} className="object-contain" />
+              <div className="mb-8 flex justify-center lg:hidden">
+                <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={160} height={50} className="h-auto w-[160px] object-contain" />
               </div>
 
               <div className="mb-8">
@@ -326,8 +326,8 @@ export default function LoginPage() {
             <div className="w-full shrink-0 px-7 pb-2">
 
               {/* Mobile logo */}
-              <div className="mb-8 lg:hidden">
-                <Image src="/imagotipo cliniq.png" alt="CliniQ" width={100} height={100} className="object-contain" />
+              <div className="mb-8 flex justify-center lg:hidden">
+                <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={160} height={50} className="h-auto w-[160px] object-contain" />
               </div>
 
               {recoverySent ? (

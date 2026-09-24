@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, Check, Search, Plus, Trash2, Pencil, Loader2, CheckCircle2,
@@ -10,6 +10,7 @@ import { pacientesApi } from '@/lib/api/pacientes'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useFormasPago } from '@/hooks/useFormasPago'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from '@/components/ui/dialog'
@@ -73,6 +74,8 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const cerrar = () => { setOpen(false); onClose() }
 
   const { sedes, defaultSedeId } = useUserSedes()
+  const { formasPago: formasPagoReales } = useFormasPago({ soloMedioReal: true })
+  const { formasPago } = useFormasPago()
 
   const [step, setStep] = useState(0)
   const [sedeId, setSedeId] = useState<string>('')
@@ -97,7 +100,12 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const [numLibre, setNumLibre] = useState('6')
   const [precio, setPrecio] = useState('')
   const [valorPagado, setValorPagado] = useState('')
+  const [medioPagoInicial, setMedioPagoInicial] = useState('')
   const [fechaInicio, setFechaInicio] = useState('')
+
+  useEffect(() => {
+    if (!medioPagoInicial && formasPagoReales.length > 0) setMedioPagoInicial(formasPagoReales[0].id)
+  }, [formasPagoReales, medioPagoInicial])
 
   const { data: tratamientos } = useQuery({
     queryKey: ['tratamientos-activos'],
@@ -163,6 +171,10 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   // ── paso 5: plan de pago ──────────────────────────────────
   const [plan, setPlan] = useState<CuotaPlanInput[]>([])
   const [nota, setNota] = useState('')
+  const tipoPlanPorDefecto = useMemo(
+    () => formasPago.find((f) => f.tipo_base === 'transferencia')?.id ?? formasPago[0]?.id ?? '',
+    [formasPago],
+  )
 
   const total = Number(precio) || 0
   const pagado = Number(valorPagado) || 0
@@ -186,7 +198,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
         },
         sesiones_realizadas: filas.filter((f) => f.done).map((f) => ({ nombre: f.nombre })),
         pagos: pagado > 0
-          ? [{ valor: pagado.toFixed(2), medio_pago: 'otro' as const, fecha: today() }]
+          ? [{ valor: pagado.toFixed(2), medio_pago: medioPagoInicial, fecha: today() }]
           : [],
         plan_saldo: saldo > 0 ? plan.map((c) => ({ ...c, valor_esperado: (Number(c.valor_esperado) || 0).toFixed(2) })) : [],
         mediciones_historicas: medidas,
@@ -207,7 +219,8 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
 
   const puedeAvanzar = [
     !!pacienteId && !!sede,
-    (tipo === 'tratamiento' ? (!!tratamientoId && !!tratSel) : !!descripcion.trim()) && total > 0 && pagado <= total,
+    (tipo === 'tratamiento' ? (!!tratamientoId && !!tratSel) : !!descripcion.trim())
+      && total > 0 && pagado <= total && (pagado <= 0 || !!medioPagoInicial),
     true,
     true,
     planCuadra,
@@ -341,6 +354,20 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
                 </div>
               </div>
 
+              {pagado > 0 && (
+                <div className="space-y-1.5 sm:max-w-[240px]">
+                  <Label>Forma de pago de lo ya pagado</Label>
+                  <Select value={medioPagoInicial} onValueChange={setMedioPagoInicial}>
+                    <SelectTrigger><SelectValue placeholder="Seleccionar…" /></SelectTrigger>
+                    <SelectContent>
+                      {formasPagoReales.map((f) => (
+                        <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {total > 0 && (
                 <p className={cn('text-[11px]', pagado > total ? 'text-rose-600' : 'text-muted-foreground')}>
                   {pagado > total
@@ -460,12 +487,18 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
                 <div className="space-y-2">
                   <div className="flex items-center justify-between">
                     <Label>Cuotas pendientes (aún no pagadas)</Label>
-                    <Button size="sm" variant="ghost" onClick={() => setPlan((p) => [...p, { valor_esperado: '', fecha_esperada: '', tipo: 'efectivo' }])}>
+                    <Button size="sm" variant="ghost" onClick={() => setPlan((p) => [...p, { valor_esperado: '', fecha_esperada: '', tipo: tipoPlanPorDefecto }])}>
                       <Plus className="h-4 w-4 mr-1" />Cuota
                     </Button>
                   </div>
                   {plan.map((c, i) => (
                     <div key={i} className="flex gap-2">
+                      <Select value={c.tipo} onValueChange={(v) => setPlan((x) => x.map((y, j) => j === i ? { ...y, tipo: v } : y))}>
+                        <SelectTrigger className="h-9 w-[150px] shrink-0"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          {formasPago.map((f) => <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                       <MoneyInput placeholder="Valor" value={c.valor_esperado}
                         onChange={(d) => setPlan((x) => x.map((y, j) => j === i ? { ...y, valor_esperado: d } : y))} className="h-9" />
                       <Input type="date" value={c.fecha_esperada ?? ''}

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { useQuery, keepPreviousData } from '@tanstack/react-query'
@@ -26,15 +26,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn, formatDate } from '@/lib/utils'
-import type { Cartera } from '@/types/cartera'
+import type { CarteraPaciente } from '@/types/cartera'
 
-// Columnas ordenables → clave `ordering` del backend.
+// Columnas ordenables → clave `ordering` del listado por paciente.
 const SORT_COLS = {
-  paciente: 'paciente__apellidos',
+  paciente: 'paciente',
   total: 'total',
-  cobrado: 'total_cobrado',
+  cobrado: 'cobrado',
   saldo: 'saldo',
-  prox: 'proxima_cuota_fecha',
+  prox: 'prox',
 } as const
 type SortCol = keyof typeof SORT_COLS
 
@@ -230,6 +230,65 @@ function ResumenCard({
   )
 }
 
+// ── Celdas compartidas entre la fila del paciente y la de cada cotización ──
+
+type FilaMontos = Pick<CarteraPaciente, 'saldo_pendiente' | 'en_mora' | 'mora_dias' | 'mora_valor' | 'proxima_cuota_fecha' | 'proxima_cuota_valor'>
+
+function LinkCotizacion({ id }: { id: string }) {
+  return (
+    <Link
+      href={`/cotizaciones/${id}`}
+      className="inline-flex items-center gap-1 text-xs text-primary hover:underline font-mono"
+      onClick={(e) => e.stopPropagation()}
+    >
+      #{id.slice(0, 8).toUpperCase()}
+      <ExternalLink className="h-3 w-3" />
+    </Link>
+  )
+}
+
+function Saldo({ fila }: { fila: FilaMontos }) {
+  if (Number(fila.saldo_pendiente) <= 0) {
+    return <span className="text-emerald-600 text-xs font-medium">Al día</span>
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={fila.en_mora ? 'text-rose-600 font-semibold' : 'text-amber-600 font-medium'}>
+        {formatCOP(fila.saldo_pendiente)}
+      </span>
+      {fila.en_mora && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 text-rose-700 px-1 py-0.5 text-[10px] font-semibold leading-none">
+              <AlertTriangle className="h-3 w-3" />
+              {fila.mora_dias}d
+            </span>
+          </TooltipTrigger>
+          <TooltipContent side="top">
+            En mora · {fila.mora_dias} día{fila.mora_dias !== 1 ? 's' : ''} · {formatCOP(fila.mora_valor)}
+          </TooltipContent>
+        </Tooltip>
+      )}
+    </span>
+  )
+}
+
+function ProximoPago({ fila }: { fila: FilaMontos }) {
+  if (!fila.proxima_cuota_fecha && !fila.proxima_cuota_valor) {
+    return <span className="text-muted-foreground">—</span>
+  }
+  return (
+    <>
+      <span className={fila.en_mora ? 'text-rose-600 font-medium' : 'text-muted-foreground'}>
+        {fila.proxima_cuota_fecha ? formatDate(fila.proxima_cuota_fecha) : 'Sin fecha'}
+      </span>
+      {fila.proxima_cuota_valor && (
+        <span className="text-foreground font-medium"> · {formatCOP(fila.proxima_cuota_valor)}</span>
+      )}
+    </>
+  )
+}
+
 export default function CarteraPage() {
   const router = useRouter()
   const [modalVencidas, setModalVencidas] = useState(false)
@@ -248,11 +307,19 @@ export default function CarteraPage() {
   })
 
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['cartera', { search: debouncedSearch, page, ordering }],
-    queryFn: () => carteraApi.list({ search: debouncedSearch || undefined, page, ordering }),
+    queryKey: ['cartera', 'por-paciente', { search: debouncedSearch, page, ordering }],
+    queryFn: () => carteraApi.porPaciente({ search: debouncedSearch || undefined, page, ordering, page_size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
   })
-  const carteras = data?.results ?? []
+  const pacientes = data?.results ?? []
+  // Pacientes con varias cotizaciones abiertos para ver cada una.
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const toggleExpandido = (id: string) => setExpandidos((prev) => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    return next
+  })
   const total = data?.count ?? 0
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
@@ -357,7 +424,7 @@ export default function CarteraPage() {
       {/* Tabla */}
       {isLoading ? (
         <LoadingState rows={5} />
-      ) : !carteras.length ? (
+      ) : !pacientes.length ? (
         <Card>
           <CardContent className="py-16 text-center">
             <Wallet className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -387,8 +454,9 @@ export default function CarteraPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b bg-muted/60">
+                <th className="w-8" />
                 {sortTh('paciente', 'Paciente')}
-                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground hidden lg:table-cell">Cotización</th>
+                <th className="text-left px-4 py-2.5 text-xs font-semibold text-muted-foreground hidden lg:table-cell">Cotizaciones</th>
                 {sortTh('total', 'Total')}
                 {sortTh('cobrado', 'Cobrado')}
                 {sortTh('saldo', 'Saldo')}
@@ -397,78 +465,81 @@ export default function CarteraPage() {
               </tr>
             </thead>
             <tbody>
-              {carteras.map((c) => (
-                <tr
-                  key={c.id}
-                  className="border-b border-gray-100 last:border-0 hover:bg-muted/40 cursor-pointer transition-colors"
-                  onClick={() => router.push(`/cartera/${c.id}`)}
-                >
-                  <td className="px-4 py-2">
-                    <span className="font-medium">{c.paciente_nombre}</span>
-                    {c.es_migracion && (
-                      <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                        Datos previos
-                      </span>
-                    )}
-                    {c.profesional_nombre && (
-                      <span className="text-xs text-muted-foreground ml-2 inline-flex items-center gap-1 align-middle">
-                        <User className="h-3 w-3" />{c.profesional_nombre}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 hidden lg:table-cell">
-                    <Link
-                      href={`/cotizaciones/${c.cotizacion_id}`}
-                      className="inline-flex items-center gap-1 text-xs text-primary hover:underline font-mono"
-                      onClick={(e) => e.stopPropagation()}
+              {pacientes.map((p) => {
+                const varias = p.carteras_count > 1
+                const abierto = varias && expandidos.has(p.paciente_id)
+                const unica = p.carteras[0]
+                return (
+                  <Fragment key={p.paciente_id}>
+                    <tr
+                      className={cn(
+                        'border-b border-gray-100 hover:bg-muted/40 cursor-pointer transition-colors',
+                        abierto && 'bg-muted/30',
+                      )}
+                      onClick={() => (varias ? toggleExpandido(p.paciente_id) : router.push(`/cartera/${unica.id}`))}
+                      aria-expanded={varias ? abierto : undefined}
                     >
-                      #{c.cotizacion_id.slice(0, 8).toUpperCase()}
-                      <ExternalLink className="h-3 w-3" />
-                    </Link>
-                  </td>
-                  <td className="px-4 py-2 tabular-nums font-semibold">{formatCOP(c.total)}</td>
-                  <td className="px-4 py-2 tabular-nums text-emerald-600">{formatCOP(c.total_pagado)}</td>
-                  <td className="px-4 py-2 tabular-nums">
-                    {Number(c.saldo_pendiente) > 0 ? (
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={c.en_mora ? 'text-rose-600 font-semibold' : 'text-amber-600 font-medium'}>
-                          {formatCOP(c.saldo_pendiente)}
-                        </span>
-                        {c.en_mora && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="inline-flex items-center gap-0.5 rounded bg-rose-100 text-rose-700 px-1 py-0.5 text-[10px] font-semibold leading-none">
-                                <AlertTriangle className="h-3 w-3" />
-                                {c.mora_dias}d
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent side="top">
-                              En mora · {c.mora_dias} día{c.mora_dias !== 1 ? 's' : ''} · {formatCOP(c.mora_valor)}
-                            </TooltipContent>
-                          </Tooltip>
+                      <td className="pl-3 py-2 text-muted-foreground">
+                        {varias && (
+                          <ChevronRight className={cn('h-4 w-4 transition-transform', abierto && 'rotate-90')} />
                         )}
-                      </span>
-                    ) : (
-                      <span className="text-emerald-600 text-xs font-medium">Al día</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 hidden sm:table-cell text-muted-foreground text-xs tabular-nums">
-                    {c.cuotas_pagadas}/{c.cuotas_total}
-                  </td>
-                  <td className="px-4 py-2 hidden md:table-cell text-xs whitespace-nowrap">
-                    {c.proxima_cuota_fecha || c.proxima_cuota_valor ? (
-                      <>
-                        <span className={c.en_mora ? 'text-rose-600 font-medium' : 'text-muted-foreground'}>
-                          {c.proxima_cuota_fecha ? formatDate(c.proxima_cuota_fecha) : 'Sin fecha'}
-                        </span>
-                        {c.proxima_cuota_valor && (
-                          <span className="text-foreground font-medium"> · {formatCOP(c.proxima_cuota_valor)}</span>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className="font-medium">{p.paciente_nombre}</span>
+                        {p.es_migracion && (
+                          <span className="ml-2 align-middle text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
+                            Datos previos
+                          </span>
                         )}
-                      </>
-                    ) : <span className="text-muted-foreground">—</span>}
-                  </td>
-                </tr>
-              ))}
+                        {p.paciente_documento && (
+                          <span className="block text-xs text-muted-foreground tabular-nums">{p.paciente_documento}</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 hidden lg:table-cell">
+                        {varias ? (
+                          <span className="text-xs text-muted-foreground">{p.carteras_count} cotizaciones</span>
+                        ) : (
+                          <LinkCotizacion id={unica.cotizacion_id} />
+                        )}
+                      </td>
+                      <td className="px-4 py-2 tabular-nums font-semibold">{formatCOP(p.total)}</td>
+                      <td className="px-4 py-2 tabular-nums text-emerald-600">{formatCOP(p.total_pagado)}</td>
+                      <td className="px-4 py-2 tabular-nums"><Saldo fila={p} /></td>
+                      <td className="px-4 py-2 hidden sm:table-cell text-muted-foreground text-xs tabular-nums">
+                        {p.cuotas_pagadas}/{p.cuotas_total}
+                      </td>
+                      <td className="px-4 py-2 hidden md:table-cell text-xs whitespace-nowrap"><ProximoPago fila={p} /></td>
+                    </tr>
+
+                    {abierto && p.carteras.map((c) => (
+                      <tr
+                        key={c.id}
+                        className="border-b border-gray-100 bg-muted/20 hover:bg-muted/50 cursor-pointer transition-colors"
+                        onClick={() => router.push(`/cartera/${c.id}`)}
+                      >
+                        <td />
+                        <td className="py-2 pl-7 pr-4 text-xs text-muted-foreground">
+                          <span className="lg:hidden"><LinkCotizacion id={c.cotizacion_id} /></span>
+                          <span className="hidden lg:inline">Aprobada el {formatDate(c.created_at)}</span>
+                          {c.profesional_nombre && (
+                            <span className="ml-2 inline-flex items-center gap-1 align-middle">
+                              <User className="h-3 w-3" />{c.profesional_nombre}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 hidden lg:table-cell"><LinkCotizacion id={c.cotizacion_id} /></td>
+                        <td className="px-4 py-2 tabular-nums text-xs">{formatCOP(c.total)}</td>
+                        <td className="px-4 py-2 tabular-nums text-xs text-emerald-600">{formatCOP(c.total_pagado)}</td>
+                        <td className="px-4 py-2 tabular-nums text-xs"><Saldo fila={c} /></td>
+                        <td className="px-4 py-2 hidden sm:table-cell text-muted-foreground text-xs tabular-nums">
+                          {c.cuotas_pagadas}/{c.cuotas_total}
+                        </td>
+                        <td className="px-4 py-2 hidden md:table-cell text-xs whitespace-nowrap"><ProximoPago fila={c} /></td>
+                      </tr>
+                    ))}
+                  </Fragment>
+                )
+              })}
             </tbody>
           </table>
         </div>

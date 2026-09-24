@@ -25,6 +25,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { EditarCitaForm } from './EditarCitaForm'
 import { ConfirmacionForm } from './ConfirmacionForm'
+import { ConfirmarCitaDialog } from './ConfirmarCitaDialog'
 import { RegistrosConfirmacion } from './RegistrosConfirmacion'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
 import { CambiarProfesionalDialog } from './CambiarProfesionalDialog'
@@ -57,6 +58,15 @@ const ACCION_BTN_LABEL: Record<string, string> = {
   manual:     'Confirmar asistencia',
 }
 
+const RESULTADO_CONTACTO_LABEL: Record<string, string> = {
+  confirmada:  'Confirmó',
+  cancelada:   'Canceló',
+  no_confirmo: 'No confirmó',
+  no_asistio:  'No asistió',
+  en_espera:   'Llegó',
+  en_curso:    'Inició atención',
+}
+
 function accionKey(a: AccionModal) {
   return a.kind === 'manual' ? 'manual' : a.estado
 }
@@ -72,6 +82,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
   const [showRegistros, setShowRegistros] = useState(false)
   const [wizardCitaId, setWizardCitaId] = useState<string | null>(null)
   const [cambiarProfOpen, setCambiarProfOpen] = useState(false)
+  const [confirmarDialog, setConfirmarDialog] = useState<'estado' | 'manual' | null>(null)
 
   const { data: cita, isLoading } = useQuery({
     queryKey: ['citas', citaId],
@@ -131,8 +142,8 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     },
   })
 
-  const handleOpenModal = (accionesModal: AccionModal[]) => {
-    setSelectedAccion(accionesModal[0] ?? null)
+  const handleOpenModal = (accion: AccionModal) => {
+    setSelectedAccion(accion)
     setMotivo('')
     setModalOpen(true)
   }
@@ -226,6 +237,25 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   )}
                 </div>
 
+                {/* Último contacto: quién confirmó / canceló / no confirmó y cuándo */}
+                {cita.ultimo_registro_confirmacion && (
+                  <div className="px-4 py-2 text-xs text-muted-foreground">
+                    <span className="font-medium text-foreground">
+                      {RESULTADO_CONTACTO_LABEL[cita.ultimo_registro_confirmacion.estado_resultante]
+                        ?? cita.ultimo_registro_confirmacion.estado_resultante}
+                    </span>
+                    {' · '}
+                    {cita.ultimo_registro_confirmacion.usuario_nombre || 'Sin usuario'}
+                    {' · '}
+                    {formatDateTime(cita.ultimo_registro_confirmacion.created_at)}
+                    {cita.ultimo_registro_confirmacion.nota && (
+                      <p className="mt-0.5 italic truncate" title={cita.ultimo_registro_confirmacion.nota}>
+                        “{cita.ultimo_registro_confirmacion.nota}”
+                      </p>
+                    )}
+                  </div>
+                )}
+
                 {/* Paciente + profesional */}
                 <div className="px-4 py-3 space-y-1">
                   <Link
@@ -240,10 +270,10 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   </p>
                 </div>
 
-                {/* Servicio + Sede (2 col) */}
+                {/* Procedimiento + Sede (2 col) */}
                 <div className="grid grid-cols-2 divide-x">
                   <div className="px-4 py-3">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Servicio</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Procedimiento</p>
                     <p className="text-sm font-medium leading-snug uppercase">{cita.servicio_nombre || '—'}</p>
                   </div>
                   <div className="px-4 py-3">
@@ -405,18 +435,28 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
                 // no dar a entender que recepción "inicia la atención".
                 const soloCheckin = tieneEnEspera && !tieneEnCurso
-                const accionModalLabel = accionesModal.length > 0
-                  ? (ACCION_BTN_LABEL[accionKey(accionesModal[0])] ?? 'Registrar contacto')
-                  : ''
                 const puedeCambiarProf =
                   (cita.estado === 'confirmada' || cita.estado === 'en_espera') && hasPermission(user, PERM.AGENDA_EDITAR)
+                // Confirmar (cita pendiente o asistencia de una confirmada) abre el
+                // modal de contacto con sus salidas — confirmó / canceló / no confirmó
+                // / no asistió —, así que esas acciones ya no se repiten en el menú.
+                const accionConfirmacion = accionesModal.find(
+                  (a) => a.kind === 'manual' || a.estado === 'confirmada',
+                )
+                const modoConfirmacion = accionConfirmacion?.kind === 'manual' ? 'manual' : 'estado'
+                const restantes = accionesModal.filter(
+                  (a) => a !== accionConfirmacion
+                    && !(accionConfirmacion && a.kind === 'estado' && (a.estado === 'cancelada' || a.estado === 'no_asistio')),
+                )
                 // Sin otra accion primaria (p. ej. una cita pendiente, donde lo
-                // esperable es confirmarla), la primera accion del modal pasa a
-                // ser el boton principal en vez de quedar escondida dentro de
-                // "Otras acciones" — que de lo contrario aparecia sola, sin
-                // ningun botón rosa junto a ella.
-                const accionModalEsPrimaria = accionesModal.length > 0 && !necesitaAccion
-                const hayOtrasAcciones = (accionesModal.length > 0 && !accionModalEsPrimaria) || tieneRecordatorio || puedeCambiarProf
+                // esperable es confirmarla), confirmar pasa a ser el boton principal
+                // en vez de quedar escondido dentro de "Otras acciones".
+                const confirmacionEsPrimaria = Boolean(accionConfirmacion) && !necesitaAccion
+                const restanteEsPrimaria = !accionConfirmacion && restantes.length > 0 && !necesitaAccion
+                const otrasAccionesModal = restanteEsPrimaria ? restantes.slice(1) : restantes
+                const confirmacionEnMenu = Boolean(accionConfirmacion) && !confirmacionEsPrimaria
+                const hayOtrasAcciones = otrasAccionesModal.length > 0 || confirmacionEnMenu || tieneRecordatorio || puedeCambiarProf
+                const labelConfirmacion = modoConfirmacion === 'manual' ? 'Confirmar asistencia' : 'Confirmar cita'
                 return (
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
@@ -426,10 +466,16 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                           {soloCheckin ? 'Registrar llegada' : 'Iniciar atención'}
                         </Button>
                       )}
-                      {accionModalEsPrimaria && (
-                        <Button size="sm" onClick={() => handleOpenModal(accionesModal)}>
+                      {confirmacionEsPrimaria && (
+                        <Button size="sm" onClick={() => setConfirmarDialog(modoConfirmacion)}>
                           <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
-                          {accionModalLabel}
+                          {labelConfirmacion}
+                        </Button>
+                      )}
+                      {restanteEsPrimaria && (
+                        <Button size="sm" onClick={() => handleOpenModal(restantes[0])}>
+                          <MessageSquare className="h-3.5 w-3.5 mr-1.5" />
+                          {ACCION_BTN_LABEL[accionKey(restantes[0])] ?? 'Registrar contacto'}
                         </Button>
                       )}
                       {hayOtrasAcciones && (
@@ -441,12 +487,18 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
-                            {accionesModal.length > 0 && !accionModalEsPrimaria && (
-                              <DropdownMenuItem onClick={() => handleOpenModal(accionesModal)}>
+                            {confirmacionEnMenu && (
+                              <DropdownMenuItem onClick={() => setConfirmarDialog(modoConfirmacion)}>
                                 <MessageSquare className="h-4 w-4 mr-2" />
-                                {accionModalLabel}
+                                {labelConfirmacion}
                               </DropdownMenuItem>
                             )}
+                            {otrasAccionesModal.map((a) => (
+                              <DropdownMenuItem key={accionKey(a)} onClick={() => handleOpenModal(a)}>
+                                <MessageSquare className="h-4 w-4 mr-2" />
+                                {ACCION_BTN_LABEL[accionKey(a)] ?? 'Registrar contacto'}
+                              </DropdownMenuItem>
+                            ))}
                             {tieneRecordatorio && (
                               <DropdownMenuItem
                                 disabled={enviandoRecordatorio}
@@ -522,84 +574,59 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
       />
     )}
 
-    {/* Modal de registro de contacto */}
+    {cita && (
+      <ConfirmarCitaDialog
+        cita={cita}
+        open={confirmarDialog !== null}
+        onOpenChange={(open) => { if (!open) setConfirmarDialog(null) }}
+        modo={confirmarDialog ?? 'estado'}
+        permiteNoAsistio={transiciones.includes('no_asistio')}
+      />
+    )}
+
+    {/* Modal de registro de contacto — la acción ya viene elegida desde el botón que lo abrió */}
     <Dialog open={modalOpen} onOpenChange={(open) => { if (!open) handleCloseModal() }}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Registrar contacto</DialogTitle>
+          <DialogTitle>
+            {selectedAccion ? (ACCION_LABEL[accionKey(selectedAccion)] ?? 'Registrar contacto') : 'Registrar contacto'}
+          </DialogTitle>
         </DialogHeader>
 
-        {(() => {
-          if (!cita) return null
-          const accionesModal: AccionModal[] = [
-            ...transiciones
-              .filter((e) => e !== 'en_espera' && e !== 'en_curso' && e !== 'completada' && !(e === 'cancelada' && cita.estado === 'en_curso'))
-              .map((estado) => ({ kind: 'estado' as const, estado })),
-            ...(cita.estado === 'confirmada' && !isPasada && cita.estado_confirmacion !== 'confirmado'
-              ? [{ kind: 'manual' as const }]
-              : []),
-          ]
-          return (
-            <div className="space-y-4">
-              {accionesModal.length > 1 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">¿Qué ocurrió?</Label>
-                  <div className="flex flex-col gap-1.5">
-                    {accionesModal.map((a) => {
-                      const key = accionKey(a)
-                      const active = selectedAccion && accionKey(selectedAccion) === key
-                      return (
-                        <button
-                          key={key}
-                          type="button"
-                          onClick={() => { setSelectedAccion(a); setMotivo('') }}
-                          className={`text-left text-sm px-3 py-2 rounded-md border transition-colors ${
-                            active
-                              ? 'border-primary bg-primary/5 text-primary font-medium'
-                              : 'border-input bg-background hover:bg-muted'
-                          }`}
-                        >
-                          {ACCION_LABEL[key] ?? key}
-                        </button>
-                      )
-                    })}
-                  </div>
-                </div>
-              )}
+        {cita && selectedAccion && (
+          <div className="space-y-4">
+            {selectedAccion.kind === 'estado' && selectedAccion.estado === 'cancelada' && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">
+                  Motivo de cancelación
+                  <span className="text-destructive ml-1">*</span>
+                </Label>
+                <Textarea
+                  rows={2}
+                  placeholder="Describe el motivo…"
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value)}
+                  className="text-sm resize-none"
+                />
+                {!motivo.trim() && (
+                  <p className="text-xs text-destructive flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    Requerido para cancelar
+                  </p>
+                )}
+              </div>
+            )}
 
-              {selectedAccion?.kind === 'estado' && selectedAccion.estado === 'cancelada' && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs">
-                    Motivo de cancelación
-                    <span className="text-destructive ml-1">*</span>
-                  </Label>
-                  <Textarea
-                    rows={2}
-                    placeholder="Describe el motivo…"
-                    value={motivo}
-                    onChange={(e) => setMotivo(e.target.value)}
-                    className="text-sm resize-none"
-                  />
-                  {!motivo.trim() && (
-                    <p className="text-xs text-destructive flex items-center gap-1">
-                      <AlertCircle className="h-3 w-3" />
-                      Requerido para cancelar
-                    </p>
-                  )}
-                </div>
-              )}
-
-              <ConfirmacionForm
-                estado={selectedAccion?.kind === 'estado' ? selectedAccion.estado : 'confirmada'}
-                isPending={cambiando || confirmando}
-                onConfirmar={handleConfirmarModal}
-                onCancelar={handleCloseModal}
-                confirmLabel={selectedAccion ? (ACCION_BTN_LABEL[accionKey(selectedAccion)] ?? 'Guardar') : 'Guardar'}
-                cancelLabel="Cerrar"
-              />
-            </div>
-          )
-        })()}
+            <ConfirmacionForm
+              estado={selectedAccion.kind === 'estado' ? selectedAccion.estado : 'confirmada'}
+              isPending={cambiando || confirmando}
+              onConfirmar={handleConfirmarModal}
+              onCancelar={handleCloseModal}
+              confirmLabel={ACCION_BTN_LABEL[accionKey(selectedAccion)] ?? 'Guardar'}
+              cancelLabel="Cerrar"
+            />
+          </div>
+        )}
       </DialogContent>
     </Dialog>
     </>

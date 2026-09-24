@@ -46,7 +46,6 @@ export default function PlantillasOrdenesPage() {
         helpSlug="ordenes-medicas-y-examenes"
         title="Plantillas de órdenes"
         description="Crea y gestiona las plantillas que los profesionales usarán para generar órdenes médicas."
-        backHref="/configuracion"
         action={
           <Button size="sm" onClick={abrirNueva}>
             <Plus className="h-4 w-4 mr-1.5" />Nueva plantilla

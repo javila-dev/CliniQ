@@ -16,7 +16,6 @@ export const PERM = {
   AGENDA_VER:                'agenda.citas.ver',
   AGENDA_CREAR:              'agenda.citas.crear',
   AGENDA_EDITAR:             'agenda.citas.editar',
-  AGENDA_CANCELAR:           'agenda.citas.cancelar',
   AGENDA_CREAR_BLOQUEO:      'agenda.crear_bloqueo',
   AGENDA_APROBAR_BLOQUEO:    'agenda.aprobar_bloqueo',
 
@@ -30,7 +29,8 @@ export const PERM = {
 
   // Historia clínica
   HISTORIA_VER:              'historia.ver',
-  HISTORIA_ESCRIBIR:         'historia.escribir',
+  // Lo da el check "atiende pacientes" (User.es_profesional), no el rol.
+  HISTORIA_NOTAS_CREAR:      'historia.notas.crear',
 
   // Antecedentes del paciente (claves reales del catálogo backend)
   PACIENTES_ANTECEDENTES_VER:    'pacientes.antecedentes.ver',
@@ -115,6 +115,10 @@ export const PERM = {
 
   // Puesta en marcha / migración
   MIGRACION_GESTIONAR:       'migracion.gestionar',
+
+  // Configuración / formas de pago
+  FORMAS_PAGO_VER:           'configuracion.formas_pago.ver',
+  FORMAS_PAGO_GESTIONAR:     'configuracion.formas_pago.gestionar',
 } as const
 
 export type PermKey = typeof PERM[keyof typeof PERM]
@@ -188,7 +192,7 @@ export const canAccess = {
   dashboard: (_u: AuthUser | null | undefined) => true,
 
   atenciones: (u: AuthUser | null | undefined) =>
-    isProfesional(u) || isAdminOrSuperAdmin(u) || hasPermission(u, PERM.HISTORIA_ESCRIBIR),
+    isProfesional(u) || isAdminOrSuperAdmin(u) || hasPermission(u, PERM.HISTORIA_NOTAS_CREAR),
 
   agenda: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.AGENDA_VER),

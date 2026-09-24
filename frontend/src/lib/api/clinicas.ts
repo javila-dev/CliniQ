@@ -40,7 +40,7 @@ export const registroPublicoApi = {
   },
 
   planesPublicos: async (): Promise<PlanPublico[]> => {
-    const res = await axios.get(`${BASE_URL}/registro-clinica/planes/`)
+    const res = await axios.get(`${BASE_URL}/registro-clinica/planes/`, { timeout: 8000 })
     return res.data
   },
 }
@@ -59,20 +59,76 @@ import type {
 import type { DiagramaCorporal, GrupoZonas } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
+/** Un paso de "Preparar mi clínica". El estado sale de los datos reales, no se guarda. */
 export interface SetupChecklistItem {
   key: string
   label: string
+  /** Para qué sirve el paso. */
+  por_que: string
+  /** Lo que ya está configurado, en una línea. */
+  resumen: string
   completado: boolean
+  /** Los opcionales no cuentan para el progreso y se pueden omitir. */
+  requerido: boolean
+  omitido: boolean
   href: string
+  /** Texto del botón que resuelve el paso. */
+  accion: string
+  /** Solo en el paso Equipo: el usuario puede marcarse como profesional con un clic. */
+  puede_marcarse_profesional?: boolean
 }
+
+export type NivelPreparacion = 'sin_empezar' | 'datos_basicos' | 'lista_para_agendar'
 
 export interface SetupChecklist {
   items: SetupChecklistItem[]
+  niveles: { key: Exclude<NivelPreparacion, 'sin_empezar'>; label: string; alcanzado: boolean }[]
+  nivel: NivelPreparacion
+  completados: number
+  total: number
+  /** Todos los pasos requeridos están completos. */
+  todo_listo: boolean
+  modelo: '' | 'procedimientos' | 'tratamientos' | 'ambos'
+}
+
+export interface GuardarPreparacionRequest {
+  modelo?: 'procedimientos' | 'tratamientos' | 'ambos'
+  omitir?: string
+  restaurar?: string
+}
+
+export interface ProcedimientosSinProfesional {
+  procedimientos: { id: string; nombre: string }[]
+  total_profesionales: number
 }
 
 export const clinicasApi = {
+  /** Resumen previo a activar el filtro por procedimiento. */
+  procedimientosSinProfesional: async (): Promise<ProcedimientosSinProfesional> => {
+    const res = await apiClient.get<ProcedimientosSinProfesional>('/clinicas/mi-clinica/procedimientos-sin-profesional/')
+    return res.data
+  },
+
+  /** Asigna todos los profesionales activos a los procedimientos que no tienen ninguno. */
+  asignarProfesionalesAProcedimientos: async (): Promise<{ procedimientos_actualizados: number; profesionales: number }> => {
+    const res = await apiClient.post('/clinicas/mi-clinica/asignar-profesionales-a-procedimientos/')
+    return res.data
+  },
+
   setupChecklist: async (): Promise<SetupChecklist> => {
     const res = await apiClient.get<SetupChecklist>('/clinicas/mi-clinica/setup-checklist/')
+    return res.data
+  },
+
+  /** Guarda qué vende la clínica y los pasos opcionales que se omiten o se restauran. */
+  guardarPreparacion: async (data: GuardarPreparacionRequest): Promise<SetupChecklist> => {
+    const res = await apiClient.post<SetupChecklist>('/clinicas/mi-clinica/preparacion/', data)
+    return res.data
+  },
+
+  /** Atajo para quien configura y también atiende pacientes. */
+  marcarmeComoProfesional: async (): Promise<SetupChecklist> => {
+    const res = await apiClient.post<SetupChecklist>('/clinicas/mi-clinica/preparacion/yo-atiendo/')
     return res.data
   },
 
@@ -205,8 +261,12 @@ export const clinicasApi = {
         const res = await apiClient.get<ServicioConsentimientoRequerido[]>(`/clinicas/procedimientos/${id}/consentimientos/`)
         return res.data
       },
-      add: async (id: string, templateId: string, orden?: number): Promise<ServicioConsentimientoRequerido> => {
-        const res = await apiClient.post<ServicioConsentimientoRequerido>(`/clinicas/procedimientos/${id}/consentimientos/`, { template_id: templateId, orden: orden ?? 1 })
+      add: async (id: string, templateId: string, orden?: number, requiereFirmaCadaVez?: boolean): Promise<ServicioConsentimientoRequerido> => {
+        const res = await apiClient.post<ServicioConsentimientoRequerido>(`/clinicas/procedimientos/${id}/consentimientos/`, {
+          template_id: templateId,
+          orden: orden ?? 1,
+          requiere_firma_cada_vez: requiereFirmaCadaVez ?? false,
+        })
         return res.data
       },
       remove: async (id: string, consentimientoId: string): Promise<void> => {
