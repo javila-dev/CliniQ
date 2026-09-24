@@ -42,6 +42,9 @@ const COP = new Intl.NumberFormat('es-CO', {
   style: 'currency', currency: 'COP', maximumFractionDigits: 0,
 })
 
+// Servicio se lleva el espacio sobrante; citas cabe en 3 dígitos y el % en "100.0%".
+const COLS_SERVICIOS = 'grid grid-cols-[minmax(0,1fr)_2rem_6rem_3.5rem] gap-x-3 px-5'
+
 const ESTADO_LEFT: Record<EstadoCita, string> = {
   pendiente: 'border-l-yellow-400',
   confirmada: 'border-l-blue-400',
@@ -732,7 +735,7 @@ function DashboardContent() {
                       ESTADO_LEFT[cita.estado]
                     )}
                   >
-                    <div className="text-center w-12 shrink-0">
+                    <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
                       <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
                       <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
                     </div>
@@ -1043,9 +1046,17 @@ function DashboardContent() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              <div className="grid grid-cols-4 px-5 py-2 bg-gray-50/60">
-                {['Servicio', 'Citas', 'Ingresos', '% del total'].map(h => (
-                  <span key={h} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{h}</span>
+              <div className={cn(COLS_SERVICIOS, 'py-2 bg-gray-50/60')}>
+                {['Servicio', 'Citas', 'Ingresos', '% total'].map((h, i) => (
+                  <span
+                    key={h}
+                    className={cn(
+                      'whitespace-nowrap text-[10px] font-semibold text-muted-foreground uppercase tracking-wide',
+                      i > 0 && 'text-right',
+                    )}
+                  >
+                    {h}
+                  </span>
                 ))}
               </div>
               {(() => {
@@ -1053,12 +1064,12 @@ function DashboardContent() {
                 return servicios.slice(0, 6).map(s => {
                   const pct = totalIngresos > 0 ? (Number(s.ingresos) / totalIngresos) * 100 : 0
                   return (
-                    <div key={s.servicio_nombre} className="grid grid-cols-4 px-5 py-2.5 items-center hover:bg-gray-50/50">
-                      <span className="text-sm truncate pr-2 uppercase">{s.servicio_nombre}</span>
-                      <span className="text-sm text-muted-foreground">{s.cantidad_citas}</span>
-                      <span className="text-sm font-medium">{COP.format(Number(s.ingresos))}</span>
+                    <div key={s.servicio_nombre} className={cn(COLS_SERVICIOS, 'py-2.5 items-center text-[13px] hover:bg-gray-50/50')}>
+                      <span className="truncate uppercase" title={s.servicio_nombre}>{s.servicio_nombre}</span>
+                      <span className="text-right tabular-nums text-muted-foreground">{s.cantidad_citas}</span>
+                      <span className="text-right tabular-nums whitespace-nowrap font-medium">{COP.format(Number(s.ingresos))}</span>
                       <span className={cn(
-                        'text-sm font-semibold',
+                        'text-right tabular-nums font-semibold',
                         pct >= 30 ? 'text-emerald-600' : pct >= 10 ? 'text-amber-600' : 'text-muted-foreground'
                       )}>
                         {pct.toFixed(1)}%
@@ -1156,7 +1167,7 @@ function DashboardContent() {
                     ESTADO_LEFT[cita.estado]
                   )}
                 >
-                  <div className="text-center w-12 shrink-0">
+                  <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
                     <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
                     <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
                   </div>
