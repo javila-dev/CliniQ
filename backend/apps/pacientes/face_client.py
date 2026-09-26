@@ -46,7 +46,8 @@ async def validate_enrollment(photo_bytes: bytes, filename: str, *, config=None)
         data["min_laplacian_var"] = config.min_blur_score
         data["min_brightness"] = config.min_brightness
         data["max_brightness"] = config.max_brightness
-        data["min_resolution"] = config.min_resolution
+        # El servicio parsea min_resolution con int(): "400.0" (FloatField) da 422.
+        data["min_resolution"] = int(round(config.min_resolution))
 
     async with httpx.AsyncClient(timeout=30) as client:
         response = await _post_with_retry(
