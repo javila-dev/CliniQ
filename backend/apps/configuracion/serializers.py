@@ -245,6 +245,21 @@ class ConfiguracionFacialSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("updated_at",)
+        # Mismos rangos que valida face-recognition-service (/v1/enroll y /v1/match):
+        # fuera de ellos el servicio responde 422 y el enrollment falla.
+        extra_kwargs = {
+            "umbral_alta": {"min_value": -1.0, "max_value": 1.0},
+            "umbral_media": {"min_value": -1.0, "max_value": 1.0},
+            "min_det_score": {"min_value": 0.0, "max_value": 1.0},
+            "min_blur_score": {"min_value": 0.0},
+            "min_brightness": {"min_value": 0.0, "max_value": 255.0},
+            "max_brightness": {"min_value": 0.0, "max_value": 255.0},
+            "max_yaw": {"min_value": 0.0, "max_value": 90.0},
+            "max_pitch": {"min_value": 0.0, "max_value": 90.0},
+            "max_roll": {"min_value": 0.0, "max_value": 90.0},
+            "min_face_area_pct": {"min_value": 0.0, "max_value": 100.0},
+            "min_resolution": {"min_value": 1.0},
+        }
 
     def validate(self, data):
         umbral_alta = data.get("umbral_alta", self.instance.umbral_alta if self.instance else 0.85)
