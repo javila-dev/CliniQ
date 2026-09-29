@@ -748,11 +748,8 @@ class RolViewSet(GenericViewSet):
             if rol.es_profesional != es_profesional:
                 rol.es_profesional = es_profesional
                 rol.save(update_fields=["es_profesional", "updated_at"])
-            # El check "atiende pacientes" del usuario manda: un rol clinico marca a
-            # sus usuarios como profesionales, pero quitarle esas capacidades no
-            # desmarca a quienes atienden por su propio check.
-            if es_profesional:
-                rol.usuarios.filter(es_profesional=False).update(es_profesional=True)
+            # Quien atiende pacientes lo decide solo el check "atiende pacientes" de
+            # cada usuario: el rol no marca ni desmarca a sus usuarios.
             RolAuditoria.objects.create(
                 rol=rol,
                 usuario=request.user,

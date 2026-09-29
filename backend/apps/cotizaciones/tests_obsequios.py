@@ -473,6 +473,7 @@ class ObsequiosCotizacionTests(TestCase):
             first_name="Ana",
             last_name="Lopez",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         Sede.objects.filter(pk=self.sede.pk).update(

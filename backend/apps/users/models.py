@@ -61,14 +61,6 @@ class User(AbstractUser, BaseModel):
         nombre = self.get_full_name().strip()
         return nombre or self.email
 
-    def save(self, *args, **kwargs):
-        update_fields = kwargs.get("update_fields")
-        if self.rol == self.Role.PROFESIONAL:
-            self.es_profesional = True
-            if update_fields is not None and "es_profesional" not in update_fields:
-                kwargs["update_fields"] = set(update_fields) | {"es_profesional"}
-        super().save(*args, **kwargs)
-
     def __str__(self) -> str:
         return self.nombre_completo
 

@@ -280,9 +280,6 @@ function RolDialog({
 
   const areas = capacidades?.areas ?? []
   const gruposTecnicos = capacidades?.permisos_tecnicos ?? []
-  const profesionalKeys = new Set(
-    areas.flatMap(a => a.capacidades.filter(c => c.profesional).flatMap(c => c.permisos)),
-  )
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm({
     resolver: zodResolver(rolSchema),
@@ -339,7 +336,6 @@ function RolDialog({
   }
 
   const readonly = Boolean(rol && !rol.editable)
-  const esProfesional = permKeys.some(k => profesionalKeys.has(k))
 
   return (
     <Dialog open={open} onOpenChange={v => { if (!v) { reset(); onClose() } }}>
@@ -397,16 +393,6 @@ function RolDialog({
                 </button>
               )}
             </div>
-
-            {esProfesional && (
-              <div className="flex items-start gap-2 rounded-lg bg-sky-50/70 border border-sky-100 px-3 py-2">
-                <Stethoscope className="h-4 w-4 text-sky-600 mt-0.5 shrink-0" />
-                <p className="text-xs text-sky-700">
-                  Este rol podrá realizar atenciones clínicas: quien lo tenga aparecerá
-                  como profesional en la agenda y podrá firmar la historia.
-                </p>
-              </div>
-            )}
 
             {areas.length === 0 ? (
               <p className="text-sm text-muted-foreground">Cargando capacidades…</p>

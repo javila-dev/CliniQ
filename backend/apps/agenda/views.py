@@ -9,6 +9,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.permissions import BasePermission
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
@@ -682,7 +683,12 @@ class CitaViewSet(ModelViewSet):
         clinica = get_clinica_activa(request)
         if clinica is None:
             return Response({"total": 0, "fecha_desde": None, "fecha_hasta": None})
-        return Response(services.citas_sin_confirmar_proximo_dia_habil(clinica))
+        # Mismos filtros que la agenda (sede y profesionales) para que el aviso no
+        # cuente citas que el usuario no puede ver en el calendario.
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede"))
+        profesionales = request.query_params.get("profesional__in", "")
+        profesional_ids = [p.strip() for p in profesionales.split(",") if p.strip()] or None
+        return Response(services.citas_sin_confirmar_proximo_dia_habil(clinica, sede_ids, profesional_ids))
 
     @action(detail=True, methods=["patch"], url_path="confirmar_manual")
     def confirmar_manual(self, request, pk=None):
@@ -1064,6 +1070,18 @@ class ConfirmacionPublicaView(APIView):
         )
 
 
+class PuedeVerBloqueos(BasePermission):
+    message = "No tienes permiso para realizar esta accion."
+
+    def has_permission(self, request, view):
+        from apps.users.authorization import user_has_permission
+
+        return any(
+            user_has_permission(request.user, clave, request=request)
+            for clave in ("agenda.bloqueos.ver", "agenda.citas.ver")
+        )
+
+
 class BloqueoAgendaViewSet(ModelViewSet):
     serializer_class = BloqueoAgendaSerializer
     queryset = BloqueoAgenda.objects.select_related(
@@ -1073,7 +1091,9 @@ class BloqueoAgendaViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve"}:
-            return [RequirePermission("agenda.bloqueos.ver")()]
+            # Quien ve la agenda necesita ver los horarios bloqueados para agendar;
+            # sin `agenda.bloqueos.ver` solo ve los aprobados (ver get_queryset).
+            return [PuedeVerBloqueos()]
         if self.action in {"aprobar", "rechazar"}:
             return [RequirePermission("agenda.aprobar_bloqueo")()]
         return [RequirePermission("agenda.crear_bloqueo")()]
@@ -1107,6 +1127,10 @@ class BloqueoAgendaViewSet(ModelViewSet):
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
         if estado:
             queryset = queryset.filter(estado=estado)
+        if self.action in {"list", "retrieve"} and not user_has_permission(
+            user, "agenda.bloqueos.ver", request=self.request
+        ):
+            queryset = queryset.filter(estado=BloqueoAgenda.Estado.APROBADO)
         return queryset.order_by("fecha_inicio")
 
     def perform_create(self, serializer):

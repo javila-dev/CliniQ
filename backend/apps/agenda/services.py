@@ -112,11 +112,18 @@ def proximo_dia_habil_sede(sede: Sede, desde):
     return desde + timedelta(days=1)
 
 
-def citas_sin_confirmar_proximo_dia_habil(clinica) -> dict:
+def citas_sin_confirmar_proximo_dia_habil(clinica, sede_ids=None, profesional_ids=None) -> dict:
     """Citas sin confirmar del próximo día que cada sede trabaja (normalmente
-    mañana; si la sede no abre mañana, del siguiente día hábil de esa sede)."""
+    mañana; si la sede no abre mañana, del siguiente día hábil de esa sede).
+
+    `sede_ids` / `profesional_ids` (None = sin filtro) acotan el conteo a lo que
+    el usuario ve en la agenda; si no, el aviso cuenta citas que no aparecen.
+    """
     hoy = timezone.localdate()
-    sedes = list(Sede.objects.filter(clinica=clinica))
+    sedes_qs = Sede.objects.filter(clinica=clinica)
+    if sede_ids is not None:
+        sedes_qs = sedes_qs.filter(id__in=sede_ids)
+    sedes = list(sedes_qs)
 
     condiciones = Q()
     fechas_objetivo = set()
@@ -128,11 +135,10 @@ def citas_sin_confirmar_proximo_dia_habil(clinica) -> dict:
     if not fechas_objetivo:
         return {"total": 0, "fecha_desde": None, "fecha_hasta": None}
 
-    total = (
-        Cita.objects.filter(condiciones, estado__in=[Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA])
-        .exclude(estado_confirmacion=Cita.EstadoConfirmacion.CONFIRMADO)
-        .count()
-    )
+    citas = Cita.objects.filter(condiciones, estado__in=[Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA])
+    if profesional_ids:
+        citas = citas.filter(profesional_id__in=profesional_ids)
+    total = citas.exclude(estado_confirmacion=Cita.EstadoConfirmacion.CONFIRMADO).count()
     return {
         "total": total,
         "fecha_desde": min(fechas_objetivo),

@@ -59,7 +59,7 @@ class FiltroProfesionalesBase(TestCase):
     def _profesional(self, email, procedimientos):
         user = User.objects.create_user(
             email=email, password="secret123", first_name=email.split("@")[0].title(), last_name="Prof",
-            rol=User.Role.PROFESIONAL, clinica=self.clinica,
+            rol=User.Role.PROFESIONAL, es_profesional=True, clinica=self.clinica,
         )
         colaborador = Colaborador.objects.create(
             user=user, sede_principal=self.sede, tipo_contrato=Colaborador.TipoContrato.EMPLEADO,

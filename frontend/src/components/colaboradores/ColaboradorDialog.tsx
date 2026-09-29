@@ -612,16 +612,12 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
     watchRoleId: string,
     watchSedePrincipal: string,
     watchEsProfesional: boolean | undefined,
+    setEsProfesional: (value: boolean) => void,
     camposExtra: { personales?: React.ReactNode; acceso?: React.ReactNode },
   ) => {
-    // El rol puede tener es_profesional inherente (ej. rol "Profesional").
-    // Para roles que no lo tienen (ej. Admin, Recepción) se muestra la opción manual.
+    // "Atiende pacientes" lo decide solo el check del usuario, no el rol.
     const selectedRol = roles.find(r => r.id === watchRoleId)
-    const rolInherenteProfesional = selectedRol
-      ? (selectedRol.es_profesional ?? selectedRol.slug === 'profesional')
-      : false
-    const esProfesional = rolInherenteProfesional || !!watchEsProfesional
-    const mostrarCheckbox = !!selectedRol && !rolInherenteProfesional
+    const esProfesional = !!watchEsProfesional
 
     return (
       <>
@@ -649,7 +645,15 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
           <Campo label="Rol" error={errors.role_id?.message}>
             <Controller name="role_id" control={control}
               render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                <Select
+                  value={field.value}
+                  onValueChange={(value) => {
+                    field.onChange(value)
+                    // Al elegir el rol Profesional, "Atiende pacientes" se activa por
+                    // defecto; se puede desmarcar.
+                    if (roles.find(r => r.id === value)?.slug === 'profesional') setEsProfesional(true)
+                  }}
+                >
                   <SelectTrigger><SelectValue placeholder="Seleccionar rol" /></SelectTrigger>
                   <SelectContent>
                     {roles.map(r => <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>)}
@@ -660,8 +664,8 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
           {camposExtra.acceso}
 
           {/* ¿Atiende pacientes? Junto al rol, porque de esto depende aparecer en la agenda.
-              Si el rol ya es profesional se muestra como dato; si no, como opción. */}
-          {selectedRol && (mostrarCheckbox ? (
+              Lo decide solo este check, sea cual sea el rol. */}
+          {selectedRol && (
             <Controller name="es_profesional" control={control}
               render={({ field }) => (
                 <label className="sm:col-span-2 flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer select-none">
@@ -676,17 +680,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                   <Switch checked={!!field.value} onCheckedChange={field.onChange} />
                 </label>
               )} />
-          ) : (
-            <div className="sm:col-span-2 flex items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
-              <Check className="h-4 w-4 shrink-0 text-primary" />
-              <p className="text-sm">
-                <span className="font-medium">Atiende pacientes.</span>{' '}
-                <span className="text-muted-foreground">
-                  Lo define el rol {selectedRol.nombre}. Podrá atender citas y escribir en la historia clínica.
-                </span>
-              </p>
-            </div>
-          ))}
+          )}
 
           {esProfesional && (
             <Campo label="Procedimientos que realiza" className="sm:col-span-2">
@@ -792,6 +786,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                   editForm.watch('role_id'),
                   editForm.watch('sede_principal') ?? '',
                   editForm.watch('es_profesional'),
+                  (value) => editForm.setValue('es_profesional', value, { shouldDirty: true }),
                   {
                     acceso: (
                       <Controller name="activo" control={editForm.control}
@@ -857,6 +852,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                 createForm.watch('role_id'),
                 createForm.watch('sede_principal'),
                 createForm.watch('es_profesional'),
+                (value) => createForm.setValue('es_profesional', value, { shouldDirty: true }),
                 {
                   personales: (
                     <Campo label="Correo electrónico" className="sm:col-span-2" error={createForm.formState.errors.email?.message}>
