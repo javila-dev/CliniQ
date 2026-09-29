@@ -219,7 +219,8 @@ def aceptar_cotizacion_por_firma_compromiso(consentimiento) -> None:
         return
 
     cotizacion = consentimiento.cotizacion
-    if cotizacion.estado != Cotizacion.Estado.BORRADOR:
+    # Eliminada: el link de firma pudo quedar abierto; firmarlo no la revive.
+    if cotizacion.estado != Cotizacion.Estado.BORRADOR or not cotizacion.activo:
         return
     if not clinica_exige_compromiso_pago(cotizacion):
         return
