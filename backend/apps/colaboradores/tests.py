@@ -50,6 +50,7 @@ class ColaboradoresBaseTests(ClinicaFixtureMixin, TestCase):
             "last_name": "Profesional",
             "telefono": "3005550001",
             "rol": "profesional",
+            "es_profesional": True,
             "sede_principal": str(self.sede.id),
             "sedes_ids": [str(self.sede.id)],
             "tipo_contrato": Colaborador.TipoContrato.EMPLEADO,

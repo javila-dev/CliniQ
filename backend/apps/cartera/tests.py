@@ -49,6 +49,7 @@ class CarteraFlowTests(TestCase):
             first_name="Ana",
             last_name="Garcia",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         self.paciente = Paciente.objects.create(

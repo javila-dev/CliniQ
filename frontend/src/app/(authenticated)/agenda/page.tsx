@@ -1382,7 +1382,9 @@ function AgendaContent() {
   const canCrearCita = hasPermission(user, PERM.AGENDA_CREAR)
 
   const isAdmin = user?.rol === 'admin' || user?.rol === 'superadmin'
-  const esSoloProfesional = !!user?.es_profesional && !isAdmin
+  // "Solo profesional" = atiende pacientes y no gestiona la agenda de otros. Quien puede
+  // agendar citas (p. ej. recepción que también atiende) ve la agenda completa.
+  const esSoloProfesional = !!user?.es_profesional && !isAdmin && !canCrearCita
 
   const [linkCopiado, setLinkCopiado] = useState(false)
   const [showQr, setShowQr] = useState(false)
@@ -1698,7 +1700,7 @@ function AgendaContent() {
               </PopoverContent>
             </Popover>
 
-          <AvisoCitasSinConfirmar compact className="hidden md:flex" />
+          <AvisoCitasSinConfirmar compact className="hidden md:flex" sede={filterSede} profesionales={filterProfesional} />
         </div>
 
         {/* Row 2: Filters (left) + Actions (right) */}

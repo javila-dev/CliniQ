@@ -50,6 +50,7 @@ class CitaEnEsperaFlowTests(TestCase):
             first_name="Ana",
             last_name="Lopez",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         self.paciente = Paciente.objects.create(
@@ -119,6 +120,7 @@ class CitaEnEsperaFlowTests(TestCase):
             first_name="Beatriz",
             last_name="Dos",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         tercero = User.objects.create_user(
@@ -127,6 +129,7 @@ class CitaEnEsperaFlowTests(TestCase):
             first_name="Carolina",
             last_name="Tres",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         segunda_cita = Cita.objects.create(
@@ -182,6 +185,7 @@ class CitaEnEsperaFlowTests(TestCase):
             first_name="Luis",
             last_name="Mora",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         self.client.force_authenticate(otro_profesional)
@@ -464,6 +468,7 @@ class CitaCotizacionItemTests(TestCase):
             first_name="Ana",
             last_name="Lopez",
             rol=User.Role.PROFESIONAL,
+            es_profesional=True,
             clinica=self.clinica,
         )
         self.paciente = Paciente.objects.create(

@@ -20,14 +20,21 @@ function etiquetaFecha(fechaDesde: string, fechaHasta: string): string {
 interface AvisoCitasSinConfirmarProps {
   className?: string
   compact?: boolean
+  /** Mismos filtros que la agenda, para no contar citas que el calendario no muestra. */
+  sede?: string
+  profesionales?: string[]
 }
 
 /** Citas sin confirmar del próximo día que la clínica trabaja (no siempre "mañana" en el
  * calendario: si la sede no abre mañana, corre hasta el siguiente día hábil). */
-export function AvisoCitasSinConfirmar({ className, compact }: AvisoCitasSinConfirmarProps) {
+export function AvisoCitasSinConfirmar({ className, compact, sede, profesionales }: AvisoCitasSinConfirmarProps) {
+  const profesionalIn = profesionales?.length ? profesionales.join(',') : ''
   const { data } = useQuery({
-    queryKey: ['citas-sin-confirmar-proximo-dia-habil'],
-    queryFn: () => agendaApi.citas.sinConfirmarProximoDiaHabil(),
+    queryKey: ['citas-sin-confirmar-proximo-dia-habil', sede ?? '', profesionalIn],
+    queryFn: () => agendaApi.citas.sinConfirmarProximoDiaHabil({
+      ...(sede && { sede }),
+      ...(profesionalIn && { profesional__in: profesionalIn }),
+    }),
     staleTime: 5 * 60 * 1000,
   })
 

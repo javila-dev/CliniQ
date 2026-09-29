@@ -183,8 +183,8 @@ class UserCreateSerializer(serializers.ModelSerializer):
         role = validated_data.pop("_rol_dinamico")
         validated_data.pop("role_id", None)
         validated_data.pop("rol", None)
-        # Atiende pacientes si el rol es clinico o si se marco el check, sea cual sea el rol.
-        es_profesional = role.es_profesional or bool(validated_data.pop("es_profesional", False))
+        # Atiende pacientes solo si se marco el check, sea cual sea el rol.
+        es_profesional = bool(validated_data.pop("es_profesional", False))
         user = User(
             **validated_data,
             clinica=get_clinica_activa(request),
@@ -224,11 +224,8 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         if role:
             instance.rol_dinamico = role
             instance.rol = legacy_storage_role(role.slug)
-            # Cambiar de rol no desmarca el check "atiende pacientes": se conserva
-            # el valor enviado (o el actual), y un rol clinico lo fuerza.
-            validated_data["es_profesional"] = role.es_profesional or validated_data.get(
-                "es_profesional", instance.es_profesional
-            )
+            # Cambiar de rol no toca el check "atiende pacientes": se conserva el
+            # valor enviado (o el actual).
         return super().update(instance, validated_data)
 
 

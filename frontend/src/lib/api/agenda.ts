@@ -48,8 +48,8 @@ export const agendaApi = {
       const res = await apiClient.get<Cita[]>('/agenda/citas/hoy/')
       return res.data
     },
-    sinConfirmarProximoDiaHabil: async (): Promise<CitasSinConfirmar> => {
-      const res = await apiClient.get<CitasSinConfirmar>('/agenda/citas/sin_confirmar_proximo_dia_habil/')
+    sinConfirmarProximoDiaHabil: async (params?: { sede?: string; profesional__in?: string }): Promise<CitasSinConfirmar> => {
+      const res = await apiClient.get<CitasSinConfirmar>('/agenda/citas/sin_confirmar_proximo_dia_habil/', { params })
       return res.data
     },
     create: async (data: CreateCitaRequest): Promise<Cita> => {

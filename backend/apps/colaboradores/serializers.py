@@ -268,13 +268,9 @@ class ColaboradorSerializer(serializers.ModelSerializer):
             return
         user.rol_dinamico = role
         user.rol = legacy_storage_role(role.slug)
-        # Si el rol es inherentemente profesional, lo fuerza. Si no lo es, no
-        # lo toca: pisar aca el valor que _save_user_updates ya aplico desde
-        # el checkbox manual "tambien atiende pacientes" lo revertia en cada
-        # guardado (role_id siempre viaja en el payload del formulario).
-        if role.es_profesional:
-            user.es_profesional = True
-        user.save(update_fields=["rol_dinamico", "rol", "es_profesional"])
+        # El rol no toca "atiende pacientes": lo decide solo el check, que
+        # _save_user_updates ya aplico.
+        user.save(update_fields=["rol_dinamico", "rol"])
 
     def update(self, instance, validated_data):
         role = validated_data.pop("_rol_dinamico", None)
@@ -362,9 +358,8 @@ class ColaboradorCreateSerializer(ColaboradorSerializer):
         sede_principal = validated_data["sede_principal"]
         user_fields = ("email", "first_name", "last_name", "telefono", "es_profesional")
         user_data = {field: validated_data.pop(field) for field in user_fields if field in validated_data}
-        # Igual que en update(): el rol inherentemente profesional fuerza el
-        # flag, pero si no lo es se respeta el checkbox manual enviado.
-        user_data["es_profesional"] = role.es_profesional or user_data.get("es_profesional", False)
+        # Atiende pacientes solo si se marco el check, sea cual sea el rol.
+        user_data["es_profesional"] = bool(user_data.get("es_profesional", False))
 
         if user is None:
             user = User.objects.create_user(

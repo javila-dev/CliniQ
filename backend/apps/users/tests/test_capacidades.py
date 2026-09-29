@@ -121,17 +121,20 @@ class RolPermisosProfesionalDerivationTests(TestCase):
             format="json",
         )
 
-    def test_capacidad_clinica_activa_es_profesional_y_propaga(self):
+    def test_capacidad_clinica_no_marca_a_los_usuarios_del_rol(self):
+        # "Atiende pacientes" es solo el check del usuario: el rol no lo propaga.
         res = self._put(["pacientes.ver", "historia.fotos.eliminar"])
         self.assertEqual(res.status_code, 200, res.content)
         self.rol.refresh_from_db()
         self.miembro.refresh_from_db()
         self.assertTrue(self.rol.es_profesional)
-        self.assertTrue(self.miembro.es_profesional)
+        self.assertFalse(self.miembro.es_profesional)
 
     def test_quitar_capacidad_clinica_no_desmarca_al_usuario(self):
         # El rol deja de ser clinico, pero el usuario conserva "atiende pacientes":
         # ese check es del usuario y manda sobre el rol.
+        self.miembro.es_profesional = True
+        self.miembro.save(update_fields=["es_profesional"])
         self._put(["historia.fotos.eliminar"])
         res = self._put(["pacientes.ver", "cobros.ver"])
         self.assertEqual(res.status_code, 200, res.content)

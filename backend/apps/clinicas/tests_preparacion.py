@@ -39,7 +39,7 @@ class PreparacionBase(TestCase):
         )
 
     def _profesional(self, sede, *, es_profesional=True, activo=True, email="prof-preparar@example.com"):
-        # User.save() fuerza es_profesional=True para el rol PROFESIONAL; quien no atiende usa otro rol.
+        # "Atiende pacientes" lo da solo es_profesional; el rol es para que el dato sea realista.
         user = User.objects.create_user(
             email=email, password="secret123", first_name="Laura", last_name="Ramirez",
             rol=User.Role.PROFESIONAL if es_profesional else User.Role.RECEPCION,
