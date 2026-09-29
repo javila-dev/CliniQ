@@ -239,8 +239,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         if attrs.get("valor_unitario", getattr(self.instance, "valor_unitario", None)) in (None, ""):
             raise serializers.ValidationError({"valor_unitario": "Este campo es obligatorio."})
 
-        # Si el item tiene precio bloqueado y el usuario intenta un valor diferente al de catálogo,
-        # requiere el permiso cotizaciones.cambiar_precio, salvo que el valor coincida con una campaña activa.
+        # Precio bloqueado = el de catálogo es un mínimo: subirlo es libre; bajarlo requiere el
+        # permiso cotizaciones.cambiar_precio, salvo que el valor coincida con una campaña activa.
         precio_bloqueado = attrs.get(
             "precio_bloqueado",
             getattr(self.instance, "precio_bloqueado", False),
@@ -255,7 +255,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                 catalogo_precio = tratamiento.precio_estimado
             elif procedimiento and getattr(procedimiento, "precio_base", None) is not None:
                 catalogo_precio = procedimiento.precio_base
-            if catalogo_precio is not None and valor_unitario is not None and valor_unitario != catalogo_precio:
+            if catalogo_precio is not None and valor_unitario is not None and valor_unitario < catalogo_precio:
                 clinica, sede = self._resolve_clinica_sede()
                 precio_campana = lookup_precio_campana(
                     clinica=clinica,
@@ -268,7 +268,10 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                     request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
                 ):
                     raise serializers.ValidationError({
-                        "valor_unitario": "No tienes permiso para modificar el precio de un item con precio bloqueado.",
+                        "valor_unitario": (
+                            "No tienes permiso para bajar el precio de este item por debajo del "
+                            f"precio de catálogo (${float(catalogo_precio):,.0f})."
+                        ),
                         "code": "PRECIO_BLOQUEADO",
                     })
 

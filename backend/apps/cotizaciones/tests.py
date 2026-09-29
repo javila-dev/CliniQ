@@ -1285,6 +1285,41 @@ class CotizacionPrecioCampanaTests(TestCase):
             code = code[0]
         self.assertEqual(code, "PRECIO_BLOQUEADO")
 
+    def test_sin_permiso_puede_subir_el_precio_bloqueado(self):
+        # El precio de catálogo es un mínimo: subirlo no requiere cotizaciones.cambiar_precio.
+        profesional = User.objects.create_user(
+            email=f"prof-cot-sube-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Prof",
+            last_name="Sube",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        self.client.force_authenticate(profesional)
+
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "400000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "400000.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(create.status_code, 201, create.content)
+        item = create.json()["items"][0]
+        self.assertTrue(item["precio_bloqueado"])
+        self.assertEqual(item["valor_unitario"], "400000.00")
+
     def test_patch_tratamiento_acepta_precio_campana_con_precio_bloqueado(self):
         create = self.client.post(
             "/api/v1/cotizaciones/",
