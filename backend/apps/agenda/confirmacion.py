@@ -39,6 +39,14 @@ def get_url_confirmacion(token: ConfirmacionToken) -> str:
     return f"{settings.FRONTEND_URL}/confirmar/{token.token}"
 
 
+def _pasar_a_confirmada(cita: Cita) -> list[str]:
+    """Si el paciente confirma una cita pendiente, la cita queda confirmada (no solo el flag)."""
+    if cita.estado != Cita.Estado.PENDIENTE:
+        return []
+    cita.estado = Cita.Estado.CONFIRMADA
+    return ["estado"]
+
+
 def confirmar_cita(token_str: str) -> Cita:
     try:
         token = ConfirmacionToken.objects.select_related(
@@ -59,7 +67,7 @@ def confirmar_cita(token_str: str) -> Cita:
     cita = token.cita
     cita.estado_confirmacion = Cita.EstadoConfirmacion.CONFIRMADO
     cita.confirmado_en = timezone.now()
-    cita.save(update_fields=["estado_confirmacion", "confirmado_en", "updated_at"])
+    cita.save(update_fields=["estado_confirmacion", "confirmado_en", "updated_at", *_pasar_a_confirmada(cita)])
     crear_registro_confirmacion(
         cita=cita,
         estado_resultante=Cita.Estado.CONFIRMADA,
@@ -75,7 +83,9 @@ def confirmar_manual(cita: Cita, user, *, medio: str = "", nota: str = "") -> Ci
     cita.estado_confirmacion = Cita.EstadoConfirmacion.CONFIRMADO
     cita.confirmado_por = user
     cita.confirmado_en = timezone.now()
-    cita.save(update_fields=["estado_confirmacion", "confirmado_por", "confirmado_en", "updated_at"])
+    cita.save(update_fields=[
+        "estado_confirmacion", "confirmado_por", "confirmado_en", "updated_at", *_pasar_a_confirmada(cita),
+    ])
     crear_registro_confirmacion(
         cita=cita,
         estado_resultante=Cita.Estado.CONFIRMADA,

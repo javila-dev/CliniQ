@@ -361,6 +361,13 @@ class CitaViewSet(ModelViewSet):
         cita.estado = nuevo_estado
         update_fields = ["estado", "updated_at"]
 
+        if nuevo_estado == Cita.Estado.CONFIRMADA and cita.estado_confirmacion != Cita.EstadoConfirmacion.CONFIRMADO:
+            # Se confirma tras contactar al paciente: es su confirmación, no un paso aparte.
+            cita.estado_confirmacion = Cita.EstadoConfirmacion.CONFIRMADO
+            cita.confirmado_por = request.user
+            cita.confirmado_en = timezone.now()
+            update_fields.extend(["estado_confirmacion", "confirmado_por", "confirmado_en"])
+
         if nuevo_estado == Cita.Estado.EN_CURSO and cita.fecha_inicio_real is None:
             cita.fecha_inicio_real = timezone.now()
             update_fields.append("fecha_inicio_real")

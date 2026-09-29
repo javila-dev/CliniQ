@@ -435,6 +435,53 @@ class CitaEnEsperaFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
 
+    def test_confirmar_pendiente_marca_que_el_paciente_confirmo(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
+        self.cita.save()
+
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.CONFIRMADA, "nota": "Confirma por llamada"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.CONFIRMADA)
+        self.assertEqual(self.cita.estado_confirmacion, Cita.EstadoConfirmacion.CONFIRMADO)
+        self.assertEqual(self.cita.confirmado_por, self.superadmin)
+        self.assertIsNotNone(self.cita.confirmado_en)
+
+    def test_confirmar_manual_pasa_pendiente_a_confirmada(self):
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
+        self.cita.save()
+
+        response = self.client.patch(
+            f"/api/v1/agenda/citas/{self.cita.id}/confirmar_manual/",
+            {"medio": RegistroConfirmacion.Medio.LLAMADA},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.CONFIRMADA)
+        self.assertEqual(self.cita.estado_confirmacion, Cita.EstadoConfirmacion.CONFIRMADO)
+
+    def test_confirmacion_por_link_pasa_pendiente_a_confirmada(self):
+        from apps.agenda.confirmacion import confirmar_cita, generar_token
+
+        self.cita.estado = Cita.Estado.PENDIENTE
+        self.cita.estado_confirmacion = Cita.EstadoConfirmacion.ENVIADO
+        self.cita.save()
+
+        confirmar_cita(generar_token(self.cita).token)
+
+        self.cita.refresh_from_db()
+        self.assertEqual(self.cita.estado, Cita.Estado.CONFIRMADA)
+        self.assertEqual(self.cita.estado_confirmacion, Cita.EstadoConfirmacion.CONFIRMADO)
+
 
 class CitaCotizacionItemTests(TestCase):
     def setUp(self):
