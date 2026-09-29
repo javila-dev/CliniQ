@@ -180,6 +180,7 @@ export default function PacienteDetailPage({ params }: Props) {
   const user = useAuthStore((s) => s.user)
   const canCambiarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_CAMBIAR)
   const canEliminarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_ELIMINAR)
+  const canCrearCotizacion = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
 
   const { data: p, isLoading, isError, refetch } = useQuery({
     queryKey: ['pacientes', id],
@@ -399,11 +400,13 @@ export default function PacienteDetailPage({ params }: Props) {
                   <Calendar className="h-4 w-4 mr-2" />Ver citas
                 </Link>
               </Button>
-              <Button variant="outline" className="w-full justify-start" asChild>
-                <Link href={`/cotizaciones/nueva?paciente=${id}`}>
-                  <ClipboardList className="h-4 w-4 mr-2" />Nueva cotización
-                </Link>
-              </Button>
+              {canCrearCotizacion && (
+                <Button variant="outline" className="w-full justify-start" asChild>
+                  <Link href={`/cotizaciones/nueva?paciente=${id}`}>
+                    <ClipboardList className="h-4 w-4 mr-2" />Nueva cotización
+                  </Link>
+                </Button>
+              )}
             </CardContent>
           </Card>
 
@@ -489,11 +492,13 @@ export default function PacienteDetailPage({ params }: Props) {
           <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center justify-between pr-6">
               <span>Cotizaciones</span>
-              <Button size="sm" variant="outline" className="h-7 text-xs gap-1" asChild>
-                <Link href={`/cotizaciones/nueva?paciente=${id}`} onClick={() => setActiveModal(null)}>
-                  <Plus className="h-3.5 w-3.5" />Nueva
-                </Link>
-              </Button>
+              {canCrearCotizacion && (
+                <Button size="sm" variant="outline" className="h-7 text-xs gap-1" asChild>
+                  <Link href={`/cotizaciones/nueva?paciente=${id}`} onClick={() => setActiveModal(null)}>
+                    <Plus className="h-3.5 w-3.5" />Nueva
+                  </Link>
+                </Button>
+              )}
             </DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 -mx-6 px-0">
