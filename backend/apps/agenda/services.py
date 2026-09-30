@@ -2,7 +2,6 @@ import logging
 import random
 from datetime import datetime, timedelta
 
-import requests
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -14,9 +13,8 @@ from apps.colaboradores.models import HorarioColaborador
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
-    get_whatsapp_outbound_webhook_url,
-    registrar_envio_whatsapp,
-    verificar_disponibilidad_whatsapp,
+    enviar_whatsapp,
+    resolver_ruta_whatsapp,
 )
 
 logger = logging.getLogger(__name__)
@@ -404,43 +402,6 @@ def crear_cita(data: dict, created_by) -> Cita:
     return cita
 
 
-def _enviar_otp_whatsapp_cita(paciente, codigo: str):
-    from django.conf import settings
-    url = get_whatsapp_outbound_webhook_url()
-    if not url:
-        raise AgendaError("Webhook no configurado", code="WEBHOOK_NOT_CONFIGURED")
-    payload = {
-        "nombre": paciente.nombres,
-        "apellido": paciente.apellidos,
-        "telefono": paciente.telefono,
-        "clinica_id": str(paciente.clinica_id) if paciente.clinica_id else "",
-        "paciente_id": str(paciente.id),
-        "tipo_notificacion": "checkin_otp",
-        "codigo": codigo,
-    }
-    headers = {}
-    secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
-    if secret:
-        headers["X-Webhook-Secret"] = secret
-    logger.debug(
-        "[checkin_otp] enviando webhook | url=%s | telefono=%s",
-        url, paciente.telefono,
-    )
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=15)
-        logger.debug(
-            "[checkin_otp] webhook response | status=%s | body=%s",
-            response.status_code, response.text[:500],
-        )
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        logger.error(
-            "[checkin_otp] webhook error | url=%s | exc=%s",
-            url, exc,
-        )
-        raise
-
-
 def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
     estados_validos = {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}
     logger.debug(
@@ -448,7 +409,7 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
         cita.id, cita.estado, cita.paciente_id, cita.paciente.telefono,
     )
     try:
-        verificar_disponibilidad_whatsapp(cita.sede.clinica)
+        ruta = resolver_ruta_whatsapp(cita.sede.clinica, cita.sede, tipo=EnvioWhatsApp.Tipo.CHECKIN_OTP)
     except WhatsAppNoDisponibleError as exc:
         raise AgendaError(str(exc), code=exc.code) from exc
     if cita.estado not in estados_validos:
@@ -465,11 +426,14 @@ def iniciar_checkin_otp_cita(cita: Cita, request_ip: str):
         codigo=f"{random.randint(0, 999999):06d}",
     )
     try:
-        _enviar_otp_whatsapp_cita(cita.paciente, otp.codigo)
+        enviar_whatsapp(ruta=ruta, tipo=EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=cita.paciente, codigo=otp.codigo)
+    except ValueError as exc:
+        otp.delete()
+        raise AgendaError("Webhook no configurado", code="WEBHOOK_NOT_CONFIGURED") from exc
     except Exception:
+        logger.exception("[checkin_otp] fallo el envio | cita_id=%s", cita.id)
         otp.delete()
         raise
-    registrar_envio_whatsapp(cita.sede.clinica, EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=cita.paciente)
     return otp, True
 
 

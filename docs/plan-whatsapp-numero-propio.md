@@ -1,668 +1,631 @@
 # Plan: WhatsApp con número propio (addon)
 
-Fecha: 2026-09-13 (revisado contra el código real el 2026-09-14 y actualizado
-el 2026-09-17 para fijar el MVP de Coexistence y la topología de Lyvio).
-Estado: planeado, no implementado.
+Fecha: 2026-09-13. Revisado contra el código el 2026-09-14 y el 2026-09-24.
+**Reescrito el 2026-09-25** porque el alcance en Lyvio se redujo al mínimo:
+solo se agregó la creación de plantillas; todo lo demás usa la API que
+Chatwoot ya tenía (ver D7).
 
-**Config de Meta — confirmado hecho y verificado contra captura real
-(2026-09-15):**
-- App ID: `2050257332050356`
-- Configuration ID (embedded signup): `2909835515866390`
-- Dominio `https://cliniq.2asoft.tech/` agregado a la whitelist del SDK de
-  JavaScript (mismo panel donde Lyvio ya tiene `lyvio.io`/`app.lyvio.io`).
-- Es el flujo de **SDK de JavaScript** (popup + evento de mensaje), no el de
-  redirección de página completa — no hace falta configurar "Valid OAuth
-  Redirect URIs" para este caso. Webhook, system user token y verificación
-  del negocio ya están funcionando en producción para Lyvio/Chatwoot, no se
-  tocan.
-- **App en modo Live, no Desarrollo** — confirmado por "Revisión de apps y
-  verificación de acceso ✓: ahora puedes usar esta app en producción, no es
-  necesario agregar manualmente usuarios de prueba". Esto descarta un riesgo
-  real: si el App estuviera en modo Desarrollo, cualquier clínica real
-  (al no ser un "test user" agregado a mano) quedaría bloqueada en el popup.
-  Ya no aplica.
-- Confirmado que Lyvio le sirve a más clientes que solo CliniQ (mismo App ID
-  compartido entre todos) — refuerza por qué el endpoint `create_template`
-  de la sección 0 debe ser genérico, sin ningún conocimiento de CliniQ: no es
-  solo buena práctica, es la realidad de cómo está desplegado Lyvio.
-- Los ítems sin marcar en "Configuración de registro insertado" del panel de
-  Meta (`Create a system user token`, `Números de teléfono preverificados`)
-  son para escenarios de aprovisionamiento manual/masivo, no para el flujo
-  estándar de conexión en vivo que usa este plan — no bloquean nada.
+**Rediseñado el 2026-09-25 (D12):** el addon define cuántos números puede
+conectar la clínica; los números son de la clínica y cada sede elige desde
+cuál envía. Desaparece el "modo" general / por sede.
 
-La configuración base de Meta está lista. Antes de implementar todavía hay que
-validar de punta a punta que la configuración usa el flujo vigente de Embedded
-Signup con **Coexistence** y registrar los identificadores que devuelve el
-modelo actual de cuentas de Meta (WABA/WAAC/PMA). El código no debe asumir que
-un `waba_id` seguirá concentrando para siempre números, plantillas y billing.
+Estado: backend y frontend implementados sin commit; faltan las pruebas con
+un número real. Avance en
+[checklist-whatsapp-numero-propio.md](checklist-whatsapp-numero-propio.md).
+Referencia de la API de Lyvio:
+[handoff-lyvio-whatsapp-coexistence.md](handoff-lyvio-whatsapp-coexistence.md).
+
+## Resumen del flujo
+
+1. Un superadmin activa el **addon de número propio** a la clínica, con
+   cuántos números puede conectar (D1, D12).
+2. La clínica conecta su número con **Embedded Signup de Meta en modo
+   Coexistence**. CliniQ canjea el `code` en Lyvio y Lyvio crea el inbox. El
+   primer número queda como **número por defecto**: todas las sedes lo usan.
+3. Si tiene varios números, en **Asignación** elige desde cuál envía cada
+   sede (un número, el por defecto o el de CliniQ).
+4. **Por ahora a mano**, desde `/console/clinicas/[id]`, el superadmin crea el
+   catálogo de plantillas en la WABA de ese número y luego actualiza su
+   estado hasta que Meta las apruebe.
+5. Con todas las plantillas del catálogo aprobadas, el número pasa a
+   `activo` y los envíos de la clínica salen por él. Si algo falla, salen por
+   el **número compartido, como hoy**.
+
+El **OTP de check-in no se migra**: siempre sale por el número compartido
+(D8). Los **recordatorios automáticos** por número propio quedan como bonus,
+fuera del núcleo (D9).
 
 ## Contexto
 
-Hoy CliniQ envía todo por WhatsApp (OTP de check-in, recordatorios, envío de
-documentos/firma) desde un número compartido, con infraestructura propia.
-**Lyvio es un fork/custom self-hosted de Chatwoot**: conserva su modelo de
-cuentas, inboxes, contactos y conversaciones, y agrega la integración propia
-con Meta que usa CliniQ. El costo de Meta es prácticamente nulo (~USD
-$0,0008 por mensaje utility/authentication en Colombia). Ese número compartido
-va en el plan base para todas las clínicas — no tiene sentido cobrarlo aparte.
+Hoy CliniQ envía por WhatsApp (OTP de check-in, recordatorios, cotizaciones,
+órdenes médicas, links de firma) desde un número compartido, vía n8n → Lyvio.
+**Lyvio es nuestro Chatwoot 4.18.0 self-hosted** (https://app.lyvio.io).
 
-Lo que sí es un addon legítimo es que una clínica use **su propio número de
-WhatsApp Business**, porque ahí sí hay costo y trabajo real por clínica:
-aprovisionar su WABA, aprobar sus propias plantillas de mensaje, y darle una
-conversación bidireccional de verdad (las respuestas del paciente le llegan a
-ella, no a nadie, como pasa hoy con el número compartido).
+WhatsApp por el número compartido **ya es un addon con cupo**
+(`backend/apps/clinicas/models.py`, `backend/apps/notificaciones/services.py`):
 
-### Alcance cerrado del MVP: Coexistence, no bandeja de entrada
+- `Plan.whatsapp_habilitado` / `Clinica.whatsapp_override` → property
+  `Clinica.whatsapp_habilitado`.
+- `Plan.whatsapp_envios_incluidos` / `Clinica.whatsapp_envios_incluidos_override`
+  → cupo mensual (0 = sin límite).
+- `EnvioWhatsApp` registra cada envío y es lo que cuenta contra el cupo.
+- Desde la fase 3 (sin commit), todos los envíos pasan por
+  `enviar_whatsapp` + `resolver_ruta_whatsapp`
+  (`notificaciones/services.py`). `RutaWhatsApp.canal` hoy es siempre
+  `compartido`; este addon agrega `propio`.
 
-El autoservicio de esta primera versión acepta **únicamente Coexistence**: el
-número ya vive en WhatsApp Business App, Meta permite conectarlo también a
-Cloud API y la clínica continúa leyendo y respondiendo desde su teléfono. Lyvio
-recibe/sincroniza la conversación como infraestructura, pero la clínica nunca
-toca su UI. CliniQ tampoco construye todavía una bandeja de entrada.
+El número propio es una capa encima: la clínica usa **su propio número de
+WhatsApp Business**, con su propia WABA, sus propias plantillas y su propio
+pago a Meta. El paciente recibe el mensaje desde la clínica y su respuesta le
+llega a la clínica en el teléfono.
 
-Si Meta no ofrece Coexistence para el número, el flujo se detiene sin migrarlo
-a API-only ni modificar su WhatsApp actual. La elegibilidad depende 100 % de
-Meta: CliniQ no puede garantizarla ni forzarla. Si la clínica quiere evaluar
-una conexión administrada directamente en Lyvio —que puede requerir migrar el
-número o usar otro— debe contactar a soporte antes de cualquier cambio.
+### Configuración de Meta (hecha, 2026-09-15)
 
-Detrás, CliniQ se apoya en el mismo App de Meta que ya tiene configurado Lyvio
-(nada de un segundo registro/Tech Provider) y en el endpoint que Lyvio ya
-expone (`POST /api/v1/accounts/:account_id/whatsapp/authorization`) para crear
-el inbox y configurar el webhook.
+- App ID: `2050257332050356` (el App de Lyvio, compartido con todos sus
+  clientes; por eso Lyvio se mantiene genérico).
+- Configuration ID (Embedded Signup): `2909835515866390`.
+- Dominio `https://cliniq.2asoft.tech/` en la lista de dominios permitidos del
+  SDK de JavaScript.
+- Flujo de **SDK de JavaScript** (popup + `postMessage`), no de redirección.
+- App en modo **Live**.
 
-### Topología decidida para el MVP
+### Requisitos y límites de Coexistence (documentación de Meta, 2026-09-24)
 
-- Una sola **cuenta Lyvio exclusiva para CliniQ**, configurada globalmente.
-- Un **inbox Lyvio por cada número conectado**, no solo por clínica. Una
-  clínica con tres números/sedes tiene tres inboxes.
-- Ninguna cuenta, usuario ni token de Lyvio se entrega a las clínicas.
-- Cada clínica conserva sus propios activos de Meta. Compartir la cuenta de
-  Lyvio no significa compartir WABA/WAAC/PMA ni números en Meta.
-- CliniQ siempre resuelve `clinica -> sede/número -> lyvio_inbox_id`; jamás
-  selecciona un inbox buscando solo el teléfono del paciente.
+- **Popup**: `FB.login` con `config_id`, `response_type: "code"`,
+  `override_default_response_type: true` y
+  `extras: { setup: {}, featureType: "whatsapp_business_app_onboarding", sessionInfoVersion: "3" }`.
+  Sin el `featureType` el popup ofrece el flujo API-only.
+- **Evento de fin**: `type: "WA_EMBEDDED_SIGNUP"` con
+  `event: "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"` (Coexistence) o
+  `"FINISH"` (API-only). `data` trae `waba_id`, `business_id` y, a veces,
+  `phone_number_id` (en Coexistence puede venir vacío).
+- **Versión mínima** de WhatsApp Business App: 2.24.17.
+- **Throughput**: 20 mensajes/segundo por número.
+- **Inactividad de 14 días**: si la clínica no abre WhatsApp Business en el
+  teléfono principal, Meta desconecta el número de la API.
+- **Cambio de teléfono**: si la clínica inicia sesión en otro dispositivo
+  principal, la coexistencia se desconecta.
+- **Funciones que se desactivan en la app**: mensajes temporales, "ver una
+  vez", ubicación en tiempo real y listas de difusión (las existentes quedan
+  de solo lectura). WhatsApp para Windows y WearOS dejan de funcionar como
+  dispositivos vinculados.
+- **Líneas de crédito previas** con otro partner pueden hacer fallar el
+  onboarding.
 
-Esta topología es deliberadamente de MVP. Los contactos de Chatwoot son de
-alcance de cuenta, aunque sus conversaciones pertenezcan a inboxes. Es
-aceptable mientras solo los operadores internos tengan acceso a Lyvio y todo
-el tráfico de CliniQ esté forzado por `inbox_id`. Si más adelante se ofrece la
-UI de Lyvio a las clínicas, debe reevaluarse una cuenta por clínica o demostrar
-aislamiento suficiente antes de abrir ese acceso.
+Lo que Coexistence exige del lado de Lyvio (no registrar el número, webhooks
+`history` / `smb_app_state_sync` / `smb_message_echoes`, sincronización de
+24 h) **ya funciona en producción** y no es trabajo de CliniQ.
 
-## Plantillas: el problema que hay que resolver primero
+## 0. Lyvio: qué hay y qué no hace
 
-Las plantillas de mensaje se aprueban **por WABA**, no globalmente. El WABA
-compartido de Lyvio ya tiene las suyas aprobadas (OTP, recordatorio, envío de
-documento); el WABA propio de cada clínica nace sin ninguna. Sin esto, una
-clínica puede quedar "conectada" pero sin poder enviar nada real.
+Autenticación: header `api_access_token` de un **usuario administrador** de
+la cuenta de Lyvio de CliniQ. Los tokens de agente bot no sirven. CliniQ
+**nunca** maneja tokens de Meta: Lyvio los guarda por inbox.
 
-**Verificado directamente en el código de Chatwoot (self-hosted, `develop`)**:
-la API de Lyvio **no expone ninguna acción para crear una plantilla nueva**.
-Lo que sí existe (`app/controllers/api/v1/accounts/concerns/inbox_health_management.rb`):
+| Uso en CliniQ | Endpoint (`/api/v1/accounts/{account_id}/…`) |
+|---|---|
+| Conectar número | `POST whatsapp/authorization` |
+| **Crear plantilla** (lo único nuevo) | `POST lyvio/inboxes/{inbox_id}/message_templates` |
+| Refrescar caché de plantillas | `POST inboxes/{inbox_id}/sync_templates` |
+| Leer plantillas y su estado | `GET inboxes/{inbox_id}/message_templates` (lee el caché) |
+| Salud del número | `GET inboxes/{inbox_id}/health` |
+| Contacto | `POST contacts` / `GET contacts/search?q=` |
+| Conversación | `GET contacts/{id}/conversations` / `POST conversations` |
+| Mensaje con plantilla | `POST conversations/{id}/messages` con `template_params` |
+| Estados y respuestas | Webhook de cuenta: `message_created`, `message_updated` |
 
-- `sync_templates` → dispara `Channels::Whatsapp::TemplatesSyncJob`, que
-  **lee/sincroniza** las plantillas que ya existen en Meta hacia la caché
-  local de Chatwoot. No crea nada.
-- `message_templates` (GET) → solo lee esa caché local, ni siquiera consulta
-  Meta en vivo.
+Limitaciones que CliniQ debe cubrir:
 
-Y el token de acceso de Meta para cada WABA **nunca sale de Lyvio** — hay un
-`PUT .../whatsapp_business_management_token` para cargarlo, pero ningún `GET`
-para leerlo de vuelta. Consecuencia directa: **CliniQ no puede llamar
-`POST /{waba_id}/message_templates` de Meta por su cuenta**, porque nunca
-tiene el token.
+- **Envío asíncrono**: crear el mensaje no confirma que Meta lo aceptó. El
+  fallo llega después por `message_updated` (`status: failed` +
+  `external_error`).
+- **Sin idempotencia**: un reintento puede duplicar el mensaje.
+- **Caché de plantillas**: Chatwoot solo envía plantillas que están en su
+  caché y aprobadas; su sincronización automática corre cada ~3 h.
+- **No borrar nunca un inbox de clínica**: Chatwoot llama `/deregister` en
+  Meta y desconecta el número de la API.
 
-**Solución**: agregar una acción nueva del lado de Lyvio (mismo patrón que ya
-usan para `sync_templates`/`health`), por ejemplo `create_template`, que haga
-internamente el `POST /{waba_id}/message_templates` de Meta usando el token
-que el canal ya tiene guardado — sin que ese token salga nunca de Lyvio. Debe
-ser **completamente genérica**: recibe nombre, categoría, idioma y
-componentes por parámetro, sin ningún conocimiento de CliniQ ni de qué
-plantillas son "las 3 conocidas". Así queda reutilizable por cualquier otra
-cuenta de Lyvio, no solo la de CliniQ.
+Todo lo demás (catálogo, estado por clínica, elección de número, respaldo,
+cupo, UI) vive en CliniQ. Lyvio no sabe nada de CliniQ.
 
-Categoría por plantilla, importante para el endpoint: `UTILITY`/`MARKETING`
-llevan cuerpo libre con variables (`{{1}}`, `{{2}}`); `AUTHENTICATION` (la del
-OTP) **no admite cuerpo editable** — Meta lo fija automáticamente y exige un
-botón de "Copiar código" — por eso, para esa plantilla puntual, el payload es
-incluso más simple de construir.
+## 0.1 Cuenta de Lyvio y configuración
 
-**Orquestación — manual desde el admin de CliniQ; ejecución en Lyvio.**
-Decisión tomada a propósito para bajar riesgo: CliniQ no agrega Celery/RQ ni
-dispara automáticamente la preparación de plantillas. Un superadmin inicia
-cada operación desde `/console/clinicas/[id]`. Lyvio puede ejecutar internamente
-con ActiveJob, como ya hace `sync_templates`, pero para CliniQ nunca puede ser
-un fire-and-forget silencioso: la llamada debe devolver el resultado final o un
-`operation_id` consultable hasta `succeeded`/`failed`.
+Una sola cuenta de Lyvio exclusiva de CliniQ, con **un inbox por número
+conectado**. Las clínicas nunca reciben usuarios ni tokens de Lyvio.
 
-Además, encadenar "esperar `health` y después crear estas 3 plantillas
-puntuales" dentro de `Whatsapp::EmbeddedSignupService` estaría mal de
-cualquier forma: ese servicio lo usan **todas** las cuentas de Lyvio, no solo
-CliniQ — meter ahí una regla de negocio específica afectaría a clientes de
-Lyvio que no tienen nada que ver con CliniQ. Lyvio se queda genérico (el
-endpoint `create_template` de arriba, sin lógica de cuándo ni qué crear).
-
-Dos acciones manuales en `/console/clinicas/[id]`, cada una con su propio
-botón:
-
-1. **"Crear plantillas"** — se **habilita solo cuando el `NumeroWhatsappSede`
-   ya pasó a `estado="conectado_sin_plantillas"`** (es decir, apenas
-   `whatsapp/authorization` devolvió `inbox_id` y la cuenta en Lyvio quedó
-   creada — antes de eso no hay nada contra qué disparar nada, el botón ni
-   aparece). Al apretarlo:
-   1. Primero consulta `health` (GET, sección 4); si no está listo, muestra
-      el error tal cual y no hace nada más — se reintenta apretando de nuevo,
-      sin backoff ni reintentos automáticos.
-   2. Si `health` da bien, consulta `message_templates` del inbox compartido
-      y cruza la respuesta contra un **catálogo controlado de capacidades de
-      CliniQ** (`checkin_otp`, `recordatorio_cita`, `firma_documento`,
-      `envio_documento`, `envio_cotizacion`). No se ofrece para clonar toda la
-      cuenta ni se exponen plantillas ajenas al producto.
-   3. Al confirmar, por cada capacidad seleccionada llama `create_template`
-      sobre la cuenta de mensajería nueva. Lyvio normaliza el objeto leído al
-      esquema de creación de Meta: elimina IDs/estado/calidad, conserva idioma
-      y ejemplos, transforma componentes y trata `AUTHENTICATION` de forma
-      específica. No se reenvía la respuesta de lectura "tal cual".
-   4. Guarda `pending` en `plantillas_estado` por capacidad, junto con nombre,
-      idioma e ID externo cuando exista.
-2. **"Actualizar estado de plantillas"** — visible mientras
-   `plantillas_estado` tenga alguna en `pending`. Al apretarlo, primero dispara
-   `sync_templates` en Lyvio y espera/consulta su operación. Solo cuando termina
-   correctamente lee `message_templates` (GET) y refresca
-   `plantillas_estado` con lo que Meta ya aprobó/rechazó, incluyendo
-   `paused`/`disabled` si Meta los reporta. Leer la caché sin sincronizar antes
-   no cuenta como una actualización.
-   Cuando todas las capacidades **requeridas** quedan `approved`, ese número
-   pasa a `estado="activo"`; una plantilla opcional no bloquea las demás.
-   Nadie necesita quedarse mirando la
-   pantalla — se
-   aprieta cuando a alguien se le ocurra revisar, no hay ventana de tiempo
-   que perder por no automatizarlo (mientras tanto, sigue saliendo por el
-   número compartido sin fricción).
-
-### Contrato de errores de las operaciones manuales
-
-- El backend de CliniQ persiste inicio, fin, estado, `operation_id`, error
-  legible y referencia técnica devuelta por Lyvio/Meta.
-- El botón queda en estado "Procesando" mientras la operación siga activa y no
-  permite iniciar otra igual para la misma conexión.
-- Si Lyvio responde error sin encolar nada, se muestra inmediatamente y se
-  persiste en `ultimo_error`.
-- Si el job de Lyvio falla después de ser aceptado, el polling debe terminar en
-  `failed`; nunca dejar la UI girando ni asumir éxito por haber recibido `202`.
-- Los errores parciales se registran por capacidad/plantilla: una creación
-  exitosa no se revierte porque otra falle.
-- Ante cualquier error la conexión permanece en
-  `conectado_sin_plantillas`, los tipos afectados siguen por el número
-  compartido y el admin muestra un botón explícito de reintento.
-- La UI presenta un mensaje útil al operador y conserva el detalle técnico
-  desplegable/copiable para soporte; ningún fallo queda solo en logs de Lyvio.
-
-Si más adelante se vuelve una operación frecuente y vale la pena automatizar
-el paso 2, se evalúa sumar un cron. La primera versión mantiene el disparo
-manual para que un operador observe el resultado.
-
-## 0. Trabajo previo en Lyvio (no es código de CliniQ)
-
-Antes de que CliniQ pueda apoyarse en esto, hace falta agregar en el propio
-código de Lyvio (Chatwoot self-hosted, repo propio):
-
-- Una acción nueva tipo `create_template` en el inbox (mismo módulo que
-  `inbox_health_management.rb`), que reciba la definición de una plantilla
-  (nombre, categoría, idioma, cuerpo, botones) y haga el
-  `POST /{waba_id}/message_templates` de Meta usando el token que el canal ya
-  tiene guardado — el token nunca sale de Lyvio.
-- Confirmar (o agregar) que el webhook `message_template_status_update` de
-  Meta llega a Lyvio y decidir cómo se lo hace saber a CliniQ: lo más simple
-  es que Lyvio guarde el estado y CliniQ lo consulte por polling contra
-  `message_templates` (GET) — ya confirmado que existe y es de lectura.
-- Exponer el estado de los jobs disparados por `create_template` y
-  `sync_templates` (`operation_id`, `queued|running|succeeded|failed`, error y
-  timestamps), o hacer la operación síncrona si su duración lo permite. Un
-  `202 Accepted` sin endpoint de estado no sirve para este MVP.
-
-### Handoff técnico mínimo para el agente que modifica Lyvio
-
-Implementar en el custom de Chatwoot/Lyvio, sin incorporar reglas de negocio
-específicas de CliniQ:
-
-1. **Autorización de WhatsApp con Coexistence**: el endpoint de Embedded Signup
-   debe poder crear un inbox dentro de una cuenta Lyvio existente y devolver
-   `inbox_id`, `phone_number_id`, los identificadores Meta vigentes y una señal
-   inequívoca de que el resultado fue Coexistence. Debe devolver error explícito
-   si ese modo no fue concedido; nunca convertir silenciosamente a API-only.
-2. **Creación genérica de plantilla**: endpoint autenticado por inbox/cuenta que
-   reciba nombre, categoría, idioma, componentes y ejemplos; normalice el
-   payload y cree la plantilla con el token Meta que Lyvio ya custodia. El token
-   nunca se expone a CliniQ.
-3. **Sincronización observable**: `sync_templates` debe devolver resultado
-   síncrono u `operation_id`. Si usa ActiveJob, agregar consulta de estado con
-   `queued|running|succeeded|failed`, timestamps y error.
-4. **Estado real de plantillas**: después de sincronizar,
-   `message_templates` debe exponer al menos ID, nombre, idioma, categoría,
-   componentes, estado y motivo de rechazo/error que conserve Lyvio.
-5. **Envío por inbox explícito**: confirmar o ajustar el endpoint de envío para
-   exigir `inbox_id`, retornar el ID externo del mensaje y propagar errores de
-   Meta. No debe seleccionar el canal buscando solo el teléfono del contacto.
-6. **Salud y webhook**: mantener utilizables por API `health` y
-   `register_webhook`, y confirmar que los eventos de estado de plantilla y
-   mensaje actualizan el inbox correcto.
-7. **Errores no silenciosos**: toda operación aceptada debe terminar en estado
-   consultable. Conservar código/mensaje de Meta y una referencia técnica; no
-   responder éxito definitivo solo porque el job fue encolado.
-8. **Pruebas mínimas**: éxito y fallo de Coexistence, creación de plantilla,
-   fallo interno de job después de un `202`, sincronización, aislamiento entre
-   dos inboxes de la misma cuenta y envío por el inbox indicado.
-
-Fuera del alcance del agente de Lyvio: catálogo de plantillas de CliniQ,
-selección clínica/sede, fallback al número compartido, cupos, billing, UI de
-CliniQ y creación de cuentas/usuarios Lyvio por clínica.
-
-El entregable se considera aceptado cuando CliniQ puede ejecutar manualmente
-el ciclo `authorization -> health -> create_template -> sync_templates ->
-message_templates -> send` y obtener un resultado terminal verificable en cada
-paso, incluyendo los fallos inducidos.
-
-## 0.1 Cuenta única de Lyvio para CliniQ
-
-Se descarta crear una cuenta y un usuario Lyvio por clínica. El MVP usa una
-sola cuenta Lyvio dedicada a CliniQ y crea dentro de ella un inbox por cada
-número conectado. Esto elimina el aprovisionamiento por Platform API y evita
-guardar credenciales de Lyvio dentro de cada tenant.
-
-Configuración global nueva del backend:
+**Dos cuentas de Lyvio distintas (D4):** el número compartido sigue en la
+cuenta principal (cuenta `1`, inbox `14`), operado solo por n8n. Los números
+propios van en la cuenta de CliniQ, operados solo por Django. Django nunca
+usa credenciales de la cuenta principal.
 
 ```env
-LYVIO_BASE_URL=
+LYVIO_BASE_URL=https://app.lyvio.io
 LYVIO_CLINIQ_ACCOUNT_ID=
-LYVIO_CLINIQ_API_TOKEN=
+LYVIO_CLINIQ_API_TOKEN=          # secreto: solo en Dokploy, nunca en logs ni frontend
+LYVIO_WHATSAPP_APP_ID=2050257332050356
+LYVIO_WHATSAPP_CONFIG_ID=2909835515866390
+LYVIO_WEBHOOK_SECRET=            # lo genera Lyvio al crear el webhook; firma cada aviso
 ```
 
-El token es una credencial técnica con alcance sobre todos los inboxes de
-CliniQ: debe vivir únicamente en secretos del despliegue, nunca enviarse al
-frontend, guardarse en modelos por clínica ni aparecer en logs. Todos los
-endpoints propios de CliniQ deben resolver el `lyvio_inbox_id` desde una
-relación validada de la clínica/sede activa; no se aceptan inbox IDs arbitrarios
-enviados por el cliente.
+`LYVIO_WHATSAPP_APP_ID` y `LYVIO_WHATSAPP_CONFIG_ID` son públicos, pero el
+backend se los entrega al frontend en el endpoint del asistente de conexión.
+Así no hacen falta variables `NEXT_PUBLIC_*` ni rebuild del frontend.
 
-## 0.2 Consolidar los puntos de envío de WhatsApp (prerequisito real)
+**Aislamiento:** los endpoints de CliniQ resuelven siempre
+`clínica → número → lyvio_inbox_id` desde la base. Nunca se aceptan IDs de
+inbox, contacto o conversación enviados por el cliente.
 
-**El hallazgo más importante de la revisión.** El plan original asumía que
-"los envíos de esa clínica migran al número propio" es un interruptor único.
-No lo es: hoy el envío de WhatsApp está repartido en **al menos 7 sitios de
-llamada, en 5 apps distintas**, con **2 URLs de webhook ya separadas** y
-**2 funciones de OTP duplicadas**:
+Los contactos de Chatwoot son de **toda la cuenta**: el mismo paciente en dos
+clínicas es un solo contacto en Lyvio (las conversaciones sí van por inbox).
+Es aceptable mientras ninguna clínica use la UI de Lyvio.
 
-- `backend/apps/agenda/services.py:341` (`_enviar_otp_whatsapp_cita`) y
-  `backend/apps/protocolos/services.py:22` (`enviar_otp_whatsapp`) — mismo
-  propósito (OTP de check-in), payload casi idéntico, código duplicado en dos
-  apps.
-- `backend/apps/notificaciones/services.py:27` (`enviar_documento_whatsapp_webhook`),
-  `:67` (`enviar_link_firma_whatsapp`), `:115` (`enviar_recordatorio_cita_webhook`,
-  con su propia URL de webhook separada, `N8N_APPOINTMENT_REMINDERS_WEBHOOK`).
-- Puntos de llamada adicionales en `agenda/views.py:627,771`,
-  `historia_clinica/views.py:762,926`, `cotizaciones/views.py:286`,
-  `consentimientos/services.py:305`.
+## 1. Catálogo de plantillas
 
-Ninguno de estos consulta hoy nada específico de la clínica antes de
-mandar — solo hay una URL global en settings. Meter la rama "¿esta clínica
-tiene número propio activo?" en cada uno de estos sitios, uno por uno, es
-frágil (fácil que alguno quede desactualizado cuando se agregue un envío
-nuevo en el futuro).
+Las plantillas pertenecen a la **WABA**. Las del número compartido no sirven
+en la WABA de una clínica: hay que crear una copia del catálogo en cada una y
+cada copia pasa por la aprobación de Meta.
 
-**Se necesita, antes o como parte de esta feature**: una única función de
-envío centralizada (ej. `notificaciones/services.py::enviar_whatsapp(clinica,
-telefono, tipo_mensaje, **payload)`) que resuelva puertas adentro "¿número
-propio activo para esta clínica? → Lyvio; si no → n8n de siempre", y refactor
-de los ~7 call sites (incluida la deduplicación de las 2 funciones de OTP)
-para que todos pasen por ahí. Sin este paso, la feature de número propio no
-tiene un lugar limpio donde vivir.
+El catálogo vive **en código de CliniQ, como datos** (no se lee de la WABA
+del número compartido): nombre, idioma, categoría, componentes con ejemplos y
+el mapeo de variables desde los datos del envío. Las claves son las de
+`EnvioWhatsApp.Tipo`.
 
-**n8n no debería necesitar cambios.** El workflow `cliniq/envio-documentos`
-ramifica hoy solo por `tipo_notificacion` (ver
-`reference-n8n-webhook-envio-documentos` en memoria), no por clínica, y
-termina pegándole a Lyvio con la cuenta compartida — sin ninguna noción de
-"esta clínica tiene número propio". Con el diseño de arriba, para las
-clínicas con número propio activo Django **le pega directo a la API de
-Lyvio, sin pasar por n8n en absoluto**; n8n sigue haciendo exactamente lo
-mismo que hoy (mandar por la cuenta compartida) y simplemente deja de ser
-invocado para esas clínicas. No verificado abriendo el workflow real — es
-inferencia a partir del payload que Django ya manda y de esa nota de
-memoria; confirmarlo mirando el workflow de n8n en sí antes de dar por
-cerrado este punto.
+| Tipo | Categoría | En el catálogo | Referencia en el número compartido |
+|---|---|---|---|
+| `recordatorio_cita` | UTILITY | sí | `envio_recordatorios_cliniq`: paciente, clínica, sede, fecha y hora, servicio, teléfono de la sede |
+| `firma_documento` | UTILITY | sí | `firma_documento_cliniq`: nombre, clínica, link |
+| `envio_cotizacion` | UTILITY (Meta puede pasarla a MARKETING) | sí | `envio_cotizacion_cliniq`: encabezado PDF; nombre, clínica |
+| `envio_formula` | UTILITY | sí | `envio_orden_medica`: encabezado PDF; nombre, clínica |
+| `checkin_otp` | AUTHENTICATION | **no (D8)** | `otp_citas`: siempre por el número compartido |
 
-**De paso**: hay una tercera vía de envío (`enviar_confirmacion_whatsapp` +
-`enviar_recordatorio`, `backend/apps/notificaciones/services.py:200`, vía
-Evolution API) que no tiene ningún caller en todo el backend — código muerto
-de una integración anterior a Lyvio. No afecta el plan mientras siga muerto,
-pero conviene limpiarlo en el mismo barrido para no dejar una tercera ruta de
-envío fantasma dando vueltas.
+Todas en `es_CO`.
 
-## 1. Modelo de datos
+Reglas de Meta que el catálogo debe cumplir:
 
-Reusar exactamente el patrón que ya existe para los otros addons (`Plan` +
-override nullable en `Clinica`, ver `backend/apps/clinicas/models.py`,
-migración `0033_addons_por_plan.py`). Última migración real de `clinicas` a
-hoy: `0035_quitar_addons_directos_clinica.py` — esta feature continúa en
-`0036_...`.
+- Nombre solo con `[a-z0-9_]`. Usar nombres versionados
+  (`cliniq_firma_documento_v1`): para cambiar una plantilla aprobada se crea
+  la versión siguiente en todas las clínicas, no se edita.
+- Las variables **no pueden ir ni al principio ni al final** del texto.
+  Ojo con `firma_documento`: si el link queda como última variable, hay que
+  agregar texto después.
+- Toda variable necesita ejemplo (`example.body_text`).
+- Encabezado PDF: `{ "type": "HEADER", "format": "DOCUMENT", "example": { "header_url": "<PDF público de ejemplo>" } }`.
+  Lyvio lo descarga y lo sube a Meta. Hace falta un PDF de ejemplo en una
+  URL pública fija.
+- Lyvio necesita además el **texto ya renderizado** (`content`) en cada
+  envío, así que el catálogo guarda el cuerpo y una función que lo rinde con
+  las variables. Para `firma_documento`, el texto que hoy arma n8n a partir
+  de `documento_tipo` debe salir igual desde el catálogo.
+- Variables posicionales (`{{1}}`, `{{2}}`…): coinciden con las claves de
+  `processed_params.body` que espera Lyvio.
+
+**Todas o ninguna (D5).** Un número solo pasa a `activo` cuando las **4**
+plantillas del catálogo están `APPROVED` en su inbox. Mientras tanto, todo
+sale por el número compartido. No hay ruteo mixto por tipo.
+
+**Agregar un tipo nuevo** rompería el "todas" de los números ya activos. Se
+agrega al catálogo como `borrador`, se crea y aprueba en todos los números
+existentes desde el admin y solo entonces se marca vigente. Mientras está en
+borrador, ese tipo sale por el compartido para todos.
+
+## 2. Modelo de datos
+
+Reusar el patrón de addons existente (`Plan` + override nullable en `Clinica`
++ property con `_addon_efectivo`). La última migración de `clinicas` es
+`0044_backfill_formas_pago.py`.
+
+**Addon (D1):**
 
 - `Plan.whatsapp_numero_propio_habilitado` (BooleanField, default `False`).
-- `Clinica.whatsapp_numero_propio_override` (BooleanField nullable) + property
-  `whatsapp_numero_propio_habilitado` (mismo patrón de `_addon_efectivo`).
+- `Clinica.whatsapp_numero_propio_override` (nullable) + property
+  `whatsapp_numero_propio_habilitado`, que devuelve `False` si
+  `whatsapp_habilitado` es `False` (depende del addon base). Sin la excepción
+  de "sin plan = habilitado".
+- Validación: un `Plan` no puede tener número propio sin WhatsApp base. En la
+  consola, el override se deshabilita mientras el addon base esté apagado.
+- `Plan.whatsapp_numeros_incluidos` (default 1) +
+  `Clinica.whatsapp_numeros_incluidos_override`: cuántos números puede
+  conectar (property `whatsapp_numeros_incluidos`, 0 sin el addon).
+- `Plan.precio_por_numero_whatsapp` (DecimalField opcional), de referencia:
+  no hay facturación automática hacia las clínicas.
 
-**Decisión revisada — activos Meta por clínica, números por Sede (máx. 1 por
-sede).** La conexión de Meta y el conjunto de plantillas/capacidades pertenecen
-a cada clínica; cada `Sede` que lo necesite puede tener su propio número. El
-modelo persiste los IDs que devuelva Meta sin acoplar el dominio a que todo
-seguirá viviendo siempre en una única WABA: Meta está separando la identidad y
-números (WAAC) de plantillas/billing (PMA). `Sede` ya tiene su propio campo
-`telefono`, pero el número efectivamente conectado se guarda también en
-`NumeroWhatsappSede` y no se infiere de ese campo informativo.
-
-Del lado de Lyvio, cada número sigue necesitando su propio inbox (Chatwoot
-ata 1 inbox a 1 `phone_number_id`), así que "agregar el número de la sede 2"
-significa: un segundo paso de embedded signup (elige el mismo WABA, agrega un
-número) + un segundo `whatsapp/authorization` con ese `phone_number_id`, pero
-**sin** un segundo ciclo de aprobación de plantillas — ya están aprobadas a
-nivel de WABA.
-
-**Cobro por número, para efectos financieros.** El addon deja de ser un
-simple on/off: el cobro es **por cada número conectado**, no un monto fijo
-por clínica.
-
-**Verificado: no existe ningún sistema de facturación/cobro de CliniQ hacia
-las clínicas.** `Plan.precio` (`clinicas/models.py:57-63`) es puramente de
-referencia — un campo que el superadmin llena a mano en `/console/planes`,
-sin ningún job, señal ni pasarela de pago detrás que lo convierta en un
-cobro real. No hay ninguna app de billing, ni integración de pasarela de
-pago a nivel plataforma, en todo el backend. La suscripción de cada clínica
-se factura hoy fuera del sistema, manualmente.
-
-Dado eso, "cobro por número para efectos financieros" no tiene nada
-automatizado con qué engancharse — construir un motor de facturación
-completo está fuera del alcance de esta feature. Lo que sí corresponde:
-seguir el mismo patrón que ya usan con `Plan.precio` (dato de referencia
-visible para uso manual):
-
-- `Plan.precio_por_numero_whatsapp` (DecimalField, opcional, mismo estilo que
-  `precio`) — de referencia, para que el superadmin sepa cuánto cobrar por
-  número al mirar la clínica.
-- En `/console/clinicas/[id]`, mostrar el conteo real de
-  `NumeroWhatsappSede` en `estado="activo"` para esa clínica — el dato que
-  alguien necesita para facturar manualmente, igual que hoy se factura el
-  plan.
-- Nada de generación automática de factura/cobro — no hay dónde engancharlo
-  hasta que exista un sistema de billing de plataforma, que sería un
-  proyecto aparte, mucho más grande que este addon.
-
-**Credenciales.** CliniQ no guarda un token Lyvio por clínica. El único token
-de Lyvio es global y vive en secretos del despliegue (sección 0.1). Los tokens
-de Meta permanecen en Lyvio, que ya administra el canal; CliniQ guarda solo
-identificadores no secretos y estados operativos.
-
-Dos modelos: uno para la conexión (la WABA, 1:1 con `Clinica`) y otro para
-cada número conectado dentro de ella (1:N con `Sede`, `Sede` opcional para
-soportar un número "general" de la clínica sin asignar a una sede puntual):
+**Conexión y números:**
 
 ```python
 class ConexionWhatsappPropio(BaseModel):
     clinica = models.OneToOneField(Clinica, on_delete=models.CASCADE)
-    meta_business_id = models.CharField(max_length=64, blank=True)
-    meta_account_id = models.CharField(max_length=64, blank=True)  # WABA/WAAC/PMA efectivo
-    # clave lógica -> {nombre, idioma, external_id, requerida, estado, error}
-    # estado: pending|approved|rejected|paused|disabled
-    plantillas_estado = models.JSONField(default=dict)
-    ultimo_chequeo_en = models.DateTimeField(null=True, blank=True)
-    ultimo_error = models.TextField(blank=True)
+    pago_meta_configurado = models.BooleanField(default=False)  # la clínica confirma método de pago (D2)
+    # Para envíos sin sede, sedes sin asignación (incluidas las nuevas) y
+    # respaldo si el número de una sede no está activo (D11). El primero que
+    # se conecta queda como por defecto; la clínica puede cambiarlo.
+    numero_por_defecto = models.OneToOneField("NumeroWhatsapp", null=True, blank=True,
+                                              on_delete=models.SET_NULL, related_name="+")
 
 
-class NumeroWhatsappSede(BaseModel):
+class NumeroWhatsapp(BaseModel):  # de la clínica, no de una sede
     conexion = models.ForeignKey(ConexionWhatsappPropio, on_delete=models.CASCADE, related_name="numeros")
-    sede = models.OneToOneField(Sede, on_delete=models.CASCADE, null=True, blank=True)  # null = número general de la clínica
-    lyvio_inbox_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
-    phone_number_id = models.CharField(max_length=64, null=True, blank=True, unique=True)
+    lyvio_inbox_id = models.CharField(max_length=64, unique=True)
+    waba_id = models.CharField(max_length=64)
+    phone_number_id = models.CharField(max_length=64, blank=True)
     numero_visible = models.CharField(max_length=30, blank=True)
-    coexistencia_confirmada = models.BooleanField(default=False)
     estado = models.CharField(choices=[
-        ("no_conectado", "No conectado"),
-        ("conectando", "Conectando"),
-        ("conectado_sin_plantillas", "Conectado, plantillas pendientes"),
+        ("conectado", "Conectado"),
+        ("plantillas_pendientes", "Plantillas pendientes de aprobación"),
         ("activo", "Activo"),
         ("error", "Error"),
-    ], default="no_conectado")
+    ])
+    ultimo_error = models.TextField(blank=True)
+    ultimo_chequeo_en = models.DateTimeField(null=True, blank=True)
+
+
+class AsignacionWhatsappSede(BaseModel):  # sin fila = número por defecto
+    conexion = models.ForeignKey(ConexionWhatsappPropio, on_delete=models.CASCADE)
+    sede = models.OneToOneField(Sede, on_delete=models.CASCADE)
+    tipo = models.CharField(choices=["por_defecto", "numero", "cliniq"])
+    numero = models.ForeignKey(NumeroWhatsapp, null=True, on_delete=models.SET_NULL)  # solo con tipo "numero"
+
+
+class PlantillaWhatsappNumero(BaseModel):
+    numero = models.ForeignKey(NumeroWhatsapp, on_delete=models.CASCADE, related_name="plantillas")
+    tipo = models.CharField(choices=EnvioWhatsApp.Tipo.choices)
+    nombre = models.CharField(max_length=100)
+    idioma = models.CharField(max_length=10)
+    estado = models.CharField()  # PENDING|APPROVED|REJECTED|PAUSED|DISABLED
+    categoria = models.CharField(max_length=20, blank=True)  # la que dejó Meta
+    ultimo_error = models.TextField(blank=True)
+    # UniqueConstraint(numero, nombre, idioma)
 ```
 
-Agregar además una `UniqueConstraint` condicional para permitir como máximo un
-número general (`sede IS NULL`) por conexión, y validar que cualquier `sede`
-pertenezca a la misma clínica de `conexion`.
+- "No conectado" es la ausencia de `NumeroWhatsapp`.
+- Límite: no se conecta un número más si ya hay `whatsapp_numeros_incluidos`.
+  Se valida antes de llamar a Lyvio.
+- Validar que la sede y el número asignados sean de la misma clínica.
+- **Las plantillas se llevan por número (inbox), no por clínica.** Con varios
+  números en la misma WABA, crear el catálogo en el segundo inbox devuelve
+  "ya existe" (se trata como éxito) y queda con el mismo estado. Si un número
+  es de otra WABA, también queda cubierto sin lógica extra.
 
-`estado`/`plantillas_estado` de la conexión (WABA) siguen la primera vez que
-se conecta un número (la primera pasa por todo el ciclo de aprobación); los
-números que se agreguen después, sobre la misma WABA ya aprobada, arrancan
-directo en `activo` en cuanto `health` de ese inbox da bien — sin pasar por
-`conectado_sin_plantillas`.
+**Envíos (`EnvioWhatsApp`, en `notificaciones`), campos nuevos:**
 
-## 2. Flujo de conexión
+- `ruta` (`compartido` | `propio`) y `numero` (FK nullable a `NumeroWhatsapp`).
+- `motivo_ruta`: `sin_addon`, `sin_numero`, `numero_no_activo`,
+  `respaldo_por_fallo`, `otp_siempre_compartido`, `ok`…
+- `estado`: `enviado` | `fallido` | `incierto` (ruta propia).
+- `lyvio_message_id`, `lyvio_conversation_id`, `error_externo`.
+- `datos` (JSON): lo necesario para reenviar por el compartido si falla
+  (tipo, `pdf_url`, link, `documento_tipo`, payload del recordatorio).
+- `respaldo_de` (FK a sí mismo): el envío por el compartido que reemplazó a
+  uno propio fallido.
 
-Dos variantes: **primer número de la clínica** (crea la WABA + arranca el
-ciclo de plantillas) y **número adicional de otra sede** (reusa la WABA ya
-aprobada, salta directo a `activo`). El popup de Meta y la llamada a
-`whatsapp/authorization` son los mismos en ambos casos — lo que cambia es qué
-hace CliniQ con la respuesta.
+**Contactos en Lyvio:** `ContactoLyvio(paciente, numero, contact_id,
+conversation_id)` para no buscar en cada envío. Si Lyvio devuelve 404 al usar
+un ID guardado, se vuelve a resolver.
 
-**Meta (config, una sola vez, manual):**
-- Agregar el dominio de CliniQ a los dominios permitidos del App de Meta que
-  ya usa Lyvio (Facebook Login for Business → Client OAuth settings).
+## 3. Conexión del número (Embedded Signup)
 
-**Frontend de CliniQ:**
-- Pantalla en Configuración (ej. `configuracion/integraciones` o dentro de
-  `configuracion/clinica`) con un botón "Conectar WhatsApp" **por sede** (más
-  uno general de la clínica), visible solo si `whatsapp_numero_propio_habilitado`
-  es `true` para esa clínica.
-- Copy de crédito a Lyvio **antes** de abrir el popup: algo como "Tu WhatsApp
-  se conecta a través de Lyvio, nuestra plataforma de mensajería — vas a ver
-  su nombre en la ventana de Meta, es esperado." Esto evita que la clínica se
-  confunda cuando el popup de Meta muestre el nombre de Lyvio y no el de
-  CliniQ (no vamos a renombrar el App de Meta, se mantiene tal cual está).
-- Antes del popup, explicar que este autoservicio es solo para un número que ya
-  funciona en **WhatsApp Business App** y que Meta decide su elegibilidad para
-  Coexistence. Nunca prometer que todos los números califican.
-- El flujo debe solicitar/validar explícitamente Coexistence. Si Meta no la
-  ofrece, cancela sin continuar como API-only y muestra que el número actual no
-  fue modificado, más un enlace para contactar a soporte si la clínica quiere
-  evaluar una conexión administrada en Lyvio.
-- Carga el JS SDK de Meta con el `WHATSAPP_APP_ID`/`WHATSAPP_CONFIGURATION_ID`
-  que ya están configurados en Lyvio (son públicos del lado cliente). Si ya
-  existe una `ConexionWhatsappPropio` para la clínica, el flujo de Meta debe
-  apuntar a **agregar un número a esa misma WABA**, no crear una nueva (Meta
-  lo permite desde el mismo popup, eligiendo la WABA existente en vez de
-  "crear una nueva").
-- Al completar el popup, recibe `code` + `waba_id` (+ `business_id`,
-  `phone_number_id`) y se los pasa al backend de CliniQ, junto con qué `sede`
-  (o "general") está conectando.
+**Frontend** (Configuración → WhatsApp → Número de envío). Siempre muestra
+arriba desde qué número reciben hoy los pacientes. Sin el addon, promociona el
+número propio (comparación + botón a ventas). Con el addon:
 
-**Backend de CliniQ:**
-- Endpoint nuevo (ej. `POST /clinicas/whatsapp/conectar/`) que recibe esos
-  datos y llama a
-  `POST /api/v1/accounts/{LYVIO_CLINIQ_ACCOUNT_ID}/whatsapp/authorization` en
-  Lyvio con la credencial técnica global de la sección 0.1. La clínica no crea
-  ni recibe un usuario Lyvio.
-- Si es el **primer número** de la clínica: crea `ConexionWhatsappPropio`
-  (guarda los identificadores Meta no secretos) y un `NumeroWhatsappSede` con
-  `estado="conectando"`; con la respuesta de Lyvio (`inbox_id`), guarda
-  `lyvio_inbox_id`/`phone_number_id`, confirma que el resultado corresponde a
-  Coexistence, marca `coexistencia_confirmada=True` y pasa a
-  `estado="conectado_sin_plantillas"`.
-  Con eso ya se habilita el botón "Crear plantillas" de la sección 3 — nada
-  se dispara solo, alguien lo aprieta.
-- Si ya existe `ConexionWhatsappPropio` (número adicional de otra sede): crea
-  solo el `NumeroWhatsappSede` nuevo, guarda `inbox_id`/`phone_number_id`, y
-  en cuanto `health` de ese inbox da bien pasa directo a `estado="activo"` —
-  sin pasar por `conectado_sin_plantillas` ni volver a llamar
-  `create_template` (las plantillas ya están aprobadas a nivel de WABA).
+1. **Sin números:** tarjeta "Cambia a tu número propio" → "Conectar mi
+   número". Con números: sección **Tus números** ("1 de 2 incluidos") con
+   "Conectar otro número" mientras no se llegue al límite.
+2. **Pago en Meta (D2)**: explicar que Meta cobra los mensajes a la WABA de la
+   clínica, con enlace a la configuración de pagos. La clínica marca "Ya
+   agregué el método de pago" (`pago_meta_configurado`). No bloquea la
+   conexión.
+3. **Avisos** antes del popup: el popup dice "Lyvio", solo aplica a WhatsApp
+   Business App ≥ 2.24.17, Meta decide la elegibilidad, y lo que se desactiva
+   en la app (sección 7).
+4. Cargar el SDK de Facebook con el App ID y el Config ID que entrega el
+   backend, lanzar `FB.login` con los parámetros de Coexistence y escuchar el
+   `postMessage` de Meta.
+5. Si el evento es de cancelación o error, mostrar el copy de "no habilitado"
+   y no llamar al backend.
+6. Al terminar, enviar al backend **de inmediato** (el `code` vence rápido y
+   es de un solo uso): `code`, `waba_id`, `phone_number_id` si vino,
+   `business_id` y el nombre del evento.
 
-En ningún caso el frontend puede indicar libremente el `account_id` o el
-`inbox_id` de Lyvio. El backend los toma de configuración y de sus relaciones
-tenant-scoped.
+**Backend:** `POST /notificaciones/whatsapp-propio/conectar/` (estado y configuración en `GET/PATCH /notificaciones/whatsapp-propio/`; permiso `clinicas.editar`)
 
-## 3. Replicar plantillas
+1. Valida el addon y el límite de números.
+2. `POST {LYVIO_BASE_URL}/api/v1/accounts/{LYVIO_CLINIQ_ACCOUNT_ID}/whatsapp/authorization`
+   con `code`, `waba_id`, `phone_number_id` (si vino) e `is_coexistence: true`
+   si el evento fue `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`.
+3. La respuesta trae `id` = `lyvio_inbox_id`. Crea el `NumeroWhatsapp` en
+   `conectado`. Si la clínica no tiene número por defecto, este queda como
+   por defecto.
+4. Si Lyvio responde `422`, se muestra el mensaje tal cual (p. ej. la WABA
+   tiene varios números y no llegó `phone_number_id`). No se crea nada.
 
-**Solo corre una vez por cuenta de mensajería Meta de la clínica**, al conectar
-el primer número. Los números adicionales que compartan esa cuenta no repiten
-el ciclo. No acoplar esta regla al nombre histórico WABA: debe resolverse con
-el identificador efectivo que devuelva Embedded Signup. La orquestación es
-manual, con dos botones:
+## 4. Plantillas: creación y aprobación, manual desde el admin (por ahora)
 
-- **"Crear plantillas"**, habilitado apenas el número pasa a
-  `estado="conectado_sin_plantillas"`. Al apretarlo: chequea `health` en el
-  momento; si está bien, presenta únicamente el catálogo de capacidades de
-  CliniQ y crea sus plantillas mediante el adaptador normalizado de Lyvio.
-  Guarda `pending` por capacidad en `plantillas_estado` (campo de
-  `ConexionWhatsappPropio`, no del número). Si `health` no está listo,
-  muestra el error y no hace nada más — se reintenta apretando de nuevo.
-- **"Actualizar estado de plantillas"**, disponible mientras haya alguna en
-  `pending`. Al apretarlo: dispara `sync_templates`, sigue su `operation_id`
-  hasta resultado terminal y, solo si termina bien, consulta
-  `message_templates` (GET) para refrescar `plantillas_estado`. Si falla,
-  conserva el estado anterior y muestra/persiste el error del job.
-- Mientras falte una capacidad requerida, ese `NumeroWhatsappSede` se queda
-  en `conectado_sin_plantillas`. El router decide por tipo de mensaje: usa el
-  número propio para las capacidades ya aprobadas y el compartido para las que
-  aún no estén disponibles. Un timeout o resultado incierto no debe provocar
-  reenvío automático sin idempotencia, para evitar mensajes duplicados.
-- Cuando todas las requeridas quedan `approved`, ese número pasa a
-  `estado="activo"` — y
-  cualquier número adicional que se conecte después arranca directo en
-  `activo` en cuanto su propio `health` esté bien, sin pasar por este ciclo
-  ni necesitar ninguno de estos dos botones.
+En `/console/clinicas/[id]`, por cada número conectado (endpoints de superadmin: `GET /admin/tenants/{clinica_id}/whatsapp-propio/` y `POST /admin/whatsapp-numeros/{id}/crear-plantillas|actualizar-plantillas|revisar-salud/`):
 
-## 4. Verificación end-to-end
+**"Crear plantillas"** (número en `conectado`, o para reintentar las
+fallidas). Por cada plantilla del catálogo vigente:
 
-Todo lo de esta sección es **por número** (por `NumeroWhatsappSede`/inbox),
-no por clínica — cada sede con número propio puede fallar o estar sana de
-forma independiente. No alcanza con "se creó el inbox". Antes de marcar
-`activo` y antes de migrar los envíos de ese número:
+`POST …/lyvio/inboxes/{lyvio_inbox_id}/message_templates` con la definición.
 
-- **Inbox real**: confirmar que Lyvio devolvió `inbox_id` (no solo que el
-  request dio 200).
-- **Salud del canal**: Lyvio ya expone `GET .../inboxes/:id/health`
-  (confirmado en código, `Whatsapp::HealthService`) — golpea Meta en vivo y
-  devuelve el estado real del canal, incluyendo errores de autorización
-  (token vencido/revocado) con su código y subcódigo. Es el chequeo correcto
-  a usar, no hay que inventar uno propio.
-- **Webhook vivo**: si `health` reporta problema de suscripción, Lyvio también
-  expone `POST .../inboxes/:id/register_webhook` para volver a registrarlo
-  sin intervención manual.
-- **Plantillas aprobadas**: los 3 (o los que correspondan) slugs de
-  `plantillas_estado` en `approved`.
-- **Prueba de envío real** (recomendado antes de migrar del todo): mandar un
-  mensaje de prueba real al momento de conectar y pedirle a la clínica que
-  confirme que le llegó — la única verificación que prueba el camino
-  completo, no solo que las piezas están configuradas.
+| Respuesta | Qué hace CliniQ |
+|---|---|
+| `201` `{id, name, language, status, category}` | Guarda la plantilla con el `status` y la `category` de Meta |
+| `422` con `error.meta.code = 100` y `subcode = 2388024` | Ya existía: éxito, estado `PENDING` hasta el próximo refresco |
+| Otro `422` | Rechazada: guarda `error.meta.user_msg` (o `error.message` si es de validación) |
+| `502` | Falla temporal de Meta: se reintenta con el mismo botón |
+| `401/403/404` | Error de configuración de CliniQ (token o inbox): se muestra y se registra |
 
-Este chequeo se corre al conectar, y de nuevo periódicamente mediante un
-management command de Django ejecutado por cron (no requiere Celery),
-iterando cada `NumeroWhatsappSede` en `activo`, para detectar que algo se
-cayó después (autorización de la cuenta revocada, número dado de baja en Meta
-o plantilla pausada/rechazada en una edición posterior). El alcance exacto de
-cada fallo —cuenta completa o un solo número— se toma de la respuesta de Meta
-y no se presupone por el modelo histórico WABA. Si algo falla,
-ese `NumeroWhatsappSede` pasa a `estado="error"` + los envíos de esa sede
-vuelven automáticamente al número compartido hasta que se resuelva — el
-resto de números/sedes de la misma clínica que sigan sanos no se ven
-afectados. Nunca dejar a una clínica/sede sin poder mandar
-recordatorios/OTP por un problema del lado del addon.
+Los errores son por plantilla: una que falla no revierte las demás. Si todas
+quedan creadas, el número pasa a `plantillas_pendientes`.
 
-## 5. UI en CliniQ
+**"Actualizar estado de plantillas"**:
 
-- Pantalla con **una fila por sede** (+ una fila "general" de la clínica),
-  cada una con su propio badge de estado (5 posibles: no conectado /
-  conectando / conectado sin plantillas — con lista de qué falta aprobar —
-  / activo / error con el motivo) y su propio botón "Conectar"/"Reconectar",
-  siguiendo el mismo patrón visual que ya existe para otros addons.
-- En `/console/clinicas/[id]`, el superadmin ve el estado de la conexión y de
-  cada número por clínica, más el **conteo de números en `activo`** (el dato
-  de referencia para facturar manualmente, ver sección 1) — aunque la
-  anulación del addon en sí se maneje con el mismo control de 3 estados que
-  ya existe para los otros addons.
+1. `GET …/inboxes/{lyvio_inbox_id}/message_templates`: el caché que dejó la
+   sincronización anterior (crear una plantilla ya encola una). Del `payload`
+   se toman `name`, `language`, `status` y `category` de cada plantilla.
+2. `POST …/inboxes/{lyvio_inbox_id}/sync_templates` para la próxima vez. Así
+   no se espera al job de Lyvio dentro del request; si Meta acaba de aprobar,
+   hay que volver a pulsar en un minuto.
+3. Si todas las del catálogo vigente están `APPROVED`, el número pasa a
+   `activo`. Como el estado se leyó del caché de Lyvio, las plantillas ya
+   están listas para enviarse.
+4. Si alguna queda `REJECTED`, `PAUSED` o `DISABLED`, el número pasa a
+   `error` con ese motivo y todo sale por el compartido.
+5. Si todavía hay `PENDING`, se muestra "volver a actualizar más tarde".
 
-### Copy obligatorio del autoservicio
+Avisar en la UI si Meta cambió la categoría de `envio_cotizacion` a
+`MARKETING`: cambia el precio que paga la clínica.
+
+**Bonus:** un Schedule de n8n (D6) que llame un endpoint protegido para hacer
+el paso "Actualizar estado" solo en números con plantillas pendientes.
+
+## 5. Envío
+
+### Decisión de ruta (`resolver_ruta_whatsapp`)
+
+1. `checkin_otp` → siempre compartido (D8).
+2. Sin addon de número propio → compartido.
+3. Buscar el número (D11, D12):
+   1. **Sede del envío**, en este orden: la del objeto (`cita.sede`,
+      `cotizacion.sede`); la de la cita ligada al objeto (historia clínica,
+      consentimientos y protocolos tienen un `cita` opcional); si no hay, la
+      sede de la **última cita del paciente** en la clínica.
+   2. Asignación de esa sede: `cliniq` → compartido; `numero` → ese número si
+      está `activo`.
+   3. Si no hay sede, no tiene asignación, o su número no está `activo` → el
+      **número por defecto**.
+
+   Nunca un número de otra clínica.
+4. Número elegido en `activo` y plantilla del tipo `APPROVED` en su inbox →
+   `propio`.
+5. En cualquier otro caso → compartido, **como hoy**, con
+   `verificar_disponibilidad_whatsapp` (addon base + cupo).
+
+La idea es que el paciente reciba los mensajes desde un número de la clínica,
+al que puede responder o que puede buscar después; el compartido es solo el
+último recurso.
+
+Solo la ruta compartida descuenta cupo (D1), **también cuando es el respaldo
+de un envío propio que falló** (D10). Todo se registra en `EnvioWhatsApp` con
+`ruta` y `motivo_ruta`.
+
+### Envío por Lyvio (ruta propia)
+
+1. Crear el `EnvioWhatsApp` con `estado=incierto` **antes** de llamar a
+   Lyvio. No hay clave de idempotencia por envío: el único reintento
+   automático es el respaldo por el compartido, y ese es único por envío
+   (`respaldo_de`). Evitar el doble clic es tarea del frontend.
+2. **Contacto**: `ContactoLyvio` o `POST …/contacts` con `inbox_id`, `name` y
+   `phone_number` en E.164. Si el número ya existe, `GET …/contacts/search?q=`.
+   El caché guarda el teléfono: si el paciente lo cambia, se resuelve de nuevo.
+   La conversación se guarda en el envío **antes** del POST del mensaje: si
+   Meta rechaza tan rápido que el aviso llega antes que el `message_id`, el
+   webhook encuentra el envío por conversación.
+3. **Conversación**: la guardada, o
+   `GET …/contacts/{id}/conversations` filtrando por `inbox_id`.
+4. **Mensaje**:
+   Si no hay, `POST …/conversations` con `{inbox_id, contact_id}` (sin
+   mensaje: así el mensaje siempre se crea en el paso siguiente y se obtiene
+   su `id`).
+   - `POST …/conversations/{id}/messages` con
+     `{content, message_type: "outgoing", template_params}`. Si responde 404
+     (conversación borrada en Lyvio), se resuelve de nuevo una vez.
+
+   `template_params` = `{name, language, category, processed_params: {body: {"1": …}, header: {media_url, media_type: "document", media_name}}}`.
+   `header` solo en las plantillas con PDF; `media_url` es la URL pública que
+   ya genera `enviar_documento_whatsapp_webhook`.
+5. Respuesta OK → guardar `lyvio_message_id` y `estado=enviado`.
+6. Error HTTP inmediato de Lyvio (4xx/5xx) → `fallido` y se envía por el
+   compartido en el mismo request (`respaldo_por_fallo`).
+7. **Timeout** → queda `incierto` y **no** se reintenta ni se cae al
+   compartido: podría duplicarse. Queda visible en el admin.
+
+"Enviado" solo significa que Lyvio lo aceptó. La confirmación real llega por
+el webhook.
+
+## 6. Webhook Lyvio → CliniQ
+
+Endpoint nuevo `POST /notificaciones/lyvio-webhook/`. Se configura en Lyvio
+en **Configuración → Integraciones → Webhooks** de la cuenta de CliniQ, con
+los eventos `message_created` y `message_updated`. Al guardarlo, Lyvio genera
+un secreto: va en `LYVIO_WEBHOOK_SECRET`. Cada aviso trae
+`X-Chatwoot-Timestamp` y `X-Chatwoot-Signature: sha256=<HMAC-SHA256(secreto,
+"<timestamp>.<cuerpo>")>` (verificado en el código de Chatwoot 4.18). CliniQ
+verifica la firma sobre el cuerpo crudo y rechaza avisos de más de 5 minutos.
+
+- **`message_updated` con `status: failed`**: buscar el `EnvioWhatsApp` por
+  `lyvio_message_id`, marcarlo `fallido` con `external_error` y **reenviar
+  por el compartido** una sola vez (`respaldo_de`). `external_error` suele
+  venir como `"<código>: <título>"`; si Meta rechazó en el momento, trae solo
+  el texto.
+- **`131042`** (falta método de pago): además, el número pasa a `error` con el
+  mensaje "Falta método de pago en Meta". Así los siguientes envíos van
+  directo por el compartido y no fallan dos veces cada uno.
+- **`message_created` con `message_type: incoming`**: respuesta del paciente.
+  La clínica ya la ve en su teléfono. En el MVP solo se registra; se usará
+  si más adelante hay un botón "Confirmar cita". Se ignoran los salientes y
+  los ecos de lo que la clínica escribe desde su teléfono.
+- Si llega un `message_id` desconocido, responder `200` y registrar.
+- **Antes de fijar el parser**, capturar un evento real de cada tipo y
+  confirmar qué campos trae (`id`, `status`, `external_error`,
+  `conversation`, `inbox`, `content`, `message_type`).
+
+## 7. Salud del número
+
+`GET …/inboxes/{lyvio_inbox_id}/health`: si `status` no es `CONNECTED` o
+`is_on_biz_app` deja de ser `true`, el número pasa a `error`, sus envíos van
+por el compartido y la clínica ve el aviso con la acción concreta (abrir
+WhatsApp Business en el teléfono y reconectar).
+
+- Núcleo: botón "Revisar salud" en `/console/clinicas/[id]` y chequeo al
+  pulsar "Actualizar estado de plantillas".
+- Bonus: Schedule diario en n8n (D6) que llame un endpoint protegido de Django.
+
+Un número en `error` no afecta a los demás números de la clínica. Nunca se
+deja a la clínica sin envíos por un problema del addon.
+
+## 8. UI y copy
+
+- **Configuración → WhatsApp → Número de envío**: número en uso, promoción o
+  "Tus números" (estado de cada uno y "Conectar otro número") y
+  **Asignación** (número por defecto + un dropdown por sede con "Número por
+  defecto", cada número y "Número de CliniQ"). La asignación no se muestra si
+  hay un solo número y una sola sede.
+- **Configuración → WhatsApp → Consumo y envíos**: consumo del mes por ruta y
+  envíos fallidos.
+- **`/console/clinicas/[id]`**: override del addon (3 estados) y de números
+  incluidos, cada número con su inbox, las sedes que lo usan, plantillas por tipo con estado y error, botones
+  "Crear plantillas", "Actualizar estado" y "Revisar salud", conteo de
+  números `activo` (referencia de cobro).
+- **Uso de WhatsApp** (`uso_whatsapp_mes_actual`): desglose por ruta.
+
+### Copy obligatorio
 
 Antes de conectar:
 
 > Conecta el número que ya utilizas en WhatsApp Business. Si Meta habilita la
 > modalidad de coexistencia para tu número, podrás seguir respondiendo desde
-> tu teléfono mientras CliniQ envía recordatorios, códigos y documentos
+> tu teléfono mientras CliniQ envía recordatorios y documentos
 > automáticamente.
-
-Aviso visible, no escondido en términos:
 
 > La disponibilidad de esta modalidad la determina exclusivamente Meta.
 > CliniQ no puede garantizar ni forzar la elegibilidad de un número.
+
+> Al conectar, WhatsApp Business desactiva en tu teléfono los mensajes
+> temporales, los mensajes de "ver una vez", la ubicación en tiempo real y las
+> listas de difusión (las existentes quedan solo de lectura). WhatsApp para
+> Windows deja de funcionar como dispositivo vinculado.
+
+> Los mensajes que CliniQ envíe desde tu número los cobra Meta directamente a
+> tu cuenta de WhatsApp Business, según el tipo de mensaje. Antes de conectar,
+> agrega un método de pago en Meta Business Suite; sin él, los mensajes
+> saldrán por el número de CliniQ. Los mensajes enviados desde tu número no
+> consumen el cupo de mensajes de tu plan de CliniQ; los que salgan por el
+> número de CliniQ (incluidos los códigos de check-in, que siempre se envían
+> desde ahí) sí lo consumen.
+
+### Copy de la asignación (D11, D12)
+
+> **Número por defecto.** Para sedes nuevas, documentos sin sede y cuando el
+> número de una sede tiene un problema.
+
+Bajo cada sede: "Enviando desde +57 …" o "Enviando desde el número de CliniQ".
+
+Recuadro "¿Qué número se usa?":
+
+> Los documentos sin sede (consentimientos, órdenes médicas, firmas) usan la
+> sede de la cita relacionada o, si no hay, la última sede donde se atendió el
+> paciente. Si el número de una sede tiene un problema, el mensaje sale desde
+> el número por defecto, y si ninguno está disponible, desde el número de
+> CliniQ.
+
+Siempre visible: "Los códigos de check-in siempre salen desde el número de
+CliniQ."
+
+Si todavía no hay ningún número listo:
+
+> Mientras Meta aprueba tus mensajes (suele tardar de minutos a un día), todo
+> se sigue enviando desde el número de CliniQ, como hasta ahora.
 
 Si Meta no ofrece Coexistence:
 
 > Meta no habilitó la coexistencia para este número. Tu WhatsApp actual no ha
 > sido modificado. Puedes intentarlo nuevamente más adelante o contactar a
-> soporte para evaluar una conexión administrada mediante Lyvio.
+> soporte.
 
 Después de conectar:
 
 > Conexión activa. Puedes seguir respondiendo desde WhatsApp Business en tu
-> teléfono. CliniQ utilizará este número para los envíos automáticos
-> habilitados. No desvincules el número desde Meta ni desde WhatsApp Business
-> sin contactar primero a soporte.
+> teléfono. Abre WhatsApp Business al menos una vez cada 14 días: si no, Meta
+> desconecta el número y los envíos volverán a salir por el número de CliniQ.
+> No cambies de teléfono sin contactar primero a soporte.
 
-La UI nunca debe describir la alternativa de soporte como equivalente a
-Coexistence: puede requerir otro número o una migración que cambie el uso desde
-el teléfono, y soporte debe explicarlo antes de ejecutar cualquier cambio.
+## Decisiones
 
-## Verificación / pruebas antes de dar por hecho
+- **D1 — Addon dedicado, sin cupo** (2026-09-24). Pagado aparte, exige el
+  addon base de WhatsApp. Los envíos por número propio no descuentan cupo; la
+  ruta compartida sí.
+- **D2 — Pago a Meta** (2026-09-24). Lo paga la clínica con su método de pago
+  en Meta. CliniQ lo informa en el asistente y detecta `131042`.
+- **D3 — Modo del número** (2026-09-24). Reemplazada por D12.
+- **D4 — Dos cuentas de Lyvio** (2026-09-24). El compartido en la cuenta
+  principal (n8n); los propios en la cuenta de CliniQ (Django). El catálogo
+  vive en código.
+- **D5 — Todas o ninguna** (2026-09-24). Un número está `activo` solo con las
+  4 plantillas del catálogo aprobadas. Sin ruteo mixto por tipo.
+- **D6 — Tareas periódicas en n8n** (2026-09-24). Schedule de n8n → endpoint
+  protegido de Django; nada de crons en Dokploy.
+- **D7 — Lyvio mínimo** (2026-09-25). En Lyvio solo se agregó la creación de
+  plantillas. Idempotencia, confirmación de envío, respaldo y seguimiento de
+  aprobación los hace CliniQ con la API existente. Se descartan
+  `operation_id`, clave de idempotencia en Lyvio y "envío por inbox" nuevo.
+- **D8 — OTP siempre por el compartido** (2026-09-25). `checkin_otp` no entra
+  al catálogo. Evita la plantilla AUTHENTICATION (cuerpo fijo de Meta y botón
+  de código) en cada WABA.
+- **D9 — Recordatorios automáticos: bonus** (2026-09-25). Conectar el polling
+  de n8n (fase A) y despacharlos por número propio no es parte del núcleo. El
+  recordatorio inmediato desde la agenda sí usa el número propio, porque pasa
+  por `enviar_whatsapp`.
+- **D10 — El respaldo descuenta cupo** (2026-09-25). Si un envío propio falla
+  y se reenvía por el compartido, ese reenvío cuenta contra el cupo. Si no
+  hay cupo, el respaldo no sale y queda registrado como fallido.
+- **D11 — Número de la clínica antes que el compartido** (2026-09-25). Lo que
+  no tiene sede, o cuya sede no tiene número activo, sale por el **número por
+  defecto** de la clínica, no por el compartido: el paciente debe poder
+  responder o buscar después el número de la clínica que le envió la
+  información.
+- **D12 — Números de la clínica + asignación por sede** (2026-09-25). El
+  addon define cuántos números se pueden conectar. Los números son de la
+  clínica; cada sede elige en un dropdown "Número por defecto", uno de los
+  números o "Número de CliniQ". El primer número conectado queda como por
+  defecto y todas las sedes lo usan sin configurar nada. Reemplaza el "modo"
+  general / por sede de D3.
 
-1. Confirmar el flujo completo con un número real de WhatsApp Business App que
-   Meta muestre como elegible para Coexistence (un número de prueba Cloud API
-   puede no recorrer ese camino): whitelist de dominio, popup disparado desde
-   CliniQ, resultado explícito de Coexistence y creación del inbox en Lyvio con
-   los IDs vigentes que entregue Meta. Nunca se probó llamar ese endpoint desde
-   un sistema externo a Lyvio; la lectura de código no sustituye esta prueba.
-2. Construir y probar el endpoint `create_template` en el propio código de
-   Lyvio (no existe hoy) — confirmar que el `POST` a Meta funciona con el
-   token que ya tiene guardado el canal, y que el estado de aprobación
-   aparece correctamente después de disparar y completar `sync_templates`.
-   Forzar además un fallo dentro del job y comprobar que el admin recibe
-   `failed` con el error, no un falso éxito por el `202` inicial.
-3. Probar el camino de fallback: plantilla rechazada a propósito, confirmar
-   que el tipo de mensaje afectado sale por el número compartido una sola vez
-   y que queda auditado el motivo del cambio de ruta.
-4. Probar el chequeo periódico de salud con un token revocado a propósito
-   (revocar desde Meta Business Settings) y confirmar que el sistema lo
-   detecta y actúa (fallback + alerta), no que se queda en silencio.
-5. Hacer el refactor de consolidación de envíos (sección 0.2) **antes** de
-   escribir la lógica de bifurcación — confirmar con tests existentes (si los
-   hay para `agenda`/`protocolos`/`notificaciones`) que ningún envío actual
-   se rompe al pasar por la función centralizada nueva.
-6. Probar la cuenta única de Lyvio de punta a punta: confirmar que la
-   credencial técnica global puede crear y operar varios inboxes y que cada
-   operación de CliniQ exige la relación clínica/sede/inbox correcta. Probar
-   expresamente que un usuario de una clínica no puede consultar ni operar el
-   inbox de otra enviando IDs manipulados.
-7. Probar el flujo de **número adicional** (segunda sede): confirmar en la
-   práctica que el popup de Meta deja agregar un número a una WABA ya
-   existente (no solo crear una nueva), y que ese segundo número llega a
-   `activo` sin pasar por el ciclo de plantillas — es el supuesto central del
-   modelo de "WABA por clínica, números por sede" y no está probado contra
-   Meta todavía, solo verificado por documentación.
-8. Probar que una falla en un número (ej. token de esa sede revocado, si eso
-   es posible de forma independiente al resto de la WABA) no tira abajo los
-   demás números activos de la misma clínica.
-9. Abrir el workflow real de n8n (`cliniq/envio-documentos`) y confirmar que
-   efectivamente no tiene ninguna lógica por clínica — solo inferido hasta
-   ahora a partir del payload y de una nota de memoria, no visto
-   directamente. Si resulta que sí hay algo específico por cuenta ahí,
-   revisar la sección 0.2 antes de construir.
-10. Probar un número **no elegible para Coexistence** y confirmar que el flujo
-    se detiene sin registrarlo como API-only, sin crear un inbox utilizable y
-    sin alterar su WhatsApp Business App.
-11. Probar que el mismo teléfono de paciente presente en dos clínicas se
-    resuelve siempre dentro del inbox correcto y no reutiliza una conversación
-    de la otra clínica, dado que los contactos de Chatwoot son account-wide.
+## Criterio de terminado
+
+1. Una clínica de prueba conecta su número desde CliniQ, queda con
+   `lyvio_inbox_id` y como número por defecto.
+2. Desde el admin se crea el catálogo en su WABA, incluida una plantilla con
+   PDF. Repetirlo (o hacerlo en un segundo número de la misma WABA) trata los
+   duplicados como éxito.
+3. Al actualizar el estado tras la aprobación de Meta, el número pasa a
+   `activo`.
+4. Una cotización real sale desde el número de la clínica; la respuesta del
+   paciente llega a su teléfono y a CliniQ por el webhook.
+5. Si el número no está listo, o el envío falla (probar con una WABA sin
+   método de pago → `131042`), el mensaje sale por el compartido una sola vez
+   y el número pasa a `error`.
+6. El OTP de check-in sale por el compartido aunque la clínica tenga número
+   `activo`.
+7. Asignación: un envío de la sede A sale por el número asignado a A si está
+   activo; un consentimiento sin cita sale por el número por defecto; una
+   sede con "Número de CliniQ" sale por el compartido; nunca sale por el
+   número de otra clínica; no se puede conectar más números que los incluidos.
+8. Con el addon base apagado, el de número propio queda inactivo aunque su
+   override diga `True`.
+9. Tests: decisión de ruta (OTP, por defecto, número asignado, sede con
+   CliniQ, sede de la cita ligada y de la última cita, respaldo al por
+   defecto), límite de números,
+   creación de plantillas con duplicado, rechazo y `502`, parser del webhook,
+   respaldo por `failed` sin duplicar y descontando cupo, `131042` → `error`,
+   y timeout → `incierto`.

@@ -36,10 +36,9 @@ from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
     email_provider_config,
-    enviar_documento_whatsapp_webhook,
     enviar_email,
-    registrar_envio_whatsapp,
-    verificar_disponibilidad_whatsapp,
+    enviar_whatsapp,
+    resolver_ruta_whatsapp,
 )
 from apps.users.permissions import RequirePermission
 
@@ -378,7 +377,10 @@ class CotizacionViewSet(ModelViewSet):
     def enviar_whatsapp(self, request, pk=None):
         cotizacion = self.get_object()
         try:
-            verificar_disponibilidad_whatsapp(cotizacion.clinica)
+            ruta = resolver_ruta_whatsapp(
+                cotizacion.clinica, cotizacion.sede,
+                tipo=EnvioWhatsApp.Tipo.ENVIO_COTIZACION, paciente=cotizacion.paciente,
+            )
         except WhatsAppNoDisponibleError as exc:
             return Response(
                 {"error": str(exc), "code": exc.code},
@@ -386,9 +388,10 @@ class CotizacionViewSet(ModelViewSet):
             )
         pdf_bytes = render_cotizacion_pdf(cotizacion)
         try:
-            enviar_documento_whatsapp_webhook(
+            enviar_whatsapp(
+                ruta=ruta,
+                tipo=EnvioWhatsApp.Tipo.ENVIO_COTIZACION,
                 paciente=cotizacion.paciente,
-                tipo_notificacion="envio_cotizacion",
                 pdf_bytes=pdf_bytes,
                 nombre_archivo_pdf=f"cotizacion-{cotizacion.id}.pdf",
                 metadata={
@@ -399,6 +402,9 @@ class CotizacionViewSet(ModelViewSet):
                     "total": str(cotizacion.total),
                 },
             )
+        except WhatsAppNoDisponibleError as exc:
+            # El numero de la clinica fallo y el respaldo por el de CliniQ no tiene cupo.
+            return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except ValueError:
             return Response(
                 {"error": "Webhook no configurado", "code": "WEBHOOK_NOT_CONFIGURED"},
@@ -409,7 +415,6 @@ class CotizacionViewSet(ModelViewSet):
                 {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-        registrar_envio_whatsapp(cotizacion.clinica, EnvioWhatsApp.Tipo.ENVIO_COTIZACION, paciente=cotizacion.paciente)
         envio = CotizacionEnvio.objects.create(
             cotizacion=cotizacion,
             canal=CotizacionEnvio.Canal.WHATSAPP,

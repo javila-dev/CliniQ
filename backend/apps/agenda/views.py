@@ -41,10 +41,10 @@ from apps.core.logging import registrar_accion
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
-    enviar_recordatorio_cita_webhook,
+    enviar_whatsapp,
     registrar_envio_whatsapp,
+    resolver_ruta_whatsapp,
     uso_whatsapp_mes_actual,
-    verificar_disponibilidad_whatsapp,
 )
 from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
 from apps.users.models import User
@@ -839,20 +839,24 @@ class CitaViewSet(ModelViewSet):
             )
         cita_qs = Cita.objects.select_related("paciente", "servicio", "profesional", "sede", "sede__clinica").get(pk=cita.pk)
         try:
-            verificar_disponibilidad_whatsapp(cita_qs.sede.clinica)
+            ruta = resolver_ruta_whatsapp(
+                cita_qs.sede.clinica, cita_qs.sede,
+                tipo=EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita_qs.paciente, cita=cita_qs,
+            )
         except WhatsAppNoDisponibleError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         payload = RecordatorioPendienteSerializer(cita_qs).data
         payload["tipo_recordatorio"] = "manual"
         try:
-            enviar_recordatorio_cita_webhook(dict(payload))
+            enviar_whatsapp(
+                ruta=ruta, tipo=EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita_qs.paciente, payload=dict(payload),
+            )
         except Exception as exc:
             logger.error("Error al enviar recordatorio inmediato cita=%s: %s", cita.pk, exc)
             return Response(
                 {"error": "No se pudo contactar el servicio de notificaciones. Intenta de nuevo.", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-        registrar_envio_whatsapp(cita_qs.sede.clinica, EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita_qs.paciente)
         cita.recordatorio_enviado = True
         cita.recordatorio_manual_pendiente = False
         if cita.estado_confirmacion == Cita.EstadoConfirmacion.SIN_ENVIAR:
@@ -971,8 +975,6 @@ class CitaViewSet(ModelViewSet):
     def enviar_link_firma_asistencia(self, request, pk=None):
         from apps.consentimientos.services import iniciar_registro_asistencia_documenso
         from apps.historia_clinica.services import DocumensoIntegrationError, url_firma_documenso
-        from apps.notificaciones.services import enviar_link_firma_whatsapp
-
         cita = self.get_object()
         try:
             result = iniciar_registro_asistencia_documenso(cita)
@@ -990,16 +992,19 @@ class CitaViewSet(ModelViewSet):
         enviado = False
         if telefono:
             try:
-                verificar_disponibilidad_whatsapp(cita.sede.clinica)
-                enviar_link_firma_whatsapp(
+                enviar_whatsapp(
+                    clinica=cita.sede.clinica,
+                    sede=cita.sede,
+                    cita=cita,
+                    tipo=EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO,
                     paciente=cita.paciente,
                     documento_tipo="registro de asistencia",
                     link=link,
                     metadata={"cita_id": str(cita.id)},
                 )
-                registrar_envio_whatsapp(cita.sede.clinica, EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO, paciente=cita.paciente)
                 enviado = True
-            except (ValueError, WhatsAppNoDisponibleError):
+            except (ValueError, WhatsAppNoDisponibleError, http_requests.RequestException):
+                # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
 
         return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)

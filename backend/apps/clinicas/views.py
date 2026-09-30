@@ -391,6 +391,7 @@ class AdminTenantViewSet(ModelViewSet):
         "nombre", "nit", "email", "telefono", "activo", "plan_id",
         "facial_verificacion_override", "modulo_estetico_override",
         "modulo_obesidad_override", "whatsapp_override", "whatsapp_envios_incluidos_override",
+        "whatsapp_numero_propio_override", "whatsapp_numeros_incluidos_override",
         "modo_puesta_en_marcha",
     )
     _MODULO_LABELS = {
@@ -399,6 +400,8 @@ class AdminTenantViewSet(ModelViewSet):
         "modulo_obesidad_override": "Módulo obesidad",
         "whatsapp_override": "WhatsApp",
         "whatsapp_envios_incluidos_override": "Cupo de envíos de WhatsApp",
+        "whatsapp_numero_propio_override": "WhatsApp con número propio",
+        "whatsapp_numeros_incluidos_override": "Números propios de WhatsApp incluidos",
         "modo_puesta_en_marcha": "Modo puesta en marcha",
     }
 

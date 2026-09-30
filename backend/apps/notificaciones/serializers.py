@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from apps.notificaciones.models import NotificacionFallida
+from apps.notificaciones.models import AsignacionWhatsappSede, NotificacionFallida
 
 
 class NotificacionFallidaSerializer(serializers.ModelSerializer):
@@ -72,3 +72,30 @@ class EmailConfigSerializer(serializers.Serializer):
     timeout = serializers.IntegerField()
     default_from_email = serializers.EmailField()
     configured = serializers.BooleanField()
+
+
+class AsignacionSedeSerializer(serializers.Serializer):
+    sede_id = serializers.UUIDField()
+    tipo = serializers.ChoiceField(choices=AsignacionWhatsappSede.Tipo.choices)
+    numero_id = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs["tipo"] == AsignacionWhatsappSede.Tipo.NUMERO and not attrs.get("numero_id"):
+            raise serializers.ValidationError({"numero_id": "Elige el número de esta sede."})
+        return attrs
+
+
+class WhatsappPropioConfigSerializer(serializers.Serializer):
+    pago_meta_configurado = serializers.BooleanField(required=False)
+    numero_por_defecto_id = serializers.UUIDField(required=False)
+    asignaciones = AsignacionSedeSerializer(many=True, required=False)
+
+
+class WhatsappConectarSerializer(serializers.Serializer):
+    """Resultado del Embedded Signup de Meta (evento WA_EMBEDDED_SIGNUP)."""
+
+    evento = serializers.CharField(max_length=60)
+    code = serializers.CharField(max_length=1000)
+    waba_id = serializers.CharField(max_length=64)
+    phone_number_id = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")
+    business_id = serializers.CharField(max_length=64, required=False, allow_blank=True, default="")

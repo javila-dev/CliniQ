@@ -1,13 +1,12 @@
 import logging
 import uuid
+from dataclasses import dataclass
 
 import requests
 from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.utils import timezone
 
-from apps.agenda.confirmacion import generar_token, get_url_confirmacion
-from apps.agenda.models import Cita
 from apps.core.storage import get_public_url, upload_public_file
 from apps.notificaciones.models import EnvioWhatsApp
 
@@ -23,6 +22,17 @@ class WhatsAppNoDisponibleError(Exception):
         self.code = code
 
 
+def _envios_que_cuentan_cupo(clinica, hoy):
+    """Envios del mes que descuentan cupo: solo la ruta compartida (los envios
+    por numero propio los paga la clinica a Meta)."""
+    return EnvioWhatsApp.objects.filter(
+        clinica=clinica,
+        ruta=EnvioWhatsApp.Ruta.COMPARTIDO,
+        created_at__year=hoy.year,
+        created_at__month=hoy.month,
+    )
+
+
 def verificar_disponibilidad_whatsapp(clinica) -> None:
     """Valida el addon de WhatsApp antes de disparar un envio. No hace la llamada:
     solo gatea. Levanta WhatsAppNoDisponibleError si la clinica no puede enviar."""
@@ -33,35 +43,44 @@ def verificar_disponibilidad_whatsapp(clinica) -> None:
     cupo = clinica.whatsapp_envios_incluidos
     if cupo:
         hoy = timezone.now()
-        usados = EnvioWhatsApp.objects.filter(
-            clinica=clinica, created_at__year=hoy.year, created_at__month=hoy.month,
-        ).count()
+        usados = _envios_que_cuentan_cupo(clinica, hoy).count()
         if usados >= cupo:
             raise WhatsAppNoDisponibleError(
                 "Se agotó el cupo de envíos de WhatsApp de este mes.", code="WHATSAPP_CUPO_AGOTADO",
             )
 
 
-def registrar_envio_whatsapp(clinica, tipo: str, paciente=None) -> None:
-    """Registra un envio de WhatsApp exitoso. Llamar solo despues de que el envio
-    real haya tenido exito (para no descontar cupo por intentos fallidos)."""
-    EnvioWhatsApp.objects.create(clinica=clinica, tipo=tipo, paciente=paciente)
+def registrar_envio_whatsapp(clinica, tipo: str, paciente=None, *, motivo_ruta: str = "", respaldo_de=None) -> None:
+    """Registra un envio de WhatsApp exitoso por el numero compartido. Llamar
+    solo despues de que el envio real haya tenido exito (para no descontar cupo
+    por intentos fallidos)."""
+    EnvioWhatsApp.objects.create(
+        clinica=clinica, tipo=tipo, paciente=paciente, ruta=EnvioWhatsApp.Ruta.COMPARTIDO,
+        motivo_ruta=motivo_ruta, respaldo_de=respaldo_de,
+    )
 
 
 def uso_whatsapp_mes_actual(clinica) -> dict:
     """Resumen de consumo del addon de WhatsApp para el mes calendario actual."""
     hoy = timezone.now()
     envios_incluidos = clinica.whatsapp_envios_incluidos
-    envios_realizados = EnvioWhatsApp.objects.filter(
-        clinica=clinica, created_at__year=hoy.year, created_at__month=hoy.month,
-    ).count()
+    envios_realizados = _envios_que_cuentan_cupo(clinica, hoy).count()
     sin_limite = envios_incluidos == 0
+    # Enviados desde los numeros de la clinica: no cuentan contra el cupo (los
+    # paga la clinica a Meta). Los fallidos salieron por el compartido.
+    envios_numero_propio = EnvioWhatsApp.objects.filter(
+        clinica=clinica,
+        ruta=EnvioWhatsApp.Ruta.PROPIO,
+        created_at__year=hoy.year,
+        created_at__month=hoy.month,
+    ).exclude(estado=EnvioWhatsApp.Estado.FALLIDO).count()
     return {
         "habilitado": clinica.whatsapp_habilitado,
         "envios_incluidos": envios_incluidos,
         "envios_realizados": envios_realizados,
         "envios_restantes": None if sin_limite else max(0, envios_incluidos - envios_realizados),
         "sin_limite": sin_limite,
+        "envios_numero_propio": envios_numero_propio,
     }
 
 
@@ -75,22 +94,56 @@ def get_whatsapp_outbound_webhook_url() -> str:
     return f"{base}{path}"
 
 
-def enviar_documento_whatsapp_webhook(
-    *,
-    paciente,
-    tipo_notificacion: str,
-    pdf_bytes: bytes,
-    nombre_archivo_pdf: str,
-    metadata: dict | None = None,
-) -> dict:
+def enviar_otp_checkin_webhook(*, paciente, codigo: str) -> dict:
+    """Envia el codigo OTP de check-in (citas y sesiones de protocolo) por el
+    webhook outbound de n8n -> Lyvio."""
     url = get_whatsapp_outbound_webhook_url()
     if not url:
         raise ValueError("Webhook no configurado")
 
+    payload = {
+        "nombre": paciente.nombres,
+        "apellido": paciente.apellidos,
+        "telefono": paciente.telefono,
+        "clinica_id": str(paciente.clinica_id) if paciente.clinica_id else "",
+        "paciente_id": str(paciente.id),
+        "tipo_notificacion": "checkin_otp",
+        "codigo": codigo,
+    }
+
+    headers = {}
+    if settings.N8N_WEBHOOK_SECRET:
+        headers["X-Webhook-Secret"] = settings.N8N_WEBHOOK_SECRET
+
+    response = requests.post(url, json=payload, headers=headers, timeout=15)
+    response.raise_for_status()
+    return payload
+
+
+def subir_pdf_whatsapp(pdf_bytes: bytes, nombre_archivo_pdf: str) -> str:
+    """Sube el PDF a una URL publica para que n8n/Lyvio lo adjunten."""
     hoy = timezone.now()
     storage_path = f"whatsapp_docs/{hoy.year}/{hoy.month:02d}/{uuid.uuid4().hex}/{nombre_archivo_pdf}"
     upload_public_file(pdf_bytes, storage_path, content_type="application/pdf")
-    pdf_url = get_public_url(storage_path)
+    return get_public_url(storage_path)
+
+
+def enviar_documento_whatsapp_webhook(
+    *,
+    paciente,
+    tipo_notificacion: str,
+    nombre_archivo_pdf: str,
+    pdf_bytes: bytes | None = None,
+    pdf_url: str | None = None,
+    metadata: dict | None = None,
+) -> dict:
+    """`pdf_url` si el PDF ya esta subido (respaldo de un envio por numero propio)."""
+    url = get_whatsapp_outbound_webhook_url()
+    if not url:
+        raise ValueError("Webhook no configurado")
+
+    if not pdf_url:
+        pdf_url = subir_pdf_whatsapp(pdf_bytes, nombre_archivo_pdf)
 
     payload = {
         "nombre": paciente.nombres,
@@ -174,6 +227,91 @@ def enviar_recordatorio_cita_webhook(payload: dict) -> None:
     response.raise_for_status()
 
 
+@dataclass(frozen=True)
+class RutaWhatsApp:
+    """Por donde sale un envio de WhatsApp: el numero compartido (n8n -> Lyvio,
+    cuenta principal) o un numero propio de la clinica (Django -> Lyvio, cuenta
+    de CliniQ). `motivo` queda en EnvioWhatsApp.motivo_ruta."""
+
+    clinica: object
+    sede: object = None
+    canal: str = "compartido"
+    numero: object = None
+    motivo: str = ""
+
+
+def resolver_ruta_whatsapp(clinica, sede=None, *, tipo=None, paciente=None, cita=None) -> RutaWhatsApp:
+    """Decide por donde sale el envio y valida que la clinica pueda enviar.
+    Levanta WhatsAppNoDisponibleError (solo en la ruta compartida: la propia no
+    descuenta cupo). Llamarla antes de crear efectos que haya que deshacer (OTP,
+    documentos) y pasar el resultado a enviar_whatsapp. Sin `tipo` siempre
+    resuelve el compartido."""
+    from apps.notificaciones.numero_propio import elegir_numero
+
+    numero, motivo = elegir_numero(clinica, tipo=tipo, sede=sede, cita=cita, paciente=paciente)
+    if numero is not None:
+        return RutaWhatsApp(clinica=clinica, sede=sede, canal="propio", numero=numero, motivo=motivo)
+    verificar_disponibilidad_whatsapp(clinica)
+    return RutaWhatsApp(clinica=clinica, sede=sede, motivo=motivo)
+
+
+def enviar_whatsapp(
+    *, tipo: str, paciente, clinica=None, sede=None, cita=None, ruta: RutaWhatsApp | None = None, **datos,
+):
+    """Punto unico de envio de WhatsApp: resuelve la ruta (si no viene), envia
+    y registra el envio. Todos los envios del backend pasan por aqui. `cita`
+    ayuda a elegir el numero de la sede cuando el objeto no tiene sede. `datos`
+    depende del tipo:
+
+    - checkin_otp: codigo
+    - firma_documento: documento_tipo, link, metadata
+    - envio_cotizacion / envio_formula: pdf_bytes, nombre_archivo_pdf, metadata
+    - recordatorio_cita: payload
+
+    Errores: WhatsAppNoDisponibleError (addon/cupo), ValueError (webhook no
+    configurado) y requests.RequestException (fallo del webhook). En la ruta
+    compartida, si falla no se registra nada; en la propia, un fallo sale por
+    el compartido (ver numero_propio.enviar_por_numero_propio)."""
+    if ruta is None:
+        ruta = resolver_ruta_whatsapp(clinica, sede, tipo=tipo, paciente=paciente, cita=cita)
+    if ruta.canal == "propio":
+        from apps.notificaciones.numero_propio import enviar_por_numero_propio
+
+        return enviar_por_numero_propio(ruta, tipo=tipo, paciente=paciente, datos=datos)
+    return enviar_por_compartido(ruta.clinica, tipo=tipo, paciente=paciente, datos=datos, motivo=ruta.motivo)
+
+
+def enviar_por_compartido(clinica, *, tipo: str, paciente, datos: dict, motivo: str = "", respaldo_de=None):
+    """Envio por el numero compartido (n8n). Registra el envio, que descuenta
+    cupo, solo si el webhook lo acepto."""
+    Tipo = EnvioWhatsApp.Tipo
+    if tipo == Tipo.CHECKIN_OTP:
+        resultado = enviar_otp_checkin_webhook(paciente=paciente, codigo=datos["codigo"])
+    elif tipo == Tipo.FIRMA_DOCUMENTO:
+        resultado = enviar_link_firma_whatsapp(
+            paciente=paciente,
+            documento_tipo=datos["documento_tipo"],
+            link=datos["link"],
+            metadata=datos.get("metadata"),
+        )
+    elif tipo in (Tipo.ENVIO_COTIZACION, Tipo.ENVIO_FORMULA):
+        resultado = enviar_documento_whatsapp_webhook(
+            paciente=paciente,
+            tipo_notificacion=tipo,
+            pdf_bytes=datos.get("pdf_bytes"),
+            pdf_url=datos.get("pdf_url"),
+            nombre_archivo_pdf=datos["nombre_archivo_pdf"],
+            metadata=datos.get("metadata"),
+        )
+    elif tipo == Tipo.RECORDATORIO_CITA:
+        resultado = enviar_recordatorio_cita_webhook(datos["payload"])
+    else:
+        raise ValueError(f"Tipo de envio de WhatsApp desconocido: {tipo}")
+
+    registrar_envio_whatsapp(clinica, tipo, paciente=paciente, motivo_ruta=motivo, respaldo_de=respaldo_de)
+    return resultado
+
+
 def email_backend_requires_password() -> bool:
     return settings.EMAIL_BACKEND == "django.core.mail.backends.smtp.EmailBackend"
 
@@ -238,66 +376,3 @@ def enviar_email(
     return email.send()
 
 
-def _build_message(cita: Cita) -> str:
-    token = generar_token(cita)
-    url = get_url_confirmacion(token)
-    fecha = cita.fecha_inicio.strftime("%Y-%m-%d %H:%M")
-    return (
-        f"Hola {cita.paciente.nombre_completo}, te recordamos tu cita de "
-        f"{cita.servicio.nombre} el {fecha}. Confirma aqui: {url}"
-    )
-
-
-def enviar_confirmacion_whatsapp(cita: Cita) -> bool:
-    if not settings.EVOLUTION_API_URL or not settings.EVOLUTION_API_KEY:
-        logger.warning("Evolution API no configurada para enviar WhatsApp.")
-        return False
-
-    payload = {
-        "number": cita.paciente.telefono,
-        "text": _build_message(cita),
-    }
-    headers = {
-        "apikey": settings.EVOLUTION_API_KEY,
-        "Content-Type": "application/json",
-    }
-    url = settings.EVOLUTION_API_URL.rstrip("/")
-    if settings.EVOLUTION_INSTANCE:
-        url = f"{url}/message/sendText/{settings.EVOLUTION_INSTANCE}"
-
-    try:
-        response = requests.post(url, json=payload, headers=headers, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.exception("Fallo enviando confirmacion por WhatsApp para cita %s: %s", cita.id, exc)
-        return False
-
-
-def enviar_confirmacion_sms(cita: Cita) -> bool:
-    if not settings.MENSATEK_API_URL or not settings.MENSATEK_API_KEY:
-        logger.warning("Mensatek API no configurada para enviar SMS.")
-        return False
-
-    payload = {
-        "api_key": settings.MENSATEK_API_KEY,
-        "to": cita.paciente.telefono,
-        "message": _build_message(cita),
-    }
-    try:
-        response = requests.post(settings.MENSATEK_API_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        return True
-    except Exception as exc:
-        logger.exception("Fallo enviando confirmacion por SMS para cita %s: %s", cita.id, exc)
-        return False
-
-
-def enviar_recordatorio(cita: Cita) -> bool:
-    if cita.canal_confirmacion == Cita.CanalConfirmacion.WHATSAPP:
-        return enviar_confirmacion_whatsapp(cita)
-    if cita.canal_confirmacion == Cita.CanalConfirmacion.SMS:
-        return enviar_confirmacion_sms(cita)
-
-    logger.info("Cita %s requiere llamada manual; no se envia mensaje externo.", cita.id)
-    return False

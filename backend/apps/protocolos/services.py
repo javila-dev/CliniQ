@@ -2,7 +2,6 @@ import logging
 import random
 from datetime import date, timedelta
 
-import requests
 from django.db import transaction
 from django.db.models import Max
 from django.utils import timezone
@@ -10,9 +9,8 @@ from django.utils import timezone
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
-    get_whatsapp_outbound_webhook_url,
-    registrar_envio_whatsapp,
-    verificar_disponibilidad_whatsapp,
+    enviar_whatsapp,
+    resolver_ruta_whatsapp,
 )
 from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.services import consentimiento_informado_vigente, consentimiento_satisfecho
@@ -31,27 +29,6 @@ class ProtocolosError(Exception):
         self.extra = extra or {}
 
 
-def enviar_otp_whatsapp(paciente, codigo: str):
-    from django.conf import settings
-    url = get_whatsapp_outbound_webhook_url()
-    if not url:
-        raise ProtocolosError("Webhook no configurado", code="WEBHOOK_NOT_CONFIGURED")
-    payload = {
-        "nombre": paciente.nombres,
-        "apellido": paciente.apellidos,
-        "telefono": paciente.telefono,
-        "tipo_notificacion": "checkin_otp",
-        "codigo": codigo,
-    }
-    headers = {}
-    secret = getattr(settings, "N8N_WEBHOOK_SECRET", "")
-    if secret:
-        headers["X-Webhook-Secret"] = secret
-    response = requests.post(url, json=payload, headers=headers, timeout=15)
-    response.raise_for_status()
-    return payload
-
-
 def iniciar_checkin_otp(sesion: SesionProcedimiento, request_ip: str):
     otp_existente = getattr(sesion, "otp", None)
     if otp_existente and otp_existente.esta_vigente():
@@ -59,7 +36,7 @@ def iniciar_checkin_otp(sesion: SesionProcedimiento, request_ip: str):
 
     paciente = sesion.tratamiento.paciente
     try:
-        verificar_disponibilidad_whatsapp(paciente.clinica)
+        ruta = resolver_ruta_whatsapp(paciente.clinica, tipo=EnvioWhatsApp.Tipo.CHECKIN_OTP)
     except WhatsAppNoDisponibleError as exc:
         raise ProtocolosError(str(exc), code=exc.code) from exc
 
@@ -70,11 +47,13 @@ def iniciar_checkin_otp(sesion: SesionProcedimiento, request_ip: str):
         expira_en=timezone.now() + timedelta(minutes=10),
     )
     try:
-        enviar_otp_whatsapp(paciente, otp.codigo)
+        enviar_whatsapp(ruta=ruta, tipo=EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=paciente, codigo=otp.codigo)
+    except ValueError as exc:
+        otp.delete()
+        raise ProtocolosError("Webhook no configurado", code="WEBHOOK_NOT_CONFIGURED") from exc
     except Exception:
         otp.delete()
         raise
-    registrar_envio_whatsapp(paciente.clinica, EnvioWhatsApp.Tipo.CHECKIN_OTP, paciente=paciente)
     return otp, True
 
 

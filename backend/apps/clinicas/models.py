@@ -1,6 +1,7 @@
 import os
 import secrets
 
+from django.core.validators import MinValueValidator
 from django.db import models
 from django.db.models import F
 from django.db.models.functions import Lower, Trim
@@ -86,6 +87,25 @@ class Plan(BaseModel):
         default=0,
         help_text="Envíos de WhatsApp incluidos por mes en este plan. 0 significa sin límite.",
     )
+    whatsapp_numero_propio_habilitado = models.BooleanField(
+        default=False,
+        help_text=(
+            "Addon: la clínica envía los WhatsApp desde su propio número (Coexistence "
+            "vía Lyvio). Requiere el addon base de WhatsApp."
+        ),
+    )
+    whatsapp_numeros_incluidos = models.PositiveIntegerField(
+        default=1,
+        validators=[MinValueValidator(1)],
+        help_text="Números propios de WhatsApp que la clínica puede conectar con el add-on.",
+    )
+    precio_por_numero_whatsapp = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Costo mensual de referencia por cada número propio de WhatsApp activo.",
+    )
     mostrar_publico = models.BooleanField(
         default=False,
         help_text="Si esta activo, el plan aparece en la tabla de precios publica de la landing.",
@@ -112,6 +132,16 @@ class Plan(BaseModel):
     def __str__(self) -> str:
         limite = f"{self.max_usuarios} usuarios" if self.max_usuarios > 0 else "sin limite"
         return f"{self.nombre} ({limite})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.whatsapp_numero_propio_habilitado and not self.whatsapp_habilitado:
+            raise ValidationError({
+                "whatsapp_numero_propio_habilitado": (
+                    "El número propio de WhatsApp requiere el addon de WhatsApp."
+                ),
+            })
 
 
 class Clinica(BaseModel):
@@ -207,6 +237,22 @@ class Clinica(BaseModel):
             "Null = hereda del plan. 0 = sin límite."
         ),
     )
+    whatsapp_numero_propio_override = models.BooleanField(
+        null=True,
+        blank=True,
+        default=None,
+        help_text=(
+            "Anula el addon de número propio de WhatsApp del plan para esta clínica. "
+            "Null = hereda del plan. Sin el addon base de WhatsApp no tiene efecto."
+        ),
+    )
+    whatsapp_numeros_incluidos_override = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        default=None,
+        validators=[MinValueValidator(1)],
+        help_text="Anula cuántos números propios de WhatsApp puede conectar esta clínica. Null = hereda del plan.",
+    )
     modo_puesta_en_marcha = models.BooleanField(
         default=False,
         help_text=(
@@ -259,6 +305,23 @@ class Clinica(BaseModel):
         if self.plan is None:
             return 0
         return self.plan.whatsapp_envios_incluidos
+
+    @property
+    def whatsapp_numero_propio_habilitado(self):
+        # Depende del addon base: el numero compartido es el respaldo de todo
+        # envio por numero propio. Sin plan no se hereda habilitado (addon nuevo).
+        if not self.whatsapp_habilitado:
+            return False
+        return self._addon_efectivo(self.whatsapp_numero_propio_override, "whatsapp_numero_propio_habilitado")
+
+    @property
+    def whatsapp_numeros_incluidos(self):
+        """Cuantos numeros propios puede conectar; 0 si no tiene el addon."""
+        if not self.whatsapp_numero_propio_habilitado:
+            return 0
+        if self.whatsapp_numeros_incluidos_override is not None:
+            return self.whatsapp_numeros_incluidos_override
+        return self.plan.whatsapp_numeros_incluidos if self.plan else 1
 
 
 class Sede(BaseModel):

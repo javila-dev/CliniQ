@@ -201,11 +201,6 @@ N8N_APPOINTMENT_REMINDERS_WEBHOOK = config(
 )
 FRONTEND_URL = config("FRONTEND_URL", default="http://localhost:3000")
 FRONTEND_PASSWORD_RESET_PATH = config("FRONTEND_PASSWORD_RESET_PATH", default="/recuperar-contrasena")
-EVOLUTION_API_URL = config("EVOLUTION_API_URL", default="")
-EVOLUTION_API_KEY = config("EVOLUTION_API_KEY", default="")
-EVOLUTION_INSTANCE = config("EVOLUTION_INSTANCE", default="")
-MENSATEK_API_URL = config("MENSATEK_API_URL", default="")
-MENSATEK_API_KEY = config("MENSATEK_API_KEY", default="")
 PASSWORD_RESET_TOKEN_TTL_HOURS = config("PASSWORD_RESET_TOKEN_TTL_HOURS", default=2, cast=int)
 PASSWORD_INVITATION_TOKEN_TTL_HOURS = config("PASSWORD_INVITATION_TOKEN_TTL_HOURS", default=72, cast=int)
 PASSWORD_INVITATION_RESEND_COOLDOWN_SECONDS = config(
@@ -219,6 +214,26 @@ DOCUMENSO_WEBHOOK_SECRET = config("DOCUMENSO_WEBHOOK_SECRET", default="")
 DOCUMENSO_FALLBACK_EMAIL = config("DOCUMENSO_FALLBACK_EMAIL", default="")
 ORDEN_WEBHOOK_URL = config("ORDEN_WEBHOOK_URL", default="")
 WHATSAPP_OUTBOUND_WEBHOOK_URL = config("WHATSAPP_OUTBOUND_WEBHOOK_URL", default="")
+
+# WhatsApp con numero propio (Coexistence via Lyvio). Cuenta de Lyvio exclusiva de
+# CliniQ, distinta de la cuenta principal que usa n8n para el numero compartido.
+# LYVIO_CLINIQ_API_TOKEN es de un usuario administrador: secreto, nunca en logs.
+LYVIO_BASE_URL = config("LYVIO_BASE_URL", default="https://app.lyvio.io")
+LYVIO_CLINIQ_ACCOUNT_ID = config("LYVIO_CLINIQ_ACCOUNT_ID", default="")
+LYVIO_CLINIQ_API_TOKEN = config("LYVIO_CLINIQ_API_TOKEN", default="")
+# Secreto que genera Lyvio al crear el webhook de cuenta; firma cada aviso (HMAC).
+LYVIO_WEBHOOK_SECRET = config("LYVIO_WEBHOOK_SECRET", default="")
+# App de Meta y configuracion de Embedded Signup de Lyvio (publicos).
+LYVIO_WHATSAPP_APP_ID = config("LYVIO_WHATSAPP_APP_ID", default="2050257332050356")
+LYVIO_WHATSAPP_CONFIG_ID = config("LYVIO_WHATSAPP_CONFIG_ID", default="2909835515866390")
+# PDF publico de ejemplo para crear las plantillas con encabezado de documento.
+# Vacio: se sube uno generico al storage publico.
+LYVIO_PLANTILLA_PDF_EJEMPLO_URL = config("LYVIO_PLANTILLA_PDF_EJEMPLO_URL", default="")
+# Numero compartido de CliniQ tal como lo ve el paciente (solo para mostrarlo en
+# Configuracion -> WhatsApp) y WhatsApp de ventas para pedir el addon de numero
+# propio. Ambos opcionales: vacios, la UI usa textos genericos.
+WHATSAPP_NUMERO_CLINIQ = config("WHATSAPP_NUMERO_CLINIQ", default="")
+CLINIQ_VENTAS_WHATSAPP = config("CLINIQ_VENTAS_WHATSAPP", default="")
 
 EMAIL_BACKEND = config(
     "EMAIL_BACKEND",

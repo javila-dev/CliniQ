@@ -519,7 +519,7 @@ class CotizacionFlowTests(TestCase):
         self.assertIn("http://minio:9000/clinica-static/", html)
         self.assertIn(self.clinica.nombre, html)
 
-    @patch("apps.cotizaciones.views.enviar_documento_whatsapp_webhook")
+    @patch("apps.notificaciones.services.enviar_documento_whatsapp_webhook")
     def test_enviar_whatsapp_cotizacion_llama_webhook_con_payload_estandar(self, mocked_send):
         response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
         cotizacion = Cotizacion.objects.get(id=response.json()["id"])
@@ -542,7 +542,7 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(envio.canal, CotizacionEnvio.Canal.WHATSAPP)
         self.assertEqual(envio.destinatario, self.paciente.telefono)
 
-    @patch("apps.cotizaciones.views.enviar_documento_whatsapp_webhook")
+    @patch("apps.notificaciones.services.enviar_documento_whatsapp_webhook")
     def test_enviar_whatsapp_bloquea_al_agotar_cupo(self, mocked_send):
         self.clinica.whatsapp_envios_incluidos_override = 1
         self.clinica.save(update_fields=["whatsapp_envios_incluidos_override"])

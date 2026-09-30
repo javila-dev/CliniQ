@@ -1,6 +1,9 @@
+import hashlib
 import hmac
+import json
 
 from django.conf import settings
+from django.core.serializers.json import DjangoJSONEncoder
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
@@ -9,15 +12,64 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.notificaciones.models import NotificacionFallida
+from apps.core.logging import registrar_accion
+from apps.notificaciones import numero_propio
+from apps.notificaciones.models import NotificacionFallida, NumeroWhatsapp
 from apps.notificaciones.serializers import (
     EmailConfigSerializer,
     EmailSendSerializer,
     NotificacionFallidaCallbackSerializer,
     NotificacionFallidaSerializer,
+    WhatsappConectarSerializer,
+    WhatsappPropioConfigSerializer,
 )
 from apps.notificaciones.services import email_provider_config, enviar_email
-from apps.users.permissions import RequirePermission, get_clinica_activa
+from apps.users.permissions import IsSuperAdmin, RequirePermission, get_clinica_activa
+
+
+def firma_lyvio_valida(cuerpo: bytes, timestamp: str, firma: str, *, ahora=None) -> bool:
+    """Firma del webhook de Chatwoot 4.18: X-Chatwoot-Signature =
+    "sha256=" + HMAC-SHA256(secreto, f"{X-Chatwoot-Timestamp}.{cuerpo}"). El
+    secreto lo genera Lyvio al crear el webhook. Se rechazan avisos con mas de
+    LYVIO_WEBHOOK_TOLERANCIA_SEGUNDOS para que no se puedan reenviar."""
+    secreto = settings.LYVIO_WEBHOOK_SECRET
+    if not secreto or not timestamp or not firma.startswith("sha256="):
+        return False
+    try:
+        edad = abs((ahora if ahora is not None else timezone.now().timestamp()) - int(timestamp))
+    except ValueError:
+        return False
+    if edad > LYVIO_WEBHOOK_TOLERANCIA_SEGUNDOS:
+        return False
+    esperada = hmac.new(secreto.encode(), timestamp.encode() + b"." + cuerpo, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(firma.removeprefix("sha256="), esperada)
+
+
+LYVIO_WEBHOOK_TOLERANCIA_SEGUNDOS = 300
+
+
+class LyvioWebhookView(APIView):
+    """Webhook de cuenta de Lyvio (cuenta de CliniQ) con message_created y
+    message_updated, firmado por Lyvio (ver firma_lyvio_valida). Siempre
+    responde 200 a eventos validos para que Lyvio no reintente."""
+
+    authentication_classes = ()
+    permission_classes = (AllowAny,)
+
+    def post(self, request, *args, **kwargs):
+        cuerpo = request.body  # crudo: la firma es sobre los bytes exactos
+        if not firma_lyvio_valida(
+            cuerpo,
+            request.headers.get("X-Chatwoot-Timestamp", ""),
+            request.headers.get("X-Chatwoot-Signature", ""),
+        ):
+            return Response({"error": "No autorizado."}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            payload = json.loads(cuerpo or b"{}")
+        except ValueError:
+            return Response({"error": "JSON inválido."}, status=status.HTTP_400_BAD_REQUEST)
+        resultado = numero_propio.procesar_webhook(payload if isinstance(payload, dict) else {})
+        return Response({"ok": True, "resultado": resultado})
 
 
 class NotificacionFallidaCallbackView(APIView):
@@ -122,3 +174,125 @@ class EmailSendView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class _NumeroPropioBaseView(APIView):
+    """WhatsApp con numero propio de la clinica activa. Configurarlo es parte de
+    editar la clinica: mismo permiso."""
+
+    permission_classes = (RequirePermission("clinicas.editar"),)
+
+    def _clinica(self, request):
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return None, Response(
+                {"error": "No hay una clínica activa.", "code": "SIN_CLINICA"}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return clinica, None
+
+    @staticmethod
+    def _error(exc):
+        return Response({"error": exc.mensaje, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class WhatsappPropioView(_NumeroPropioBaseView):
+    """GET: estado para la pantalla de configuracion. PATCH: pago en Meta,
+    numero por defecto y asignacion de numeros a las sedes."""
+
+    def get(self, request, *args, **kwargs):
+        clinica, error = self._clinica(request)
+        if error:
+            return error
+        return Response(numero_propio.estado(clinica))
+
+    def patch(self, request, *args, **kwargs):
+        clinica, error = self._clinica(request)
+        if error:
+            return error
+        serializer = WhatsappPropioConfigSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            conexion = numero_propio.configurar(clinica, **serializer.validated_data)
+        except numero_propio.NumeroPropioError as exc:
+            return self._error(exc)
+        registrar_accion(
+            request, "whatsapp_propio.configurar", conexion,
+            {
+                "resumen": "Configuración de WhatsApp con número propio actualizada",
+                **json.loads(json.dumps(serializer.validated_data, cls=DjangoJSONEncoder)),
+            },
+            clinica=clinica,
+        )
+        return Response(numero_propio.estado(clinica))
+
+
+class WhatsappPropioConectarView(_NumeroPropioBaseView):
+    """Recibe el resultado del Embedded Signup de Meta y conecta el numero."""
+
+    def post(self, request, *args, **kwargs):
+        clinica, error = self._clinica(request)
+        if error:
+            return error
+        serializer = WhatsappConectarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            numero = numero_propio.conectar_numero(clinica, **serializer.validated_data)
+        except numero_propio.NumeroPropioError as exc:
+            return self._error(exc)
+        registrar_accion(
+            request, "whatsapp_propio.conectar", numero,
+            {
+                "resumen": "Número de WhatsApp conectado",
+                "numero": numero.numero_visible,
+                "lyvio_inbox_id": numero.lyvio_inbox_id,
+            },
+            clinica=clinica,
+        )
+        return Response(numero_propio.estado(clinica), status=status.HTTP_201_CREATED)
+
+
+class AdminWhatsappPropioView(APIView):
+    """Consola: estado del numero propio de una clinica con plantillas."""
+
+    permission_classes = (IsSuperAdmin,)
+
+    def get(self, request, clinica_id, *args, **kwargs):
+        from apps.clinicas.models import Clinica
+
+        clinica = get_object_or_404(Clinica, pk=clinica_id)
+        return Response(numero_propio.detalle_admin(clinica))
+
+
+class AdminWhatsappNumeroAccionView(APIView):
+    """Consola: crear plantillas, actualizar su estado o revisar la salud de un
+    numero. Manual por ahora (sin jobs periodicos)."""
+
+    permission_classes = (IsSuperAdmin,)
+    accion = None  # crear_plantillas | actualizar_plantillas | revisar_salud
+    _RESUMEN = {
+        "crear_plantillas": "Plantillas de WhatsApp creadas en Meta",
+        "actualizar_plantillas": "Estado de plantillas de WhatsApp actualizado",
+        "revisar_salud": "Salud del número de WhatsApp revisada",
+    }
+
+    def post(self, request, pk, *args, **kwargs):
+        numero = get_object_or_404(NumeroWhatsapp.objects.select_related("conexion__clinica"), pk=pk)
+        clinica = numero.conexion.clinica
+        extra = {}
+        try:
+            if self.accion == "crear_plantillas":
+                extra["resultados"] = numero_propio.crear_plantillas(numero)
+            elif self.accion == "actualizar_plantillas":
+                numero_propio.actualizar_plantillas(numero)
+            else:
+                extra["salud"] = numero_propio.revisar_salud(numero)
+        except numero_propio.NumeroPropioError as exc:
+            return Response({"error": exc.mensaje, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+
+        numero.refresh_from_db()
+        registrar_accion(
+            request, f"whatsapp_propio.{self.accion}", numero,
+            {"resumen": self._RESUMEN[self.accion], "estado": numero.estado, "numero": numero.numero_visible},
+            clinica=clinica,
+        )
+        return Response({**extra, "detalle": numero_propio.detalle_admin(clinica)})

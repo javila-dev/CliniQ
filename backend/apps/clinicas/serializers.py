@@ -36,10 +36,28 @@ class PlanSerializer(serializers.ModelSerializer):
             "precio_usuario_adicional", "precio_sede_adicional",
             "facial_verificacion_habilitada", "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
-            "whatsapp_habilitado", "whatsapp_envios_incluidos", "mostrar_publico",
+            "whatsapp_habilitado", "whatsapp_envios_incluidos",
+            "whatsapp_numero_propio_habilitado", "whatsapp_numeros_incluidos", "precio_por_numero_whatsapp",
+            "mostrar_publico",
             "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+
+    def validate(self, attrs):
+        def valor(campo):
+            if campo in attrs:
+                return attrs[campo]
+            if self.instance is not None:
+                return getattr(self.instance, campo)
+            return Plan._meta.get_field(campo).default
+
+        if valor("whatsapp_numero_propio_habilitado") and not valor("whatsapp_habilitado"):
+            raise serializers.ValidationError({
+                "whatsapp_numero_propio_habilitado": (
+                    "El número propio de WhatsApp requiere el addon de WhatsApp."
+                ),
+            })
+        return attrs
 
     def validate_max_usuarios(self, value):
         if value < 0:
@@ -190,6 +208,7 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "modulo_obesidad_habilitado",
             "whatsapp_habilitado",
             "whatsapp_uso",
+            "whatsapp_numero_propio_habilitado",
             "modo_puesta_en_marcha",
             "filtrar_profesionales_por_procedimiento",
         )
@@ -929,6 +948,10 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "whatsapp_habilitado",
             "whatsapp_envios_incluidos",
             "whatsapp_uso",
+            "whatsapp_numero_propio_habilitado",
+            "whatsapp_numero_propio_override",
+            "whatsapp_numeros_incluidos",
+            "whatsapp_numeros_incluidos_override",
             "facial_verificacion_override",
             "modulo_estetico_override",
             "modulo_obesidad_override",
@@ -991,6 +1014,7 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
             "nombre", "nit", "email", "telefono", "activo", "plan",
             "facial_verificacion_override", "modulo_estetico_override", "modulo_obesidad_override",
             "whatsapp_override", "whatsapp_envios_incluidos_override",
+            "whatsapp_numero_propio_override", "whatsapp_numeros_incluidos_override",
             "modo_puesta_en_marcha",
         )
         extra_kwargs = {
@@ -1000,6 +1024,8 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
             "modulo_obesidad_override": {"required": False, "allow_null": True},
             "whatsapp_override": {"required": False, "allow_null": True},
             "whatsapp_envios_incluidos_override": {"required": False, "allow_null": True},
+            "whatsapp_numero_propio_override": {"required": False, "allow_null": True},
+            "whatsapp_numeros_incluidos_override": {"required": False, "allow_null": True},
             "modo_puesta_en_marcha": {"required": False},
         }
 

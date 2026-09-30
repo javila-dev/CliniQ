@@ -62,10 +62,8 @@ from apps.core.storage import read_public_file
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
-    enviar_documento_whatsapp_webhook,
-    enviar_link_firma_whatsapp,
-    registrar_envio_whatsapp,
-    verificar_disponibilidad_whatsapp,
+    enviar_whatsapp,
+    resolver_ruta_whatsapp,
 )
 from apps.users.authorization import user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
@@ -855,16 +853,18 @@ class ConsentimientoInformadoViewSet(
         enviado = False
         if telefono:
             try:
-                verificar_disponibilidad_whatsapp(paciente.clinica)
-                enviar_link_firma_whatsapp(
+                enviar_whatsapp(
+                    clinica=paciente.clinica,
+                    cita=consentimiento.cita,
+                    tipo=EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO,
                     paciente=paciente,
                     documento_tipo=consentimiento.documenso_template_nombre or "consentimiento informado",
                     link=link,
                     metadata={"consentimiento_informado_id": str(consentimiento.id)},
                 )
-                registrar_envio_whatsapp(paciente.clinica, EnvioWhatsApp.Tipo.FIRMA_DOCUMENTO, paciente=paciente)
                 enviado = True
-            except (ValueError, WhatsAppNoDisponibleError):
+            except (ValueError, WhatsAppNoDisponibleError, requests.RequestException):
+                # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
 
         return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
@@ -1022,15 +1022,19 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
         try:
-            verificar_disponibilidad_whatsapp(orden.historia.clinica)
+            ruta = resolver_ruta_whatsapp(
+                orden.historia.clinica,
+                tipo=EnvioWhatsApp.Tipo.ENVIO_FORMULA, paciente=orden.historia.paciente, cita=orden.cita,
+            )
         except WhatsAppNoDisponibleError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
 
         pdf_bytes = render_order_pdf(orden)
         try:
-            enviar_documento_whatsapp_webhook(
+            enviar_whatsapp(
+                ruta=ruta,
+                tipo=EnvioWhatsApp.Tipo.ENVIO_FORMULA,
                 paciente=orden.historia.paciente,
-                tipo_notificacion="envio_formula",
                 pdf_bytes=pdf_bytes,
                 nombre_archivo_pdf=f"orden-medica-{orden.id}.pdf",
                 metadata={
@@ -1041,6 +1045,9 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                     "contenido": orden.contenido,
                 },
             )
+        except WhatsAppNoDisponibleError as exc:
+            # El numero de la clinica fallo y el respaldo por el de CliniQ no tiene cupo.
+            return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except ValueError:
             return Response(
                 {"error": "Webhook no configurado", "code": "WEBHOOK_NOT_CONFIGURED"},
@@ -1052,7 +1059,6 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-        registrar_envio_whatsapp(orden.historia.clinica, EnvioWhatsApp.Tipo.ENVIO_FORMULA, paciente=orden.historia.paciente)
         return Response({"enviado": True}, status=status.HTTP_200_OK)
 
 

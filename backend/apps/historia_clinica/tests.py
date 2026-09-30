@@ -357,7 +357,7 @@ class OrdenMedicaTests(TestCase):
         self.assertEqual(orden.contenido_original, "Texto base")
         self.assertEqual(orden.auditorias.count(), 1)
 
-    @patch("apps.historia_clinica.views.enviar_documento_whatsapp_webhook")
+    @patch("apps.notificaciones.services.enviar_documento_whatsapp_webhook")
     @patch("apps.historia_clinica.views.settings.WHATSAPP_OUTBOUND_WEBHOOK_URL", "https://n8n.test/webhook/whatsapp")
     def test_enviar_whatsapp_llama_webhook(self, mocked_send):
         plantilla = PlantillaOrden.objects.create(
