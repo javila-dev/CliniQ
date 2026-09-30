@@ -113,8 +113,8 @@ function ElegirProcedimiento({
     <Popover open={abierto} onOpenChange={(v) => { setAbierto(v); if (!v) setQ('') }}>
       <PopoverTrigger asChild>
         {destacado ? (
-          <Button type="button" variant="outline" size="sm" className="h-8 border-primary/40 text-primary hover:bg-primary/5 hover:text-primary">
-            <Plus className="h-3.5 w-3.5 mr-1" />Elegir procedimiento
+          <Button type="button" variant="outline" size="sm" className="h-7 px-2.5 text-xs border-primary/40 text-primary hover:bg-primary/5 hover:text-primary">
+            <Plus className="h-3 w-3 mr-1" />Elegir procedimiento
           </Button>
         ) : (
           <button
@@ -170,7 +170,7 @@ function ElegirProcedimiento({
 // Inline para no depender de que Tailwind genere la clase arbitraria:
 // flechas · # · procedimientos · nombre · veces · duración · quitar.
 const COLUMNAS: React.CSSProperties = {
-  gridTemplateColumns: '1rem 1.5rem minmax(0, 1.3fr) minmax(0, 1fr) 4.5rem 4.5rem 1.75rem',
+  gridTemplateColumns: '1rem 2.25rem minmax(0, 1.3fr) minmax(0, 1fr) 3.5rem 4.75rem 1.75rem',
 }
 
 function FilaDeSesion({
@@ -196,7 +196,7 @@ function FilaDeSesion({
   const quitar = (id: string) => onChange({ ...fila, procs: fila.procs.filter((p) => p.id !== id) })
 
   return (
-    <div className="grid items-start gap-2 px-3 py-2.5" style={COLUMNAS}>
+    <div className="grid items-start gap-2 px-3 py-2" style={COLUMNAS}>
       <div className="flex flex-col pt-1">
         <button type="button" onClick={() => onMover(-1)} disabled={esPrimera} aria-label="Subir sesión"
           className="text-muted-foreground/60 hover:text-foreground disabled:opacity-20 h-4 flex items-center">
@@ -208,12 +208,12 @@ function FilaDeSesion({
         </button>
       </div>
 
-      <span className="pt-2 text-xs tabular-nums text-muted-foreground">{etiqueta}</span>
+      <span className="pt-1.5 text-xs tabular-nums whitespace-nowrap text-muted-foreground">{etiqueta}</span>
 
       <div className="min-w-0">
-        <div className="flex items-center gap-1.5 flex-wrap min-h-8">
+        <div className="flex items-center gap-1.5 flex-wrap min-h-7">
           {fila.procs.map((p) => (
-            <span key={p.id} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs uppercase">
+            <span key={p.id} className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-[11px] uppercase">
               {p.nombre}
               <span className="normal-case text-muted-foreground">· {p.duracion_min} min</span>
               <button type="button" onClick={() => quitar(p.id)} aria-label={`Quitar ${p.nombre}`} className="text-muted-foreground hover:text-destructive">
@@ -237,7 +237,7 @@ function FilaDeSesion({
           value={fila.descripcion}
           onChange={(e) => onChange({ ...fila, descripcion: e.target.value })}
           placeholder={fila.procs.length ? `Opcional · ${nombreDeProcs(fila)}` : 'Ej: Control'}
-          className={cn('h-8 text-sm', errores?.nombre && 'border-destructive focus-visible:ring-destructive')}
+          className={cn('h-7 px-2 text-xs', errores?.nombre && 'border-destructive focus-visible:ring-destructive')}
           aria-label="Nombre de la sesión"
           aria-invalid={errores?.nombre || undefined}
         />
@@ -249,12 +249,12 @@ function FilaDeSesion({
         min={1}
         value={fila.cantidad}
         onChange={(e) => onChange({ ...fila, cantidad: Math.max(1, Number(e.target.value) || 1) })}
-        className="h-8 px-1 text-center text-sm"
+        className="h-7 px-1 text-center text-xs"
         aria-label="Número de veces"
       />
 
       {fila.procs.length > 0 ? (
-        <span className="pt-2 text-sm tabular-nums text-muted-foreground">{formatoDuracion(duracionDeFila(fila))}</span>
+        <span className="pt-1.5 text-xs tabular-nums whitespace-nowrap text-muted-foreground">{formatoDuracion(duracionDeFila(fila))}</span>
       ) : (
         <div className="relative">
           <Input
@@ -265,15 +265,15 @@ function FilaDeSesion({
             value={fila.duracionManual || ''}
             placeholder="0"
             onChange={(e) => onChange({ ...fila, duracionManual: Math.max(0, Number(e.target.value) || 0) })}
-            className={cn('h-8 px-2 pr-8 text-sm', errores?.minutos && 'border-destructive focus-visible:ring-destructive')}
+            className={cn('h-7 pl-2 pr-7 text-xs', errores?.minutos && 'border-destructive focus-visible:ring-destructive')}
             aria-label="Duración en minutos"
           />
-          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground pointer-events-none">min</span>
+          <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">min</span>
         </div>
       )}
 
       <Button
-        type="button" variant="ghost" size="icon" className="h-8 w-7 hover:text-destructive"
+        type="button" variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive"
         onClick={onQuitar} disabled={!puedeQuitar} aria-label="Quitar sesión"
       >
         <X className="h-3.5 w-3.5" />

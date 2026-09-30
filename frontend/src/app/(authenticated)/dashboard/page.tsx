@@ -824,9 +824,12 @@ function DashboardContent() {
         <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
       </div>
 
-      <PuestaEnMarchaBanner />
-
-      <AvisoDatosProfesionales />
+      {/* Banners: en columnas en pantallas grandes; si solo aparece uno,
+          ocupa todo el ancho, y si no aparece ninguno el contenedor se oculta */}
+      <div className="flex flex-col lg:flex-row gap-4 empty:hidden [&>*]:min-w-0 lg:[&>*]:flex-1">
+        <PuestaEnMarchaBanner />
+        <AvisoDatosProfesionales />
+      </div>
 
       {/* Filtros (sede + periodo) — encima de los KPI */}
       {filtrosLinea}
