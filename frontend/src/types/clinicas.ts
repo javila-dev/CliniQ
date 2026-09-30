@@ -18,6 +18,7 @@ export interface WhatsAppUso {
   envios_realizados: number      // del mes calendario actual
   envios_restantes: number | null  // null si sin límite
   sin_limite: boolean
+  envios_numero_propio?: number  // enviados desde los números de la clínica (no cuentan en el cupo)
 }
 
 export interface Clinica {
@@ -42,6 +43,7 @@ export interface Clinica {
   modulo_obesidad_habilitado?: boolean
   whatsapp_habilitado?: boolean
   whatsapp_uso?: WhatsAppUso
+  whatsapp_numero_propio_habilitado?: boolean
   modo_puesta_en_marcha?: boolean
   filtrar_profesionales_por_procedimiento?: boolean
   created_at: string

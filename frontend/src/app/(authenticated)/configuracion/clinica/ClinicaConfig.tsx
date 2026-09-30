@@ -504,6 +504,10 @@ export function ClinicaConfig({
                       <Info className="h-3.5 w-3.5 text-blue-400 mt-0.5 shrink-0" />
                       <p className="text-xs text-blue-600">
                         También puedes enviar recordatorios manualmente desde el detalle de cualquier cita.
+                        Se envían por WhatsApp ·{' '}
+                        <Link href="/configuracion/whatsapp" className="font-medium underline-offset-2 hover:underline">
+                          Ver número de envío
+                        </Link>
                       </p>
                     </div>
 
@@ -600,6 +604,12 @@ export function ClinicaConfig({
                             )}
                           </div>
                           <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{step.description}</p>
+                          {step.key === 'paso_checkin' && !addonNoHabilitado && (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              El código siempre se envía desde el número de CliniQ, aunque tu clínica tenga{' '}
+                              <Link href="/configuracion/whatsapp" className="font-medium text-primary hover:underline">número propio</Link>.
+                            </p>
+                          )}
                           {addonNoHabilitado && (
                             <p className="text-[11px] text-gray-400 mt-0.5">
                               {step.addonLockedCopy ?? 'Contáctanos para habilitar este módulo en tu plan.'}

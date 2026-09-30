@@ -29,6 +29,7 @@ import type { AdminTenant, AdminTenantUsuario, AdminTenantHistorialGrupo } from 
 import {
   serverErrorMessage, ESTADO_BADGE, HISTORIAL_PAGE_SIZE, HISTORIAL_GRUPOS, HistorialFila,
 } from '../_shared'
+import { WhatsappPropioConsola } from '../_whatsapp'
 
 // ─── Schema del formulario "General" ──────────────────────────
 
@@ -278,21 +279,24 @@ function AddonOverrideRow({
   defaultDelPlan,
   value,
   onChange,
+  disabledReason,
 }: {
   label: string
   descripcion: string
   defaultDelPlan: boolean
   value: boolean | null
   onChange: (v: boolean) => void
+  /** Si viene, el switch se muestra apagado y bloqueado con esta explicación. */
+  disabledReason?: string
 }) {
-  const efectivo = value ?? defaultDelPlan
+  const efectivo = disabledReason ? false : (value ?? defaultDelPlan)
   return (
     <div className="flex items-center justify-between gap-3">
       <div>
         <p className="text-sm font-medium text-gray-800">{label}</p>
-        <p className="text-xs text-muted-foreground mt-0.5">{descripcion}</p>
+        <p className="text-xs text-muted-foreground mt-0.5">{disabledReason ?? descripcion}</p>
       </div>
-      <Switch checked={efectivo} onCheckedChange={onChange} />
+      <Switch checked={efectivo} onCheckedChange={onChange} disabled={!!disabledReason} />
     </div>
   )
 }
@@ -387,6 +391,8 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
   const [obesidadOverride, setObesidadOverride]     = useState<boolean | null>(tenant.modulo_obesidad_override)
   const [whatsappOverride, setWhatsappOverride]     = useState<boolean | null>(tenant.whatsapp_override)
   const [whatsappCupoOverride, setWhatsappCupoOverride] = useState<number | null>(tenant.whatsapp_envios_incluidos_override)
+  const [numeroPropioOverride, setNumeroPropioOverride] = useState<boolean | null>(tenant.whatsapp_numero_propio_override)
+  const [numerosOverride, setNumerosOverride] = useState<number | null>(tenant.whatsapp_numeros_incluidos_override)
   const [puestaEnMarcha, setPuestaEnMarcha]         = useState(tenant.modo_puesta_en_marcha)
 
   useEffect(() => {
@@ -395,8 +401,10 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
     setObesidadOverride(tenant.modulo_obesidad_override)
     setWhatsappOverride(tenant.whatsapp_override)
     setWhatsappCupoOverride(tenant.whatsapp_envios_incluidos_override)
+    setNumeroPropioOverride(tenant.whatsapp_numero_propio_override)
+    setNumerosOverride(tenant.whatsapp_numeros_incluidos_override)
     setPuestaEnMarcha(tenant.modo_puesta_en_marcha)
-  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.modulo_obesidad_override, tenant.whatsapp_override, tenant.whatsapp_envios_incluidos_override, tenant.modo_puesta_en_marcha])
+  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.modulo_obesidad_override, tenant.whatsapp_override, tenant.whatsapp_envios_incluidos_override, tenant.whatsapp_numero_propio_override, tenant.whatsapp_numeros_incluidos_override, tenant.modo_puesta_en_marcha])
 
   const addonsDirty =
     facialOverride   !== tenant.facial_verificacion_override ||
@@ -404,6 +412,8 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
     obesidadOverride !== tenant.modulo_obesidad_override ||
     whatsappOverride !== tenant.whatsapp_override ||
     whatsappCupoOverride !== tenant.whatsapp_envios_incluidos_override ||
+    numeroPropioOverride !== tenant.whatsapp_numero_propio_override ||
+    numerosOverride !== tenant.whatsapp_numeros_incluidos_override ||
     puestaEnMarcha   !== tenant.modo_puesta_en_marcha
 
   const mutation = useMutation({
@@ -418,6 +428,8 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
       modulo_obesidad_override: obesidadOverride,
       whatsapp_override: whatsappOverride,
       whatsapp_envios_incluidos_override: whatsappCupoOverride,
+      whatsapp_numero_propio_override: numeroPropioOverride,
+      whatsapp_numeros_incluidos_override: numerosOverride,
       modo_puesta_en_marcha: puestaEnMarcha,
     }),
     onSuccess: (data) => {
@@ -529,6 +541,30 @@ function GeneralTab({ tenant }: { tenant: AdminTenant }) {
               defaultDelPlan={planSeleccionado?.whatsapp_envios_incluidos ?? 0}
               value={whatsappCupoOverride}
               onChange={setWhatsappCupoOverride}
+            />
+          )}
+
+          <AddonOverrideRow
+            label="WhatsApp con número propio"
+            descripcion="La clínica envía desde su propio número (Coexistence vía Lyvio). Se configura en la pestaña WhatsApp."
+            defaultDelPlan={planSeleccionado?.whatsapp_numero_propio_habilitado ?? false}
+            value={numeroPropioOverride}
+            onChange={setNumeroPropioOverride}
+            disabledReason={
+              (whatsappOverride ?? planSeleccionado?.whatsapp_habilitado ?? false)
+                ? undefined
+                : 'Requiere el add-on de WhatsApp. Si se apaga, los números conectados dejan de usarse (no se desconectan).'
+            }
+          />
+
+          {(whatsappOverride ?? planSeleccionado?.whatsapp_habilitado ?? false)
+            && (numeroPropioOverride ?? planSeleccionado?.whatsapp_numero_propio_habilitado ?? false) && (
+            <AddonCupoOverrideRow
+              label="Números propios incluidos"
+              descripcion="Cuántos números de WhatsApp puede conectar esta clínica. Vacío = hereda del plan."
+              defaultDelPlan={planSeleccionado?.whatsapp_numeros_incluidos ?? 1}
+              value={numerosOverride}
+              onChange={setNumerosOverride}
             />
           )}
 
@@ -976,6 +1012,7 @@ export default function TenantDetailPage() {
         <TabsList>
           <TabsTrigger value="general">General</TabsTrigger>
           <TabsTrigger value="usuarios">Usuarios</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
           <TabsTrigger value="historial">Historial</TabsTrigger>
         </TabsList>
         <TabsContent value="general" className="pt-4">
@@ -983,6 +1020,9 @@ export default function TenantDetailPage() {
         </TabsContent>
         <TabsContent value="usuarios" className="pt-4">
           <UsuariosTab tenant={tenant} />
+        </TabsContent>
+        <TabsContent value="whatsapp" className="pt-4">
+          <WhatsappPropioConsola tenant={tenant} />
         </TabsContent>
         <TabsContent value="historial" className="pt-4">
           <HistorialTab tenant={tenant} />

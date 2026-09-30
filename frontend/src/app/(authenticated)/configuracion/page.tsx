@@ -9,21 +9,10 @@ import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 import { useChecklistConfiguracion } from '@/components/configuracion/ConfiguracionShell'
 import { categoriaDeRuta, categoriasVisibles } from '@/components/configuracion/navegacion'
+import { Bloque } from '@/components/configuracion/Bloque'
 
 // Resumen de Configuración. En escritorio acompaña al menú lateral; en celular
 // el menú se muestra encima (lo pone ConfiguracionShell).
-
-function Bloque({ titulo, extra, children }: { titulo: string; extra?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="overflow-hidden rounded-xl border bg-white">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-3 text-[13.5px] font-semibold">
-        {titulo}
-        {extra}
-      </div>
-      <div className="divide-y divide-border/60">{children}</div>
-    </section>
-  )
-}
 
 export default function ConfiguracionPage() {
   const { user } = useAuthStore()

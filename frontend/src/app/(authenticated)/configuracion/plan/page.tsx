@@ -1,25 +1,15 @@
 'use client'
 
+import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { cn } from '@/lib/utils'
+import { Bloque } from '@/components/configuracion/Bloque'
 
 // Lo que incluye el plan de la clínica y cuánto se lleva usado. Es solo lectura:
 // los cambios de plan y los add-ons los activa el equipo de CliniQ.
-
-function Bloque({ titulo, extra, children }: { titulo: string; extra?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <section className="overflow-hidden rounded-xl border bg-white">
-      <div className="flex items-center justify-between gap-2 border-b px-4 py-3 text-[13.5px] font-semibold">
-        {titulo}
-        {extra}
-      </div>
-      <div className="divide-y divide-border/60">{children}</div>
-    </section>
-  )
-}
 
 function Estado({ activo, texto }: { activo: boolean; texto?: string }) {
   return (
@@ -92,13 +82,18 @@ export default function PlanConfigPage() {
 
           <Bloque titulo="Consumo">
             {clinica?.whatsapp_habilitado && whatsapp ? (
-              <Consumo
-                titulo="Envíos por WhatsApp"
-                detalle="Cotizaciones, firma de documentos, check-in por código y recordatorios. Se reinicia cada mes."
-                usado={whatsapp.envios_realizados}
-                incluido={whatsapp.sin_limite ? null : whatsapp.envios_incluidos}
-                unidad="este mes"
-              />
+              <>
+                <Consumo
+                  titulo="Envíos por WhatsApp"
+                  detalle="Cotizaciones, firma de documentos, check-in por código y recordatorios. Se reinicia cada mes."
+                  usado={whatsapp.envios_realizados}
+                  incluido={whatsapp.sin_limite ? null : whatsapp.envios_incluidos}
+                  unidad="este mes"
+                />
+                <Link href="/configuracion/whatsapp/consumo" className="block px-4 py-2.5 text-[12.5px] font-medium text-primary hover:bg-muted/40">
+                  Ver el detalle de WhatsApp
+                </Link>
+              </>
             ) : (
               <div className="flex items-start gap-4 px-4 py-3.5">
                 <div className="min-w-0 flex-1">
@@ -135,6 +130,7 @@ export default function PlanConfigPage() {
             {[
               { titulo: 'Verificación facial', detalle: 'Compara la foto en vivo del paciente con su foto de control al llegar.', activo: !!clinica?.facial_verificacion_habilitada },
               { titulo: 'Módulo estético', detalle: 'Procedimientos y zonas corporales en la atención y la historia.', activo: !!clinica?.modulo_estetico_habilitado },
+              { titulo: 'WhatsApp con número propio', detalle: 'Tus pacientes reciben los mensajes desde el WhatsApp de tu clínica y te responden a ti.', activo: !!clinica?.whatsapp_numero_propio_habilitado },
             ].map((a) => (
               <div key={a.titulo} className="flex items-center gap-4 px-4 py-3.5">
                 <div className="min-w-0 flex-1">

@@ -38,6 +38,8 @@ const planSchema = z.object({
   precio_usuario_adicional:   z.string().optional(),
   precio_sede_adicional:      z.string().optional(),
   whatsapp_envios_incluidos:  z.string().optional(),
+  precio_por_numero_whatsapp: z.string().optional(),
+  whatsapp_numeros_incluidos: z.string().optional(),
 })
 
 type PlanFormValues = z.infer<typeof planSchema>
@@ -67,6 +69,8 @@ function PlanDialog({
       precio_usuario_adicional: plan.precio_usuario_adicional ?? '',
       precio_sede_adicional:    plan.precio_sede_adicional ?? '',
       whatsapp_envios_incluidos: plan.whatsapp_envios_incluidos ? String(plan.whatsapp_envios_incluidos) : '',
+      precio_por_numero_whatsapp: plan.precio_por_numero_whatsapp ?? '',
+      whatsapp_numeros_incluidos: String(plan.whatsapp_numeros_incluidos ?? 1),
     } : undefined,
   })
 
@@ -74,6 +78,7 @@ function PlanDialog({
   const [moduloEstetico, setModuloEstetico]     = useState(plan?.modulo_estetico_habilitado ?? true)
   const [moduloObesidad, setModuloObesidad]     = useState(plan?.modulo_obesidad_habilitado ?? false)
   const [whatsappHabilitado, setWhatsappHabilitado] = useState(plan?.whatsapp_habilitado ?? true)
+  const [numeroPropio, setNumeroPropio] = useState(plan?.whatsapp_numero_propio_habilitado ?? false)
   const [mostrarPublico, setMostrarPublico]     = useState(plan?.mostrar_publico ?? false)
 
   useEffect(() => {
@@ -81,6 +86,7 @@ function PlanDialog({
     setModuloEstetico(plan?.modulo_estetico_habilitado ?? true)
     setModuloObesidad(plan?.modulo_obesidad_habilitado ?? false)
     setWhatsappHabilitado(plan?.whatsapp_habilitado ?? true)
+    setNumeroPropio(plan?.whatsapp_numero_propio_habilitado ?? false)
     setMostrarPublico(plan?.mostrar_publico ?? false)
   }, [plan?.id])
 
@@ -99,6 +105,10 @@ function PlanDialog({
         modulo_obesidad_habilitado: moduloObesidad,
         whatsapp_habilitado: whatsappHabilitado,
         whatsapp_envios_incluidos: data.whatsapp_envios_incluidos ? parseInt(data.whatsapp_envios_incluidos, 10) : 0,
+        // El número propio exige el addon base de WhatsApp (el backend también lo valida).
+        whatsapp_numero_propio_habilitado: whatsappHabilitado && numeroPropio,
+        precio_por_numero_whatsapp: data.precio_por_numero_whatsapp ? parseFloat(data.precio_por_numero_whatsapp) : null,
+        whatsapp_numeros_incluidos: data.whatsapp_numeros_incluidos ? Math.max(1, parseInt(data.whatsapp_numeros_incluidos, 10)) : 1,
         mostrar_publico: mostrarPublico,
       }
       return isEdit ? adminApi.planes.update(plan!.id, payload) : adminApi.planes.create(payload)
@@ -226,6 +236,33 @@ function PlanDialog({
                   min={0}
                   placeholder="0 = sin límite"
                   {...register('whatsapp_envios_incluidos')}
+                />
+              </div>
+            )}
+            {whatsappHabilitado && (
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm text-gray-700">WhatsApp con número propio</p>
+                  <p className="text-[11px] text-muted-foreground">La clínica envía desde su número (Coexistence vía Lyvio).</p>
+                </div>
+                <Switch checked={numeroPropio} onCheckedChange={setNumeroPropio} />
+              </div>
+            )}
+            {whatsappHabilitado && numeroPropio && (
+              <div className="space-y-1.5 pl-1">
+                <Label className="text-xs text-gray-600">Números propios incluidos</Label>
+                <Input type="number" min={1} placeholder="1" {...register('whatsapp_numeros_incluidos')} />
+              </div>
+            )}
+            {whatsappHabilitado && numeroPropio && (
+              <div className="space-y-1.5 pl-1">
+                <Label className="text-xs text-gray-600">Precio por número activo (COP, referencia)</Label>
+                <Input
+                  type="number"
+                  min={0}
+                  step={1000}
+                  placeholder="Vacío = no aplica"
+                  {...register('precio_por_numero_whatsapp')}
                 />
               </div>
             )}

@@ -47,12 +47,18 @@ export const ACCION_LABEL: Record<string, string> = {
   'rol.eliminar':                'Rol eliminado',
   'rol.permisos':                'Permisos de rol actualizados',
   'auth.login':                  'Inicio de sesión',
+  'whatsapp_propio.configurar':            'WhatsApp propio configurado',
+  'whatsapp_propio.conectar':              'Número de WhatsApp conectado',
+  'whatsapp_propio.crear_plantillas':      'Plantillas de WhatsApp creadas',
+  'whatsapp_propio.actualizar_plantillas': 'Plantillas de WhatsApp actualizadas',
+  'whatsapp_propio.revisar_salud':         'Salud de WhatsApp revisada',
 }
 
 export function accionChipClass(accion: string): string {
   if (accion.startsWith('auth.'))     return 'bg-blue-50 text-blue-600'
   if (accion.startsWith('usuario.'))  return 'bg-emerald-50 text-emerald-600'
   if (accion.startsWith('rol.'))      return 'bg-violet-50 text-violet-600'
+  if (accion.startsWith('whatsapp_propio.')) return 'bg-teal-50 text-teal-700'
   if (accion === 'tenant.desactivar') return 'bg-red-50 text-red-600'
   if (accion.startsWith('tenant.'))   return 'bg-amber-50 text-amber-600'
   return 'bg-gray-100 text-gray-600'

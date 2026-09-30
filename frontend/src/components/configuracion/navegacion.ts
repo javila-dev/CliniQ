@@ -1,5 +1,5 @@
 import {
-  Building2, CalendarClock, Workflow, Stethoscope, FileSignature, Wallet, ShieldCheck,
+  Building2, CalendarClock, Workflow, Stethoscope, FileSignature, Wallet, ShieldCheck, MessageCircle,
 } from 'lucide-react'
 import type { AuthUser } from '@/types/auth'
 import { hasPermission, PERM } from '@/lib/permissions'
@@ -51,6 +51,28 @@ export const CATEGORIAS: CategoriaConfig[] = [
         label: 'Plan',
         description: 'Lo que incluye tu plan y cuánto llevas usado este mes.',
         keywords: 'plan whatsapp envios limite cupo consumo mensajes usuarios sedes add-on addon modulos prueba',
+        perm: PERM.CLINICAS_EDITAR,
+      },
+    ],
+  },
+  {
+    id: 'whatsapp',
+    label: 'WhatsApp',
+    description: 'Número de envío y consumo de mensajes',
+    icon: MessageCircle,
+    ajustes: [
+      {
+        href: '/configuracion/whatsapp',
+        label: 'Número de envío',
+        description: 'Envía los mensajes desde el número de tu clínica, uno general o uno por sede.',
+        keywords: 'whatsapp numero propio business coexistencia meta sede principal conectar mensajes pacientes',
+        perm: PERM.CLINICAS_EDITAR,
+      },
+      {
+        href: '/configuracion/whatsapp/consumo',
+        label: 'Consumo y envíos',
+        description: 'Mensajes enviados este mes y los que no se pudieron enviar.',
+        keywords: 'whatsapp consumo cupo envios mes fallidos no enviados errores mensajes',
         perm: PERM.CLINICAS_EDITAR,
       },
     ],

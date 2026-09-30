@@ -15,6 +15,9 @@ export interface Plan {
   modulo_obesidad_habilitado: boolean
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
+  whatsapp_numero_propio_habilitado: boolean
+  whatsapp_numeros_incluidos: number
+  precio_por_numero_whatsapp: string | null
   mostrar_publico: boolean
   created_at: string
   updated_at: string
@@ -35,12 +38,16 @@ export interface AdminTenant {
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
   whatsapp_uso: WhatsAppUso
+  whatsapp_numero_propio_habilitado: boolean
+  whatsapp_numeros_incluidos: number  // 0 sin el add-on
   // Anulación explícita por clínica. null = sigue al plan.
   facial_verificacion_override: boolean | null
   modulo_estetico_override: boolean | null
   modulo_obesidad_override: boolean | null
   whatsapp_override: boolean | null
   whatsapp_envios_incluidos_override: number | null
+  whatsapp_numero_propio_override: boolean | null
+  whatsapp_numeros_incluidos_override: number | null
   modo_puesta_en_marcha: boolean
   total_usuarios: number
   usuarios_activos: number
@@ -108,6 +115,8 @@ export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email
   modulo_obesidad_override?: boolean | null
   whatsapp_override?: boolean | null
   whatsapp_envios_incluidos_override?: number | null
+  whatsapp_numero_propio_override?: boolean | null
+  whatsapp_numeros_incluidos_override?: number | null
   modo_puesta_en_marcha?: boolean
 }
 
@@ -124,6 +133,9 @@ export interface CreatePlanRequest {
   modulo_obesidad_habilitado?: boolean
   whatsapp_habilitado?: boolean
   whatsapp_envios_incluidos?: number
+  whatsapp_numero_propio_habilitado?: boolean
+  whatsapp_numeros_incluidos?: number
+  precio_por_numero_whatsapp?: number | null
   mostrar_publico?: boolean
 }
 

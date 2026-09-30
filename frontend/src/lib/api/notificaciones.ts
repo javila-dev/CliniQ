@@ -6,6 +6,7 @@ export type TipoNotificacionFallida =
   | 'checkin_otp'
   | 'envio_cotizacion'
   | 'envio_formula'
+  | 'firma_documento'
 
 export interface NotificacionFallida {
   id: string
