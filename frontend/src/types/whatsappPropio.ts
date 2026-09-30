@@ -8,11 +8,15 @@ export type EstadoPlantillaWhatsapp = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAU
 /** Desde qué número envía una sede. */
 export type TipoAsignacionSede = 'por_defecto' | 'numero' | 'cliniq'
 
+/** Problema del número que no depende de las plantillas ('' = ninguno). */
+export type BloqueoNumeroWhatsapp = '' | 'pago' | 'conexion'
+
 export interface NumeroWhatsapp {
   id: string
   numero_visible: string
   estado: EstadoNumeroWhatsapp
   estado_display: string
+  bloqueo: BloqueoNumeroWhatsapp
   ultimo_error: string
   es_por_defecto: boolean
 }

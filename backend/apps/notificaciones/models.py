@@ -98,6 +98,14 @@ class NumeroWhatsapp(models.Model):
         ACTIVO = "activo", "Activo"
         ERROR = "error", "Error"
 
+    class Bloqueo(models.TextChoices):
+        """Problema del numero que no depende de las plantillas: mientras exista,
+        el numero queda en error aunque las plantillas esten aprobadas."""
+
+        NINGUNO = "", "Sin bloqueo"
+        PAGO = "pago", "Falta el método de pago en Meta"
+        CONEXION = "conexion", "Meta desconectó o restringió el número"
+
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     conexion = models.ForeignKey(
         ConexionWhatsappPropio,
@@ -110,6 +118,7 @@ class NumeroWhatsapp(models.Model):
     business_id = models.CharField(max_length=64, blank=True)
     numero_visible = models.CharField(max_length=30, blank=True)
     estado = models.CharField(max_length=25, choices=Estado.choices, default=Estado.CONECTADO)
+    bloqueo = models.CharField(max_length=10, choices=Bloqueo.choices, blank=True, default=Bloqueo.NINGUNO)
     ultimo_error = models.TextField(blank=True)
     ultimo_chequeo_en = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)

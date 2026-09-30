@@ -9,6 +9,8 @@ Lo hecho va ~~tachado~~ con fecha y commit.
 
 **Backend de las fases 4 a 8 hecho** (2026-09-25, sin commit): 69 tests en `notificaciones`; 370 de 371 en las apps afectadas (el que falla es `agenda.CitaCotizacionItemTests.test_rechaza_item_sin_sesiones_disponibles`, depende de la fecha: agenda "mañana" y un sábado la sede está cerrada). Frontend hecho el mismo día (Configuración → WhatsApp, pestaña WhatsApp de la consola, addon en planes y clínicas, consumo por ruta en Plan). Faltan las pruebas con un número real.
 
+Commiteado en la rama `feat/whatsapp-numero-propio` (`e237b78` backend, `24040c5` frontend), sin push. Las correcciones de la revisión del 2026-09-29 están sin commit.
+
 Todo se desarrolla y prueba en local, en ramas; nada se fusiona ni se sube hasta decidirlo.
 
 ---
@@ -95,6 +97,8 @@ Rama `feat/whatsapp-numero-propio`.
 - [ ] 🟨 Definir `WHATSAPP_NUMERO_CLINIQ` (número compartido que se muestra) y `CLINIQ_VENTAS_WHATSAPP` (botón "Quiero mi número propio") en producción
 - [x] ~~🟦 Revisión previa al commit: teléfono cambiado no reutiliza la conversación, fallo que llega antes del `message_id`, plantilla rechazada no se reenvía, respaldo fallido queda en `NotificacionFallida` y las vistas lo manejan~~ — 2026-09-25, sin commit
 - [x] ~~🟦 Mejoras de la revisión: el webhook reenvía después del commit (sin bloqueo durante la llamada a n8n), se quitó `clave` (sin uso), "Actualizar estado" sin espera de 5 s, límite de números mínimo 1, `Bloque` compartido~~ — 2026-09-25, sin commit
+- [x] ~~🟦 Revisión cruzada contra el código de Chatwoot 4.18.0 y la documentación de Meta: el webhook no trae `status` en la raíz (se reconoce el fallo por `external_error`); la autorización no trae el teléfono (se lee el inbox); errores de conexión traducidos y timeout sin reintento; "Registrar un inbox existente" en la consola; respaldo según el código de Meta (sin respaldo para errores del paciente) y solo dentro de 1 h; bloqueo de número (`pago`/`conexion`) que "Actualizar estado" no borra; variables sin saltos de línea ni comillas; teléfono inválido va directo al compartido; orden de `message_id` y estado al terminar el envío (migración `notificaciones.0004`, 90 tests)~~ — 2026-09-29, sin commit
+- [ ] 🟨 **Antes del 15-oct-2026:** confirmar que la configuración de Embedded Signup `2909835515866390` es v4 (Login for Business con el producto Cloud API seleccionado) y que su token no vence a los 60 días; si no, crear una nueva y cambiar `LYVIO_WHATSAPP_CONFIG_ID`
 - [ ] 🟨 Criterio de terminado 1–9 del plan con un número real
 
 ---
@@ -107,6 +111,12 @@ Rama `feat/whatsapp-numero-propio`.
 - [ ] 🟦 Fusionar la rama a `main` y desplegar
 - [ ] 🟧 Workflow "Enviar recordatorios": activar el Schedule, apuntarlo a producción con credencial, recorrer citas y marcarlas
 - [ ] 🟦🟧 Despacharlos por número propio (endpoint en Django que use `enviar_whatsapp`)
+
+**Robustez (de la revisión del 2026-09-29):**
+
+- [ ] 🟦 Botón "Reconectar" para un número bloqueado: `whatsapp/authorization` con `inbox_id` (reautorización del mismo inbox en Chatwoot)
+- [ ] 🟦🟧 Guardar el `source_id` (wamid) cuando Meta acepta el mensaje y señalar los envíos sin él (job de Chatwoot fallido o webhook perdido: hoy quedan como `enviado`)
+- [ ] 🟦 Precargar el SDK de Facebook al abrir el diálogo (en Safari el popup puede bloquearse) y registrar `session_id`/`error_code` del evento `CANCEL`
 
 **Automatizar el seguimiento (D6):**
 

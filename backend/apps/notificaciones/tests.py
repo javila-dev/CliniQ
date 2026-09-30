@@ -337,6 +337,20 @@ def _respuesta(status, data):
     return Mock(status_code=status, json=Mock(return_value=data))
 
 
+def _autorizado(inbox_id):
+    """Respuesta real de whatsapp/authorization en Chatwoot 4.18 (sin telefono)."""
+    return _respuesta(200, {"success": True, "id": inbox_id, "name": "WhatsApp", "channel_type": "whatsapp"})
+
+
+def _inbox(inbox_id, telefono="+573001112233", reautorizar=False, **extra):
+    """GET inboxes/{id} como lo ve un administrador: trae el token de Meta."""
+    return _respuesta(200, {
+        "id": inbox_id, "channel_type": "Channel::Whatsapp", "phone_number": telefono,
+        "provider_config": {"api_key": "EAAG-token-de-meta", "phone_number_id": "pn1", "business_account_id": "waba1"},
+        "reauthorization_required": reautorizar, **extra,
+    })
+
+
 @override_settings(**LYVIO_OK)
 class ConectarNumeroPropioTests(TestCase):
     """Embedded Signup -> Lyvio whatsapp/authorization -> NumeroWhatsapp, y la
@@ -399,16 +413,18 @@ class ConectarNumeroPropioTests(TestCase):
 
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_primer_numero_queda_por_defecto(self, req):
-        req.return_value = _respuesta(200, {"id": 55, "phone_number": "+573001112233"})
+        req.side_effect = [_autorizado(55), _inbox(55)]
         res = self._conectar(phone_number_id="pn1")
         self.assertEqual(res.status_code, 201, res.content)
 
-        args, kwargs = req.call_args
+        args, kwargs = req.call_args_list[0]
         self.assertEqual(args, ("POST", "https://lyvio.test/api/v1/accounts/7/whatsapp/authorization"))
         self.assertEqual(kwargs["headers"], {"api_access_token": "tok-secreto"})
         self.assertEqual(
             kwargs["json"], {"code": "c0de", "waba_id": "waba1", "is_coexistence": True, "phone_number_id": "pn1"},
         )
+        # la autorizacion no trae el telefono: se lee del inbox
+        self.assertEqual(req.call_args_list[1].args, ("GET", "https://lyvio.test/api/v1/accounts/7/inboxes/55"))
 
         data = res.json()
         numero = data["numeros"][0]
@@ -417,19 +433,35 @@ class ConectarNumeroPropioTests(TestCase):
         self.assertEqual(data["numero_por_defecto_id"], numero["id"])
         # las sedes siguen en "por defecto": usan este numero sin configurar nada
         self.assertEqual({s["tipo"] for s in data["sedes"]}, {"por_defecto"})
+        # el token de Meta que trae el inbox nunca sale de lyvio.py
+        self.assertNotIn("EAAG", res.content.decode())
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_inbox_que_pide_reautorizar_queda_bloqueado(self, req):
+        req.side_effect = [_autorizado(55), _inbox(55, reautorizar=True)]
+        numero = self._conectar().json()["numeros"][0]
+        self.assertEqual((numero["estado"], numero["bloqueo"]), ("error", "conexion"))
+        self.assertIn("no terminó de conectar", numero["ultimo_error"])
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_si_no_se_puede_leer_el_inbox_se_registra_igual(self, req):
+        req.side_effect = [_autorizado(55), requests.ConnectionError("caido")]
+        res = self._conectar()
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.json()["numeros"][0]["numero_visible"], "")
 
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_limite_de_numeros_no_llama_a_lyvio(self, req):
-        req.return_value = _respuesta(200, {"id": 55})
+        req.side_effect = [_autorizado(55), _inbox(55)]
         self._conectar()
         res = self._conectar()
         self.assertEqual(res.json()["code"], "LIMITE_NUMEROS")
-        self.assertEqual(req.call_count, 1)
+        self.assertEqual(req.call_count, 2)
 
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_asignar_numeros_a_las_sedes(self, req):
         self._permitir(2)
-        req.side_effect = [_respuesta(200, {"id": 1}), _respuesta(200, {"id": 2})]
+        req.side_effect = [_autorizado(1), _inbox(1), _autorizado(2), _inbox(2, telefono="+573009998877")]
         self._conectar()
         data = self._conectar().json()
         primero, segundo = data["numeros"]
@@ -478,16 +510,46 @@ class ConectarNumeroPropioTests(TestCase):
         req.assert_not_called()
 
     @patch("apps.notificaciones.lyvio.requests.request")
-    def test_422_de_lyvio_se_muestra(self, req):
-        req.return_value = _respuesta(422, {"error": "La WABA tiene varios números; indica phone_number_id"})
-        res = self._conectar()
-        self.assertEqual(res.status_code, 400)
-        self.assertEqual(res.json()["error"], "La WABA tiene varios números; indica phone_number_id")
+    def test_errores_de_lyvio_se_traducen(self, req):
+        """Chatwoot 4.18 responde 422 {success: false, error: "<texto en ingles>"}."""
+        casos = {
+            "Channel already exists for this phone number: +573001112233, please contact support if the error "
+            "persists": "ya está conectado",
+            "Multiple phone numbers found for WABA waba1; unable to determine the onboarded number": "cuál de los números",
+            'Token exchange failed: {"error":{"message":"Invalid verification code format."}}': "Meta no pudo completar",
+        }
+        for texto, esperado in casos.items():
+            req.return_value = _respuesta(422, {"success": False, "error": texto})
+            res = self._conectar()
+            self.assertEqual(res.status_code, 400)
+            self.assertIn(esperado, res.json()["error"])
+            self.assertNotIn("Token", res.json()["error"])
         self.assertFalse(self.clinica.conexion_whatsapp_propio.numeros.exists())
 
-    @patch("apps.notificaciones.lyvio.requests.request", side_effect=requests.Timeout("lento"))
+    @patch("apps.notificaciones.lyvio.requests.request", side_effect=requests.ConnectionError("caido"))
     def test_lyvio_no_responde(self, _req):
         self.assertEqual(self._conectar().json()["code"], "LYVIO_NO_RESPONDE")
+
+    @patch("apps.notificaciones.lyvio.requests.request", side_effect=requests.ReadTimeout("lento"))
+    def test_timeout_no_invita_a_reintentar(self, _req):
+        """El inbox pudo quedar creado en Lyvio: reintentar daria "Channel already exists"."""
+        data = self._conectar().json()
+        self.assertEqual(data["code"], "LYVIO_TIMEOUT")
+        self.assertIn("No la intentes de nuevo", data["error"])
+
+    def test_confirmar_el_pago_levanta_el_bloqueo_de_pago(self):
+        from apps.notificaciones.models import ConexionWhatsappPropio, NumeroWhatsapp
+
+        conexion = ConexionWhatsappPropio.objects.create(clinica=self.clinica)
+        numero = NumeroWhatsapp.objects.create(
+            conexion=conexion, lyvio_inbox_id="61", waba_id="w", estado="error", bloqueo="pago",
+            ultimo_error="Falta método de pago",
+        )
+        data = self._patch({"pago_meta_configurado": True}).json()
+        self.assertTrue(data["pago_meta_configurado"])
+        numero.refresh_from_db()
+        # sin plantillas: vuelve a "conectado" y el error se limpia
+        self.assertEqual((numero.bloqueo, numero.estado, numero.ultimo_error), ("", "conectado", ""))
 
     def test_sin_addon(self):
         self.clinica.whatsapp_numero_propio_override = False
@@ -538,6 +600,16 @@ class CatalogoWhatsappTests(TestCase):
         self.assertIn("Hola Ana,", texto)
         self.assertNotIn("{{", texto)
         self.assertEqual(plantilla.valores({"paciente_nombre": "Ana"}), ["Ana", "-"])
+
+    def test_limpia_lo_que_meta_o_chatwoot_rechazan(self):
+        """Meta rechaza saltos de linea, tabulaciones y 5+ espacios seguidos;
+        Chatwoot borra < > " ' de cada parametro."""
+        from apps.notificaciones.catalogo_whatsapp import plantilla_de
+
+        plantilla = plantilla_de(Tipo.ENVIO_COTIZACION)
+        valores = plantilla.valores({"paciente_nombre": "Ana O'Brien\n\t Pérez", "clinica_nombre": ' Clínica "Bella"     <Sur> '})
+        self.assertEqual(valores, ["Ana O’Brien Pérez", "Clínica ”Bella” Sur"])
+        self.assertEqual(plantilla.valores({"paciente_nombre": " \n ", "clinica_nombre": None}), ["-", "-"])
 
 
 @override_settings(**LYVIO_OK, LYVIO_PLANTILLA_PDF_EJEMPLO_URL="https://cdn.test/ejemplo.pdf")
@@ -654,6 +726,90 @@ class PlantillasNumeroPropioTests(TestCase):
         self._accion("revisar-salud")
         self.numero.refresh_from_db()
         self.assertEqual(self.numero.estado, "activo")
+
+    def _bloquear(self, bloqueo, mensaje="bloqueado"):
+        self.numero.bloqueo = bloqueo
+        self.numero.estado = "error"
+        self.numero.ultimo_error = mensaje
+        self.numero.save()
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_actualizar_plantillas_no_borra_un_bloqueo(self, req):
+        """Antes, plantillas aprobadas devolvian a `activo` un numero sin pago o desconectado."""
+        self._crear_todas(req)
+        self._bloquear("pago", "Falta método de pago en Meta.")
+        req.side_effect = [_respuesta(200, self._meta({})), _respuesta(200, {})]
+        self._accion("actualizar-plantillas")
+        self.numero.refresh_from_db()
+        self.assertEqual((self.numero.estado, self.numero.ultimo_error), ("error", "Falta método de pago en Meta."))
+        self.assertTrue(self.numero.plantillas.filter(estado="APPROVED").exists())
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_salud_ok_levanta_el_bloqueo_de_conexion_pero_no_el_de_pago(self, req):
+        self._crear_todas(req)
+        req.side_effect = [_respuesta(200, self._meta({})), _respuesta(200, {})]
+        self._accion("actualizar-plantillas")
+        req.side_effect = None
+        req.return_value = _respuesta(200, {"status": "CONNECTED", "is_on_biz_app": True})
+
+        self._bloquear("pago")
+        self._accion("revisar-salud")
+        self.numero.refresh_from_db()
+        self.assertEqual((self.numero.estado, self.numero.bloqueo), ("error", "pago"))
+
+        self._bloquear("conexion")
+        self._accion("revisar-salud")
+        self.numero.refresh_from_db()
+        self.assertEqual((self.numero.estado, self.numero.bloqueo, self.numero.ultimo_error), ("activo", "", ""))
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_salud_bloquea_si_chatwoot_pide_reautorizar_y_completa_el_numero(self, req):
+        req.side_effect = [
+            _respuesta(200, {"status": "CONNECTED", "is_on_biz_app": True, "display_phone_number": "+57 300 111 2233"}),
+            _inbox(88, reautorizar=True),
+        ]
+        self._accion("revisar-salud")
+        self.numero.refresh_from_db()
+        self.assertEqual((self.numero.estado, self.numero.bloqueo), ("error", "conexion"))
+        self.assertEqual(self.numero.numero_visible, "+573001112233")
+
+    def _registrar(self, inbox_id):
+        return self.client.post(
+            f"/api/v1/admin/tenants/{self.clinica.id}/whatsapp-propio/registrar-inbox/",
+            {"lyvio_inbox_id": inbox_id}, format="json",
+        )
+
+    def _habilitar_addon(self, numeros=2):
+        self.clinica.whatsapp_numero_propio_override = True
+        self.clinica.whatsapp_numeros_incluidos_override = numeros
+        self.clinica.save()
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_registrar_inbox_existente(self, req):
+        """Recupera un inbox que quedo creado en Lyvio sin registrarse en CliniQ."""
+        self._habilitar_addon()
+        req.return_value = _inbox(90)
+        res = self._registrar("90")
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(req.call_args.args, ("GET", "https://lyvio.test/api/v1/accounts/7/inboxes/90"))
+        registrado = self.numero.conexion.numeros.get(lyvio_inbox_id="90")
+        self.assertEqual(
+            (registrado.waba_id, registrado.phone_number_id, registrado.numero_visible),
+            ("waba1", "pn1", "+573001112233"),
+        )
+        self.assertNotIn("EAAG", res.content.decode())
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_registrar_inbox_valida(self, req):
+        self._habilitar_addon()
+        self.assertEqual(self._registrar("88").json()["code"], "INBOX_YA_REGISTRADO")
+        self.assertEqual(self._registrar("abc").json()["code"], "INBOX_INVALIDO")
+        req.return_value = _respuesta(404, {"error": "Resource could not be found"})
+        self.assertEqual(self._registrar("91").json()["code"], "INBOX_NO_EXISTE")
+        req.return_value = _respuesta(200, {"id": 92, "channel_type": "Channel::Api"})
+        self.assertEqual(self._registrar("92").json()["code"], "INBOX_NO_WHATSAPP")
+        self._habilitar_addon(numeros=1)
+        self.assertEqual(self._registrar("93").json()["code"], "LIMITE_NUMEROS")
 
     def test_detalle_admin(self):
         data = self.client.get(f"/api/v1/admin/tenants/{self.clinica.id}/whatsapp-propio/").json()
@@ -780,9 +936,28 @@ class ElegirNumeroTests(_BaseNumeroPropio):
         general = self._numero("1", por_defecto=True)
         self.assertEqual(self._elegir()[0], general)
 
+    def test_telefono_invalido_sale_por_compartido(self):
+        """Sin E.164 valido Chatwoot no crea el contacto: no se intenta por Lyvio."""
+        self._numero("1", por_defecto=True)
+        for telefono in ("", "123", "abc"):
+            self.paciente.telefono = telefono
+            self.assertEqual(self._elegir(sede=self.sede_a), (None, "telefono_invalido"))
+
     def test_nada_activo_sale_por_compartido(self):
         self._numero("1", estado="plantillas_pendientes", aprobadas=False, por_defecto=True)
         self.assertEqual(self._elegir(sede=self.sede_a), (None, "numero_no_activo"))
+
+
+def _evento_fallido(message_id, external_error, conversation_id=21):
+    """message_updated como lo arma Chatwoot 4.18 (Message#webhook_data): sin
+    `status` en la raiz. El estado solo va en conversation.messages (el ultimo
+    mensaje) y el error en content_attributes.external_error."""
+    atributos = {"external_error": external_error} if external_error else {}
+    return {
+        "event": "message_updated", "id": message_id, "message_type": "outgoing",
+        "content_attributes": atributos,
+        "conversation": {"id": conversation_id, "status": "open", "messages": [{"id": message_id, "status": "failed"}]},
+    }
 
 
 def _conversacion_ok(req, message_id=501):
@@ -946,10 +1121,7 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
     def test_webhook_failed_reenvia_una_sola_vez(self, compartido):
         envio = self._enviado()
-        evento = {
-            "event": "message_updated", "id": 501, "status": "failed", "message_type": "outgoing",
-            "content_attributes": {"external_error": "131026: Message undeliverable"},
-        }
+        evento = _evento_fallido(501, "131000: Something went wrong")
         self.assertEqual(self._webhook(evento).json()["resultado"], "respaldo_enviado")
         self.assertEqual(self._webhook(evento).json()["resultado"], "ya_procesado")
         compartido.assert_called_once_with(
@@ -961,30 +1133,84 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
         self.assertEqual(self.norte.estado, "activo")
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_sin_pago_pone_el_numero_en_error(self, _compartido):
+    def test_webhook_sin_pago_bloquea_el_numero_hasta_confirmar_el_pago(self, compartido):
+        from apps.notificaciones.numero_propio import configurar
+
+        self.conexion.pago_meta_configurado = True
+        self.conexion.save()
         self._enviado()
-        self._webhook({
-            "event": "message_updated", "id": 501, "status": "failed",
-            "content_attributes": {"external_error": "131042: Business eligibility payment issue"},
-        })
+        res = self._webhook(_evento_fallido(501, "131042: Business eligibility payment issue"))
+        self.assertEqual(res.json()["resultado"], "respaldo_enviado")
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "pago"))
+        self.assertIn("método de pago", self.norte.ultimo_error)
+        self.conexion.refresh_from_db()
+        self.assertFalse(self.conexion.pago_meta_configurado)
+
+        configurar(self.clinica, pago_meta_configurado=True)
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo), ("activo", ""))
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_numero_desconectado_bloquea_por_conexion(self, compartido):
+        self._enviado()
+        self._webhook(_evento_fallido(501, "131045: Incorrect certificate"))
+        compartido.assert_called_once()
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "conexion"))
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_plantilla_pausada_saca_el_numero_y_reenvia(self, compartido):
+        self._enviado()
+        self._webhook(_evento_fallido(501, "132015: Template is paused"))
+        compartido.assert_called_once()
+        plantilla = self.norte.plantillas.get(tipo=Tipo.FIRMA_DOCUMENTO)
+        self.assertEqual(plantilla.estado, "PAUSED")
         self.norte.refresh_from_db()
         self.assertEqual(self.norte.estado, "error")
-        self.assertIn("método de pago", self.norte.ultimo_error)
+        self.assertIn("cliniq_firma_documento_v1", self.norte.ultimo_error)
 
-    @patch(f"{SERVICES}.enviar_link_firma_whatsapp", side_effect=ValueError("Webhook no configurado"))
-    def test_webhook_respaldo_fallido_queda_como_notificacion_fallida(self, _compartido):
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_error_del_paciente_no_reenvia(self, compartido):
+        """131026: el paciente no tiene WhatsApp; el numero de CliniQ tampoco lo entregaria."""
         from apps.notificaciones.models import NotificacionFallida
 
         self._enviado()
-        res = self._webhook({"event": "message_updated", "id": 501, "status": "failed"})
+        res = self._webhook(_evento_fallido(501, "131026: Message undeliverable"))
+        self.assertEqual(res.json()["resultado"], "sin_respaldo_paciente")
+        compartido.assert_not_called()
+        self.assertIn("no tiene WhatsApp", NotificacionFallida.objects.get().motivo)
+        self.norte.refresh_from_db()
+        self.assertEqual(self.norte.estado, "activo")
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_fallo_tardio_no_reenvia(self, compartido):
+        from apps.notificaciones.models import NotificacionFallida
+
+        envio = self._enviado()
+        EnvioWhatsApp.objects.filter(pk=envio.pk).update(created_at=timezone.now() - timedelta(hours=3))
+        res = self._webhook(_evento_fallido(501, "131000: Something went wrong"))
+        self.assertEqual(res.json()["resultado"], "fallo_tardio")
+        compartido.assert_not_called()
+        self.assertIn("avisó tarde", NotificacionFallida.objects.get().motivo)
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp", side_effect=ValueError("Webhook no configurado"))
+    def test_webhook_respaldo_fallido_queda_como_notificacion_fallida(self, _compartido):
+        """Fallo sin external_error: se reconoce por el estado del ultimo mensaje de la conversacion."""
+        from apps.notificaciones.models import NotificacionFallida
+
+        self._enviado()
+        res = self._webhook(_evento_fallido(501, None))
         self.assertEqual(res.json()["resultado"], "respaldo_fallido")
         self.assertEqual(NotificacionFallida.objects.get().tipo_notificacion, Tipo.FIRMA_DOCUMENTO)
 
     def test_webhook_otros_eventos(self):
-        self.assertEqual(self._webhook({"event": "message_updated", "id": 999, "status": "failed"}).json()["resultado"],
-                         "desconocido")
-        self.assertEqual(self._webhook({"event": "message_updated", "id": 1, "status": "delivered"}).json()["resultado"],
-                         "ignorado")
+        self.assertEqual(self._webhook(_evento_fallido(999, "131000: x")).json()["resultado"], "desconocido")
+        entregado = {
+            "event": "message_updated", "id": 1, "message_type": "outgoing", "content_attributes": {},
+            "conversation": {"id": 21, "status": "open", "messages": [{"id": 1, "status": "delivered"}]},
+        }
+        self.assertEqual(self._webhook(entregado).json()["resultado"], "ignorado")
         self.assertEqual(
             self._webhook({"event": "message_created", "id": 2, "message_type": "incoming", "inbox": {"id": 31}})
             .json()["resultado"],
@@ -1039,10 +1265,7 @@ class CorreccionesRevisionTests(_BaseNumeroPropio):
             if url.endswith("/conversations"):
                 return _respuesta(200, {"id": 21})
             # POST del mensaje: el webhook de fallo llega antes de la respuesta
-            resultados.append(procesar_webhook({
-                "event": "message_updated", "id": 777, "status": "failed",
-                "conversation": {"id": 21}, "content_attributes": {"external_error": "131026: undeliverable"},
-            }))
+            resultados.append(procesar_webhook(_evento_fallido(777, "131000: Something went wrong")))
             return _respuesta(200, {"id": 777})
 
         with patch("apps.notificaciones.lyvio.requests.request", side_effect=lyvio):

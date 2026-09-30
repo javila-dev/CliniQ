@@ -31,6 +31,14 @@ export const whatsappPropioAdminApi = {
     return res.data
   },
 
+  /** Registra un inbox que ya existe en Lyvio (la conexión terminó allá pero CliniQ no la guardó). */
+  registrarInbox: async (clinicaId: string, lyvioInboxId: string): Promise<AccionNumeroWhatsappResponse> => {
+    const res = await apiClient.post<AccionNumeroWhatsappResponse>(
+      `/admin/tenants/${clinicaId}/whatsapp-propio/registrar-inbox/`, { lyvio_inbox_id: lyvioInboxId },
+    )
+    return res.data
+  },
+
   accion: async (
     numeroId: string,
     accion: 'crear-plantillas' | 'actualizar-plantillas' | 'revisar-salud',

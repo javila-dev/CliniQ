@@ -147,8 +147,11 @@ Respuestas:
 ## Limitaciones de la API actual de Lyvio
 
 - **Envío asíncrono:** crear el mensaje no confirma que Meta lo aceptó. El
-  resultado llega después por `message_updated` (`status: failed` +
-  `external_error`).
+  resultado llega después por `message_updated`. Ojo: en 4.18 ese webhook
+  **no trae `status` en la raíz** (`Message#webhook_data`); el fallo se
+  reconoce por `content_attributes.external_error` (Chatwoot lo borra en
+  cualquier estado que no sea `failed`) o por `conversation.messages` con el
+  mismo `id`. Los webhooks de cuenta no se reintentan (timeout de 5 s).
   - Si el fallo llega por el webhook de estados de Meta, `external_error`
     viene como `"<código>: <título>"` (p. ej. `131042: …`).
   - Si Meta rechaza el envío en el momento, trae solo el texto del error,

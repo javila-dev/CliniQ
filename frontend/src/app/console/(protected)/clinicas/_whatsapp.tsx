@@ -7,9 +7,10 @@
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, AlertTriangle, FileText, HeartPulse, Loader2, MessageCircle, RefreshCw } from 'lucide-react'
+import { AlertCircle, AlertTriangle, FileText, HeartPulse, Link2, Loader2, MessageCircle, RefreshCw } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { whatsappPropioAdminApi } from '@/lib/api/whatsappPropio'
 import { cn } from '@/lib/utils'
 import type { AdminTenant } from '@/types/admin'
@@ -163,6 +164,51 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
   )
 }
 
+/** Recupera una conexión que terminó en Lyvio pero no quedó registrada en CliniQ
+ *  (p. ej. la clínica vio "tardó más de lo normal"): el inbox existe en la
+ *  cuenta de CliniQ en Lyvio y reintentar la conexión fallaría con "ya existe". */
+function RegistrarInbox({ clinicaId }: { clinicaId: string }) {
+  const qc = useQueryClient()
+  const [inboxId, setInboxId] = useState('')
+  const mutation = useMutation({
+    mutationFn: () => whatsappPropioAdminApi.registrarInbox(clinicaId, inboxId.trim()),
+    onSuccess: (data) => {
+      qc.setQueryData(['admin-whatsapp-propio', clinicaId], data.detalle)
+      qc.invalidateQueries({ queryKey: ['admin-tenant-historial', clinicaId] })
+      setInboxId('')
+    },
+  })
+
+  return (
+    <div className="space-y-2 rounded-xl border bg-white p-4">
+      <p className="text-sm font-semibold">Registrar un inbox existente</p>
+      <p className="text-xs text-muted-foreground">
+        Si la clínica conectó su número pero vio un error, el inbox puede haber quedado creado en la cuenta de CliniQ
+        en Lyvio sin registrarse aquí. Búscalo en Lyvio por el número de teléfono y registra su ID.
+      </p>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(e) => { e.preventDefault(); mutation.mutate() }}
+      >
+        <Input
+          value={inboxId}
+          onChange={(e) => setInboxId(e.target.value)}
+          placeholder="ID del inbox"
+          inputMode="numeric"
+          className="h-8 w-40"
+        />
+        <Button type="submit" size="sm" variant="outline" disabled={!inboxId.trim() || mutation.isPending}>
+          {mutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Link2 className="mr-1.5 h-3.5 w-3.5" />}
+          Registrar
+        </Button>
+      </form>
+      {mutation.isError && (
+        <p className="text-xs text-red-600">{serverErrorMessage(mutation.error) ?? 'No se pudo registrar el inbox.'}</p>
+      )}
+    </div>
+  )
+}
+
 export function WhatsappPropioConsola({ tenant }: { tenant: AdminTenant }) {
   const { data, isLoading, isError } = useQuery({
     queryKey: ['admin-whatsapp-propio', tenant.id],
@@ -224,6 +270,8 @@ export function WhatsappPropioConsola({ tenant }: { tenant: AdminTenant }) {
       {conCliniq.length > 0 && (
         <p className="text-xs text-muted-foreground">Sedes que eligieron el número de CliniQ: {conCliniq.join(', ')}.</p>
       )}
+
+      {data.habilitado && data.numeros.length < data.numeros_incluidos && <RegistrarInbox clinicaId={tenant.id} />}
 
       <p className="text-xs text-muted-foreground">
         &quot;Actualizar estado&quot; muestra lo último que Lyvio sincronizó con Meta y pide una sincronización nueva:

@@ -263,6 +263,32 @@ class AdminWhatsappPropioView(APIView):
         return Response(numero_propio.detalle_admin(clinica))
 
 
+class AdminWhatsappRegistrarInboxView(APIView):
+    """Consola: registra para la clinica un inbox que ya existe en Lyvio (la
+    conexion termino alla pero CliniQ no alcanzo a guardarla)."""
+
+    permission_classes = (IsSuperAdmin,)
+
+    def post(self, request, clinica_id, *args, **kwargs):
+        from apps.clinicas.models import Clinica
+
+        clinica = get_object_or_404(Clinica, pk=clinica_id)
+        try:
+            numero = numero_propio.registrar_inbox_existente(clinica, request.data.get("lyvio_inbox_id"))
+        except numero_propio.NumeroPropioError as exc:
+            return Response({"error": exc.mensaje, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+        registrar_accion(
+            request, "whatsapp_propio.registrar_inbox", numero,
+            {
+                "resumen": "Inbox de Lyvio registrado para la clínica",
+                "lyvio_inbox_id": numero.lyvio_inbox_id,
+                "numero": numero.numero_visible,
+            },
+            clinica=clinica,
+        )
+        return Response({"detalle": numero_propio.detalle_admin(clinica)}, status=status.HTTP_201_CREATED)
+
+
 class AdminWhatsappNumeroAccionView(APIView):
     """Consola: crear plantillas, actualizar su estado o revisar la salud de un
     numero. Manual por ahora (sin jobs periodicos)."""

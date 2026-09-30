@@ -20,6 +20,16 @@ from apps.notificaciones.models import EnvioWhatsApp
 Tipo = EnvioWhatsApp.Tipo
 IDIOMA = "es_CO"
 _VARIABLE = re.compile(r"\{\{(\d+)\}\}")
+# Chatwoot borra < > " ' de cada parametro ("O'Brien" -> "OBrien"): las
+# comillas se cambian por las tipograficas, que si pasan.
+_COMILLAS = str.maketrans({"'": "’", '"': "”", "<": "", ">": ""})
+
+
+def _limpiar(valor) -> str:
+    """Meta rechaza parametros vacios, con saltos de linea, tabulaciones o mas
+    de 4 espacios seguidos: se deja todo en una linea con espacios simples."""
+    texto = " ".join(str(valor or "").translate(_COMILLAS).split())
+    return texto or "-"
 
 
 @dataclass(frozen=True)
@@ -36,8 +46,8 @@ class PlantillaCatalogo:
     vigente: bool = True
 
     def valores(self, contexto: dict) -> list:
-        """Valores de las variables en orden. Meta rechaza parametros vacios."""
-        return [str(contexto.get(clave) or "-").strip() or "-" for clave in self.variables]
+        """Valores de las variables en orden, ya limpios (ver _limpiar)."""
+        return [_limpiar(contexto.get(clave)) for clave in self.variables]
 
     def renderizar(self, contexto: dict) -> str:
         """Texto final del mensaje: Lyvio lo necesita como `content`."""

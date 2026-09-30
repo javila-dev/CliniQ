@@ -368,6 +368,9 @@ function ConectarDialog({ estado, open, onClose }: {
 
 function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onConectar: () => void }) {
   const lleno = estado.numeros.length >= estado.numeros_incluidos
+  // Meta rechazó un envío por falta de pago: la clínica lo corrige en Meta y lo
+  // confirma aquí. Si sigue sin pago, el próximo envío vuelve a bloquear el número.
+  const pago = useConfigurar()
   return (
     <section className="overflow-hidden rounded-xl border bg-white">
       <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
@@ -395,6 +398,19 @@ function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onCo
                   && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto se usa el número de CliniQ.'}
                 {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto se usa otro número.')}
               </p>
+              {n.bloqueo === 'pago' && (
+                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
+                    className="inline-flex items-center gap-1 text-[12.5px] font-medium text-primary hover:underline">
+                    Abrir pagos en Meta <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                  <Button size="sm" variant="outline" disabled={pago.isPending}
+                    onClick={() => pago.mutate({ pago_meta_configurado: true })}>
+                    {pago.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                    Ya agregué el método de pago
+                  </Button>
+                </div>
+              )}
             </div>
             <EstadoBadge numero={n} />
           </div>

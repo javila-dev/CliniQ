@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 # es el flujo API-only, que sacaria el numero de la app de WhatsApp Business.
 EVENTO_COEXISTENCE = "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"
 
+# Motivos de bloqueo del numero (NumeroWhatsapp.bloqueo) que ve la clinica.
+MENSAJE_REAUTORIZAR = (
+    "Meta no terminó de conectar el número con CliniQ. Escríbenos para revisarlo; mientras tanto, los "
+    "mensajes salen por el número de CliniQ."
+)
+MENSAJE_FUERA_DE_LA_APP = (
+    "El número dejó de estar en WhatsApp Business. Abre WhatsApp Business en el teléfono de la clínica y "
+    "escríbenos para reconectarlo."
+)
+
 
 class NumeroPropioError(Exception):
     def __init__(self, mensaje, *, code):
@@ -47,6 +57,7 @@ def _serializar_numero(numero, por_defecto_id):
         "numero_visible": numero.numero_visible,
         "estado": numero.estado,
         "estado_display": numero.get_estado_display(),
+        "bloqueo": numero.bloqueo,
         "ultimo_error": numero.ultimo_error,
         "es_por_defecto": numero.id == por_defecto_id,
     }
@@ -113,6 +124,12 @@ def configurar(clinica, *, pago_meta_configurado=None, numero_por_defecto_id=Non
         conexion.numero_por_defecto = numero
     conexion.save()
 
+    if pago_meta_configurado:
+        # La clinica dice que ya corrigio el pago: sus numeros vuelven a
+        # intentarlo. Si Meta sigue sin pago, el proximo envio los bloquea otra vez.
+        for numero in conexion.numeros.filter(bloqueo=NumeroWhatsapp.Bloqueo.PAGO):
+            _desbloquear(numero, NumeroWhatsapp.Bloqueo.PAGO)
+
     Tipo = AsignacionWhatsappSede.Tipo
     for item in asignaciones or []:
         sede = clinica.sedes.filter(id=item["sede_id"]).first()
@@ -151,20 +168,28 @@ def conectar_numero(
         raise NumeroPropioError("Meta no devolvió los datos de la conexión. Intenta de nuevo.", code="DATOS_INCOMPLETOS")
 
     conexion = _conexion(clinica)
-    incluidos = clinica.whatsapp_numeros_incluidos
-    if conexion.numeros.count() >= incluidos:
-        raise NumeroPropioError(
-            f"Tu plan incluye {incluidos} {'número' if incluidos == 1 else 'números'} de WhatsApp y ya "
-            "están conectados. Escríbenos para agregar otro.",
-            code="LIMITE_NUMEROS",
-        )
+    _verificar_limite(clinica, conexion)
 
     try:
         inbox = lyvio.autorizar_whatsapp(
             code=code, waba_id=waba_id, phone_number_id=phone_number_id, business_id=business_id,
         )
     except lyvio.LyvioError as exc:
-        raise NumeroPropioError(exc.mensaje, code="LYVIO_ERROR") from exc
+        logger.warning("Lyvio no conectó el número de la clínica %s (waba %s): %s", clinica.id, waba_id, exc.mensaje)
+        raise NumeroPropioError(_mensaje_conexion_fallida(exc), code="LYVIO_ERROR") from exc
+    except requests.ReadTimeout as exc:
+        # El pedido llego a Lyvio: el inbox pudo quedar creado alla. Un reintento
+        # fallaria con "Channel already exists"; soporte lo registra desde la
+        # consola (registrar_inbox_existente).
+        logger.error(
+            "Timeout conectando el número de la clínica %s (waba %s): revisar si Lyvio creó el inbox",
+            clinica.id, waba_id,
+        )
+        raise NumeroPropioError(
+            "La conexión tardó más de lo normal y no sabemos si terminó. No la intentes de nuevo: "
+            "escríbenos y la confirmamos.",
+            code="LYVIO_TIMEOUT",
+        ) from exc
     except requests.RequestException as exc:
         logger.exception("Lyvio no respondió al conectar el número de la clínica %s", clinica.id)
         raise NumeroPropioError(
@@ -174,9 +199,54 @@ def conectar_numero(
 
     inbox_id = str((inbox or {}).get("id") or "")
     if not inbox_id:
-        logger.error("Lyvio autorizó sin devolver inbox id (clínica %s): %s", clinica.id, inbox)
+        logger.error("Lyvio autorizó sin devolver inbox id (clínica %s, waba %s)", clinica.id, waba_id)
         raise NumeroPropioError("El servicio de WhatsApp no devolvió el número conectado.", code="LYVIO_SIN_INBOX")
 
+    try:
+        datos = lyvio.datos_inbox(inbox_id)
+    except (lyvio.LyvioError, requests.RequestException):
+        # El inbox existe: se registra igual y la revision de salud completa el numero.
+        logger.warning("No se pudo leer el inbox %s recién creado en Lyvio", inbox_id)
+        datos = {}
+    return _registrar_numero(
+        clinica, conexion, inbox_id,
+        waba_id=waba_id, phone_number_id=phone_number_id, business_id=business_id, datos=datos,
+    )
+
+
+def _verificar_limite(clinica, conexion):
+    incluidos = clinica.whatsapp_numeros_incluidos
+    if conexion.numeros.count() >= incluidos:
+        raise NumeroPropioError(
+            f"Tu plan incluye {incluidos} {'número' if incluidos == 1 else 'números'} de WhatsApp y ya "
+            "están conectados. Escríbenos para agregar otro.",
+            code="LIMITE_NUMEROS",
+        )
+
+
+def _mensaje_conexion_fallida(exc) -> str:
+    """Chatwoot responde 422 con el texto del error en ingles (textos fijos del
+    codigo de 4.18, no traducidos): se traducen los conocidos y el resto va
+    generico. El texto original queda en el log."""
+    texto = exc.mensaje.lower()
+    if "already exists" in texto:
+        return (
+            "Este número ya está conectado a CliniQ o a otra plataforma de WhatsApp. "
+            "Escríbenos para ayudarte a conectarlo."
+        )
+    if "multiple phone numbers" in texto or "no matching phone number" in texto:
+        return (
+            "Meta no indicó cuál de los números de tu cuenta de WhatsApp Business conectar. "
+            "Escríbenos para ayudarte."
+        )
+    return "Meta no pudo completar la conexión. Intenta de nuevo en unos minutos; si se repite, escríbenos."
+
+
+def _registrar_numero(clinica, conexion, inbox_id, *, waba_id, phone_number_id="", business_id="", datos=None):
+    """Crea el NumeroWhatsapp de un inbox que ya existe en Lyvio. El primer
+    numero queda por defecto. Si Chatwoot marco el inbox para reautorizar
+    (token o webhooks fallidos al conectar), el numero nace bloqueado."""
+    datos = datos or {}
     try:
         with transaction.atomic():
             conexion = ConexionWhatsappPropio.objects.select_for_update().get(pk=conexion.pk)
@@ -184,10 +254,15 @@ def conectar_numero(
                 conexion=conexion,
                 lyvio_inbox_id=inbox_id,
                 waba_id=waba_id,
-                phone_number_id=phone_number_id or str(inbox.get("phone_number_id") or ""),
+                phone_number_id=phone_number_id or datos.get("phone_number_id", ""),
                 business_id=business_id,
-                numero_visible=str(inbox.get("phone_number") or ""),
+                numero_visible=datos.get("phone_number", ""),
             )
+            if datos.get("reauthorization_required"):
+                numero.bloqueo = NumeroWhatsapp.Bloqueo.CONEXION
+                numero.estado = NumeroWhatsapp.Estado.ERROR
+                numero.ultimo_error = MENSAJE_REAUTORIZAR
+                numero.save(update_fields=["bloqueo", "estado", "ultimo_error", "updated_at"])
             if conexion.numero_por_defecto_id is None:
                 conexion.numero_por_defecto = numero
                 conexion.save(update_fields=["numero_por_defecto", "updated_at"])
@@ -200,6 +275,35 @@ def conectar_numero(
             "El número se conectó pero no pudimos registrarlo. Contacta a soporte.", code="REGISTRO_FALLIDO",
         ) from exc
     return numero
+
+
+def registrar_inbox_existente(clinica, inbox_id) -> NumeroWhatsapp:
+    """Soporte: registra para la clinica un inbox que ya existe en la cuenta de
+    Lyvio de CliniQ, p. ej. si la conexion termino en Lyvio pero CliniQ no
+    alcanzo a guardarla (timeout). No llama a Meta. El token de Lyvio solo ve
+    su propia cuenta, asi que no se puede tomar un inbox de otra cuenta."""
+    _exigir_addon(clinica)
+    inbox_id = str(inbox_id or "").strip()
+    if not inbox_id.isdigit():
+        raise NumeroPropioError("Indica el número del inbox de Lyvio.", code="INBOX_INVALIDO")
+    if NumeroWhatsapp.objects.filter(lyvio_inbox_id=inbox_id).exists():
+        raise NumeroPropioError("Ese inbox ya está registrado en CliniQ.", code="INBOX_YA_REGISTRADO")
+    conexion = _conexion(clinica)
+    _verificar_limite(clinica, conexion)
+
+    try:
+        datos = lyvio.datos_inbox(inbox_id)
+    except lyvio.LyvioError as exc:
+        if exc.status == 404:
+            raise NumeroPropioError(
+                "Ese inbox no existe en la cuenta de CliniQ en Lyvio.", code="INBOX_NO_EXISTE",
+            ) from exc
+        raise _error_lyvio(exc) from exc
+    except requests.RequestException as exc:
+        raise _error_lyvio(exc) from exc
+    if datos["channel_type"] != "Channel::Whatsapp" or not datos["waba_id"]:
+        raise NumeroPropioError("Ese inbox no es un número de WhatsApp Cloud.", code="INBOX_NO_WHATSAPP")
+    return _registrar_numero(clinica, conexion, inbox_id, waba_id=datos["waba_id"], datos=datos)
 
 
 # ---------------------------------------------------------------------------
@@ -237,9 +341,31 @@ def _pdf_ejemplo_url() -> str:
     return get_public_url(_PDF_EJEMPLO_PATH)
 
 
+def _bloquear(numero_id, bloqueo, mensaje) -> None:
+    NumeroWhatsapp.objects.filter(pk=numero_id).update(
+        bloqueo=bloqueo, estado=NumeroWhatsapp.Estado.ERROR, ultimo_error=mensaje, updated_at=timezone.now(),
+    )
+
+
+def _desbloquear(numero: NumeroWhatsapp, bloqueo) -> None:
+    """Quita el bloqueo solo si es de ese tipo (la salud no levanta un bloqueo
+    de pago) y deja que las plantillas decidan el estado."""
+    NumeroWhatsapp.objects.filter(pk=numero.pk, bloqueo=bloqueo).update(
+        bloqueo=NumeroWhatsapp.Bloqueo.NINGUNO, updated_at=timezone.now(),
+    )
+    _recalcular_estado(numero)
+
+
 def _recalcular_estado(numero: NumeroWhatsapp) -> None:
     """D5: activo solo con todas las plantillas vigentes aprobadas. Una
-    rechazada, pausada o deshabilitada deja el numero en error."""
+    rechazada, pausada o deshabilitada deja el numero en error. Un bloqueo
+    (pago o conexion) manda sobre las plantillas: solo lo quita _desbloquear."""
+    numero.refresh_from_db(fields=["bloqueo", "ultimo_error"])
+    if numero.bloqueo:
+        numero.estado = NumeroWhatsapp.Estado.ERROR
+        numero.save(update_fields=["estado", "updated_at"])
+        return
+
     registros = {(p.nombre, p.idioma): p for p in numero.plantillas.all()}
     estados = {}
     for definicion in catalogo_whatsapp.vigentes():
@@ -258,6 +384,7 @@ def _recalcular_estado(numero: NumeroWhatsapp) -> None:
         numero.ultimo_error = ""
     else:
         numero.estado = NumeroWhatsapp.Estado.CONECTADO
+        numero.ultimo_error = ""
     numero.save(update_fields=["estado", "ultimo_error", "updated_at"])
 
 
@@ -366,29 +493,37 @@ def actualizar_plantillas(numero: NumeroWhatsapp) -> None:
 
 def revisar_salud(numero: NumeroWhatsapp) -> dict:
     """Si Meta no reporta el numero conectado y en la app de WhatsApp Business
-    (Coexistence), pasa a error y sus envios vuelven al compartido. Si esta
-    sano, el estado lo deciden las plantillas."""
+    (Coexistence), o Chatwoot pide reautorizarlo, queda bloqueado y sus envios
+    vuelven al compartido. Si esta sano se levanta el bloqueo de conexion (no
+    el de pago: la salud no lo muestra) y el estado lo deciden las plantillas.
+    De paso completa el numero visible si faltaba."""
     try:
         data = lyvio.salud(numero.lyvio_inbox_id)
     except (lyvio.LyvioError, requests.RequestException) as exc:
         raise _error_lyvio(exc) from exc
+    try:
+        inbox = lyvio.datos_inbox(numero.lyvio_inbox_id)
+    except (lyvio.LyvioError, requests.RequestException):
+        logger.warning("No se pudo leer el inbox %s de Lyvio al revisar la salud", numero.lyvio_inbox_id)
+        inbox = {}
 
     numero.ultimo_chequeo_en = timezone.now()
-    estado_meta = str(data.get("status") or "").upper()
-    if estado_meta == "CONNECTED" and data.get("is_on_biz_app") is True:
-        numero.save(update_fields=["ultimo_chequeo_en", "updated_at"])
-        _recalcular_estado(numero)
-        return data
+    numero.numero_visible = (
+        numero.numero_visible or inbox.get("phone_number") or str(data.get("display_phone_number") or "")
+    )
+    numero.save(update_fields=["ultimo_chequeo_en", "numero_visible", "updated_at"])
 
-    numero.estado = NumeroWhatsapp.Estado.ERROR
-    if estado_meta == "CONNECTED":
-        numero.ultimo_error = (
-            "El número dejó de estar en WhatsApp Business. Abre WhatsApp Business en el teléfono "
-            "de la clínica y vuelve a conectarlo."
-        )
+    estado_meta = str(data.get("status") or "").upper()
+    if inbox.get("reauthorization_required"):
+        problema = MENSAJE_REAUTORIZAR
+    elif estado_meta != "CONNECTED":
+        problema = f"Meta reporta el número como {estado_meta or 'desconocido'}."
+    elif data.get("is_on_biz_app") is not True:
+        problema = MENSAJE_FUERA_DE_LA_APP
     else:
-        numero.ultimo_error = f"Meta reporta el número como {estado_meta or 'desconocido'}."
-    numero.save(update_fields=["estado", "ultimo_error", "ultimo_chequeo_en", "updated_at"])
+        _desbloquear(numero, NumeroWhatsapp.Bloqueo.CONEXION)
+        return data
+    _bloquear(numero.pk, NumeroWhatsapp.Bloqueo.CONEXION, problema)
     return data
 
 
@@ -460,7 +595,11 @@ def elegir_numero(clinica, *, tipo=None, sede=None, cita=None, paciente=None):
         return None, "tipo_sin_plantilla"
     if not clinica.whatsapp_numero_propio_habilitado:
         return None, "sin_addon"
-    conexion = ConexionWhatsappPropio.objects.filter(clinica=clinica).select_related("numero_por_defecto").first()
+    if paciente is not None and not lyvio.telefono_valido(lyvio.telefono_e164(paciente.telefono)):
+        # Sin un E.164 valido Chatwoot no crea el contacto: no se deja basura en
+        # Lyvio y el compartido responde como siempre ante un telefono malo.
+        return None, "telefono_invalido"
+    conexion =ConexionWhatsappPropio.objects.filter(clinica=clinica).select_related("numero_por_defecto").first()
     if conexion is None or not conexion.numeros.exists():
         return None, "sin_numero"
 
@@ -647,28 +786,37 @@ def enviar_por_numero_propio(ruta, *, tipo, paciente, datos):
             return {"envio_id": str(envio.id), "estado": EnvioWhatsApp.Estado.INCIERTO}
 
     message_id = str(mensaje.get("id") or "")
+    # Primero el message_id y despues el estado: si el aviso de fallo llega en
+    # medio, encuentra el envio por message_id o, antes de eso, por
+    # conversacion (sigue `incierto`). Al reves quedaria un instante `enviado`
+    # sin message_id, y ese aviso se perderia.
+    EnvioWhatsApp.objects.filter(pk=envio.pk, lyvio_message_id="").update(lyvio_message_id=message_id)
     # Solo pasa a `enviado` si el webhook no lo marco `fallido` mientras tanto.
     EnvioWhatsApp.objects.filter(pk=envio.pk, estado=EnvioWhatsApp.Estado.INCIERTO).update(
         estado=EnvioWhatsApp.Estado.ENVIADO, updated_at=timezone.now(),
     )
-    EnvioWhatsApp.objects.filter(pk=envio.pk).update(lyvio_message_id=message_id)
     envio.refresh_from_db(fields=["estado", "lyvio_message_id"])
     return {"envio_id": str(envio.id), "estado": envio.estado}
 
 
-def _registrar_sin_respaldo(envio, error, exc):
-    """El envio fallo por el numero de la clinica y tampoco salio por el
-    compartido: queda en "Envios que no salieron" para que la clinica lo vea."""
+def _registrar_fallida(envio, motivo: str) -> None:
+    """El envio no le llego al paciente: queda en "Envios que no salieron" para
+    que la clinica lo vea."""
     from apps.notificaciones.models import NotificacionFallida
 
-    logger.warning("No se pudo reenviar por el compartido el envío %s: %s", envio.id, exc)
     NotificacionFallida.objects.create(
         clinica=envio.clinica,
         paciente=envio.paciente,
         tipo_notificacion=envio.tipo,
         telefono=getattr(envio.paciente, "telefono", "") or "",
-        motivo=f"Falló por el número de la clínica ({error}) y no se pudo reenviar: {exc}"[:2000],
+        motivo=motivo[:2000],
     )
+
+
+def _registrar_sin_respaldo(envio, error, exc):
+    """El envio fallo por el numero de la clinica y tampoco salio por el compartido."""
+    logger.warning("No se pudo reenviar por el compartido el envío %s: %s", envio.id, exc)
+    _registrar_fallida(envio, f"Falló por el número de la clínica ({error}) y no se pudo reenviar: {exc}")
 
 
 def _fallo_y_respaldo(envio, exc):
@@ -718,9 +866,53 @@ MENSAJE_SIN_PAGO = (
     "método de pago vinculado, límite de crédito disponible, zona horaria y moneda configuradas y los "
     "datos fiscales completos. Tras corregirlo, Meta puede tardar hasta 24 h en reactivar los envíos."
 )
+# Errores de Meta (Cloud API) segun de quien es el problema. Referencia:
+# developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
+# Un codigo que no esta aqui (o un error sin codigo) sale por el compartido.
+#
+# Del numero de la clinica: el numero queda bloqueado para que los envios
+# siguientes no fallen uno por uno, y este sale por el compartido.
+_ERRORES_DEL_NUMERO = {
+    ERROR_SIN_PAGO: (NumeroWhatsapp.Bloqueo.PAGO, MENSAJE_SIN_PAGO),
+    "131045": (
+        NumeroWhatsapp.Bloqueo.CONEXION,
+        "Meta reporta un problema con el registro del número (suele pasar cuando se desconecta de WhatsApp "
+        "Business). Abre WhatsApp Business en el teléfono de la clínica y escríbenos para reconectarlo.",
+    ),
+    "131031": (
+        NumeroWhatsapp.Bloqueo.CONEXION,
+        "Meta bloqueó la cuenta de WhatsApp Business de la clínica. Revisa Meta Business Suite o escríbenos.",
+    ),
+    "368": (
+        NumeroWhatsapp.Bloqueo.CONEXION,
+        "Meta restringió temporalmente la cuenta de WhatsApp Business de la clínica por sus políticas. "
+        "Revisa Meta Business Suite.",
+    ),
+}
+# De la plantilla de la clinica en Meta: se marca la plantilla (el numero deja
+# de estar activo hasta revisarla en la consola) y este envio sale por el
+# compartido, que usa sus propias plantillas.
+_ERRORES_DE_PLANTILLA = {
+    "132001": PlantillaWhatsappNumero.Estado.ERROR,  # no existe o no esta aprobada en ese idioma
+    "132015": PlantillaWhatsappNumero.Estado.PAUSED,
+    "132016": PlantillaWhatsappNumero.Estado.DISABLED,
+}
+# Del paciente: el numero de CliniQ tampoco lo entregaria, o pasaria por encima
+# de una decision del paciente. Sin respaldo; queda en "Envios que no salieron".
+_ERRORES_DEL_PACIENTE = {
+    "131026": "El paciente no tiene WhatsApp activo en ese número o no puede recibir mensajes.",
+    "131049": "Meta no entregó el mensaje para no saturar al paciente con mensajes de marketing.",
+    "130472": "Meta no entregó el mensaje: el paciente participa en una prueba de Meta sobre marketing.",
+    "131050": "El paciente pidió no recibir mensajes de marketing de la clínica.",
+}
+
 # Ventana para asociar un fallo que llego antes que el message_id (ver
 # _envio_del_webhook).
 VENTANA_FALLO_TEMPRANO = timedelta(minutes=5)
+# Un fallo que Meta reporta tarde (p. ej. el telefono del paciente estuvo
+# apagado) ya no se reenvia: el mensaje podria no tener sentido, como el
+# recordatorio de una cita que ya paso.
+VENTANA_RESPALDO = timedelta(hours=1)
 
 
 def _error_externo(payload: dict) -> str:
@@ -730,13 +922,31 @@ def _error_externo(payload: dict) -> str:
     return str(payload.get("external_error") or "")
 
 
+def _estado_del_mensaje(payload: dict) -> str:
+    """Chatwoot 4.18 no manda `status` en la raiz del webhook del mensaje
+    (Message#webhook_data). Solo aparece en conversation.messages, y solo si
+    ese mensaje es el ultimo de la conversacion."""
+    if payload.get("status"):
+        return str(payload["status"])
+    for mensaje in (payload.get("conversation") or {}).get("messages") or []:
+        if isinstance(mensaje, dict) and str(mensaje.get("id")) == str(payload.get("id")):
+            return str(mensaje.get("status") or "")
+    return ""
+
+
+def _fallo_en_meta(payload: dict) -> bool:
+    """Chatwoot llena content_attributes.external_error cuando el mensaje falla
+    y lo borra en cualquier otro estado (Messages::StatusUpdateService)."""
+    return bool(_error_externo(payload)) or _estado_del_mensaje(payload) == "failed"
+
+
 def procesar_webhook(payload: dict) -> str:
     """Procesa un evento del webhook de cuenta de Lyvio y devuelve que se hizo
     (para el log y los tests). Nunca levanta por datos desconocidos: Lyvio no
     debe reintentar por un evento que a CliniQ no le importa."""
     evento = payload.get("event")
-    if evento == "message_updated" and str(payload.get("status") or "") == "failed":
-        return _mensaje_fallido(payload)
+    if evento == "message_updated":
+        return _mensaje_fallido(payload) if _fallo_en_meta(payload) else "ignorado"
     if evento == "message_created" and payload.get("message_type") in ("incoming", 0):
         # Respuesta del paciente: la clinica ya la ve en su telefono. Solo se
         # registra; se usara si hay botones (p. ej. "Confirmar cita").
@@ -784,6 +994,9 @@ def _mensaje_fallido(payload: dict) -> str:
     if not message_id:
         return "ignorado"
     error = _error_externo(payload) or "Meta rechazó el mensaje."
+    # "131042: titulo" si vino del webhook de estados de Meta; sin codigo si
+    # Meta lo rechazo en el momento del envio.
+    codigo = error.split(":", 1)[0].strip()
 
     # Primero se marca el fallo con la fila bloqueada, y el reenvio (una llamada
     # HTTP a n8n) se hace despues del commit para no retener el bloqueo. Un
@@ -799,16 +1012,41 @@ def _mensaje_fallido(payload: dict) -> str:
         envio.estado = EnvioWhatsApp.Estado.FALLIDO
         envio.error_externo = error
         envio.save(update_fields=["estado", "error_externo", "updated_at"])
+        if envio.numero_id:
+            _marcar_problema_del_numero(envio, codigo, error)
 
-        if error.split(":", 1)[0].strip() == ERROR_SIN_PAGO and envio.numero_id:
-            # Sin esto cada mensaje fallaria y saldria dos veces.
-            NumeroWhatsapp.objects.filter(pk=envio.numero_id).update(
-                estado=NumeroWhatsapp.Estado.ERROR, ultimo_error=MENSAJE_SIN_PAGO, updated_at=timezone.now(),
-            )
-
+    if codigo in _ERRORES_DEL_PACIENTE:
+        _registrar_fallida(envio, f"{_ERRORES_DEL_PACIENTE[codigo]} ({error})")
+        return "sin_respaldo_paciente"
+    if timezone.now() - envio.created_at > VENTANA_RESPALDO:
+        _registrar_fallida(
+            envio, f"Meta avisó tarde que el mensaje no se entregó ({error}); ya no se reenvió por el número de CliniQ.",
+        )
+        return "fallo_tardio"
     try:
         reenviar_por_compartido(envio)
     except (WhatsAppNoDisponibleError, ValueError, requests.RequestException) as exc:
         _registrar_sin_respaldo(envio, error, exc)
         return "respaldo_fallido"
     return "respaldo_enviado"
+
+
+def _marcar_problema_del_numero(envio, codigo: str, error: str) -> None:
+    """Un error de Meta que es del numero o de su plantilla deja de usar el
+    numero: si no, cada envio siguiente fallaria y saldria dos veces."""
+    if codigo in _ERRORES_DEL_NUMERO:
+        bloqueo, mensaje = _ERRORES_DEL_NUMERO[codigo]
+        _bloquear(envio.numero_id, bloqueo, mensaje)
+        if bloqueo == NumeroWhatsapp.Bloqueo.PAGO:
+            # La clinica vuelve a ver el paso del pago; al confirmarlo se levanta el bloqueo.
+            ConexionWhatsappPropio.objects.filter(numeros__pk=envio.numero_id).update(
+                pago_meta_configurado=False, updated_at=timezone.now(),
+            )
+    elif codigo in _ERRORES_DE_PLANTILLA:
+        plantilla = catalogo_whatsapp.plantilla_de(envio.tipo)
+        if plantilla is None:
+            return
+        PlantillaWhatsappNumero.objects.filter(
+            numero_id=envio.numero_id, nombre=plantilla.nombre, idioma=plantilla.idioma,
+        ).update(estado=_ERRORES_DE_PLANTILLA[codigo], ultimo_error=f"Meta la rechazó al enviar: {error}")
+        _recalcular_estado(NumeroWhatsapp.objects.get(pk=envio.numero_id))

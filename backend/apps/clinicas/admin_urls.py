@@ -2,7 +2,11 @@ from django.urls import path
 from rest_framework.routers import DefaultRouter
 
 from apps.clinicas.views import AdminTenantViewSet, PlanViewSet
-from apps.notificaciones.views import AdminWhatsappNumeroAccionView, AdminWhatsappPropioView
+from apps.notificaciones.views import (
+    AdminWhatsappNumeroAccionView,
+    AdminWhatsappPropioView,
+    AdminWhatsappRegistrarInboxView,
+)
 from apps.users.views import ConsoleUsuarioViewSet
 
 router = DefaultRouter()
@@ -12,6 +16,11 @@ router.register("usuarios", ConsoleUsuarioViewSet, basename="admin-usuarios")
 
 urlpatterns = [
     path("tenants/<uuid:clinica_id>/whatsapp-propio/", AdminWhatsappPropioView.as_view(), name="admin-whatsapp-propio"),
+    path(
+        "tenants/<uuid:clinica_id>/whatsapp-propio/registrar-inbox/",
+        AdminWhatsappRegistrarInboxView.as_view(),
+        name="admin-whatsapp-registrar-inbox",
+    ),
     path(
         "whatsapp-numeros/<uuid:pk>/crear-plantillas/",
         AdminWhatsappNumeroAccionView.as_view(accion="crear_plantillas"),

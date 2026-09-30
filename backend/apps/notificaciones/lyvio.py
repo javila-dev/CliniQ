@@ -7,6 +7,7 @@ numero_propio.py. El token (LYVIO_CLINIQ_API_TOKEN) nunca se loguea.
 Referencia: docs/handoff-lyvio-whatsapp-coexistence.md.
 """
 import logging
+import re
 
 import requests
 from django.conf import settings
@@ -93,8 +94,9 @@ def request(method: str, path: str, *, json=None, params=None, timeout=TIMEOUT):
 
 
 def autorizar_whatsapp(*, code: str, waba_id: str, phone_number_id: str = "", business_id: str = "") -> dict:
-    """Canjea el `code` del Embedded Signup (Coexistence) y crea el inbox. La
-    respuesta es el inbox de Chatwoot; su `id` es el lyvio_inbox_id."""
+    """Canjea el `code` del Embedded Signup (Coexistence) y crea el inbox.
+    Chatwoot 4.18 responde solo {success, id, name, channel_type}: `id` es el
+    lyvio_inbox_id; el telefono se lee despues con datos_inbox."""
     payload = {"code": code, "waba_id": waba_id, "is_coexistence": True}
     if phone_number_id:
         payload["phone_number_id"] = phone_number_id
@@ -122,6 +124,23 @@ def listar_plantillas(inbox_id: str) -> list:
     return data if isinstance(data, list) else []
 
 
+def datos_inbox(inbox_id: str) -> dict:
+    """Lo que CliniQ usa del inbox. La respuesta completa de Lyvio incluye el
+    token de Meta (`provider_config.api_key`): no sale de esta funcion ni se
+    loguea."""
+    data = request("GET", f"inboxes/{inbox_id}") or {}
+    config = data.get("provider_config") or {}
+    return {
+        "channel_type": str(data.get("channel_type") or ""),
+        "phone_number": str(data.get("phone_number") or ""),
+        "phone_number_id": str(config.get("phone_number_id") or ""),
+        "waba_id": str(config.get("business_account_id") or ""),
+        # Chatwoot lo marca si Meta rechazo el token o fallo la suscripcion de
+        # webhooks al conectar (aunque la autorizacion haya respondido OK).
+        "reauthorization_required": bool(data.get("reauthorization_required")),
+    }
+
+
 def salud(inbox_id: str) -> dict:
     """Estado del numero en Meta: status, is_on_biz_app, quality_rating..."""
     return request("GET", f"inboxes/{inbox_id}/health") or {}
@@ -139,6 +158,14 @@ def telefono_e164(telefono: str, indicativo: str = "57") -> str:
     if len(digitos) == 10 and digitos.startswith("3"):
         return f"+{indicativo}{digitos}"
     return f"+{digitos}"
+
+
+_E164 = re.compile(r"^\+[1-9]\d{7,14}$")
+
+
+def telefono_valido(telefono_e164: str) -> bool:
+    """Chatwoot rechaza contactos de WhatsApp sin un E.164 valido."""
+    return bool(_E164.match(telefono_e164 or ""))
 
 
 def _payload(data):

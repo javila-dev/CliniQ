@@ -332,11 +332,27 @@ número propio (comparación + botón a ventas). Con el addon:
 2. `POST {LYVIO_BASE_URL}/api/v1/accounts/{LYVIO_CLINIQ_ACCOUNT_ID}/whatsapp/authorization`
    con `code`, `waba_id`, `phone_number_id` (si vino) e `is_coexistence: true`
    si el evento fue `FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING`.
-3. La respuesta trae `id` = `lyvio_inbox_id`. Crea el `NumeroWhatsapp` en
-   `conectado`. Si la clínica no tiene número por defecto, este queda como
+3. La respuesta de Chatwoot 4.18 es solo `{success, id, name, channel_type}`:
+   `id` = `lyvio_inbox_id`, **sin teléfono**. Se lee `GET …/inboxes/{id}` para
+   `phone_number`, `provider_config.phone_number_id` y
+   `reauthorization_required`. Esa respuesta trae el token de Meta
+   (`provider_config.api_key`): solo `lyvio.datos_inbox` la toca y nunca se
+   loguea. Si el GET falla, el número se registra igual y "Revisar salud" lo
+   completa.
+4. Crea el `NumeroWhatsapp` en `conectado`; si Chatwoot pide reautorizar
+   (falló la suscripción de webhooks o el token), nace bloqueado por
+   `conexion`. Si la clínica no tiene número por defecto, este queda como
    por defecto.
-4. Si Lyvio responde `422`, se muestra el mensaje tal cual (p. ej. la WABA
-   tiene varios números y no llegó `phone_number_id`). No se crea nada.
+5. Si Lyvio responde `422 {success: false, error}`, el texto (en inglés, fijo
+   en el código de Chatwoot) se traduce: "Channel already exists" (el número
+   ya está en otro inbox, la unicidad es global), "Multiple phone numbers" y
+   genérico para el resto. El original queda en el log. No se crea nada.
+6. **Timeout de lectura**: el inbox pudo quedar creado en Lyvio y reintentar
+   daría "Channel already exists". Se le pide a la clínica que no reintente y
+   soporte lo recupera en la consola con **"Registrar un inbox existente"**
+   (`POST /admin/tenants/{id}/whatsapp-propio/registrar-inbox/`), que lee el
+   inbox de la cuenta de CliniQ en Lyvio y crea el `NumeroWhatsapp` sin llamar
+   a Meta.
 
 ## 4. Plantillas: creación y aprobación, manual desde el admin (por ahora)
 
@@ -453,29 +469,63 @@ un secreto: va en `LYVIO_WEBHOOK_SECRET`. Cada aviso trae
 "<timestamp>.<cuerpo>")>` (verificado en el código de Chatwoot 4.18). CliniQ
 verifica la firma sobre el cuerpo crudo y rechaza avisos de más de 5 minutos.
 
-- **`message_updated` con `status: failed`**: buscar el `EnvioWhatsApp` por
-  `lyvio_message_id`, marcarlo `fallido` con `external_error` y **reenviar
-  por el compartido** una sola vez (`respaldo_de`). `external_error` suele
-  venir como `"<código>: <título>"`; si Meta rechazó en el momento, trae solo
-  el texto.
-- **`131042`** (falta método de pago): además, el número pasa a `error` con el
-  mensaje "Falta método de pago en Meta". Así los siguientes envíos van
-  directo por el compartido y no fallan dos veces cada uno.
+- **Cómo se reconoce un fallo**: el webhook de mensaje de Chatwoot 4.18
+  (`Message#webhook_data`) **no trae `status` en la raíz**. Chatwoot llena
+  `content_attributes.external_error` solo cuando el mensaje falla (y lo borra
+  en cualquier otro estado); si no hay error, el estado se busca en
+  `conversation.messages` con el mismo `id`. Verificado en el código de 4.18.
+- **Mensaje fallido**: buscar el `EnvioWhatsApp` por `lyvio_message_id` (o por
+  conversación si el aviso llegó antes que el `message_id`), marcarlo
+  `fallido` con `external_error`. `external_error` viene como
+  `"<código>: <título>"` si llegó por el webhook de estados de Meta; si Meta
+  rechazó en el momento, trae solo el texto. Según el código:
+  - **del paciente** (`131026`, `131049`, `130472`, `131050`): **sin
+    respaldo**, el número de CliniQ tampoco lo entregaría o pasaría por encima
+    de una decisión del paciente. Queda en "Envíos que no salieron";
+  - **del número** (`131042` pago, `131045` registro, `131031` cuenta
+    bloqueada, `368` restricción): el número queda **bloqueado** (`pago` o
+    `conexion`) y el envío sale por el compartido. Así los siguientes no fallan
+    dos veces cada uno. `131042` además desmarca `pago_meta_configurado`;
+  - **de la plantilla** (`132001`, `132015` pausada, `132016` deshabilitada):
+    se marca la plantilla, el número deja de estar activo y el envío sale por
+    el compartido;
+  - cualquier otro código o sin código: respaldo por el compartido.
+- **Respaldo solo dentro de 1 hora**: un fallo que Meta reporta más tarde
+  (teléfono del paciente apagado) ya no se reenvía; se registra. Evita, p. ej.,
+  el recordatorio de una cita que ya pasó.
+- **Bloqueos**: `NumeroWhatsapp.bloqueo` manda sobre las plantillas;
+  "Actualizar estado" no lo borra. El de `conexion` lo levanta "Revisar salud"
+  si Meta lo ve sano; el de `pago`, la clínica al confirmar "Ya agregué el
+  método de pago" (si Meta sigue sin pago, el próximo envío lo bloquea otra
+  vez).
+- **Sin reintentos de Chatwoot**: los webhooks de cuenta no se reintentan y
+  tienen 5 s de timeout. Un aviso perdido (p. ej. durante un deploy) deja el
+  envío como `enviado`. Si el job de envío de Chatwoot falla con excepción, el
+  mensaje queda `sent` sin webhook. Detectarlo requiere guardar el `source_id`
+  (wamid) cuando Meta acepta el mensaje: pendiente.
 - **`message_created` con `message_type: incoming`**: respuesta del paciente.
   La clínica ya la ve en su teléfono. En el MVP solo se registra; se usará
   si más adelante hay un botón "Confirmar cita". Se ignoran los salientes y
   los ecos de lo que la clínica escribe desde su teléfono.
 - Si llega un `message_id` desconocido, responder `200` y registrar.
-- **Antes de fijar el parser**, capturar un evento real de cada tipo y
-  confirmar qué campos trae (`id`, `status`, `external_error`,
-  `conversation`, `inbox`, `content`, `message_type`).
+- Con el webhook ya creado en Lyvio, capturar un evento real de cada tipo y
+  compararlo con los tests (`_evento_fallido` en `notificaciones/tests.py`).
 
 ## 7. Salud del número
 
-`GET …/inboxes/{lyvio_inbox_id}/health`: si `status` no es `CONNECTED` o
-`is_on_biz_app` deja de ser `true`, el número pasa a `error`, sus envíos van
-por el compartido y la clínica ve el aviso con la acción concreta (abrir
-WhatsApp Business en el teléfono y reconectar).
+`GET …/inboxes/{lyvio_inbox_id}/health` y `GET …/inboxes/{lyvio_inbox_id}`:
+si `status` no es `CONNECTED`, `is_on_biz_app` deja de ser `true` o Chatwoot
+marca `reauthorization_required`, el número queda bloqueado por `conexion`,
+sus envíos van por el compartido y la clínica ve el aviso con la acción
+concreta (abrir WhatsApp Business en el teléfono y escribir a soporte). Si
+está sano, se levanta el bloqueo de `conexion` (no el de `pago`). De paso
+completa `numero_visible` si faltaba.
+
+Reconectar un número bloqueado (Coexistence desconectado por inactividad,
+cambio de teléfono) no se puede con un Embedded Signup nuevo: daría "Channel
+already exists". Chatwoot 4.18 lo permite con `whatsapp/authorization` +
+`inbox_id` (reautorización del mismo inbox): pendiente como botón
+"Reconectar".
 
 - Núcleo: botón "Revisar salud" en `/console/clinicas/[id]` y chequeo al
   pulsar "Actualizar estado de plantillas".
