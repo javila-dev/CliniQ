@@ -605,6 +605,57 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(detalle.status_code, 200)
         self.assertEqual(detalle.json()["envios"][0]["canal"], "pdf")
 
+    def _crear_cotizacion(self, estado):
+        return Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin, sede=self.sede, estado=estado,
+        )
+
+    def test_elimina_cotizacion_en_borrador_o_descartada(self):
+        for estado in (Cotizacion.Estado.BORRADOR, Cotizacion.Estado.DESCARTADA):
+            cotizacion = self._crear_cotizacion(estado)
+
+            response = self.client.delete(f"/api/v1/cotizaciones/{cotizacion.id}/")
+
+            self.assertEqual(response.status_code, 204, estado)
+            cotizacion.refresh_from_db()
+            self.assertFalse(cotizacion.activo)
+            self.assertEqual(self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/").status_code, 404)
+
+    def test_no_elimina_cotizacion_aceptada(self):
+        cotizacion = self._crear_cotizacion(Cotizacion.Estado.ACEPTADA)
+
+        response = self.client.delete(f"/api/v1/cotizaciones/{cotizacion.id}/")
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "COTIZACION_NO_ELIMINABLE")
+        cotizacion.refresh_from_db()
+        self.assertTrue(cotizacion.activo)
+
+    def test_eliminar_revoca_el_compromiso_pendiente_y_firmarlo_no_la_acepta(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+        from apps.consentimientos.services import confirmar_firma_compromiso_pago
+
+        ConfiguracionCartera.objects.create(clinica=self.clinica, requiere_consentimiento_promocional=True)
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json").json()["id"]
+        # Con el compromiso exigido, "aceptar" deja la cotización en borrador esperando la firma.
+        self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+        compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
+        self.assertEqual(compromiso.estado, Consentimiento.Estado.PENDIENTE)
+
+        response = self.client.delete(f"/api/v1/cotizaciones/{cotizacion_id}/")
+
+        self.assertEqual(response.status_code, 204)
+        compromiso.refresh_from_db()
+        self.assertEqual(compromiso.estado, Consentimiento.Estado.REVOCADO)
+
+        # El link de firma pudo quedar abierto: firmarlo no revive la cotización.
+        with patch("apps.consentimientos.services.recuperar_pdf_compromiso_pago"):
+            confirmar_firma_compromiso_pago(compromiso)
+        cotizacion = Cotizacion.objects.get(id=cotizacion_id)
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.BORRADOR)
+        self.assertFalse(hasattr(cotizacion, "cartera"))
+
     def _crear_y_aceptar_cotizacion(self):
         create_response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
         cotizacion_id = create_response.json()["id"]
@@ -1233,6 +1284,41 @@ class CotizacionPrecioCampanaTests(TestCase):
         if isinstance(code, list):
             code = code[0]
         self.assertEqual(code, "PRECIO_BLOQUEADO")
+
+    def test_sin_permiso_puede_subir_el_precio_bloqueado(self):
+        # El precio de catálogo es un mínimo: subirlo no requiere cotizaciones.cambiar_precio.
+        profesional = User.objects.create_user(
+            email=f"prof-cot-sube-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!",
+            first_name="Prof",
+            last_name="Sube",
+            rol=User.Role.PROFESIONAL,
+            clinica=self.clinica,
+            es_profesional=True,
+        )
+        self.client.force_authenticate(profesional)
+
+        create = self.client.post(
+            "/api/v1/cotizaciones/",
+            {
+                "paciente": str(self.paciente.id),
+                "sede": str(self.sede.id),
+                "items": [
+                    {
+                        "tipo": "procedimiento",
+                        "procedimiento": str(self.procedimiento.id),
+                        "valor_unitario": "400000.00",
+                    }
+                ],
+                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "400000.00"}],
+            },
+            format="json",
+        )
+
+        self.assertEqual(create.status_code, 201, create.content)
+        item = create.json()["items"][0]
+        self.assertTrue(item["precio_bloqueado"])
+        self.assertEqual(item["valor_unitario"], "400000.00")
 
     def test_patch_tratamiento_acepta_precio_campana_con_precio_bloqueado(self):
         create = self.client.post(

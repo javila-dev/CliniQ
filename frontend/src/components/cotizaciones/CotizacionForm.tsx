@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
 import { CotizacionEstadoBadge } from './CotizacionEstadoBadge'
@@ -242,6 +243,14 @@ function getPrecioMinimoItem(
   return null
 }
 
+/** Misma regla que el backend (_hydrate_from_*): un ítem de catálogo con precio de lista
+ * queda con precio fijo salvo que admita 100 % de descuento (precio libre). Sin el permiso
+ * cotizaciones.cambiar_precio el backend rechaza cualquier otro valor (PRECIO_BLOQUEADO). */
+function precioBloqueadoCatalogo(precioLista: string | null | undefined, descMaxPct: string | null | undefined): boolean {
+  if (precioLista == null || precioLista === '') return false
+  return parseFloat(descMaxPct ?? '0') < 100
+}
+
 /** Tope de descuento del catálogo para un ítem: precio de lista + % máx. */
 function getDescMaxItem(
   tipo: string | undefined,
@@ -265,6 +274,40 @@ function getDescMaxItem(
 
 // ── Props ──────────────────────────────────────────────────────────────────────
 
+/** Primer mensaje legible de una respuesta de error de DRF, también dentro de
+ * errores anidados de ítems o formas de pago (`{items: {valor_unitario: "..."}}`). */
+function primerMensaje(data: unknown): string | null {
+  if (typeof data === 'string') return data
+  if (Array.isArray(data)) {
+    for (const v of data) {
+      const m = primerMensaje(v)
+      if (m) return m
+    }
+    return null
+  }
+  if (data && typeof data === 'object') {
+    for (const [k, v] of Object.entries(data)) {
+      if (k === 'code') continue
+      const m = primerMensaje(v)
+      if (m) return m
+    }
+  }
+  return null
+}
+
+/** Título y detalle del toast al fallar crear/guardar una cotización. */
+function errorGuardado(error: unknown): { titulo: string; mensaje: string } {
+  const res = (error as { response?: { status?: number; data?: unknown } })?.response
+  if (!res) return { titulo: 'No se pudo guardar', mensaje: 'No hay conexión con el servidor. Intenta de nuevo.' }
+  if (res.status === 403) {
+    return { titulo: 'Sin permiso', mensaje: primerMensaje(res.data) ?? 'Tu rol no tiene permiso para esta acción.' }
+  }
+  if (res.status >= 500) {
+    return { titulo: 'No se pudo guardar', mensaje: 'Error del servidor. Si se repite, avísale a soporte.' }
+  }
+  return { titulo: 'No se pudo guardar', mensaje: primerMensaje(res.data) ?? 'Revisa los datos e intenta de nuevo.' }
+}
+
 interface CotizacionFormProps {
   cotizacion?: Cotizacion | null
   pacienteInicial?: BusquedaPaciente | null
@@ -278,6 +321,12 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const { user } = useAuthStore()
   const esNueva = !cotizacion
   const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
+  // Precio bloqueado = el de catálogo (o el de campaña) es un mínimo para quien no tiene
+  // cotizaciones.cambiar_precio: puede subirlo, no bajarlo. Mismo criterio que el backend.
+  const precioMinimoDe = (item: { tipo?: string; procedimiento?: string | null; tratamiento?: string | null; precio_campana_disponible?: string | null; precio_bloqueado?: boolean }) =>
+    item.precio_bloqueado && !canEditPrice
+      ? getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+      : null
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
   // Quien puede gestionar la cotización puede dejar la mini-atención (motivo,
@@ -450,6 +499,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
     setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
     if (t.precio_estimado) setValue(`items.${idx}.valor_unitario`, parseFloat(t.precio_estimado))
+    setValue(`items.${idx}.precio_bloqueado`, precioBloqueadoCatalogo(t.precio_estimado, t.descuento_maximo_pct))
   }
 
   function onProcedimientoChange(idx: number, p: Procedimiento) {
@@ -462,6 +512,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
     setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
     const precio = p.precio_base ?? p.precio_referencia
     if (precio) setValue(`items.${idx}.valor_unitario`, parseFloat(precio))
+    setValue(`items.${idx}.precio_bloqueado`, precioBloqueadoCatalogo(p.precio_base, p.descuento_maximo_pct))
   }
 
 async function handleCrearPaciente(data: CreatePacienteRequest) {
@@ -533,6 +584,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       router.replace(`/cotizaciones/${data.id}`)
     },
+    onError: (error) => {
+      const { titulo, mensaje } = errorGuardado(error)
+      toast.error(titulo === 'No se pudo guardar' ? 'No se pudo crear la cotización' : titulo, mensaje)
+    },
   })
 
   const { mutate: actualizar, mutateAsync: actualizarAsync, isPending: actualizando } = useMutation({
@@ -542,12 +597,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       toast.success('Cotización guardada')
     },
-    onError: (error: any) => {
-      if (error?.response?.status === 403) {
-        toast.error('Sin permiso', 'No puedes modificar el precio de un ítem con precio fijo del catálogo.')
-      } else {
-        toast.error('No se pudo guardar', 'Revisa los datos e intenta de nuevo.')
-      }
+    onError: (error) => {
+      const { titulo, mensaje } = errorGuardado(error)
+      toast.error(titulo, mensaje)
     },
   })
 
@@ -605,6 +657,24 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     },
   })
 
+  // Solo borrador o descartada: no tienen cartera ni citas (eso nace al aceptar).
+  const puedeEliminar = !!cotizacion && canGestionar && (cotizacion.estado === 'borrador' || cotizacion.estado === 'descartada')
+  const [confirmarEliminar, setConfirmarEliminar] = useState(false)
+  const { mutate: eliminar, isPending: eliminando } = useMutation({
+    mutationFn: () => cotizacionesApi.delete(cotizacion!.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+      queryClient.removeQueries({ queryKey: ['cotizacion', cotizacion!.id] })
+      toast.success('Cotización eliminada')
+      router.push('/cotizaciones')
+    },
+    onError: (err: any) => {
+      const data = err?.response?.data
+      setConfirmarEliminar(false)
+      toast.error('No se pudo eliminar', data?.error ?? data?.detail ?? 'Vuelve a intentarlo en un momento.')
+    },
+  })
+
   function aplicarPrecioCampana({ idx, precio }: { idx: number; itemId?: string; precio: number }) {
     setValue(`items.${idx}.valor_unitario`, precio, { shouldDirty: true })
     toast.success('Precio de campaña aplicado', 'Guarda la cotización para confirmar el cambio.')
@@ -616,7 +686,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     const { formas_pago, items } = values
 
     const itemBajoMin = items.filter((item) => !item.es_obsequio).find((item) => {
-      const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+      const min = precioMinimoDe(item)
       return min !== null && item.valor_unitario < min
     })
     if (itemBajoMin) {
@@ -828,6 +898,19 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Enviar
               </Button>
             )}
+            {puedeEliminar && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground hover:bg-red-50 hover:text-red-700"
+                disabled={eliminando || cambiando}
+                onClick={() => setConfirmarEliminar(true)}
+                aria-label="Eliminar cotización"
+                title="Eliminar cotización"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            )}
             {cotizacion?.estado === 'borrador' && canGestionar && (
               <Button
                 size="sm"
@@ -859,7 +942,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     return
                   }
                   const itemBajoMin = v.items.filter((item) => !item.es_obsequio).find((item) => {
-                    const min = getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+                    const min = precioMinimoDe(item)
                     return min !== null && item.valor_unitario < min
                   })
                   if (itemBajoMin) {
@@ -1119,10 +1202,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     const isLocked = itemPrecioLocked && !canEditPrice
 
                     const precioCampana = items[idx]?.precio_campana_disponible
-                    const precioMinimo = soloLectura ? null : getPrecioMinimoItem(
-                      items[idx]?.tipo, items[idx]?.procedimiento, items[idx]?.tratamiento,
-                      precioCampana, procedimientos ?? [], tratamientos ?? [],
-                    )
+                    const precioMinimo = soloLectura || !items[idx] ? null : precioMinimoDe(items[idx])
                     const bajoPrecioMin = !soloLectura && precioMinimo !== null && val < precioMinimo
 
                     // Tope de descuento del catálogo: el precio efectivo por unidad
@@ -1181,7 +1261,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                                     itemPrecioLocked && 'pr-7',
                                     bajoPrecioMin && 'border-destructive focus-visible:ring-destructive',
                                   )}
-                                  disabled={soloLectura || isLocked}
+                                  disabled={soloLectura}
                                   value={f.value ? new Intl.NumberFormat('es-CO').format(f.value) : ''}
                                   onChange={(e) => { const raw = e.target.value.replace(/\D/g, ''); f.onChange(raw ? Number(raw) : 0) }}
                                   placeholder="0"
@@ -1204,10 +1284,12 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                             )
                             return (
                               <div>
-                                {itemPrecioLocked
-                                  ? withTooltip('Precio fijo del catálogo')
-                                  : bajoPrecioMin
+                                {bajoPrecioMin
                                   ? withTooltip(`Mínimo permitido: ${cop(precioMinimo!)}`)
+                                  : isLocked
+                                  ? withTooltip(`Precio de catálogo: puedes subirlo, no bajarlo${precioMinimo !== null ? ` de ${cop(precioMinimo)}` : ''}`)
+                                  : itemPrecioLocked
+                                  ? withTooltip('Precio de catálogo')
                                   : inputEl
                                 }
                                 {bajoPrecioMin && (
@@ -1621,6 +1703,23 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           pacienteId={cotizacion.paciente}
           open={datosClinicosOpen}
           onOpenChange={setDatosClinicosOpen}
+        />
+      )}
+
+      {puedeEliminar && (
+        <ConfirmDialog
+          open={confirmarEliminar}
+          onOpenChange={(o) => { if (!eliminando) setConfirmarEliminar(o) }}
+          title="Eliminar cotización"
+          description={
+            cotizacion?.estado === 'borrador'
+              ? `Se eliminará la cotización de ${cotizacion?.paciente_nombre}. Si tiene un compromiso de pago pendiente de firma, se anula. No se puede deshacer.`
+              : `Se eliminará la cotización descartada de ${cotizacion?.paciente_nombre}. No se puede deshacer.`
+          }
+          confirmLabel="Eliminar"
+          variant="destructive"
+          loading={eliminando}
+          onConfirm={() => eliminar()}
         />
       )}
 

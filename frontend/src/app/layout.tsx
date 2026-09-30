@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { QueryProvider } from '@/components/shared/QueryProvider'
 import { Toaster } from '@/components/ui/toaster'
+import { DetectorNuevaVersion } from '@/components/shared/DetectorNuevaVersion'
 import { geist, geistMono } from './fonts'
 
 export const metadata: Metadata = {
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <QueryProvider>
           {children}
           <Toaster />
+          <DetectorNuevaVersion />
         </QueryProvider>
       </body>
     </html>

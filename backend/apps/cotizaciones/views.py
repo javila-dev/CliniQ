@@ -158,12 +158,27 @@ class CotizacionViewSet(ModelViewSet):
         )
 
     def perform_destroy(self, instance):
-        if instance.estado != Cotizacion.Estado.BORRADOR:
+        # Solo borrador o descartada: no generan cartera, cuotas ni citas (eso nace al aceptar).
+        # Borrado lógico; los documentos pendientes de firma se revocan para que no sigan en
+        # las listas de pendientes ni se puedan firmar después.
+        from apps.consentimientos.models import Consentimiento
+
+        if instance.estado not in {Cotizacion.Estado.BORRADOR, Cotizacion.Estado.DESCARTADA}:
             raise ValidationError(
-                {"error": "Solo se pueden eliminar cotizaciones en borrador.", "code": "COTIZACION_NO_EDITABLE"}
+                {
+                    "error": "Solo se pueden eliminar cotizaciones en borrador o descartadas.",
+                    "code": "COTIZACION_NO_ELIMINABLE",
+                }
             )
+        instance.consentimientos.filter(estado=Consentimiento.Estado.PENDIENTE).update(
+            estado=Consentimiento.Estado.REVOCADO, updated_at=timezone.now(),
+        )
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
+        registrar_accion(
+            self.request, "cotizacion.eliminar", instance,
+            {"estado": instance.estado, "paciente": str(instance.paciente)},
+        )
 
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
