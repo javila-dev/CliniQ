@@ -680,12 +680,17 @@ class PlantillasNumeroPropioTests(TestCase):
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_todas_aprobadas_pasa_a_activo(self, req):
         self._crear_todas(req)
-        req.side_effect = [_respuesta(200, {"payload": self._meta({})}), _respuesta(200, {})]
+        req.side_effect = [
+            _respuesta(200, {"payload": self._meta({})}), _respuesta(200, {}),
+            _respuesta(200, {"status": "CONNECTED", "messaging_limit_tier": "TIER_250"}),
+        ]
         res = self._accion("actualizar-plantillas")
         self.assertEqual(res.status_code, 200, res.content)
-        self.assertEqual(req.call_args_list[-1].args[1], "https://lyvio.test/api/v1/accounts/7/inboxes/88/sync_templates")
+        self.assertEqual(req.call_args_list[-2].args[1], "https://lyvio.test/api/v1/accounts/7/inboxes/88/sync_templates")
+        # de paso lee el limite diario de Meta (solo informativo)
+        self.assertEqual(req.call_args_list[-1].args[1], "https://lyvio.test/api/v1/accounts/7/inboxes/88/health")
         self.numero.refresh_from_db()
-        self.assertEqual(self.numero.estado, "activo")
+        self.assertEqual((self.numero.estado, self.numero.limite_mensajes), ("activo", "TIER_250"))
 
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_una_pendiente_no_activa(self, req):
@@ -1297,3 +1302,145 @@ class CorreccionesRevisionTests(_BaseNumeroPropio):
         self.assertEqual(resultados["cliniq_firma_documento_v1"], "requiere_version")
         req.assert_not_called()
         self.assertEqual(self.norte.plantillas.get(tipo=Tipo.FIRMA_DOCUMENTO).estado, "REJECTED")
+
+
+@override_settings(**LYVIO_OK, LYVIO_WEBHOOK_SECRET="s3cr3t")
+class LimitesYReconexionTests(_BaseNumeroPropio):
+    """Limite diario de Meta (lectura, pausa por 131048, tope de 2 numeros sin
+    verificar) y reconexion de un numero desconectado."""
+
+    _enviado = EnvioNumeroPropioTests._enviado
+    _webhook = EnvioNumeroPropioTests._webhook
+
+    def setUp(self):
+        super().setUp()
+        self.norte = self._numero("31", por_defecto=True)
+
+    def test_limite_diario_desde_el_tier(self):
+        from apps.notificaciones.numero_propio import limite_diario
+
+        self.assertEqual(limite_diario("TIER_250"), 250)
+        self.assertEqual(limite_diario("tier_2k"), 2000)
+        self.assertEqual(limite_diario("TIER_100K"), 100000)
+        self.assertIsNone(limite_diario("TIER_UNLIMITED"))
+        self.assertIsNone(limite_diario(""))
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_revisar_salud_guarda_el_limite_y_el_estado_lo_muestra(self, req):
+        from apps.notificaciones.numero_propio import estado, revisar_salud
+
+        req.return_value = _respuesta(
+            200, {"status": "CONNECTED", "is_on_biz_app": True, "messaging_limit_tier": "TIER_250"},
+        )
+        revisar_salud(self.norte)
+        data = estado(self.clinica)
+        numero = data["numeros"][0]
+        self.assertEqual((numero["limite_mensajes"], numero["limite_diario"]), ("TIER_250", 250))
+        self.assertEqual(data["numeros_permitidos_meta"], 2)
+
+        self.norte.limite_mensajes = "TIER_2K"
+        self.norte.save()
+        self.assertIsNone(estado(self.clinica)["numeros_permitidos_meta"])
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_limite_pausa_el_numero_un_dia_y_reenvia(self, compartido):
+        from apps.notificaciones.numero_propio import PAUSA_POR_LIMITE
+
+        self._enviado()
+        res = self._webhook(_evento_fallido(501, "131048: Spam rate limit hit"))
+        self.assertEqual(res.json()["resultado"], "respaldo_enviado")
+        compartido.assert_called_once()
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "limite"))
+        self.assertIn("límite diario", self.norte.ultimo_error)
+        restante = self.norte.bloqueado_hasta - timezone.now()
+        self.assertTrue(PAUSA_POR_LIMITE - timedelta(minutes=1) < restante <= PAUSA_POR_LIMITE)
+        self.assertEqual(self._elegir(sede=self.sede_a), (None, "numero_no_activo"))
+
+        # vencida la pausa, el numero vuelve solo
+        self.norte.bloqueado_hasta = timezone.now() - timedelta(seconds=1)
+        self.norte.save()
+        numero, motivo = self._elegir(sede=self.sede_a)
+        self.assertEqual((numero, motivo), (self.norte, "ok"))
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo, self.norte.bloqueado_hasta), ("activo", "", None))
+
+    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
+    def test_webhook_limite_no_tapa_un_bloqueo_de_pago(self, compartido):
+        self.norte.bloqueo = "pago"
+        self.norte.estado = "error"
+        self.norte.ultimo_error = "Falta método de pago en Meta."
+        self.norte.save()
+        self._enviado()
+        self._webhook(_evento_fallido(501, "131048: Spam rate limit hit"))
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.bloqueo, self.norte.bloqueado_hasta), ("pago", None))
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_sin_verificar_meta_permite_dos_numeros(self, req):
+        from apps.notificaciones.numero_propio import NumeroPropioError, conectar_numero
+
+        self._numero("32")
+        req.return_value = _respuesta(200, {"status": "CONNECTED", "messaging_limit_tier": "TIER_250"})
+        with self.assertRaises(NumeroPropioError) as ctx:
+            conectar_numero(self.clinica, evento=EVENTO_COEX, code="c", waba_id="w")
+        self.assertEqual(ctx.exception.code, "LIMITE_META_SIN_VERIFICAR")
+        # solo leyo la salud de los dos numeros: no intento conectar en Lyvio
+        self.assertEqual([c.args[0] for c in req.call_args_list], ["GET", "GET"])
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_verificado_puede_conectar_un_tercer_numero(self, req):
+        from apps.notificaciones.numero_propio import conectar_numero
+
+        self._numero("32")
+        req.side_effect = [
+            _respuesta(200, {"messaging_limit_tier": "TIER_2K"}),
+            _respuesta(200, {"messaging_limit_tier": "TIER_2K"}),
+            _autorizado(33),
+            _inbox(33),
+        ]
+        numero = conectar_numero(self.clinica, evento=EVENTO_COEX, code="c", waba_id="w")
+        self.assertEqual(numero.lyvio_inbox_id, "33")
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_reconectar_reautoriza_el_mismo_inbox_y_levanta_el_bloqueo(self, req):
+        from rest_framework.test import APIClient
+
+        from apps.users.models import User
+
+        self.norte.phone_number_id = "pn1"
+        self.norte.bloqueo = "conexion"
+        self.norte.estado = "error"
+        self.norte.ultimo_error = "El número dejó de estar en WhatsApp Business."
+        self.norte.save()
+        admin = User.objects.create_user(
+            email="admin-reconectar@example.com", password="secret123", rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        req.return_value = _autorizado(31)
+
+        res = client.post(
+            f"/api/v1/notificaciones/whatsapp-propio/numeros/{self.norte.id}/reconectar/",
+            {"evento": EVENTO_COEX, "code": "c0de", "waba_id": "waba2", "phone_number_id": "pn1"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        args, kwargs = req.call_args
+        self.assertEqual(args, ("POST", "https://lyvio.test/api/v1/accounts/7/whatsapp/authorization"))
+        self.assertEqual(kwargs["json"]["inbox_id"], 31)
+        self.norte.refresh_from_db()
+        self.assertEqual((self.norte.estado, self.norte.bloqueo, self.norte.waba_id), ("activo", "", "waba2"))
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_reconectar_otro_numero_no_llama_a_lyvio(self, req):
+        from apps.notificaciones.numero_propio import NumeroPropioError, reconectar_numero
+
+        self.norte.phone_number_id = "pn1"
+        self.norte.save()
+        with self.assertRaises(NumeroPropioError) as ctx:
+            reconectar_numero(
+                self.clinica, self.norte.id, evento=EVENTO_COEX, code="c", waba_id="w", phone_number_id="pn9",
+            )
+        self.assertEqual(ctx.exception.code, "OTRO_NUMERO")
+        req.assert_not_called()

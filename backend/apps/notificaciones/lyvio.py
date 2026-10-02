@@ -93,15 +93,20 @@ def request(method: str, path: str, *, json=None, params=None, timeout=TIMEOUT):
     return data
 
 
-def autorizar_whatsapp(*, code: str, waba_id: str, phone_number_id: str = "", business_id: str = "") -> dict:
+def autorizar_whatsapp(
+    *, code: str, waba_id: str, phone_number_id: str = "", business_id: str = "", inbox_id: str = "",
+) -> dict:
     """Canjea el `code` del Embedded Signup (Coexistence) y crea el inbox.
     Chatwoot 4.18 responde solo {success, id, name, channel_type}: `id` es el
-    lyvio_inbox_id; el telefono se lee despues con datos_inbox."""
+    lyvio_inbox_id; el telefono se lee despues con datos_inbox. Con `inbox_id`
+    reautoriza ese inbox (mismo numero) en vez de crear uno nuevo."""
     payload = {"code": code, "waba_id": waba_id, "is_coexistence": True}
     if phone_number_id:
         payload["phone_number_id"] = phone_number_id
     if business_id:
         payload["business_id"] = business_id
+    if inbox_id:
+        payload["inbox_id"] = int(inbox_id)
     return request("POST", "whatsapp/authorization", json=payload, timeout=60)
 
 
@@ -142,7 +147,8 @@ def datos_inbox(inbox_id: str) -> dict:
 
 
 def salud(inbox_id: str) -> dict:
-    """Estado del numero en Meta: status, is_on_biz_app, quality_rating..."""
+    """Estado del numero en Meta: status, is_on_biz_app, quality_rating,
+    messaging_limit_tier (limite diario del portfolio)..."""
     return request("GET", f"inboxes/{inbox_id}/health") or {}
 
 

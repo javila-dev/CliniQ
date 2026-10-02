@@ -114,7 +114,9 @@ Rama `feat/whatsapp-numero-propio`.
 
 **Robustez (de la revisión del 2026-09-29):**
 
-- [ ] 🟦 Botón "Reconectar" para un número bloqueado: `whatsapp/authorization` con `inbox_id` (reautorización del mismo inbox en Chatwoot)
+- [x] ~~🟦 Botón "Reconectar" para un número bloqueado: `whatsapp/authorization` con `inbox_id` (reautorización del mismo inbox en Chatwoot)~~ — 2026-10-01, sin commit
+- [x] ~~🟦 Clínicas sin verificar: límite diario visible con link para verificar, pausa de 24 h por 131048, tope de 2 números de Meta, modal de conexión simplificado~~ — 2026-10-01, sin commit (98 tests)
+- [ ] 🟨 Con un número real: confirmar el formato de `messaging_limit_tier` (se asume `TIER_250`, `TIER_2K`… `TIER_UNLIMITED`) y probar "Reconectar"
 - [ ] 🟦🟧 Guardar el `source_id` (wamid) cuando Meta acepta el mensaje y señalar los envíos sin él (job de Chatwoot fallido o webhook perdido: hoy quedan como `enviado`)
 - [ ] 🟦 Precargar el SDK de Facebook al abrir el diálogo (en Safari el popup puede bloquearse) y registrar `session_id`/`error_code` del evento `CANCEL`
 

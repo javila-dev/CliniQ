@@ -8,6 +8,7 @@ from apps.notificaciones.views import (
     NotificacionFallidaListView,
     NotificacionFallidaResolverView,
     WhatsappPropioConectarView,
+    WhatsappPropioReconectarView,
     WhatsappPropioView,
 )
 
@@ -21,4 +22,9 @@ urlpatterns = [
     path("lyvio-webhook/", LyvioWebhookView.as_view(), name="lyvio-webhook"),
     path("whatsapp-propio/", WhatsappPropioView.as_view(), name="whatsapp-propio"),
     path("whatsapp-propio/conectar/", WhatsappPropioConectarView.as_view(), name="whatsapp-propio-conectar"),
+    path(
+        "whatsapp-propio/numeros/<uuid:pk>/reconectar/",
+        WhatsappPropioReconectarView.as_view(),
+        name="whatsapp-propio-reconectar",
+    ),
 ]

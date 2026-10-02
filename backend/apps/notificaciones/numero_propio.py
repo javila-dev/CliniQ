@@ -5,6 +5,7 @@ hasta N numeros (segun su plan) por Embedded Signup, uno queda como numero por
 defecto y cada sede elige desde cual envia. Plan: docs/plan-whatsapp-numero-propio.md.
 """
 import logging
+import re
 from datetime import timedelta
 from urllib.parse import quote
 
@@ -27,13 +28,21 @@ EVENTO_COEXISTENCE = "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"
 
 # Motivos de bloqueo del numero (NumeroWhatsapp.bloqueo) que ve la clinica.
 MENSAJE_REAUTORIZAR = (
-    "Meta no terminó de conectar el número con CliniQ. Escríbenos para revisarlo; mientras tanto, los "
+    "Meta no terminó de conectar el número con CliniQ. Pulsa \"Reconectar\"; mientras tanto, los "
     "mensajes salen por el número de CliniQ."
 )
 MENSAJE_FUERA_DE_LA_APP = (
     "El número dejó de estar en WhatsApp Business. Abre WhatsApp Business en el teléfono de la clínica y "
-    "escríbenos para reconectarlo."
+    "pulsa \"Reconectar\"."
 )
+
+# Meta: un portfolio sin verificar puede tener a lo sumo 2 numeros y escribirle
+# a 250 pacientes nuevos al dia (limite compartido entre sus numeros).
+MAX_NUMEROS_SIN_VERIFICAR = 2
+LIMITE_SIN_VERIFICAR = 250
+# Cuanto queda pausado un numero que choco con el limite diario de Meta (la
+# ventana de Meta es de 24 h moviles).
+PAUSA_POR_LIMITE = timedelta(hours=24)
 
 
 class NumeroPropioError(Exception):
@@ -51,6 +60,23 @@ def _exigir_addon(clinica):
         )
 
 
+def limite_diario(tier: str):
+    """'TIER_250' -> 250, 'TIER_2K' -> 2000, 'TIER_100K' -> 100000. None si es
+    ilimitado o no se conoce."""
+    match = re.fullmatch(r"TIER_(\d+)(K?)", (tier or "").upper())
+    if not match:
+        return None
+    return int(match.group(1)) * (1000 if match.group(2) else 1)
+
+
+def _limite_ampliado(tier: str) -> bool:
+    """El portfolio ya supero el limite de un negocio sin verificar."""
+    if (tier or "").upper() == "TIER_UNLIMITED":
+        return True
+    limite = limite_diario(tier)
+    return limite is not None and limite > LIMITE_SIN_VERIFICAR
+
+
 def _serializar_numero(numero, por_defecto_id):
     return {
         "id": str(numero.id),
@@ -58,14 +84,28 @@ def _serializar_numero(numero, por_defecto_id):
         "estado": numero.estado,
         "estado_display": numero.get_estado_display(),
         "bloqueo": numero.bloqueo,
+        "bloqueado_hasta": numero.bloqueado_hasta.isoformat() if numero.bloqueado_hasta else None,
         "ultimo_error": numero.ultimo_error,
         "es_por_defecto": numero.id == por_defecto_id,
+        "limite_mensajes": numero.limite_mensajes,
+        "limite_diario": limite_diario(numero.limite_mensajes),
     }
+
+
+def _numeros_permitidos_por_meta(conexion):
+    """Tope de numeros que Meta deja conectar: 2 si ningun numero muestra un
+    limite de negocio verificado; None si no hay tope conocido. Si no se conoce
+    el limite de ningun numero, se cuenta como sin verificar."""
+    if any(_limite_ampliado(n.limite_mensajes) for n in conexion.numeros.all()):
+        return None
+    return MAX_NUMEROS_SIN_VERIFICAR
 
 
 def estado(clinica) -> dict:
     """Todo lo que necesita la pantalla de configuracion de la clinica."""
     conexion = ConexionWhatsappPropio.objects.filter(clinica=clinica).first()
+    if conexion:
+        _levantar_pausas_vencidas(conexion)
     por_defecto_id = conexion.numero_por_defecto_id if conexion else None
     numeros = [_serializar_numero(n, por_defecto_id) for n in conexion.numeros.all()] if conexion else []
     asignadas = {a.sede_id: a for a in conexion.asignaciones.all()} if conexion else {}
@@ -94,6 +134,7 @@ def estado(clinica) -> dict:
         "meta_config_id": settings.LYVIO_WHATSAPP_CONFIG_ID,
         "pago_meta_configurado": bool(conexion and conexion.pago_meta_configurado),
         "numero_por_defecto_id": str(por_defecto_id) if por_defecto_id else None,
+        "numeros_permitidos_meta": _numeros_permitidos_por_meta(conexion) if conexion else MAX_NUMEROS_SIN_VERIFICAR,
         "numeros": numeros,
         "sedes": sedes,
     }
@@ -216,12 +257,24 @@ def conectar_numero(
 
 def _verificar_limite(clinica, conexion):
     incluidos = clinica.whatsapp_numeros_incluidos
-    if conexion.numeros.count() >= incluidos:
+    conectados = conexion.numeros.count()
+    if conectados >= incluidos:
         raise NumeroPropioError(
             f"Tu plan incluye {incluidos} {'número' if incluidos == 1 else 'números'} de WhatsApp y ya "
             "están conectados. Escríbenos para agregar otro.",
             code="LIMITE_NUMEROS",
         )
+    if conectados >= MAX_NUMEROS_SIN_VERIFICAR:
+        # El limite guardado puede estar viejo (p. ej. la clinica verifico su
+        # negocio despues de conectar): se relee antes de frenarla.
+        for numero in conexion.numeros.all():
+            _refrescar_limite(numero)
+        if _numeros_permitidos_por_meta(conexion) is not None:
+            raise NumeroPropioError(
+                f"Meta permite {MAX_NUMEROS_SIN_VERIFICAR} números a los negocios sin verificar. Verifica tu "
+                "negocio en Meta Business Suite para conectar más.",
+                code="LIMITE_META_SIN_VERIFICAR",
+            )
 
 
 def _mensaje_conexion_fallida(exc) -> str:
@@ -274,6 +327,71 @@ def _registrar_numero(clinica, conexion, inbox_id, *, waba_id, phone_number_id="
         raise NumeroPropioError(
             "El número se conectó pero no pudimos registrarlo. Contacta a soporte.", code="REGISTRO_FALLIDO",
         ) from exc
+    return numero
+
+
+def reconectar_numero(
+    clinica,
+    numero_id,
+    *,
+    evento: str,
+    code: str,
+    waba_id: str,
+    phone_number_id: str = "",
+    business_id: str = "",
+) -> NumeroWhatsapp:
+    """Reconecta un numero que Meta desconecto (14 dias sin abrir la app, cambio
+    de telefono) o que Chatwoot marco para reautorizar: Embedded Signup nuevo
+    sobre el mismo inbox de Lyvio. Un signup sin inbox_id fallaria con
+    "Channel already exists"."""
+    _exigir_addon(clinica)
+    numero = NumeroWhatsapp.objects.filter(pk=numero_id, conexion__clinica=clinica).first()
+    if numero is None:
+        raise NumeroPropioError("Ese número no pertenece a esta clínica.", code="NUMERO_INVALIDO")
+    if evento != EVENTO_COEXISTENCE:
+        raise NumeroPropioError(
+            "Meta no habilitó la coexistencia para este número. Tu WhatsApp actual no ha sido modificado.",
+            code="SIN_COEXISTENCE",
+        )
+    if not code or not waba_id:
+        raise NumeroPropioError("Meta no devolvió los datos de la conexión. Intenta de nuevo.", code="DATOS_INCOMPLETOS")
+    if phone_number_id and numero.phone_number_id and phone_number_id != numero.phone_number_id:
+        raise NumeroPropioError(
+            "Elegiste un número distinto al que quieres reconectar. Vuelve a intentarlo con "
+            f"{numero.numero_visible or 'el mismo número'}.",
+            code="OTRO_NUMERO",
+        )
+
+    try:
+        lyvio.autorizar_whatsapp(
+            code=code, waba_id=waba_id, phone_number_id=phone_number_id, business_id=business_id,
+            inbox_id=numero.lyvio_inbox_id,
+        )
+    except lyvio.LyvioError as exc:
+        logger.warning("Lyvio no reconectó el inbox %s (clínica %s): %s", numero.lyvio_inbox_id, clinica.id, exc.mensaje)
+        texto = exc.mensaje.lower()
+        mensaje = (
+            "Meta conectó un número distinto al de este registro. Vuelve a intentarlo eligiendo el mismo número."
+            if "phone number" in texto or "mismatch" in texto
+            else "Meta no pudo completar la reconexión. Intenta de nuevo en unos minutos; si se repite, escríbenos."
+        )
+        raise NumeroPropioError(mensaje, code="LYVIO_ERROR") from exc
+    except requests.RequestException as exc:
+        logger.exception("Lyvio no respondió al reconectar el inbox %s", numero.lyvio_inbox_id)
+        raise NumeroPropioError(
+            "No pudimos comunicarnos con el servicio de WhatsApp. Intenta de nuevo en unos minutos.",
+            code="LYVIO_NO_RESPONDE",
+        ) from exc
+
+    numero.waba_id = waba_id
+    numero.phone_number_id = phone_number_id or numero.phone_number_id
+    numero.business_id = business_id or numero.business_id
+    numero.save(update_fields=["waba_id", "phone_number_id", "business_id", "updated_at"])
+    # Sin revisar la salud: justo despues de un signup en Coexistence Meta puede
+    # reportar datos viejos por unos minutos (Chatwoot tampoco la revisa). Si el
+    # problema sigue, el proximo envio o chequeo lo vuelve a bloquear.
+    _desbloquear(numero, NumeroWhatsapp.Bloqueo.CONEXION)
+    numero.refresh_from_db()
     return numero
 
 
@@ -341,9 +459,10 @@ def _pdf_ejemplo_url() -> str:
     return get_public_url(_PDF_EJEMPLO_PATH)
 
 
-def _bloquear(numero_id, bloqueo, mensaje) -> None:
+def _bloquear(numero_id, bloqueo, mensaje, *, hasta=None) -> None:
     NumeroWhatsapp.objects.filter(pk=numero_id).update(
-        bloqueo=bloqueo, estado=NumeroWhatsapp.Estado.ERROR, ultimo_error=mensaje, updated_at=timezone.now(),
+        bloqueo=bloqueo, bloqueado_hasta=hasta, estado=NumeroWhatsapp.Estado.ERROR, ultimo_error=mensaje,
+        updated_at=timezone.now(),
     )
 
 
@@ -351,9 +470,37 @@ def _desbloquear(numero: NumeroWhatsapp, bloqueo) -> None:
     """Quita el bloqueo solo si es de ese tipo (la salud no levanta un bloqueo
     de pago) y deja que las plantillas decidan el estado."""
     NumeroWhatsapp.objects.filter(pk=numero.pk, bloqueo=bloqueo).update(
-        bloqueo=NumeroWhatsapp.Bloqueo.NINGUNO, updated_at=timezone.now(),
+        bloqueo=NumeroWhatsapp.Bloqueo.NINGUNO, bloqueado_hasta=None, updated_at=timezone.now(),
     )
     _recalcular_estado(numero)
+
+
+def _levantar_pausas_vencidas(conexion) -> bool:
+    """El bloqueo por limite diario de Meta se levanta solo cuando vence. Se
+    revisa al leer (estado y eleccion de numero), sin tareas periodicas.
+    Devuelve si levanto alguno."""
+    vencidos = list(conexion.numeros.filter(
+        bloqueo=NumeroWhatsapp.Bloqueo.LIMITE, bloqueado_hasta__lte=timezone.now(),
+    ))
+    for numero in vencidos:
+        _desbloquear(numero, NumeroWhatsapp.Bloqueo.LIMITE)
+    return bool(vencidos)
+
+
+def _guardar_limite(numero: NumeroWhatsapp, salud: dict) -> None:
+    tier = str((salud or {}).get("messaging_limit_tier") or "").upper()[:30]
+    if tier and tier != numero.limite_mensajes:
+        numero.limite_mensajes = tier
+        numero.save(update_fields=["limite_mensajes", "updated_at"])
+
+
+def _refrescar_limite(numero: NumeroWhatsapp) -> None:
+    """Lee solo el limite diario de Meta, sin tocar el bloqueo. Es informativo:
+    si Lyvio falla se queda el valor anterior."""
+    try:
+        _guardar_limite(numero, lyvio.salud(numero.lyvio_inbox_id))
+    except Exception:  # noqa: BLE001 - lectura informativa, nunca debe cortar el flujo
+        logger.warning("No se pudo leer el límite de mensajes del inbox %s", numero.lyvio_inbox_id)
 
 
 def _recalcular_estado(numero: NumeroWhatsapp) -> None:
@@ -488,6 +635,7 @@ def actualizar_plantillas(numero: NumeroWhatsapp) -> None:
         )
     numero.ultimo_chequeo_en = timezone.now()
     numero.save(update_fields=["ultimo_chequeo_en", "updated_at"])
+    _refrescar_limite(numero)
     _recalcular_estado(numero)
 
 
@@ -512,6 +660,7 @@ def revisar_salud(numero: NumeroWhatsapp) -> dict:
         numero.numero_visible or inbox.get("phone_number") or str(data.get("display_phone_number") or "")
     )
     numero.save(update_fields=["ultimo_chequeo_en", "numero_visible", "updated_at"])
+    _guardar_limite(numero, data)
 
     estado_meta = str(data.get("status") or "").upper()
     if inbox.get("reauthorization_required"):
@@ -602,6 +751,8 @@ def elegir_numero(clinica, *, tipo=None, sede=None, cita=None, paciente=None):
     conexion =ConexionWhatsappPropio.objects.filter(clinica=clinica).select_related("numero_por_defecto").first()
     if conexion is None or not conexion.numeros.exists():
         return None, "sin_numero"
+    if _levantar_pausas_vencidas(conexion):
+        conexion.refresh_from_db()
 
     Asignacion = AsignacionWhatsappSede
     sede_envio = _sede_del_envio(clinica, sede=sede, cita=cita, paciente=paciente)
@@ -877,7 +1028,15 @@ _ERRORES_DEL_NUMERO = {
     "131045": (
         NumeroWhatsapp.Bloqueo.CONEXION,
         "Meta reporta un problema con el registro del número (suele pasar cuando se desconecta de WhatsApp "
-        "Business). Abre WhatsApp Business en el teléfono de la clínica y escríbenos para reconectarlo.",
+        "Business). Abre WhatsApp Business en el teléfono de la clínica y pulsa \"Reconectar\".",
+    ),
+    # Limite diario o de calidad: Meta frena los envios a pacientes nuevos. Se
+    # pausa el numero un dia (PAUSA_POR_LIMITE) y vuelve solo.
+    "131048": (
+        NumeroWhatsapp.Bloqueo.LIMITE,
+        "Meta frenó los envíos desde tu número por hoy: llegaste al límite diario de pacientes o varios "
+        "pacientes bloquearon o reportaron mensajes recientes. Se reanudan solos en 24 horas; mientras tanto "
+        "salen por el número de CliniQ y descuentan del cupo de tu plan.",
     ),
     "131031": (
         NumeroWhatsapp.Bloqueo.CONEXION,
@@ -1036,6 +1195,15 @@ def _marcar_problema_del_numero(envio, codigo: str, error: str) -> None:
     numero: si no, cada envio siguiente fallaria y saldria dos veces."""
     if codigo in _ERRORES_DEL_NUMERO:
         bloqueo, mensaje = _ERRORES_DEL_NUMERO[codigo]
+        if bloqueo == NumeroWhatsapp.Bloqueo.LIMITE:
+            # La pausa vence sola: no debe tapar un bloqueo de pago o conexion,
+            # que al vencer quedaria levantado sin que nadie lo corrigiera.
+            sin_otro_bloqueo = NumeroWhatsapp.objects.filter(
+                pk=envio.numero_id, bloqueo__in=(NumeroWhatsapp.Bloqueo.NINGUNO, NumeroWhatsapp.Bloqueo.LIMITE),
+            ).exists()
+            if sin_otro_bloqueo:
+                _bloquear(envio.numero_id, bloqueo, mensaje, hasta=timezone.now() + PAUSA_POR_LIMITE)
+            return
         _bloquear(envio.numero_id, bloqueo, mensaje)
         if bloqueo == NumeroWhatsapp.Bloqueo.PAGO:
             # La clinica vuelve a ver el paso del pago; al confirmarlo se levanta el bloqueo.

@@ -251,6 +251,32 @@ class WhatsappPropioConectarView(_NumeroPropioBaseView):
         return Response(numero_propio.estado(clinica), status=status.HTTP_201_CREATED)
 
 
+class WhatsappPropioReconectarView(_NumeroPropioBaseView):
+    """Reconecta un numero desconectado con un Embedded Signup nuevo sobre el
+    mismo inbox de Lyvio."""
+
+    def post(self, request, pk, *args, **kwargs):
+        clinica, error = self._clinica(request)
+        if error:
+            return error
+        serializer = WhatsappConectarSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            numero = numero_propio.reconectar_numero(clinica, pk, **serializer.validated_data)
+        except numero_propio.NumeroPropioError as exc:
+            return self._error(exc)
+        registrar_accion(
+            request, "whatsapp_propio.reconectar", numero,
+            {
+                "resumen": "Número de WhatsApp reconectado",
+                "numero": numero.numero_visible,
+                "lyvio_inbox_id": numero.lyvio_inbox_id,
+            },
+            clinica=clinica,
+        )
+        return Response(numero_propio.estado(clinica))
+
+
 class AdminWhatsappPropioView(APIView):
     """Consola: estado del numero propio de una clinica con plantillas."""
 

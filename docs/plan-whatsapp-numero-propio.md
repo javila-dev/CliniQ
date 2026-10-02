@@ -96,6 +96,30 @@ Lo que Coexistence exige del lado de Lyvio (no registrar el número, webhooks
 `history` / `smb_app_state_sync` / `smb_message_echoes`, sincronización de
 24 h) **ya funciona en producción** y no es trabajo de CliniQ.
 
+### Clínicas sin negocio verificado en Meta (2026-10-01)
+
+El Embedded Signup crea el portfolio y la WABA si la clínica no los tiene:
+no hace falta verificar el negocio para conectar. Lo mínimo es una cuenta
+personal de Facebook, WhatsApp Business con más de 7 días de uso y una
+tarjeta en Meta. Qué pasa sin verificar y cómo lo maneja CliniQ:
+
+- **Límite diario** (250 pacientes distintos al día, compartido entre los
+  números del portfolio): se lee de la salud (`messaging_limit_tier`) al
+  revisar la salud y al actualizar plantillas, se guarda en
+  `NumeroWhatsapp.limite_mensajes` y la clínica lo ve con un link para
+  verificar su negocio.
+- **Error 131048** (límite o calidad): el número queda en pausa 24 h
+  (`bloqueo=limite`, `bloqueado_hasta`) y vuelve solo, sin tareas
+  periódicas; la pausa no tapa un bloqueo de pago o conexión. Los envíos de
+  la pausa salen por el compartido (D10).
+- **Máximo 2 números**: si ningún número muestra un límite mayor a 250,
+  conectar el tercero responde `LIMITE_META_SIN_VERIFICAR` antes de llamar a
+  Lyvio (relee el límite primero).
+- **Pago**: CliniQ no puede consultarlo; se entera por el 131042 del primer
+  envío (bloqueo `pago` + respaldo por el compartido).
+- Las políticas del negocio (quién es admin del portfolio, 2FA) son de la
+  clínica: CliniQ no las exige.
+
 ## 0. Lyvio: qué hay y qué no hace
 
 Autenticación: header `api_access_token` de un **usuario administrador** de
@@ -524,8 +548,12 @@ completa `numero_visible` si faltaba.
 Reconectar un número bloqueado (Coexistence desconectado por inactividad,
 cambio de teléfono) no se puede con un Embedded Signup nuevo: daría "Channel
 already exists". Chatwoot 4.18 lo permite con `whatsapp/authorization` +
-`inbox_id` (reautorización del mismo inbox): pendiente como botón
-"Reconectar".
+`inbox_id` (reautorización del mismo inbox): botón "Reconectar" en
+Configuración → WhatsApp para números con bloqueo `conexion`
+(`POST whatsapp-propio/numeros/{id}/reconectar/`). Rechaza un
+`phone_number_id` distinto antes de llamar a Lyvio; al terminar levanta el
+bloqueo sin revisar la salud (justo después del signup Meta puede reportar
+datos viejos).
 
 - Núcleo: botón "Revisar salud" en `/console/clinicas/[id]` y chequeo al
   pulsar "Actualizar estado de plantillas".
@@ -550,6 +578,8 @@ deja a la clínica sin envíos por un problema del addon.
 - **Uso de WhatsApp** (`uso_whatsapp_mes_actual`): desglose por ruta.
 
 ### Copy obligatorio
+
+> **2026-10-01:** el modal de conexión se simplificó (pasos en una frase, tres puntos y los cambios menores de la app en un desplegable; WhatsApp Web sigue funcionando). El texto vigente está en `WhatsappPropioConfig.tsx`; lo de abajo es la versión original. Aviso fijo en el modal (también al reconectar): si Meta dice que el número ya está en uso y pide eliminarlo o desconectarlo de WhatsApp, **no hacerlo** y cerrar la ventana: el número no es elegible para Coexistence, y eliminarlo lo saca de la app del teléfono sin vuelta atrás.
 
 Antes de conectar:
 

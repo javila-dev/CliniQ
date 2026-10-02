@@ -105,6 +105,7 @@ class NumeroWhatsapp(models.Model):
         NINGUNO = "", "Sin bloqueo"
         PAGO = "pago", "Falta el método de pago en Meta"
         CONEXION = "conexion", "Meta desconectó o restringió el número"
+        LIMITE = "limite", "Meta frenó los envíos por límite diario"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     conexion = models.ForeignKey(
@@ -119,6 +120,14 @@ class NumeroWhatsapp(models.Model):
     numero_visible = models.CharField(max_length=30, blank=True)
     estado = models.CharField(max_length=25, choices=Estado.choices, default=Estado.CONECTADO)
     bloqueo = models.CharField(max_length=10, choices=Bloqueo.choices, blank=True, default=Bloqueo.NINGUNO)
+    bloqueado_hasta = models.DateTimeField(
+        null=True, blank=True, help_text="Solo para el bloqueo por límite: se levanta solo a esta hora.",
+    )
+    limite_mensajes = models.CharField(
+        max_length=30,
+        blank=True,
+        help_text="Límite diario de Meta del portfolio (TIER_250, TIER_2K... TIER_UNLIMITED); vacío si no se ha leído.",
+    )
     ultimo_error = models.TextField(blank=True)
     ultimo_chequeo_en = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
