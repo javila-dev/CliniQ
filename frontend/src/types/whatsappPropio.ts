@@ -9,7 +9,7 @@ export type EstadoPlantillaWhatsapp = 'PENDING' | 'APPROVED' | 'REJECTED' | 'PAU
 export type TipoAsignacionSede = 'por_defecto' | 'numero' | 'cliniq'
 
 /** Problema del número que no depende de las plantillas ('' = ninguno). */
-export type BloqueoNumeroWhatsapp = '' | 'pago' | 'conexion'
+export type BloqueoNumeroWhatsapp = '' | 'pago' | 'conexion' | 'limite'
 
 export interface NumeroWhatsapp {
   id: string
@@ -17,8 +17,11 @@ export interface NumeroWhatsapp {
   estado: EstadoNumeroWhatsapp
   estado_display: string
   bloqueo: BloqueoNumeroWhatsapp
+  bloqueado_hasta: string | null    // solo con bloqueo 'limite': se levanta solo a esa hora
   ultimo_error: string
   es_por_defecto: boolean
+  limite_mensajes: string           // tier de Meta (TIER_250, TIER_2K, TIER_UNLIMITED…); '' si no se ha leído
+  limite_diario: number | null      // pacientes nuevos por día; null si es ilimitado o no se conoce
 }
 
 export interface SedeWhatsapp {
@@ -38,6 +41,7 @@ export interface WhatsappPropioEstado {
   meta_config_id: string
   pago_meta_configurado: boolean
   numero_por_defecto_id: string | null
+  numeros_permitidos_meta: number | null  // Meta: 2 para negocios sin verificar; null sin tope conocido
   numeros: NumeroWhatsapp[]
   sedes: SedeWhatsapp[]
 }

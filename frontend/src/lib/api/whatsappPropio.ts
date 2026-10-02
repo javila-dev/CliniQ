@@ -22,6 +22,14 @@ export const whatsappPropioApi = {
     const res = await apiClient.post<WhatsappPropioEstado>('/notificaciones/whatsapp-propio/conectar/', data)
     return res.data
   },
+
+  /** Embedded Signup nuevo sobre un número que Meta desconectó (mismo inbox de Lyvio). */
+  reconectar: async (numeroId: string, data: ConectarWhatsappRequest): Promise<WhatsappPropioEstado> => {
+    const res = await apiClient.post<WhatsappPropioEstado>(
+      `/notificaciones/whatsapp-propio/numeros/${numeroId}/reconectar/`, data,
+    )
+    return res.data
+  },
 }
 
 /** Operaciones del superadmin en /console/clinicas/[id]. */

@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle, ArrowRight, Building2, Check, CheckCircle2, CreditCard, ExternalLink, Info, Loader2, MapPin,
-  MessageCircle, Plus, ShieldCheck, Sparkles, Star, X,
+  AlertTriangle, ArrowRight, Building2, CalendarClock, Check, CheckCircle2, ChevronRight, CreditCard, ExternalLink, Info, Loader2,
+  MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck, Smartphone, Sparkles, Star, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
@@ -14,7 +14,7 @@ import { whatsappPropioApi } from '@/lib/api/whatsappPropio'
 import { EmbeddedSignupCancelado, useEmbeddedSignup } from '@/hooks/useEmbeddedSignup'
 import { cn } from '@/lib/utils'
 import type {
-  ConfigurarWhatsappPropioRequest, NumeroWhatsapp, SedeWhatsapp, WhatsappPropioEstado,
+  ConectarWhatsappRequest, ConfigurarWhatsappPropioRequest, NumeroWhatsapp, SedeWhatsapp, WhatsappPropioEstado,
 } from '@/types/whatsappPropio'
 
 // WhatsApp con número propio: la clínica conecta hasta N números (según su
@@ -25,6 +25,26 @@ import type {
 
 const QUERY_KEY = ['whatsapp-propio']
 const PAGOS_META_URL = 'https://business.facebook.com/billing_hub/payment_settings'
+// Centro de seguridad del portfolio: ahí se inicia la verificación del negocio.
+const VERIFICAR_NEGOCIO_URL = 'https://business.facebook.com/settings/security'
+// Límite de Meta para negocios sin verificar (pacientes distintos al día).
+const LIMITE_SIN_VERIFICAR = 250
+// Tarifa de Meta para mensajes de utilidad en Colombia (vigente desde el 1-oct-2026) y
+// tasa de cambio redonda: solo para mostrar un orden de magnitud.
+const PRECIO_UTILITY_USD = 0.0008
+const COP_POR_USD = 3150
+
+/** Costo aproximado en una línea: "100 mensajes ≈ $250 · 500 ≈ $1.260 · 1.000 ≈ $2.520 COP". */
+function CostoAproximado() {
+  const cop = (cantidad: number) => Math.round((cantidad * PRECIO_UTILITY_USD * COP_POR_USD) / 10) * 10
+  return (
+    <p className="mt-1 text-[12.5px] tabular-nums text-muted-foreground">
+      Aprox.: 100 mensajes ≈ <span className="font-medium text-foreground">${cop(100).toLocaleString('es-CO')}</span>
+      {' · '}500 ≈ <span className="font-medium text-foreground">${cop(500).toLocaleString('es-CO')}</span>
+      {' · '}1.000 ≈ <span className="font-medium text-foreground">${cop(1000).toLocaleString('es-CO')}</span> COP
+    </p>
+  )
+}
 
 function mensajeError(err: unknown): string {
   const data = (err as { response?: { data?: { error?: string } } })?.response?.data
@@ -50,7 +70,7 @@ function numeroEfectivo(sede: SedeWhatsapp | null, estado: WhatsappPropioEstado)
 }
 
 function EstadoBadge({ numero }: { numero: NumeroWhatsapp }) {
-  const conf = {
+  const conf = numero.bloqueo === 'limite' ? { texto: 'En pausa hoy', clase: 'bg-amber-50 text-amber-700' } : {
     activo: { texto: 'Activo', clase: 'bg-emerald-50 text-emerald-700' },
     conectado: { texto: 'En aprobación', clase: 'bg-amber-50 text-amber-700' },
     plantillas_pendientes: { texto: 'En aprobación', clase: 'bg-amber-50 text-amber-700' },
@@ -225,10 +245,12 @@ function CambiarANumeroPropio({ onConectar }: { onConectar: () => void }) {
 
 // ─── Conectar un número ──────────────────────────────────────
 
-function ConectarDialog({ estado, open, onClose }: {
+/** Conecta un número nuevo o, con `reconectar`, vuelve a conectar uno que Meta desconectó. */
+function ConectarDialog({ estado, open, onClose, reconectar }: {
   estado: WhatsappPropioEstado
   open: boolean
   onClose: () => void
+  reconectar?: NumeroWhatsapp | null
 }) {
   const qc = useQueryClient()
   const { abrir, abriendo } = useEmbeddedSignup({ appId: estado.meta_app_id, configId: estado.meta_config_id })
@@ -238,7 +260,8 @@ function ConectarDialog({ estado, open, onClose }: {
   const [primero, setPrimero] = useState(estado.numeros.length === 0)
   const pago = useConfigurar()
   const conectar = useMutation({
-    mutationFn: whatsappPropioApi.conectar,
+    mutationFn: (data: ConectarWhatsappRequest) =>
+      reconectar ? whatsappPropioApi.reconectar(reconectar.id, data) : whatsappPropioApi.conectar(data),
     onSuccess: (data) => {
       qc.setQueryData(QUERY_KEY, data)
       setConectado(true)
@@ -275,86 +298,115 @@ function ConectarDialog({ estado, open, onClose }: {
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-2 text-emerald-700">
               <CheckCircle2 className="h-5 w-5" />
-              <p className="text-base font-semibold">Número conectado</p>
+              <p className="text-base font-semibold">{reconectar ? 'Número reconectado' : 'Número conectado'}</p>
             </div>
             <p className="text-sm leading-relaxed text-muted-foreground">
-              Puedes seguir respondiendo desde WhatsApp Business en tu teléfono. Ahora Meta revisa los mensajes
-              que CliniQ enviará desde tu número; suele tardar de minutos a un día y, mientras tanto, todo se sigue
-              enviando como hasta ahora.
-              {primero
+              {reconectar
+                ? 'Los mensajes vuelven a salir desde tu número.'
+                : 'Meta está revisando los mensajes de CliniQ (de minutos a un día). Mientras tanto, todo se envía como hasta ahora.'}
+              {!reconectar && (primero
                 ? ' Todas tus sedes usarán este número.'
-                : ' Asígnalo a las sedes que quieras en la sección Asignación.'}
+                : ' Asígnalo a tus sedes en la sección Asignación.')}
             </p>
-            <p className="rounded-lg bg-amber-50 px-3 py-2.5 text-[13px] leading-relaxed text-amber-800">
-              Abre WhatsApp Business en tu teléfono al menos una vez cada 14 días: si no, Meta desconecta el número
-              y los envíos volverán a salir por el número de CliniQ. No cambies de teléfono sin contactar primero a soporte.
+            <p className="text-[13px] text-muted-foreground">
+              Recuerda abrir WhatsApp Business en tu teléfono al menos una vez cada 14 días.
             </p>
             <div className="flex justify-end"><Button onClick={cerrar}>Entendido</Button></div>
           </div>
         ) : (
           <>
             <DialogHeader>
-              <DialogTitle>{estado.numeros.length === 0 ? 'Conecta el número de tu clínica' : 'Conecta otro número'}</DialogTitle>
+              <DialogTitle>
+                {reconectar
+                  ? `Reconecta ${etiquetaNumero(reconectar)}`
+                  : estado.numeros.length === 0 ? 'Conecta el número de tu clínica' : 'Conecta otro número'}
+              </DialogTitle>
               <DialogDescription className="leading-relaxed">
-                Conecta el número que ya usas en WhatsApp Business. Si Meta habilita la coexistencia para tu número,
-                seguirás respondiendo desde tu teléfono mientras CliniQ envía los mensajes automáticos.
+                Se abrirá una ventana de Meta: inicia sesión con Facebook, elige{' '}
+                {reconectar ? 'el mismo número' : 'tu WhatsApp Business'} y escanea el código QR con tu teléfono.
+                Toma unos 5 minutos.
               </DialogDescription>
             </DialogHeader>
 
-            <div className="space-y-3">
-              <div className="rounded-lg border p-3.5">
-                <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <CreditCard className="h-4 w-4 text-muted-foreground" /> Meta cobra los mensajes a tu cuenta
-                </p>
-                <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-                  Los mensajes que CliniQ envíe desde tu número los cobra Meta directamente a tu cuenta de WhatsApp
-                  Business, según el tipo de mensaje. Agrega un método de pago en Meta Business Suite; sin él, los
-                  mensajes saldrán por el número de CliniQ. Los mensajes enviados desde tu número no consumen el cupo
-                  de tu plan.
-                </p>
-                <div className="mt-2.5 flex flex-wrap items-center justify-between gap-2">
-                  <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
-                    Abrir pagos en Meta <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                  <Checkbox
-                    id="pago-meta"
-                    label="Ya agregué el método de pago"
-                    checked={estado.pago_meta_configurado}
-                    disabled={pago.isPending}
-                    onChange={(e) => pago.mutate({ pago_meta_configurado: e.target.checked })}
-                  />
-                </div>
-              </div>
-
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3.5 text-amber-900">
-                <p className="flex items-center gap-1.5 text-sm font-medium">
-                  <AlertTriangle className="h-4 w-4" /> Lo que cambia en tu teléfono
-                </p>
-                <p className="mt-1 text-[13px] leading-relaxed">
-                  Al conectar, WhatsApp Business desactiva en tu teléfono los mensajes temporales, los mensajes de
-                  &quot;ver una vez&quot;, la ubicación en tiempo real y las listas de difusión (las existentes quedan
-                  solo de lectura). WhatsApp para Windows deja de funcionar como dispositivo vinculado. Abre la app al
-                  menos una vez cada 14 días.
-                </p>
-              </div>
-
-              <p className="text-xs leading-relaxed text-muted-foreground">
-                Necesitas WhatsApp Business 2.24.17 o superior. La ventana que se abre es de Meta y dice
-                &quot;Lyvio&quot;, nuestro proveedor. La disponibilidad de esta modalidad la determina exclusivamente
-                Meta; CliniQ no puede garantizar ni forzar la elegibilidad de un número.
-              </p>
-
-              {error && (
-                <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[13px] text-red-700">{error}</p>
+            <ul className="space-y-3">
+              {!reconectar && (
+                <li className="flex gap-3">
+                  <Smartphone className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                  <div>
+                    <p className="text-sm font-medium">Tu WhatsApp sigue igual</p>
+                    <p className="text-[13px] text-muted-foreground">
+                      Sigues respondiendo desde tu teléfono y desde WhatsApp Web, como siempre.
+                    </p>
+                  </div>
+                </li>
               )}
+              {!reconectar && (
+                <li className="flex gap-3">
+                  <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium">Agrega una tarjeta en Meta</p>
+                    <p className="text-[13px] text-muted-foreground">
+                      Meta cobra solo lo que CliniQ envía; lo que escribes desde tu teléfono es gratis.
+                    </p>
+                    <CostoAproximado />
+                    <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                      <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
+                        Abrir pagos en Meta <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                      <Checkbox
+                        id="pago-meta"
+                        label="Ya la agregué"
+                        checked={estado.pago_meta_configurado}
+                        disabled={pago.isPending}
+                        onChange={(e) => pago.mutate({ pago_meta_configurado: e.target.checked })}
+                      />
+                    </div>
+                  </div>
+                </li>
+              )}
+              <li className="flex gap-3">
+                <CalendarClock className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium">Abre WhatsApp Business cada 14 días</p>
+                  <p className="text-[13px] text-muted-foreground">Si no, Meta desconecta el número.</p>
+                </div>
+              </li>
+            </ul>
+
+            {/* Si Meta no ofrece Coexistence para el número, su ventana propone
+                pasarlo a la API eliminándolo de la app: la clínica perdería su
+                WhatsApp Business en el teléfono y no hay vuelta atrás. */}
+            <div className="flex gap-2.5 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2.5 text-amber-900">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p className="text-[13px] leading-relaxed">
+                <span className="font-semibold">Si Meta te pide eliminar o desconectar tu número, no lo hagas:</span>{' '}
+                cierra la ventana. Tu número aún no es elegible y perderías WhatsApp Business en tu teléfono.
+              </p>
             </div>
+
+            {!reconectar && (
+              <details className="group rounded-lg bg-muted/50 px-3 py-2 text-[12.5px] text-muted-foreground">
+                <summary className="flex cursor-pointer list-none items-center gap-1 font-medium">
+                  <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" /> Pequeños cambios en la app
+                </summary>
+                <p className="mt-1.5 leading-relaxed">
+                  La app de WhatsApp para Windows deja de funcionar como dispositivo vinculado (usa WhatsApp Web).
+                  Tampoco estarán los mensajes temporales, los de &quot;ver una vez&quot;, la ubicación en tiempo real
+                  ni las listas de difusión. La ventana de Meta muestra &quot;Lyvio&quot;, nuestro proveedor.
+                </p>
+              </details>
+            )}
+
+            {error && (
+              <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[13px] text-red-700">{error}</p>
+            )}
 
             <div className="flex justify-end gap-2 pt-1">
               <Button variant="outline" onClick={cerrar} disabled={ocupado}>Cancelar</Button>
               <Button onClick={handleConectar} disabled={ocupado}>
                 {ocupado ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <MessageCircle className="mr-1.5 h-4 w-4" />}
-                {conectar.isPending ? 'Conectando…' : 'Conectar con WhatsApp'}
+                {conectar.isPending ? 'Conectando…' : reconectar ? 'Reconectar' : 'Conectar con WhatsApp'}
               </Button>
             </div>
           </>
@@ -366,8 +418,36 @@ function ConectarDialog({ estado, open, onClose }: {
 
 // ─── Tus números ─────────────────────────────────────────────
 
-function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onConectar: () => void }) {
+/** Límite diario de Meta del número y cómo ampliarlo, en una línea. */
+function LimiteDiario({ numero }: { numero: NumeroWhatsapp }) {
+  if (numero.limite_mensajes === 'TIER_UNLIMITED') {
+    return <p className="mt-0.5 text-[12px] text-muted-foreground">Sin límite diario de Meta.</p>
+  }
+  if (numero.limite_diario === null) return null
+  return (
+    <p className="mt-0.5 text-[12px] text-muted-foreground">
+      Meta te deja escribir a {numero.limite_diario.toLocaleString('es-CO')} pacientes distintos al día.
+      {numero.limite_diario <= LIMITE_SIN_VERIFICAR && (
+        <>
+          {' '}
+          <a href={VERIFICAR_NEGOCIO_URL} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-0.5 font-medium text-primary hover:underline">
+            Verifica tu negocio en Meta para ampliarlo <ExternalLink className="h-3 w-3" />
+          </a>
+        </>
+      )}
+    </p>
+  )
+}
+
+function TusNumeros({ estado, onConectar, onReconectar }: {
+  estado: WhatsappPropioEstado
+  onConectar: () => void
+  onReconectar: (numero: NumeroWhatsapp) => void
+}) {
   const lleno = estado.numeros.length >= estado.numeros_incluidos
+  // Meta no deja más de 2 números a un negocio sin verificar, aunque el plan incluya más.
+  const topeMeta = estado.numeros_permitidos_meta !== null && estado.numeros.length >= estado.numeros_permitidos_meta
   // Meta rechazó un envío por falta de pago: la clínica lo corrige en Meta y lo
   // confirma aquí. Si sigue sin pago, el próximo envío vuelve a bloquear el número.
   const pago = useConfigurar()
@@ -380,9 +460,16 @@ function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onCo
         </span>
       </div>
       <div className="divide-y divide-border/60">
-        {estado.numeros.map((n) => (
-          <div key={n.id} className={cn('flex items-center gap-3 px-4 py-3.5', n.estado === 'error' && 'bg-red-50/60')}>
-            <MessageCircle className={cn('h-4 w-4 shrink-0', n.estado === 'error' ? 'text-red-600' : 'text-muted-foreground')} />
+        {estado.numeros.map((n) => {
+          const pausa = n.bloqueo === 'limite'
+          const conError = n.estado === 'error' && !pausa
+          return (
+          <div key={n.id} className={cn(
+            'flex items-center gap-3 px-4 py-3.5', conError && 'bg-red-50/60', pausa && 'bg-amber-50/60',
+          )}>
+            <MessageCircle className={cn(
+              'h-4 w-4 shrink-0', conError ? 'text-red-600' : pausa ? 'text-amber-600' : 'text-muted-foreground',
+            )} />
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-2 text-sm font-medium">
                 {etiquetaNumero(n)}
@@ -392,12 +479,21 @@ function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onCo
                   </span>
                 )}
               </p>
-              <p className={cn('mt-0.5 text-[12.5px] leading-relaxed', n.estado === 'error' ? 'text-red-700' : 'text-muted-foreground')}>
+              <p className={cn(
+                'mt-0.5 text-[12.5px] leading-relaxed',
+                conError ? 'text-red-700' : pausa ? 'text-amber-800' : 'text-muted-foreground',
+              )}>
                 {n.estado === 'activo' && 'Enviando mensajes.'}
                 {(n.estado === 'conectado' || n.estado === 'plantillas_pendientes')
                   && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto se usa el número de CliniQ.'}
                 {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto se usa otro número.')}
               </p>
+              <LimiteDiario numero={n} />
+              {n.bloqueo === 'conexion' && (
+                <Button size="sm" variant="outline" className="mt-2" onClick={() => onReconectar(n)}>
+                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Reconectar
+                </Button>
+              )}
               {n.bloqueo === 'pago' && (
                 <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
                   <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
@@ -414,10 +510,21 @@ function TusNumeros({ estado, onConectar }: { estado: WhatsappPropioEstado; onCo
             </div>
             <EstadoBadge numero={n} />
           </div>
-        ))}
+          )
+        })}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3">
-        {lleno ? (
+        {!lleno && topeMeta ? (
+          <>
+            <p className="text-[12.5px] text-muted-foreground">
+              Meta permite {estado.numeros_permitidos_meta} números a los negocios sin verificar.
+            </p>
+            <a href={VERIFICAR_NEGOCIO_URL} target="_blank" rel="noreferrer"
+              className="inline-flex items-center gap-1 text-[12.5px] font-medium text-primary hover:underline">
+              Verificar mi negocio <ExternalLink className="h-3.5 w-3.5" />
+            </a>
+          </>
+        ) : lleno ? (
           <>
             <p className="text-[12.5px] text-muted-foreground">
               ¿Quieres un número para otra sede? Tu plan incluye {estado.numeros_incluidos}{' '}
@@ -548,6 +655,7 @@ export function WhatsappPropioConfig() {
     queryFn: whatsappPropioApi.estado,
   })
   const [conectando, setConectando] = useState(false)
+  const [reconectando, setReconectando] = useState<NumeroWhatsapp | null>(null)
 
   if (isLoading) return <div className="h-48 animate-pulse rounded-xl border bg-muted/40" />
   if (isError || !estado) {
@@ -564,7 +672,11 @@ export function WhatsappPropioConfig() {
         <CambiarANumeroPropio onConectar={() => setConectando(true)} />
       ) : (
         <>
-          <TusNumeros estado={estado} onConectar={() => setConectando(true)} />
+          <TusNumeros
+            estado={estado}
+            onConectar={() => { setReconectando(null); setConectando(true) }}
+            onReconectar={(n) => { setReconectando(n); setConectando(true) }}
+          />
           <Asignacion estado={estado} />
         </>
       )}
@@ -574,7 +686,12 @@ export function WhatsappPropioConfig() {
       </p>
 
       {estado.habilitado && (
-        <ConectarDialog estado={estado} open={conectando} onClose={() => setConectando(false)} />
+        <ConectarDialog
+          estado={estado}
+          open={conectando}
+          reconectar={reconectando}
+          onClose={() => { setConectando(false); setReconectando(null) }}
+        />
       )}
     </div>
   )

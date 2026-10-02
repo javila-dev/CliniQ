@@ -101,6 +101,7 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
           </p>
           <p className="mt-0.5 font-mono text-[11px] text-muted-foreground">
             inbox {numero.lyvio_inbox_id} · waba {numero.waba_id}
+            {numero.limite_mensajes && ` · límite ${numero.limite_mensajes}`}
             {numero.ultimo_chequeo_en && ` · revisado ${new Date(numero.ultimo_chequeo_en).toLocaleString('es-CO', {
               day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
             })}`}
