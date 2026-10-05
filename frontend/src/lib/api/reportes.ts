@@ -2,7 +2,7 @@ import { apiClient } from './client'
 import type {
   DashboardData, IngresosPeriodo, ServicioReporte,
   OcupacionReporte, ReportesParams, CotizacionesMesMetrics,
-  PacienteSinReagendar, EstadoFinanciero,
+  PacienteSinReagendar, EstadoFinanciero, Vendedor,
 } from '@/types/reportes'
 
 export const reportesApi = {
@@ -26,8 +26,18 @@ export const reportesApi = {
     return res.data
   },
 
-  getCotizacionesMes: async (params?: Pick<ReportesParams, 'sede_id' | 'fecha_inicio' | 'fecha_fin'>): Promise<CotizacionesMesMetrics> => {
-    const res = await apiClient.get<CotizacionesMesMetrics>('/reportes/cotizaciones/', { params })
+  getCotizacionesMes: async (
+    params?: Pick<ReportesParams, 'sede_id' | 'fecha_inicio' | 'fecha_fin'> & { vendedores?: string[] },
+  ): Promise<CotizacionesMesMetrics> => {
+    const { vendedores, ...rest } = params ?? {}
+    const res = await apiClient.get<CotizacionesMesMetrics>('/reportes/cotizaciones/', {
+      params: { ...rest, ...(vendedores?.length ? { vendedores: vendedores.join(',') } : {}) },
+    })
+    return res.data
+  },
+
+  getVendedores: async (): Promise<Vendedor[]> => {
+    const res = await apiClient.get<Vendedor[]>('/reportes/vendedores/')
     return res.data
   },
 

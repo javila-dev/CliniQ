@@ -11,6 +11,7 @@ import { AlertCircle, AlertTriangle, FileText, HeartPulse, Link2, Loader2, Messa
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { whatsappPropioAdminApi } from '@/lib/api/whatsappPropio'
 import { cn } from '@/lib/utils'
 import type { AdminTenant } from '@/types/admin'
@@ -55,6 +56,21 @@ const TIPO_LABEL: Record<string, string> = {
 
 type Accion = 'crear-plantillas' | 'actualizar-plantillas' | 'revisar-salud'
 
+const AYUDA: Record<Accion, string> = {
+  'crear-plantillas':
+    'Envía a Meta las plantillas del catálogo que faltan en este número. Las que ya están pendientes o aprobadas no se reenvían.',
+  'actualizar-plantillas':
+    'Trae el estado de las plantillas (pendiente, aprobada, rechazada) desde Lyvio y pide una sincronización nueva con Meta. '
+    + 'Si Meta acaba de aprobar alguna y no aparece, vuelve a pulsarlo en un minuto.',
+  'revisar-salud':
+    'Revisa la conexión del número en Meta (conectado, en la app de WhatsApp Business, límite diario). '
+    + 'No actualiza las plantillas.',
+}
+
+// Solo se pueden crear las que no existen en Meta o fallaron al crearse; las
+// rechazadas/pausadas/deshabilitadas necesitan una versión nueva en el catálogo.
+const ESTADOS_CREABLES = new Set<EstadoPlantillaWhatsapp | undefined>([undefined, 'ERROR'])
+
 function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
   numero: NumeroWhatsappAdmin
   catalogo: WhatsappPropioDetalleAdmin['catalogo']
@@ -74,18 +90,30 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
   const enCurso = mutation.isPending ? mutation.variables : null
   const badge = NUMERO_BADGE[numero.estado]
   const porNombre = new Map(numero.plantillas.map((p) => [p.nombre, p]))
+  const hayPorCrear = catalogo.some((def) => ESTADOS_CREABLES.has(porNombre.get(def.nombre)?.estado))
 
-  const boton = (accion: Accion, label: string, Icon: React.ElementType, primary = false) => (
-    <Button
-      type="button"
-      size="sm"
-      variant={primary ? 'default' : 'outline'}
-      disabled={mutation.isPending}
-      onClick={() => { setResultados(null); mutation.mutate(accion) }}
-    >
-      {enCurso === accion ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Icon className="mr-1.5 h-3.5 w-3.5" />}
-      {label}
-    </Button>
+  const boton = (
+    accion: Accion, label: string, Icon: React.ElementType,
+    { primary = false, bloqueado = '' }: { primary?: boolean; bloqueado?: string } = {},
+  ) => (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* El span recibe el hover aunque el botón esté deshabilitado (pointer-events-none). */}
+        <span tabIndex={bloqueado ? 0 : -1}>
+          <Button
+            type="button"
+            size="sm"
+            variant={primary ? 'default' : 'outline'}
+            disabled={mutation.isPending || !!bloqueado}
+            onClick={() => { setResultados(null); mutation.mutate(accion) }}
+          >
+            {enCurso === accion ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Icon className="mr-1.5 h-3.5 w-3.5" />}
+            {label}
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-xs">{bloqueado || AYUDA[accion]}</TooltipContent>
+    </Tooltip>
   )
 
   return (
@@ -156,11 +184,15 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
         <p className="text-xs text-red-600">{serverErrorMessage(mutation.error) ?? 'No se pudo completar la acción.'}</p>
       )}
 
-      <div className="flex flex-wrap gap-2">
-        {boton('crear-plantillas', 'Crear plantillas', FileText)}
-        {boton('actualizar-plantillas', 'Actualizar estado', RefreshCw, true)}
-        {boton('revisar-salud', 'Revisar salud', HeartPulse)}
-      </div>
+      <TooltipProvider delayDuration={200}>
+        <div className="flex flex-wrap justify-end gap-2">
+          {boton('crear-plantillas', 'Crear plantillas', FileText, {
+            bloqueado: hayPorCrear ? '' : 'Todas las plantillas ya están creadas en Meta. Usa "Actualizar estado" para ver si las aprobaron.',
+          })}
+          {boton('actualizar-plantillas', 'Actualizar estado', RefreshCw, { primary: true })}
+          {boton('revisar-salud', 'Revisar salud', HeartPulse)}
+        </div>
+      </TooltipProvider>
     </div>
   )
 }

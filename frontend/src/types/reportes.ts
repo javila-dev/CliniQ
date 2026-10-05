@@ -110,6 +110,14 @@ export interface CotizacionesMesMetrics {
   total_mes: number
   aceptadas_mes: number
   tasa_conversion_pct: string
+  ventas_valor: string      // Decimal como string: valor aceptado en el periodo
+  ventas_cantidad: number
+}
+
+export interface Vendedor {
+  id: string
+  nombre: string
+  activo: boolean
 }
 
 export interface PacienteSinReagendar {

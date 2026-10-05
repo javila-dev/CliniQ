@@ -6,6 +6,7 @@ import {
   CalendarDays, Users, CheckCircle2,
   ArrowRight, Plus, TrendingUp, DollarSign,
   FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
+  ChevronDown, Search,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -26,7 +27,9 @@ import { RoleGuard } from '@/components/shared/RoleGuard'
 import { SetupChecklist, useSetupChecklist } from '@/components/shared/SetupChecklist'
 import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
 import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
-import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
+import { addDaysISO, cn, formatTime, scrollWheelFallback, todayISO, toTitleCase } from '@/lib/utils'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
@@ -34,7 +37,7 @@ import {
 } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
 import type { EstadoCita } from '@/types/agenda'
-import type { PacienteSinReagendar } from '@/types/reportes'
+import type { PacienteSinReagendar, Vendedor } from '@/types/reportes'
 
 const STALE = 5 * 60 * 1000
 
@@ -193,6 +196,77 @@ function GraficaIngresos({ data, loading }: { data: { periodo: string; total_cob
         <Bar dataKey="Gastos" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
+  )
+}
+
+// Filtro de vendedores de la tarjeta de Ventas. Sin selección = todos.
+function FiltroVendedores({ opciones, selected, onChange }: {
+  opciones: Vendedor[]
+  selected: string[]
+  onChange: (ids: string[]) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState('')
+
+  const q = query.trim().toLowerCase()
+  const filtradas = q ? opciones.filter((v) => v.nombre.toLowerCase().includes(q)) : opciones
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id])
+  const etiqueta = selected.length === 0
+    ? 'Todos los vendedores'
+    : selected.length === 1
+      ? toTitleCase(opciones.find((v) => v.id === selected[0])?.nombre ?? '1 vendedor')
+      : `${selected.length} vendedores`
+
+  return (
+    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) setQuery('') }}>
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" size="sm" className="h-7 max-w-[180px] gap-1 px-2 text-xs font-normal">
+          <span className={cn('truncate', selected.length === 0 && 'text-muted-foreground')}>{etiqueta}</span>
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-64 p-0 overflow-hidden">
+        <div className="relative border-b p-2">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            autoFocus
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Buscar vendedor..."
+            className="h-8 pl-7 text-sm"
+          />
+        </div>
+        <div className="max-h-56 overflow-y-auto py-1" onWheel={scrollWheelFallback}>
+          {!q && (
+            <button
+              type="button"
+              onClick={() => onChange([])}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent transition-colors"
+            >
+              <Check className={cn('h-3.5 w-3.5 shrink-0', selected.length === 0 ? 'opacity-100' : 'opacity-0')} />
+              <span className="font-medium">Todos</span>
+            </button>
+          )}
+          {opciones.length === 0 ? (
+            <p className="px-3 py-3 text-xs text-muted-foreground">No hay usuarios que elaboren cotizaciones.</p>
+          ) : filtradas.length === 0 ? (
+            <p className="px-3 py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
+          ) : filtradas.map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => toggle(v.id)}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-accent transition-colors"
+            >
+              <Check className={cn('h-3.5 w-3.5 shrink-0', selected.includes(v.id) ? 'opacity-100' : 'opacity-0')} />
+              <span className="truncate">{toTitleCase(v.nombre)}</span>
+              {!v.activo && <span className="ml-auto shrink-0 text-xs text-muted-foreground">inactivo</span>}
+            </button>
+          ))}
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -364,6 +438,7 @@ function DashboardContent() {
   const [sheetNotificacionesFallidas, setSheetNotificacionesFallidas] = useState(false)
   const [sedeId, setSedeId] = useState<string | null>(null)
   const [periodo, setPeriodo] = useState<PeriodoKey>('hoy')
+  const [vendedores, setVendedores] = useState<string[]>([])
   // Filtro de periodo de las métricas. `hoy` conserva el comportamiento original
   // del dashboard (KPIs y cobros del día); el resto abarca un rango hasta hoy.
   const rango = rangoPeriodo(periodo)
@@ -472,15 +547,22 @@ function DashboardContent() {
   const citasHoy = citasHoyData?.results
 
   const { data: cotizacionesMes, isLoading: cotizacionesMesLoading } = useQuery({
-    queryKey: ['reportes', 'cotizaciones', periodo, sede],
+    queryKey: ['reportes', 'cotizaciones', periodo, sede, vendedores],
     queryFn: () => {
       // periodo 'hoy' -> mes en curso (comportamiento original de la tarjeta).
       const { ini, fin } = periodo === 'hoy' ? mesActual() : rango
-      return reportesApi.getCotizacionesMes({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede })
+      return reportesApi.getCotizacionesMes({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede, vendedores })
     },
     staleTime: STALE,
     refetchInterval: STALE,
     enabled: canVerCotizaciones,
+  })
+
+  const { data: vendedoresOpciones = [] } = useQuery({
+    queryKey: ['reportes', 'vendedores'],
+    queryFn: reportesApi.getVendedores,
+    staleTime: STALE,
+    enabled: canVerFinanzas,
   })
 
   const { data: resumenCartera, isLoading: carteraLoading } = useQuery({
@@ -848,22 +930,27 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Cotizaciones del mes + Cartera */}
-      <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-2')}>
+      {/* Ventas del mes + Cartera: Ventas lleva 4 métricas y el filtro, Cartera 2 */}
+      <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
         {canVerCotizaciones && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <div className="flex items-center gap-2">
                 <FileText className="h-4 w-4 text-primary" />
-                <h2 className="font-semibold text-sm">Cotizaciones {periodoSufijoRetro}</h2>
+                <h2 className="font-semibold text-sm">Ventas {periodoSufijoRetro}</h2>
               </div>
-              <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Ver todas <ArrowRight className="h-3 w-3" />
-              </Link>
+              <div className="flex items-center gap-3">
+                {canVerFinanzas && (
+                  <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
+                )}
+                <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
+                  Ver cotizaciones <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
             </div>
             <div className="flex divide-x">
               <MetricaCotizacion
-                label="Realizadas"
+                label="Cotizadas"
                 value={cotizacionesMes?.total_mes ?? 0}
                 color="text-foreground"
                 loading={cotizacionesMesLoading}
@@ -887,6 +974,17 @@ function DashboardContent() {
                         : 'text-red-500'
                     : 'text-muted-foreground'
                   }
+                  loading={cotizacionesMesLoading}
+                />
+              )}
+              {canVerFinanzas && (
+                <MetricaCotizacion
+                  label="Vendido"
+                  value={cotizacionesMes ? abrevCOP(Number(cotizacionesMes.ventas_valor)) : '—'}
+                  sub={cotizacionesMes && cotizacionesMes.ventas_cantidad > 0
+                    ? `${cotizacionesMes.ventas_cantidad} venta${cotizacionesMes.ventas_cantidad !== 1 ? 's' : ''} · prom. ${abrevCOP(Number(cotizacionesMes.ventas_valor) / cotizacionesMes.ventas_cantidad)}`
+                    : 'sin ventas'}
+                  color="text-primary"
                   loading={cotizacionesMesLoading}
                 />
               )}
