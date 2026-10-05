@@ -30,6 +30,14 @@ export const whatsappPropioApi = {
     )
     return res.data
   },
+
+  /** Saca un número de CliniQ. El backend exige que ya esté desconectado desde la app de WhatsApp Business. */
+  darDeBaja: async (numeroId: string): Promise<WhatsappPropioEstado> => {
+    const res = await apiClient.post<WhatsappPropioEstado>(
+      `/notificaciones/whatsapp-propio/numeros/${numeroId}/dar-de-baja/`,
+    )
+    return res.data
+  },
 }
 
 /** Operaciones del superadmin en /console/clinicas/[id]. */
@@ -52,6 +60,14 @@ export const whatsappPropioAdminApi = {
     accion: 'crear-plantillas' | 'actualizar-plantillas' | 'revisar-salud',
   ): Promise<AccionNumeroWhatsappResponse> => {
     const res = await apiClient.post<AccionNumeroWhatsappResponse>(`/admin/whatsapp-numeros/${numeroId}/${accion}/`)
+    return res.data
+  },
+
+  /** Con `forzar`, lo da de baja aunque Meta lo siga viendo conectado. */
+  darDeBaja: async (numeroId: string, forzar = false): Promise<AccionNumeroWhatsappResponse> => {
+    const res = await apiClient.post<AccionNumeroWhatsappResponse>(
+      `/admin/whatsapp-numeros/${numeroId}/dar-de-baja/`, { forzar },
+    )
     return res.data
   },
 }

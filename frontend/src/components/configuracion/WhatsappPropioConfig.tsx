@@ -416,6 +416,84 @@ function ConectarDialog({ estado, open, onClose, reconectar }: {
   )
 }
 
+// ─── Dar de baja ─────────────────────────────────────────────
+
+/** Saca un número de CliniQ (p. ej. para conectar otro). Primero la clínica lo
+ *  desconecta desde la app: así su WhatsApp Business del teléfono no se toca. */
+function DarDeBajaDialog({ numero, estado, onClose }: {
+  numero: NumeroWhatsapp | null
+  estado: WhatsappPropioEstado
+  onClose: () => void
+}) {
+  const qc = useQueryClient()
+  const baja = useMutation({
+    mutationFn: (id: string) => whatsappPropioApi.darDeBaja(id),
+    onSuccess: (data) => {
+      qc.setQueryData(QUERY_KEY, data)
+      onClose()
+    },
+  })
+  const quedanOtros = estado.numeros.length > 1
+  const cerrar = () => {
+    if (baja.isPending) return
+    baja.reset()
+    onClose()
+  }
+
+  return (
+    <Dialog open={!!numero} onOpenChange={(v) => { if (!v) cerrar() }}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Dar de baja {numero ? etiquetaNumero(numero) : ''}</DialogTitle>
+          <DialogDescription className="leading-relaxed">
+            CliniQ dejará de enviar mensajes desde este número. Tu WhatsApp Business en el teléfono sigue igual,
+            con todos tus chats.
+          </DialogDescription>
+        </DialogHeader>
+
+        <ol className="space-y-3">
+          <li className="flex gap-3">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">1</span>
+            <div>
+              <p className="text-sm font-medium">Desconéctalo desde tu teléfono</p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                En WhatsApp Business: Configuración → Cuenta → Plataforma empresarial (Business Platform) →
+                Desconectar. Es la forma segura de salir: tu app no pierde nada.
+              </p>
+            </div>
+          </li>
+          <li className="flex gap-3">
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-semibold text-primary">2</span>
+            <div>
+              <p className="text-sm font-medium">Confirma aquí</p>
+              <p className="text-[13px] leading-relaxed text-muted-foreground">
+                {quedanOtros
+                  ? 'Las sedes que usaban este número pasan al número por defecto.'
+                  : 'Tus mensajes vuelven a salir desde el número de CliniQ.'}
+                {' '}Después puedes conectar otro número.
+              </p>
+            </div>
+          </li>
+        </ol>
+
+        {baja.isError && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2.5 text-[13px] text-red-700">
+            {mensajeError(baja.error)}
+          </p>
+        )}
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Button variant="outline" onClick={cerrar} disabled={baja.isPending}>Cancelar</Button>
+          <Button variant="destructive" disabled={!numero || baja.isPending} onClick={() => numero && baja.mutate(numero.id)}>
+            {baja.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+            Ya lo desconecté, dar de baja
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // ─── Tus números ─────────────────────────────────────────────
 
 /** Límite diario de Meta del número y cómo ampliarlo, en una línea. */
@@ -440,10 +518,11 @@ function LimiteDiario({ numero }: { numero: NumeroWhatsapp }) {
   )
 }
 
-function TusNumeros({ estado, onConectar, onReconectar }: {
+function TusNumeros({ estado, onConectar, onReconectar, onDarDeBaja }: {
   estado: WhatsappPropioEstado
   onConectar: () => void
   onReconectar: (numero: NumeroWhatsapp) => void
+  onDarDeBaja: (numero: NumeroWhatsapp) => void
 }) {
   const lleno = estado.numeros.length >= estado.numeros_incluidos
   // Meta no deja más de 2 números a un negocio sin verificar, aunque el plan incluya más.
@@ -507,6 +586,13 @@ function TusNumeros({ estado, onConectar, onReconectar }: {
                   </Button>
                 </div>
               )}
+              <button
+                type="button"
+                onClick={() => onDarDeBaja(n)}
+                className="mt-1.5 text-[12px] text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline"
+              >
+                Dar de baja este número
+              </button>
             </div>
             <EstadoBadge numero={n} />
           </div>
@@ -656,6 +742,7 @@ export function WhatsappPropioConfig() {
   })
   const [conectando, setConectando] = useState(false)
   const [reconectando, setReconectando] = useState<NumeroWhatsapp | null>(null)
+  const [dandoDeBaja, setDandoDeBaja] = useState<NumeroWhatsapp | null>(null)
 
   if (isLoading) return <div className="h-48 animate-pulse rounded-xl border bg-muted/40" />
   if (isError || !estado) {
@@ -676,7 +763,9 @@ export function WhatsappPropioConfig() {
             estado={estado}
             onConectar={() => { setReconectando(null); setConectando(true) }}
             onReconectar={(n) => { setReconectando(n); setConectando(true) }}
+            onDarDeBaja={setDandoDeBaja}
           />
+          <DarDeBajaDialog numero={dandoDeBaja} estado={estado} onClose={() => setDandoDeBaja(null)} />
           <Asignacion estado={estado} />
         </>
       )}

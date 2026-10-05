@@ -7,9 +7,10 @@
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, AlertTriangle, FileText, HeartPulse, Link2, Loader2, MessageCircle, RefreshCw } from 'lucide-react'
+import { AlertCircle, AlertTriangle, FileText, HeartPulse, Link2, Loader2, MessageCircle, RefreshCw, Trash2 } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Input } from '@/components/ui/input'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { whatsappPropioAdminApi } from '@/lib/api/whatsappPropio'
@@ -87,6 +88,20 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
       setResultados(data.resultados ?? null)
     },
   })
+  // Baja en dos pasos: sin forzar; si Meta lo sigue viendo conectado, el
+  // diálogo pasa a pedir confirmación para forzar (borrar el inbox lo
+  // desconecta de la API sin pasar por la app de la clínica).
+  const [confirmandoBaja, setConfirmandoBaja] = useState(false)
+  const baja = useMutation({
+    mutationFn: (forzar: boolean) => whatsappPropioAdminApi.darDeBaja(numero.id, forzar),
+    onSuccess: (data) => {
+      setConfirmandoBaja(false)
+      qc.setQueryData(['admin-whatsapp-propio', clinicaId], data.detalle)
+      qc.invalidateQueries({ queryKey: ['admin-tenant-historial', clinicaId] })
+    },
+  })
+  const sigueConectado =
+    (baja.error as { response?: { data?: { code?: string } } } | null)?.response?.data?.code === 'NUMERO_SIGUE_CONECTADO'
   const enCurso = mutation.isPending ? mutation.variables : null
   const badge = NUMERO_BADGE[numero.estado]
   const porNombre = new Map(numero.plantillas.map((p) => [p.nombre, p]))
@@ -191,8 +206,43 @@ function NumeroCard({ numero, catalogo, clinicaId, sedes }: {
           })}
           {boton('actualizar-plantillas', 'Actualizar estado', RefreshCw, { primary: true })}
           {boton('revisar-salud', 'Revisar salud', HeartPulse)}
+          <Button
+            type="button" size="sm" variant="outline"
+            className="text-red-600 hover:text-red-600"
+            disabled={mutation.isPending || baja.isPending}
+            onClick={() => { baja.reset(); setConfirmandoBaja(true) }}
+          >
+            <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Dar de baja
+          </Button>
         </div>
       </TooltipProvider>
+
+      <ConfirmDialog
+        open={confirmandoBaja}
+        onOpenChange={(v) => { if (!v && !baja.isPending) setConfirmandoBaja(false) }}
+        title={sigueConectado ? 'Meta lo sigue viendo conectado' : `Dar de baja ${numero.numero_visible || 'este número'}`}
+        description={sigueConectado ? (
+          <>
+            La clínica no lo ha desconectado desde WhatsApp Business (Configuración → Cuenta → Plataforma
+            empresarial → Desconectar). Si fuerzas la baja, se borra el inbox en Lyvio y Meta lo saca de la API
+            sin pasar por la app; no sabemos con certeza cómo queda la app del teléfono. Fuerza solo si la clínica
+            ya no tiene acceso a ese teléfono o lo pidió expresamente.
+          </>
+        ) : (
+          <>
+            Se borra el inbox {numero.lyvio_inbox_id} en Lyvio y el número sale de CliniQ con sus plantillas. Las
+            sedes que lo usaban pasan al número por defecto. Antes se verifica en Meta que la clínica ya lo haya
+            desconectado desde su app.
+            {baja.isError && (
+              <span className="mt-2 block text-red-600">{serverErrorMessage(baja.error) ?? 'No se pudo dar de baja.'}</span>
+            )}
+          </>
+        )}
+        confirmLabel={sigueConectado ? 'Forzar baja' : 'Dar de baja'}
+        variant="destructive"
+        loading={baja.isPending}
+        onConfirm={() => baja.mutate(sigueConectado)}
+      />
     </div>
   )
 }
@@ -309,7 +359,8 @@ export function WhatsappPropioConsola({ tenant }: { tenant: AdminTenant }) {
       <p className="text-xs text-muted-foreground">
         &quot;Actualizar estado&quot; muestra lo último que Lyvio sincronizó con Meta y pide una sincronización nueva:
         si Meta acaba de aprobar, vuelve a pulsarlo en un minuto. El número pasa a activo cuando las{' '}
-        {data.catalogo.length} están aprobadas. Nunca borres el inbox en Lyvio: desconecta el número en Meta.
+        {data.catalogo.length} están aprobadas. No borres el inbox a mano en Lyvio: usa &quot;Dar de baja&quot;, que
+        primero verifica que la clínica lo haya desconectado desde su app.
       </p>
     </div>
   )

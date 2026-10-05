@@ -52,6 +52,7 @@ export const ACCION_LABEL: Record<string, string> = {
   'whatsapp_propio.crear_plantillas':      'Plantillas de WhatsApp creadas',
   'whatsapp_propio.actualizar_plantillas': 'Plantillas de WhatsApp actualizadas',
   'whatsapp_propio.revisar_salud':         'Salud de WhatsApp revisada',
+  'whatsapp_propio.dar_de_baja':           'Número de WhatsApp dado de baja',
 }
 
 export function accionChipClass(accion: string): string {
