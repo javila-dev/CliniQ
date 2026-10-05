@@ -277,6 +277,47 @@ class WhatsappPropioReconectarView(_NumeroPropioBaseView):
         return Response(numero_propio.estado(clinica))
 
 
+def _registrar_baja(request, clinica, numero_id, datos):
+    registrar_accion(
+        request, "whatsapp_propio.dar_de_baja", None,
+        {"resumen": "Número de WhatsApp dado de baja", **datos},
+        clinica=clinica, objeto_tipo="NumeroWhatsapp", objeto_id=str(numero_id),
+    )
+
+
+class WhatsappPropioDarDeBajaView(_NumeroPropioBaseView):
+    """La clinica saca un numero (p. ej. para conectar otro). Exige que ya lo
+    haya desconectado desde la app de WhatsApp Business."""
+
+    def post(self, request, pk, *args, **kwargs):
+        clinica, error = self._clinica(request)
+        if error:
+            return error
+        try:
+            datos = numero_propio.dar_de_baja(clinica, pk)
+        except numero_propio.NumeroPropioError as exc:
+            return self._error(exc)
+        _registrar_baja(request, clinica, pk, datos)
+        return Response(numero_propio.estado(clinica))
+
+
+class AdminWhatsappDarDeBajaView(APIView):
+    """Consola: da de baja un numero. `forzar` lo hace aunque Meta lo siga
+    viendo conectado (el borrado del inbox lo desconecta de la API)."""
+
+    permission_classes = (IsSuperAdmin,)
+
+    def post(self, request, pk, *args, **kwargs):
+        numero = get_object_or_404(NumeroWhatsapp.objects.select_related("conexion__clinica"), pk=pk)
+        clinica = numero.conexion.clinica
+        try:
+            datos = numero_propio.dar_de_baja(clinica, pk, forzar=bool(request.data.get("forzar")))
+        except numero_propio.NumeroPropioError as exc:
+            return Response({"error": exc.mensaje, "code": exc.code}, status=status.HTTP_400_BAD_REQUEST)
+        _registrar_baja(request, clinica, pk, datos)
+        return Response({"detalle": numero_propio.detalle_admin(clinica)})
+
+
 class AdminWhatsappPropioView(APIView):
     """Consola: estado del numero propio de una clinica con plantillas."""
 

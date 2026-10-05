@@ -146,6 +146,13 @@ def datos_inbox(inbox_id: str) -> dict:
     }
 
 
+def borrar_inbox(inbox_id: str) -> None:
+    """Borra el inbox. Chatwoot llama `/deregister` en Meta al borrar un inbox
+    de Embedded Signup: solo se usa al dar de baja un numero que la clinica ya
+    desconecto desde la app (numero_propio.dar_de_baja)."""
+    request("DELETE", f"inboxes/{inbox_id}")
+
+
 def salud(inbox_id: str) -> dict:
     """Estado del numero en Meta: status, is_on_biz_app, quality_rating,
     messaging_limit_tier (limite diario del portfolio)..."""

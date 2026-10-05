@@ -146,8 +146,13 @@ Limitaciones que CliniQ debe cubrir:
 - **Sin idempotencia**: un reintento puede duplicar el mensaje.
 - **Caché de plantillas**: Chatwoot solo envía plantillas que están en su
   caché y aprobadas; su sincronización automática corre cada ~3 h.
-- **No borrar nunca un inbox de clínica**: Chatwoot llama `/deregister` en
-  Meta y desconecta el número de la API.
+- **No borrar nunca un inbox de clínica a mano**: Chatwoot llama `/deregister` en
+  Meta y desconecta el número de la API. La única vía es "Dar de baja"
+  (2026-10-05, `numero_propio.dar_de_baja`), en la configuración de la clínica
+  y en la consola: exige que la clínica ya lo haya desconectado desde la app
+  (Configuración → Cuenta → Plataforma empresarial → Desconectar; se verifica
+  con `health`), borra el inbox y el registro, y las sedes vuelven al número por
+  defecto. Solo la consola puede forzarla con el número aún conectado.
 
 Todo lo demás (catálogo, estado por clínica, elección de número, respaldo,
 cupo, UI) vive en CliniQ. Lyvio no sabe nada de CliniQ.

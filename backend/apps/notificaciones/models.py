@@ -89,8 +89,9 @@ class ConexionWhatsappPropio(models.Model):
 
 class NumeroWhatsapp(models.Model):
     """Un numero de WhatsApp de la clinica conectado por Embedded Signup. Cada
-    uno es un inbox de la cuenta de Lyvio de CliniQ. Nunca se borra el inbox en
-    Lyvio: eso desconecta el numero de la API en Meta."""
+    uno es un inbox de la cuenta de Lyvio de CliniQ. Borrar el inbox en Lyvio
+    desconecta el numero de la API en Meta: solo se hace al darlo de baja
+    (numero_propio.dar_de_baja), despues de que la clinica lo desconecto en la app."""
 
     class Estado(models.TextChoices):
         CONECTADO = "conectado", "Conectado"

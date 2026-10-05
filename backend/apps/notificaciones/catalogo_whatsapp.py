@@ -76,34 +76,41 @@ CATALOGO = (
         tipo=Tipo.RECORDATORIO_CITA,
         nombre="cliniq_recordatorio_cita_v1",
         categoria="UTILITY",
+        # Formato de las plantillas del numero compartido, pero cerrando con
+        # "responde a este mensaje": desde el numero propio la respuesta llega
+        # al chat de la clinica (por eso no va el telefono de la sede).
         cuerpo=(
-            "Hola {{1}}, te recordamos tu cita de {{2}} en {{3}}, sede {{4}}, el {{5}}. "
-            "Si necesitas reprogramarla, responde a este mensaje o llama al {{6}}. Te esperamos."
+            "Hola *{{1}}* 👋\n\n"
+            "Te recordamos tu cita en *{{2}}*, en nuestra sede {{3}}.\n\n"
+            "🗓️ _Fecha y hora_: {{4}}\n"
+            "💆 _Servicio_: {{5}}\n\n"
+            "Si no puedes asistir o deseas reprogramar, responde a este mensaje.\n"
+            "¡Te esperamos!"
         ),
-        variables=(
-            "paciente_nombre", "servicio_nombre", "clinica_nombre",
-            "sede_nombre", "fecha_y_hora", "sede_telefono",
-        ),
-        ejemplo=("Ana", "Limpieza facial", "Clínica Bella", "Norte", "lunes 5 de octubre a las 10:00 a. m.", "3001234567"),
+        variables=("paciente_nombre", "clinica_nombre", "sede_nombre", "fecha_y_hora", "servicio_nombre"),
+        ejemplo=("Ana", "Clínica Bella", "Norte", "lunes 5 de octubre a las 10:00 a. m.", "Limpieza facial"),
     ),
     PlantillaCatalogo(
         tipo=Tipo.FIRMA_DOCUMENTO,
         nombre="cliniq_firma_documento_v1",
         categoria="UTILITY",
         cuerpo=(
-            "Hola {{1}}, {{2}} te envía el documento {{3}} para que lo revises y lo firmes "
-            "en este enlace: {{4}} Si tienes dudas, responde a este mensaje."
+            "Hola *{{1}}* 👋\n\n"
+            "Tienes pendiente de firma tu *{{2}}* de *{{3}}*.\n\n"
+            "Firma aquí 👉 {{4}}\n\n"
+            "Si tienes alguna duda, responde a este mensaje. ¡Gracias!"
         ),
-        variables=("paciente_nombre", "clinica_nombre", "documento_tipo", "link"),
-        ejemplo=("Ana", "Clínica Bella", "consentimiento informado", "https://firma.cliniq.co/d/abc123"),
+        variables=("paciente_nombre", "documento_tipo", "clinica_nombre", "link"),
+        ejemplo=("Ana", "consentimiento informado", "Clínica Bella", "https://firma.cliniq.co/d/abc123"),
     ),
     PlantillaCatalogo(
         tipo=Tipo.ENVIO_COTIZACION,
         nombre="cliniq_envio_cotizacion_v1",
         categoria="UTILITY",
         cuerpo=(
-            "Hola {{1}}, te compartimos en el documento adjunto la cotización que preparamos "
-            "para ti en {{2}}. Si tienes preguntas, responde a este mensaje."
+            "Hola *{{1}}* 👋\n\n"
+            "Desde *{{2}}* te compartimos adjunta tu cotización para que la revises con calma.\n\n"
+            "Si tienes alguna duda, responde a este mensaje 😊"
         ),
         variables=("paciente_nombre", "clinica_nombre"),
         ejemplo=("Ana", "Clínica Bella"),
@@ -114,8 +121,9 @@ CATALOGO = (
         nombre="cliniq_envio_orden_medica_v1",
         categoria="UTILITY",
         cuerpo=(
-            "Hola {{1}}, te compartimos en el documento adjunto tu orden médica de {{2}}. "
-            "Si tienes dudas, responde a este mensaje."
+            "Hola *{{1}}* 👋\n\n"
+            "Desde *{{2}}* te compartimos adjunta tu orden médica para que la revises con calma.\n\n"
+            "Si tienes alguna duda, responde a este mensaje 😊"
         ),
         variables=("paciente_nombre", "clinica_nombre"),
         ejemplo=("Ana", "Clínica Bella"),

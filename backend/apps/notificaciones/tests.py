@@ -597,7 +597,7 @@ class CatalogoWhatsappTests(TestCase):
 
         plantilla = plantilla_de(Tipo.ENVIO_COTIZACION)
         texto = plantilla.renderizar({"paciente_nombre": "Ana", "clinica_nombre": ""})
-        self.assertIn("Hola Ana,", texto)
+        self.assertIn("Hola *Ana* 👋", texto)
         self.assertNotIn("{{", texto)
         self.assertEqual(plantilla.valores({"paciente_nombre": "Ana"}), ["Ana", "-"])
 
@@ -1000,7 +1000,7 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
         args, kwargs = req.call_args_list[3]
         self.assertEqual(args[1], "https://lyvio.test/api/v1/accounts/7/conversations/21/messages")
         mensaje = kwargs["json"]
-        self.assertIn("Hola Ana,", mensaje["content"])
+        self.assertIn("Hola *Ana* 👋", mensaje["content"])
         params = mensaje["template_params"]
         self.assertEqual(params["name"], "cliniq_envio_cotizacion_v1")
         self.assertEqual(params["processed_params"]["body"], {"1": "Ana", "2": "Clinica Ruteo"})
@@ -1083,7 +1083,7 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
             clinica=self.clinica, sede=self.sede_a, tipo=Tipo.RECORDATORIO_CITA, paciente=self.paciente, payload=payload,
         )
         body = req.call_args.kwargs["json"]["template_params"]["processed_params"]["body"]
-        self.assertEqual(body["5"], "lunes 5 de octubre a las 10:30 a. m.")
+        self.assertEqual(body["4"], "lunes 5 de octubre a las 10:30 a. m.")
         self.assertNotIn("header", req.call_args.kwargs["json"]["template_params"]["processed_params"])
 
     # --- webhook -------------------------------------------------------------
@@ -1444,3 +1444,92 @@ class LimitesYReconexionTests(_BaseNumeroPropio):
             )
         self.assertEqual(ctx.exception.code, "OTRO_NUMERO")
         req.assert_not_called()
+
+
+@override_settings(**LYVIO_OK)
+class DarDeBajaNumeroTests(_BaseNumeroPropio):
+    """Baja de un numero: solo si la clinica ya lo desconecto en la app (o soporte
+    fuerza), borra el inbox en Lyvio y devuelve las sedes al numero por defecto."""
+
+    def setUp(self):
+        super().setUp()
+        self.norte = self._numero("41", por_defecto=True)
+        self.sur = self._numero("42")
+        self._asignar(self.sede_b, "numero", self.sur)
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_conectado_en_meta_no_se_borra(self, req):
+        from apps.notificaciones.numero_propio import NumeroPropioError, dar_de_baja
+
+        req.return_value = _respuesta(200, {"status": "CONNECTED", "is_on_biz_app": True})
+        with self.assertRaises(NumeroPropioError) as ctx:
+            dar_de_baja(self.clinica, self.sur.id)
+        self.assertEqual(ctx.exception.code, "NUMERO_SIGUE_CONECTADO")
+        self.assertEqual([c.args[0] for c in req.call_args_list], ["GET"])
+        self.assertTrue(self.conexion.numeros.filter(pk=self.sur.pk).exists())
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_desconectado_borra_inbox_y_la_sede_vuelve_al_por_defecto(self, req):
+        from apps.notificaciones.models import AsignacionWhatsappSede, EnvioWhatsApp
+        from apps.notificaciones.numero_propio import dar_de_baja
+
+        envio = EnvioWhatsApp.objects.create(
+            clinica=self.clinica, paciente=self.paciente, tipo=Tipo.ENVIO_COTIZACION, ruta="propio",
+            numero=self.sur, estado="enviado",
+        )
+        req.side_effect = [_respuesta(200, {"status": "CONNECTED", "is_on_biz_app": False}), _respuesta(200, {})]
+        dar_de_baja(self.clinica, self.sur.id)
+
+        args = req.call_args_list[1].args
+        self.assertEqual(args, ("DELETE", "https://lyvio.test/api/v1/accounts/7/inboxes/42"))
+        self.assertFalse(self.conexion.numeros.filter(pk=self.sur.pk).exists())
+        asignacion = AsignacionWhatsappSede.objects.get(sede=self.sede_b)
+        self.assertEqual((asignacion.tipo, asignacion.numero_id), ("por_defecto", None))
+        envio.refresh_from_db()
+        self.assertIsNone(envio.numero_id)
+        self.assertEqual(self._elegir(sede=self.sede_b), (self.norte, "ok"))
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_baja_del_por_defecto_pasa_el_por_defecto_a_otro(self, req):
+        from apps.notificaciones.numero_propio import dar_de_baja
+
+        req.side_effect = [_respuesta(404, {"error": "not found"}), _respuesta(404, {"error": "not found"})]
+        dar_de_baja(self.clinica, self.norte.id)
+        self.conexion.refresh_from_db()
+        self.assertEqual(self.conexion.numero_por_defecto_id, self.sur.id)
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_si_lyvio_no_borra_el_inbox_no_se_toca_cliniq(self, req):
+        from apps.notificaciones.numero_propio import NumeroPropioError, dar_de_baja
+
+        req.side_effect = [_respuesta(200, {"status": "DISCONNECTED"}), _respuesta(500, {"error": "boom"})]
+        with self.assertRaises(NumeroPropioError):
+            dar_de_baja(self.clinica, self.sur.id)
+        self.assertTrue(self.conexion.numeros.filter(pk=self.sur.pk).exists())
+
+    @patch("apps.notificaciones.lyvio.requests.request")
+    def test_endpoints_clinica_sin_forzar_y_consola_forzando(self, req):
+        from rest_framework.test import APIClient
+
+        from apps.users.models import User
+
+        admin = User.objects.create_user(
+            email="admin-baja@example.com", password="secret123", rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        client = APIClient()
+        client.force_authenticate(admin)
+        req.return_value = _respuesta(200, {"status": "CONNECTED", "is_on_biz_app": True})
+        res = client.post(f"/api/v1/notificaciones/whatsapp-propio/numeros/{self.sur.id}/dar-de-baja/", {}, format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertEqual(res.json()["code"], "NUMERO_SIGUE_CONECTADO")
+
+        superadmin = User.objects.create_user(
+            email="super-baja@example.com", password="secret123", rol=User.Role.SUPERADMIN,
+        )
+        client.force_authenticate(superadmin)
+        req.reset_mock()
+        req.return_value = _respuesta(200, {})
+        res = client.post(f"/api/v1/admin/whatsapp-numeros/{self.sur.id}/dar-de-baja/", {"forzar": True}, format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual([c.args[0] for c in req.call_args_list], ["DELETE"])
+        self.assertEqual([n["id"] for n in res.json()["detalle"]["numeros"]], [str(self.norte.id)])

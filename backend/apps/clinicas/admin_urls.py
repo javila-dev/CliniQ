@@ -3,6 +3,7 @@ from rest_framework.routers import DefaultRouter
 
 from apps.clinicas.views import AdminTenantViewSet, PlanViewSet
 from apps.notificaciones.views import (
+    AdminWhatsappDarDeBajaView,
     AdminWhatsappNumeroAccionView,
     AdminWhatsappPropioView,
     AdminWhatsappRegistrarInboxView,
@@ -35,6 +36,11 @@ urlpatterns = [
         "whatsapp-numeros/<uuid:pk>/revisar-salud/",
         AdminWhatsappNumeroAccionView.as_view(accion="revisar_salud"),
         name="admin-whatsapp-revisar-salud",
+    ),
+    path(
+        "whatsapp-numeros/<uuid:pk>/dar-de-baja/",
+        AdminWhatsappDarDeBajaView.as_view(),
+        name="admin-whatsapp-dar-de-baja",
     ),
     *router.urls,
 ]

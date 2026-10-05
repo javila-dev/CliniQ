@@ -395,6 +395,67 @@ def reconectar_numero(
     return numero
 
 
+MENSAJE_SIGUE_CONECTADO = (
+    "El número sigue conectado a CliniQ en Meta. Primero desconéctalo desde WhatsApp Business en el teléfono "
+    "de la clínica (Configuración → Cuenta → Plataforma empresarial / Business Platform → Desconectar) y "
+    "vuelve a intentarlo en unos minutos."
+)
+
+
+def _sigue_conectado(numero: NumeroWhatsapp) -> bool:
+    """Meta todavia reporta el numero conectado a la API y en la app (Coexistence).
+    Si Lyvio responde error, Meta ya no lo reconoce: cuenta como desconectado.
+    Sin respuesta de Lyvio no se sabe: se corta para no arriesgar el telefono."""
+    try:
+        data = lyvio.salud(numero.lyvio_inbox_id)
+    except lyvio.LyvioError:
+        return False
+    except requests.RequestException as exc:
+        raise _error_lyvio(exc) from exc
+    return str(data.get("status") or "").upper() == "CONNECTED" and data.get("is_on_biz_app") is True
+
+
+def dar_de_baja(clinica, numero_id, *, forzar=False) -> dict:
+    """Saca un numero de CliniQ: borra su inbox en Lyvio y su registro (con sus
+    plantillas y contactos; los envios quedan en el historial sin numero).
+
+    Orden seguro: la clinica primero lo desconecta desde la app de WhatsApp
+    Business. Borrar el inbox hace que Chatwoot llame `/deregister` en Meta, y
+    con el numero aun conectado no sabemos que le pasa a la app del telefono:
+    por eso, si Meta lo sigue viendo conectado, se frena salvo `forzar`
+    (solo soporte). No exige el addon: una clinica sin el addon tambien puede
+    irse. Las sedes que enviaban desde el numero vuelven al numero por defecto."""
+    numero = NumeroWhatsapp.objects.filter(pk=numero_id, conexion__clinica=clinica).first()
+    if numero is None:
+        raise NumeroPropioError("Ese número no pertenece a esta clínica.", code="NUMERO_INVALIDO")
+    if not forzar and _sigue_conectado(numero):
+        raise NumeroPropioError(MENSAJE_SIGUE_CONECTADO, code="NUMERO_SIGUE_CONECTADO")
+
+    try:
+        lyvio.borrar_inbox(numero.lyvio_inbox_id)
+    except lyvio.LyvioError as exc:
+        if exc.status != 404:  # 404: ya no existe en Lyvio, se sigue con CliniQ
+            raise _error_lyvio(exc) from exc
+    except requests.RequestException as exc:
+        raise _error_lyvio(exc) from exc
+
+    datos = {"numero": numero.numero_visible, "lyvio_inbox_id": numero.lyvio_inbox_id, "forzado": forzar}
+    Tipo = AsignacionWhatsappSede.Tipo
+    with transaction.atomic():
+        conexion = ConexionWhatsappPropio.objects.select_for_update().get(pk=numero.conexion_id)
+        AsignacionWhatsappSede.objects.filter(conexion=conexion, numero=numero).update(
+            tipo=Tipo.POR_DEFECTO, numero=None,
+        )
+        if conexion.numero_por_defecto_id == numero.pk:
+            otros = conexion.numeros.exclude(pk=numero.pk)
+            conexion.numero_por_defecto = (
+                otros.filter(estado=NumeroWhatsapp.Estado.ACTIVO).first() or otros.first()
+            )
+            conexion.save(update_fields=["numero_por_defecto", "updated_at"])
+        numero.delete()
+    return datos
+
+
 def registrar_inbox_existente(clinica, inbox_id) -> NumeroWhatsapp:
     """Soporte: registra para la clinica un inbox que ya existe en la cuenta de
     Lyvio de CliniQ, p. ej. si la conexion termino en Lyvio pero CliniQ no

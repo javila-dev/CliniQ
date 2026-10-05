@@ -8,6 +8,7 @@ from apps.notificaciones.views import (
     NotificacionFallidaListView,
     NotificacionFallidaResolverView,
     WhatsappPropioConectarView,
+    WhatsappPropioDarDeBajaView,
     WhatsappPropioReconectarView,
     WhatsappPropioView,
 )
@@ -26,5 +27,10 @@ urlpatterns = [
         "whatsapp-propio/numeros/<uuid:pk>/reconectar/",
         WhatsappPropioReconectarView.as_view(),
         name="whatsapp-propio-reconectar",
+    ),
+    path(
+        "whatsapp-propio/numeros/<uuid:pk>/dar-de-baja/",
+        WhatsappPropioDarDeBajaView.as_view(),
+        name="whatsapp-propio-dar-de-baja",
     ),
 ]
