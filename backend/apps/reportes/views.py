@@ -11,12 +11,19 @@ from rest_framework.views import APIView
 
 from apps.agenda.models import Cita
 from apps.caja.models import GastoCaja
+from apps.cartera.models import Cartera
 from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.inventario.models import Insumo
 from apps.notificaciones.services import uso_whatsapp_mes_actual
-from apps.users.authorization import sede_ids_para_filtro, user_has_permission, user_sede_ids_acotadas
+from apps.users.authorization import (
+    get_user_permission_keys,
+    sede_ids_para_filtro,
+    user_has_permission,
+    user_sede_ids_acotadas,
+)
+from apps.users.models import User
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
@@ -48,6 +55,12 @@ def _table_exists(table_name: str) -> bool:
 
 def _money(value) -> str:
     return f"{Decimal(value or 0):.2f}"
+
+
+def _vendedor_ids(request) -> list[str]:
+    """IDs de `vendedores` (lista separada por comas). Vacío = todos."""
+    raw = request.query_params.get("vendedores") or ""
+    return [v for v in (x.strip() for x in raw.split(",")) if v]
 
 
 def _var_pct(actual, anterior):
@@ -344,6 +357,9 @@ class CotizacionesReporteView(APIView):
             qs = qs.filter(clinica=user.clinica)
         if sede_ids is not None:
             qs = qs.filter(sede_id__in=sede_ids)
+        vendedor_ids = _vendedor_ids(request)
+        if vendedor_ids:
+            qs = qs.filter(profesional_id__in=vendedor_ids)
 
         agg = qs.aggregate(
             total_mes=Count("id"),
@@ -353,11 +369,66 @@ class CotizacionesReporteView(APIView):
         aceptadas = agg["aceptadas_mes"] or 0
         tasa = (aceptadas / total * 100) if total else 0
 
+        # Ventas del periodo: valor de las cotizaciones aceptadas, por fecha de
+        # aceptación (= creación de la cartera), no por fecha de la cotización.
+        # Los saldos cargados por migración no son venta nueva.
+        ventas_qs = Cartera.objects.filter(
+            created_at__date__gte=fecha_inicio,
+            created_at__date__lte=fecha_fin,
+            activo=True,
+            cotizacion__activo=True,
+        ).exclude(es_migracion=True)
+        if user.rol != "superadmin":
+            ventas_qs = ventas_qs.filter(cotizacion__clinica=user.clinica)
+        if sede_ids is not None:
+            ventas_qs = ventas_qs.filter(cotizacion__sede_id__in=sede_ids)
+        if vendedor_ids:
+            ventas_qs = ventas_qs.filter(cotizacion__profesional_id__in=vendedor_ids)
+        ventas = ventas_qs.aggregate(valor=Sum("total"), cantidad=Count("id"))
+
         return Response({
             "total_mes": total,
             "aceptadas_mes": aceptadas,
             "tasa_conversion_pct": f"{tasa:.2f}",
+            "ventas_valor": _money(ventas["valor"]),
+            "ventas_cantidad": ventas["cantidad"] or 0,
         })
+
+
+class VendedoresView(APIView):
+    """Usuarios por los que se puede filtrar el reporte de ventas.
+
+    Quienes pueden elaborar cotizaciones (``cotizaciones.gestionar``) más
+    quienes figuren como profesional de alguna cotización de la clínica, para
+    no perder ventas de usuarios a los que luego se les quitó el permiso.
+    """
+
+    permission_classes = (RequirePermission("reportes.ver_financieros"),)
+
+    def get(self, request: Request):
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response([])
+
+        usuarios = (
+            User.objects.filter(clinica=clinica)
+            .exclude(rol="superadmin")
+            .select_related("rol_dinamico")
+        )
+        con_cotizaciones = set(
+            Cotizacion.objects.filter(clinica=clinica, activo=True)
+            .exclude(profesional_id=None)
+            .values_list("profesional_id", flat=True)
+            .distinct()
+        )
+        resultado = [
+            {"id": str(u.id), "nombre": u.nombre_completo, "activo": u.is_active}
+            for u in usuarios
+            if u.id in con_cotizaciones
+            or (u.is_active and "cotizaciones.gestionar" in get_user_permission_keys(u))
+        ]
+        resultado.sort(key=lambda v: v["nombre"].lower())
+        return Response(resultado)
 
 
 class PacientesSinReagendarView(APIView):
