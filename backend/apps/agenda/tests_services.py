@@ -10,12 +10,15 @@ from rest_framework.exceptions import ValidationError
 
 from apps.agenda.models import BloqueoAgenda, Cita
 from apps.agenda.services import (
+    DIAS_SEMANA,
     calcular_fecha_fin,
     crear_cita,
     get_slots_disponibles,
     verificar_disponibilidad_profesional,
+    verificar_horario_profesional,
     verificar_horario_sede,
 )
+from apps.colaboradores.models import Colaborador, HorarioColaborador
 from apps.cartera.models import Cartera, CuotaCartera
 from apps.clinicas.models import FormaDePago
 from apps.core.tests.factories import ClinicaFixtureMixin, HORARIO_LUN_VIE
@@ -96,6 +99,36 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
         self.assertTrue(len(slots) > 0)
         for slot in slots:
             self.assertEqual(slot.date(), self.inicio.date())
+
+    def _horario_profesional(self, **kwargs):
+        colaborador = Colaborador.objects.create(
+            user=self.profesional,
+            sede_principal=self.sede,
+            tipo_contrato=Colaborador.TipoContrato.EMPLEADO,
+            fecha_ingreso=timezone.localdate(),
+            numero_documento="123",
+        )
+        return HorarioColaborador.objects.create(
+            colaborador=colaborador,
+            sede=self.sede,
+            dia_semana=DIAS_SEMANA[self.inicio.weekday()],
+            **kwargs,
+        )
+
+    def test_profesional_sin_horario_especial_usa_el_de_la_sede(self):
+        tarde = self.inicio.replace(hour=16)
+        self.assertTrue(verificar_horario_profesional(self.profesional.id, self.sede.id, tarde, tarde + timedelta(minutes=30)))
+
+    def test_profesional_con_horario_especial_solo_en_ese_rango(self):
+        self._horario_profesional(hora_inicio="09:00", hora_fin="12:00")
+        tarde = self.inicio.replace(hour=16)
+        self.assertTrue(verificar_horario_profesional(self.profesional.id, self.sede.id, self.inicio, self.inicio + timedelta(minutes=30)))
+        self.assertFalse(verificar_horario_profesional(self.profesional.id, self.sede.id, tarde, tarde + timedelta(minutes=30)))
+
+    def test_profesional_que_no_atiende_ese_dia(self):
+        self._horario_profesional(no_atiende=True)
+        self.assertFalse(verificar_horario_profesional(self.profesional.id, self.sede.id, self.inicio, self.inicio + timedelta(minutes=30)))
+        self.assertEqual(get_slots_disponibles(self.profesional.id, self.sede.id, self.inicio.date(), 30), [])
 
     def test_crear_cita_rechaza_paciente_de_otra_clinica(self):
         sede = self.sede

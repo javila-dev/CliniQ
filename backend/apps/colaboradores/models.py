@@ -75,8 +75,11 @@ class HorarioColaborador(BaseModel):
         related_name="horarios_colaboradores",
     )
     dia_semana = models.CharField(max_length=10, choices=DiaSemana.choices)
-    hora_inicio = models.TimeField()
-    hora_fin = models.TimeField()
+    # Sin registro para el día = atiende en el horario de la sede. Con registro:
+    # horario especial (hora_inicio/hora_fin) o `no_atiende` ese día.
+    no_atiende = models.BooleanField(default=False)
+    hora_inicio = models.TimeField(null=True, blank=True)
+    hora_fin = models.TimeField(null=True, blank=True)
 
     class Meta:
         db_table = "horarios_colaborador"

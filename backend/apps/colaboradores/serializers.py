@@ -43,6 +43,7 @@ class HorarioColaboradorSerializer(serializers.ModelSerializer):
             "sede",
             "sede_nombre",
             "dia_semana",
+            "no_atiende",
             "hora_inicio",
             "hora_fin",
             "activo",
@@ -57,7 +58,15 @@ class HorarioColaboradorSerializer(serializers.ModelSerializer):
         dia_semana = attrs.get("dia_semana", getattr(self.instance, "dia_semana", None))
         hora_inicio = attrs.get("hora_inicio", getattr(self.instance, "hora_inicio", None))
         hora_fin = attrs.get("hora_fin", getattr(self.instance, "hora_fin", None))
+        no_atiende = attrs.get("no_atiende", getattr(self.instance, "no_atiende", False))
         request = self.context.get("request")
+
+        if no_atiende:
+            attrs["hora_inicio"] = None
+            attrs["hora_fin"] = None
+            hora_inicio = hora_fin = None
+        elif not hora_inicio or not hora_fin:
+            raise serializers.ValidationError({"hora_inicio": "Indica la hora de inicio y fin del horario especial."})
 
         if hora_inicio and hora_fin and hora_fin <= hora_inicio:
             raise serializers.ValidationError({"hora_fin": "La hora fin debe ser mayor a la hora inicio."})
