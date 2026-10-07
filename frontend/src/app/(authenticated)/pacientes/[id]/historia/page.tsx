@@ -26,7 +26,7 @@ import { TabAntecedentesObesidad } from '@/components/obesidad/TabAntecedentesOb
 import { TabProgresoObesidad } from '@/components/obesidad/TabProgresoObesidad'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
-import { useHistoriaConfig } from '@/store/historiaConfigStore'
+import { useHistoriaConfig } from '@/hooks/usePestanasClinica'
 import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
 

@@ -246,10 +246,12 @@ class ConfiguracionHistoriaYSignosTests(TestCase):
                 "datos-generales",
                 "motivo-consulta",
                 "antecedentes",
+                "mediciones",
                 "examenes",
                 "plan-manejo",
                 "ordenes",
                 "fotos",
+                "zonas",
             ],
         )
         self.assertTrue(ConfiguracionHistoria.objects.filter(clinica=self.clinica).exists())
@@ -262,6 +264,33 @@ class ConfiguracionHistoriaYSignosTests(TestCase):
 
         self.assertEqual(patch_response.status_code, 200)
         self.assertEqual(patch_response.json()["tabs_activos"], ["datos-generales", "antecedentes", "fotos"])
+
+    def test_pestanas_de_atencion_se_guardan_en_la_clinica(self):
+        """Antes vivian en el localStorage de cada navegador."""
+        response = self.client.get("/api/v1/configuracion/historia/")
+        self.assertIn("insumos", response.json()["atencion_tabs_activos"])
+
+        patch_response = self.client.patch(
+            "/api/v1/configuracion/historia/", {"atencion_tabs_activos": ["fotos", "insumos"]}, format="json",
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.assertEqual(patch_response.json()["atencion_tabs_activos"], ["datos-generales", "fotos", "insumos"])
+        # No toca las pestanas de la historia.
+        self.assertIn("antecedentes", patch_response.json()["tabs_activos"])
+
+        profesional = User.objects.create_user(
+            email="prof-config@example.com", password="secret123", rol=User.Role.PROFESIONAL, clinica=self.clinica,
+        )
+        otro = APIClient()
+        otro.force_authenticate(profesional)
+        self.assertEqual(
+            otro.get("/api/v1/configuracion/historia/").json()["atencion_tabs_activos"],
+            ["datos-generales", "fotos", "insumos"],
+        )
+        self.assertEqual(
+            otro.patch("/api/v1/configuracion/historia/", {"atencion_tabs_activos": []}, format="json").status_code,
+            403,
+        )
 
     def test_signos_vitales_get_y_patch_configuran_campos_extra(self):
         response = self.client.get("/api/v1/configuracion/signos-vitales/")

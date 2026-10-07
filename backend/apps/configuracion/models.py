@@ -4,7 +4,20 @@ from apps.core.models import BaseModel
 from apps.historia_clinica.models import ConsentimientoInformado
 
 
+# Pestanas que la clinica puede mostrar u ocultar: (slug, etiqueta, obligatoria).
+# Los slugs son los del frontend (historia del paciente y pantalla de atencion).
 HISTORIA_TABS_DISPONIBLES = [
+    ("datos-generales", "Datos Generales", True),
+    ("motivo-consulta", "Motivo de Consulta", False),
+    ("antecedentes", "Antecedentes", False),
+    ("mediciones", "Seguimiento", False),
+    ("examenes", "Examenes", False),
+    ("plan-manejo", "Plan de Manejo", False),
+    ("ordenes", "Ordenes Medicas", False),
+    ("fotos", "Fotos", False),
+    ("zonas", "Zonas", False),
+]
+ATENCION_TABS_DISPONIBLES = [
     ("datos-generales", "Datos Generales", True),
     ("motivo-consulta", "Motivo de Consulta", False),
     ("antecedentes", "Antecedentes", False),
@@ -12,6 +25,8 @@ HISTORIA_TABS_DISPONIBLES = [
     ("plan-manejo", "Plan de Manejo", False),
     ("ordenes", "Ordenes Medicas", False),
     ("fotos", "Fotos", False),
+    ("mediciones", "Seguimiento", False),
+    ("insumos", "Insumos", False),
 ]
 
 
@@ -139,7 +154,10 @@ class ConfiguracionHistoria(BaseModel):
         on_delete=models.CASCADE,
         related_name="config_historia",
     )
+    # Historia clinica del paciente. Lista vacia = todas.
     tabs_activos = models.JSONField(default=list, blank=True)
+    # Pantalla del profesional durante una atencion. Lista vacia = todas.
+    atencion_tabs_activos = models.JSONField(default=list, blank=True)
 
     class Meta:
         db_table = "configuracion_historia"

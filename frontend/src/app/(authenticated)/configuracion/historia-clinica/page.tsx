@@ -3,7 +3,7 @@
 import { FileText } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Switch } from '@/components/ui/switch'
-import { useHistoriaConfig, type TabHistoria } from '@/store/historiaConfigStore'
+import { useHistoriaConfig, type TabHistoria } from '@/hooks/usePestanasClinica'
 import { Button } from '@/components/ui/button'
 
 interface TabConfig {
@@ -63,7 +63,7 @@ const TABS_CONFIG: TabConfig[] = [
 ]
 
 export default function ConfiguracionHistoriaClinicaPage() {
-  const { tabsActivos, setTabActivo } = useHistoriaConfig()
+  const { tabsActivos, setTabActivo, isLoading, guardando, error } = useHistoriaConfig()
 
   return (
     <div className="space-y-6">
@@ -94,7 +94,7 @@ export default function ConfiguracionHistoriaClinicaPage() {
               </div>
               <Switch
                 checked={obligatorio ? true : activo}
-                disabled={obligatorio}
+                disabled={obligatorio || isLoading || guardando}
                 onCheckedChange={(checked) => {
                   if (!obligatorio) setTabActivo(value, checked)
                 }}
@@ -103,6 +103,10 @@ export default function ConfiguracionHistoriaClinicaPage() {
           )
         })}
       </div>
+
+      {error && (
+        <p className="text-sm text-red-600">No se pudo guardar el cambio. Intenta de nuevo.</p>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Los cambios se aplican inmediatamente a todas las historias clínicas de la clínica.

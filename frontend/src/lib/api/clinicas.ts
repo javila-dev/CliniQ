@@ -28,6 +28,24 @@ export interface PlanPublico {
   whatsapp_envios_incluidos: number  // 0 = sin límite
 }
 
+/** Pestañas visibles de la clínica: historia del paciente y pantalla del profesional. */
+export interface ConfiguracionPestanas {
+  tabs_activos: string[]
+  atencion_tabs_activos: string[]
+  updated_at: string
+}
+
+export const configuracionPestanasApi = {
+  get: async (): Promise<ConfiguracionPestanas> => {
+    const res = await apiClient.get<ConfiguracionPestanas>('/configuracion/historia/')
+    return res.data
+  },
+  update: async (data: Partial<Pick<ConfiguracionPestanas, 'tabs_activos' | 'atencion_tabs_activos'>>): Promise<ConfiguracionPestanas> => {
+    const res = await apiClient.patch<ConfiguracionPestanas>('/configuracion/historia/', data)
+    return res.data
+  },
+}
+
 export const registroPublicoApi = {
   registrarClinica: async (data: RegistroClinicaRequest): Promise<{ mensaje: string; email: string }> => {
     const res = await axios.post(`${BASE_URL}/registro-clinica/`, data)
