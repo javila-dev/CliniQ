@@ -7,6 +7,7 @@ import { EmbedSignDocument } from '@documenso/embed-react'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { toast } from '@/hooks/use-toast'
 import { Button } from '@/components/ui/button'
+import { formatDateTime } from '@/lib/utils'
 
 // Segundos de espera antes de ofrecer el botón para comprobar el estado en Documenso.
 const SEGUNDOS_PARA_COMPROBAR = 25
@@ -39,12 +40,13 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
   const [comprobando, setComprobando] = useState(false)
   const [puedeComprobar, setPuedeComprobar] = useState(false)
 
+  // Al abrir, trae el documento para saber si ya se envió el link antes.
   // Mientras esperamos que el paciente firme en su celular, consultamos el
   // estado cada 4s hasta que llegue el aviso automático (webhook).
   const { data: estadoConsentimiento } = useQuery({
     queryKey: ['consentimiento', consentimientoId],
     queryFn: () => consentimientosApi.get(consentimientoId),
-    enabled: modo === 'enviado' && !firmado,
+    enabled: !firmado,
     refetchInterval: modo === 'enviado' && !firmado ? 4000 : false,
     refetchIntervalInBackground: true,
   })
@@ -117,6 +119,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
         toast.success('Link enviado', `Se envió por WhatsApp a ${info.telefono}.`)
       }
       queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
+      queryClient.invalidateQueries({ queryKey: ['consentimiento', consentimientoId] })
     } catch (err: any) {
       const msg = err?.response?.data?.error ?? 'No se pudo generar el enlace de firma'
       toast.error('Error al enviar el link', msg)
@@ -188,6 +191,16 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
                 ¿Cómo va a firmar el paciente el {documentoLabel.toLowerCase()}?
               </p>
             </div>
+            {estadoConsentimiento?.link_enviado_en && (
+              <div className="flex items-start gap-2 w-full max-w-xs rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-left text-xs text-sky-800">
+                <MessageCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                <span>
+                  Ya se envió el link por WhatsApp
+                  {estadoConsentimiento.link_enviado_a ? ` al ${estadoConsentimiento.link_enviado_a}` : ''}
+                  {' · '}{formatDateTime(estadoConsentimiento.link_enviado_en)}. El paciente aún no ha firmado.
+                </span>
+              </div>
+            )}
             <div className="flex flex-col gap-2 w-full max-w-xs pt-2">
               <Button onClick={() => setModo('firmar')} className="w-full">
                 <PenLine className="h-4 w-4 mr-2" />
@@ -197,7 +210,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
                 {enviando ? (
                   <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generando enlace…</>
                 ) : (
-                  <><MessageCircle className="h-4 w-4 mr-2" />Enviar link por WhatsApp</>
+                  <><MessageCircle className="h-4 w-4 mr-2" />{estadoConsentimiento?.link_enviado_en ? 'Reenviar link por WhatsApp' : 'Enviar link por WhatsApp'}</>
                 )}
               </Button>
             </div>

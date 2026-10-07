@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock, MessageCircle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -620,6 +620,33 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const hayConsentimientos = cotizacion?.estado === 'aceptada' && (consentimientosRequeridos?.length ?? 0) > 0
   const mostrarCompromiso = Boolean(cotizacion?.compromiso_pago) && (cotizacion?.estado === 'aceptada' || cotizacion?.estado === 'borrador')
 
+  // Link de firma enviado por WhatsApp y modal cerrado: el webhook de Documenso
+  // acepta la cotización en el backend. Aquí solo se consulta el compromiso (no
+  // la cotización, que reiniciaría el formulario) para refrescar al firmarse.
+  const compromisoEnEspera = cotizacion?.compromiso_pago?.estado === 'pendiente' && Boolean(cotizacion.compromiso_pago.link_enviado_en)
+    ? cotizacion.compromiso_pago.id
+    : null
+  const { data: compromisoVigilado } = useQuery({
+    queryKey: ['compromiso-vigilado', compromisoEnEspera],
+    queryFn: () => consentimientosApi.get(compromisoEnEspera!),
+    enabled: Boolean(compromisoEnEspera) && !compromisoPagoId,
+    refetchInterval: 15000,
+  })
+  // Si la firma ya se vio en el modal (que avisa por su cuenta), no repetir el aviso.
+  const firmaVistaEnModalRef = useRef(false)
+  useEffect(() => {
+    if (compromisoVigilado?.estado !== 'firmado' || !cotizacion) return
+    queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+    queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+    if (!firmaVistaEnModalRef.current) {
+      toast.success(
+        'El paciente firmó',
+        cotizacion.estado === 'borrador' ? 'La cotización quedó aceptada.' : 'El compromiso de pago quedó firmado.',
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [compromisoVigilado?.estado])
+
   // Compromiso de pago firmado sin PDF cacheado (el webhook de Documenso no llegó):
   // reconcilia contra Documenso, recupera el PDF y lo abre.
   async function verCompromisoFirmado(cpId: string) {
@@ -763,12 +790,15 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const compromisoCard = mostrarCompromiso && cotizacion?.compromiso_pago && (() => {
     const cp = cotizacion.compromiso_pago!
     const enBorrador = cotizacion.estado === 'borrador'
-    const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : 'Pendiente'
+    const linkEnviado = cp.estado === 'pendiente' && Boolean(cp.link_enviado_en)
+    const label = cp.estado === 'firmado' ? 'Firmado' : cp.estado === 'revocado' ? 'Revocado' : linkEnviado ? 'Link enviado' : 'Pendiente'
     const tone = cp.estado === 'firmado'
       ? { badge: 'bg-green-50 text-green-700 ring-green-200/60', dot: 'bg-green-500' }
       : cp.estado === 'revocado'
         ? { badge: 'bg-gray-100 text-gray-500 ring-gray-200/60', dot: 'bg-gray-400' }
-        : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
+        : linkEnviado
+          ? { badge: 'bg-sky-50 text-sky-700 ring-sky-200/60', dot: 'bg-sky-500' }
+          : { badge: 'bg-amber-50 text-amber-700 ring-amber-200/60', dot: 'bg-amber-500' }
     return (
       <div className="bg-white rounded-xl border p-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-2.5 min-w-0">
@@ -784,6 +814,12 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     ? 'Firma pendiente — al firmarlo, la cotización se acepta automáticamente'
                     : 'Pendiente de firma'}
             </p>
+            {linkEnviado && (
+              <p className="text-xs text-sky-700 flex items-center gap-1 mt-0.5">
+                <MessageCircle className="h-3 w-3 shrink-0" />
+                Link enviado por WhatsApp{cp.link_enviado_a ? ` al ${cp.link_enviado_a}` : ''} · {formatDateTime(cp.link_enviado_en!)} — esperando la firma
+              </p>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-2 shrink-0">
@@ -808,7 +844,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           ) : cp.estado === 'pendiente' && canGestionar ? (
             <Button variant="outline" size="sm" onClick={() => setCompromisoPagoId(cp.id)}>
               <FileSignature className="h-3.5 w-3.5 mr-1.5" />
-              Firmar
+              {linkEnviado ? 'Firmar o reenviar' : 'Firmar'}
             </Button>
           ) : null}
         </div>
@@ -1802,7 +1838,15 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       )}
 
 {/* ── Modal firma compromiso de pago (Documenso) ────────────────── */}
-      <Dialog open={Boolean(compromisoPagoId)} onOpenChange={(v) => !v && setCompromisoPagoId(null)}>
+      <Dialog
+        open={Boolean(compromisoPagoId)}
+        onOpenChange={(v) => {
+          if (v) return
+          setCompromisoPagoId(null)
+          // Refresca la tarjeta: si se envió el link, debe verse "Link enviado".
+          if (cotizacion) queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+        }}
+      >
         <DialogContent className="max-w-4xl w-[95vw]">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -1814,10 +1858,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             <CompromisoPagoFirmaContent
               consentimientoId={compromisoPagoId}
               onFirmado={() => {
+                firmaVistaEnModalRef.current = true
                 setCompromisoPagoId(null)
                 if (cotizacion) queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
               }}
-              onCancel={() => setCompromisoPagoId(null)}
+              onCancel={() => {
+                setCompromisoPagoId(null)
+                if (cotizacion) queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+              }}
             />
           )}
         </DialogContent>
