@@ -130,6 +130,20 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
         self.assertFalse(verificar_horario_profesional(self.profesional.id, self.sede.id, self.inicio, self.inicio + timedelta(minutes=30)))
         self.assertEqual(get_slots_disponibles(self.profesional.id, self.sede.id, self.inicio.date(), 30), [])
 
+    def test_get_slots_disponibles_excluye_la_cita_que_se_edita(self):
+        """Al editar una cita, su propio horario aparece libre."""
+        cita = Cita.objects.create(
+            paciente=self.paciente, sede=self.sede, servicio=self.servicio, profesional=self.profesional,
+            fecha_inicio=self.inicio, fecha_fin=calcular_fecha_fin(self.inicio, 30), duracion_min=30,
+            servicio_nombre=self.servicio.nombre, canal_confirmacion=self.paciente.canal_confirmacion,
+        )
+        fecha = self.inicio.date()
+        self.assertNotIn(self.inicio, get_slots_disponibles(self.profesional.id, self.sede.id, fecha, 30))
+        self.assertIn(
+            self.inicio,
+            get_slots_disponibles(self.profesional.id, self.sede.id, fecha, 30, excluir_cita_id=cita.id),
+        )
+
     def test_crear_cita_rechaza_paciente_de_otra_clinica(self):
         sede = self.sede
         servicio = self.servicio

@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 import hmac
+import uuid
 import logging
 
 from django.conf import settings
@@ -568,6 +569,8 @@ class CitaViewSet(ModelViewSet):
         servicio_id = request.query_params.get("servicio_id")
         item_cotizacion_id = request.query_params.get("item_cotizacion_id")
         duracion_min_param = request.query_params.get("duracion_min")
+        # Al editar una cita, su propio horario no cuenta como ocupado.
+        cita_id = request.query_params.get("cita_id")
 
         logger.debug(
             "[slots_disponibles] params: profesional_id=%s, sede_id=%s, fecha=%s, "
@@ -697,7 +700,18 @@ class CitaViewSet(ModelViewSet):
 
         logger.debug("[slots_disponibles] llamando get_slots_disponibles: profesional=%s, sede=%s, fecha=%s, duracion=%s", profesional.id, sede.id, fecha, duracion_min)
         fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
-        slots = services.get_slots_disponibles(profesional.id, sede.id, fecha_date, duracion_min)
+        excluir_cita_id = None
+        if cita_id:
+            try:
+                excluir_cita_id = (
+                    Cita.objects.filter(id=uuid.UUID(cita_id), sede__clinica=sede.clinica)
+                    .values_list("id", flat=True).first()
+                )
+            except ValueError as exc:
+                raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
+        slots = services.get_slots_disponibles(
+            profesional.id, sede.id, fecha_date, duracion_min, excluir_cita_id=excluir_cita_id,
+        )
         logger.debug("[slots_disponibles] slots encontrados: %s", slots)
         return Response([slot.isoformat() for slot in slots], status=status.HTTP_200_OK)
 

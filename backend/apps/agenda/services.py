@@ -185,7 +185,9 @@ def verificar_horario_profesional(profesional_id, sede_id, fecha_inicio: datetim
     return inicio_habil <= fecha_inicio and fecha_fin <= fin_habil
 
 
-def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> list[datetime]:
+def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, excluir_cita_id=None) -> list[datetime]:
+    """Horarios libres del profesional en la sede. `excluir_cita_id`: al editar
+    una cita, su propio horario no cuenta como ocupado."""
     sede = Sede.objects.select_related("clinica").get(id=sede_id)
     key_dia = DIAS_SEMANA.get(fecha.weekday())
     rango = sede.horario.get(key_dia)
@@ -221,7 +223,7 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> 
         if (
             not bloqueado_sede
             and verificar_horario_sede(sede, actual, fin)
-            and verificar_disponibilidad_profesional(profesional_id, actual, fin)
+            and verificar_disponibilidad_profesional(profesional_id, actual, fin, excluir_cita_id=excluir_cita_id)
         ):
             slots.append(actual)
         actual = actual + timedelta(minutes=intervalo_min)
