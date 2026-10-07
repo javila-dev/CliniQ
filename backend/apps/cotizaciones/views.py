@@ -8,6 +8,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.http import Http404, HttpResponse
 from django.shortcuts import get_object_or_404
+from django.db import transaction
 from django.db.models import DecimalField, Prefetch, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -265,7 +266,11 @@ class CotizacionViewSet(ModelViewSet):
         anterior. No toca documentos firmados ni el acta de un acuerdo de pago.
         """
         from apps.consentimientos.models import Consentimiento
-        from apps.consentimientos.services import es_acta_acuerdo_pago, renderizar_compromiso_pago_estandar
+        from apps.consentimientos.services import (
+            eliminar_sobre_documenso,
+            es_acta_acuerdo_pago,
+            renderizar_compromiso_pago_estandar,
+        )
 
         if cotizacion.estado != Cotizacion.Estado.BORRADOR:
             return compromiso
@@ -284,12 +289,17 @@ class CotizacionViewSet(ModelViewSet):
         if hash_contenido == compromiso.hash_contenido:
             return compromiso
 
+        sobre_anterior = compromiso.documenso_documento_id
         compromiso.contenido_snapshot = snapshot
         compromiso.hash_contenido = hash_contenido
         compromiso.documenso_documento_id = ""
         compromiso.documenso_signing_token = ""
+        compromiso.link_enviado_en = None
+        compromiso.link_enviado_a = ""
         compromiso.token_expira = timezone.now() + timedelta(hours=48)
         compromiso.save()
+        if sobre_anterior:
+            transaction.on_commit(lambda: eliminar_sobre_documenso(sobre_anterior, consentimiento_id=compromiso.id))
         return compromiso
 
     def _serializar_compromiso_pago(self, compromiso_pago):

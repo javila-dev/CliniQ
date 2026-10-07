@@ -67,6 +67,7 @@ from apps.notificaciones.services import (
     pidio_numero_cliniq,
     resolver_ruta_whatsapp,
 )
+from apps.pacientes.serializers import enmascarar_cola
 from apps.users.authorization import user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
@@ -868,14 +869,14 @@ class ConsentimientoInformadoViewSet(
                 enviado = True
             except NumeroPropioNoDisponibleError as exc:
                 return Response(
-                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": telefono},
+                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": enmascarar_cola(telefono)},
                     status=status.HTTP_409_CONFLICT,
                 )
             except (ValueError, WhatsAppNoDisponibleError, requests.RequestException):
                 # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
 
-        return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
+        return Response({"enviado": enviado, "signing_url": link, "telefono": enmascarar_cola(telefono)}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="reintentar_pdf")
     def reintentar_pdf(self, request, pk=None):

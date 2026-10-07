@@ -25,6 +25,7 @@ from apps.consentimientos.services import (
 from apps.historia_clinica.services import DocumensoIntegrationError
 from apps.notificaciones.services import NumeroPropioNoDisponibleError, pidio_numero_cliniq
 from apps.core.logging import registrar_accion
+from apps.pacientes.serializers import enmascarar_cola
 from apps.users.permissions import RequirePermission
 
 
@@ -154,14 +155,14 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
                 )
             except NumeroPropioNoDisponibleError as exc:
                 return Response(
-                    {"error": str(exc), "code": exc.code, "signing_url": exc.signing_url, "telefono": exc.telefono},
+                    {"error": str(exc), "code": exc.code, "signing_url": exc.signing_url, "telefono": enmascarar_cola(exc.telefono)},
                     status=status.HTTP_409_CONFLICT,
                 )
             except DocumensoIntegrationError as exc:
                 return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
             except ValueError as exc:
                 return Response({"error": str(exc)}, status=status.HTTP_409_CONFLICT)
-        return Response(result, status=status.HTTP_200_OK)
+        return Response({**result, "telefono": enmascarar_cola(result["telefono"])}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="revocar")
     def revocar(self, request, pk=None):

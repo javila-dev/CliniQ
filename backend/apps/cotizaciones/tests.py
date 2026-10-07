@@ -817,6 +817,8 @@ class CotizacionFlowTests(TestCase):
         compromiso = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
         compromiso.documenso_documento_id = "doc-viejo"
         compromiso.documenso_signing_token = "token-viejo"
+        compromiso.link_enviado_en = timezone.now()
+        compromiso.link_enviado_a = "3000000001"
         compromiso.save()
         hash_anterior = compromiso.hash_contenido
 
@@ -828,22 +830,24 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(compromiso.documenso_documento_id, "doc-viejo")
 
         item_id = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["items"][0]["id"]
-        editado = self.client.patch(
-            f"/api/v1/cotizaciones/{cotizacion_id}/",
-            {
-                "items": [{
-                    "id": item_id,
-                    "descripcion": "Toxina botulinica",
-                    "num_citas": 1,
-                    "duracion_estimada": "45 min",
-                    "periodicidad": "Cada 4 meses",
-                    "valor_unitario": "420000.00",
-                    "descuento_porcentaje": "0.00",
-                }],
-                "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Banco XYZ", "valor": "420000.00"}],
-            },
-            format="json",
-        )
+        with patch("apps.consentimientos.services.eliminar_sobre_documenso") as eliminar, \
+                self.captureOnCommitCallbacks(execute=True):
+            editado = self.client.patch(
+                f"/api/v1/cotizaciones/{cotizacion_id}/",
+                {
+                    "items": [{
+                        "id": item_id,
+                        "descripcion": "Toxina botulinica",
+                        "num_citas": 1,
+                        "duracion_estimada": "45 min",
+                        "periodicidad": "Cada 4 meses",
+                        "valor_unitario": "420000.00",
+                        "descuento_porcentaje": "0.00",
+                    }],
+                    "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Banco XYZ", "valor": "420000.00"}],
+                },
+                format="json",
+            )
         self.assertEqual(editado.status_code, 200)
 
         compromiso.refresh_from_db()
@@ -852,6 +856,11 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(compromiso.documenso_documento_id, "")
         self.assertEqual(compromiso.documenso_signing_token, "")
         self.assertEqual(Consentimiento.objects.filter(cotizacion_id=cotizacion_id).count(), 1)
+        # El link enviado al paciente era del documento viejo: se borra su sobre
+        # en Documenso y deja de mostrarse como "link enviado".
+        eliminar.assert_called_once_with("doc-viejo", consentimiento_id=compromiso.id)
+        self.assertIsNone(compromiso.link_enviado_en)
+        self.assertEqual(compromiso.link_enviado_a, "")
 
     def test_compromiso_pago_no_se_genera_si_el_requisito_esta_desactivado(self):
         from apps.consentimientos.models import Consentimiento

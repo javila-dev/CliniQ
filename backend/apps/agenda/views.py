@@ -49,6 +49,7 @@ from apps.notificaciones.services import (
     resolver_ruta_whatsapp,
     uso_whatsapp_mes_actual,
 )
+from apps.pacientes.serializers import enmascarar_cola
 from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
 from apps.users.models import User
 from apps.users.permissions import CanChangeAppointmentState, RequirePermission, get_clinica_activa
@@ -1033,14 +1034,14 @@ class CitaViewSet(ModelViewSet):
                 enviado = True
             except NumeroPropioNoDisponibleError as exc:
                 return Response(
-                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": telefono},
+                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": enmascarar_cola(telefono)},
                     status=status.HTTP_409_CONFLICT,
                 )
             except (ValueError, WhatsAppNoDisponibleError, http_requests.RequestException):
                 # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
 
-        return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
+        return Response({"enviado": enviado, "signing_url": link, "telefono": enmascarar_cola(telefono)}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="confirmar_firma_asistencia")
     def confirmar_firma_asistencia(self, request, pk=None):

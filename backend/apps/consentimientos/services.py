@@ -348,7 +348,9 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
 
     envelope_id = _crear_envelope_documenso(
         pdf_bytes, nombre_archivo, consentimiento.paciente.nombre_completo, recipient_email, coords,
-        external_id=f"compromiso_pago:{consentimiento.id}",
+        # La huella del contenido permite al webhook descartar la firma de un
+        # sobre viejo si el documento se regenero despues de enviar el link.
+        external_id=f"compromiso_pago:{consentimiento.id}:{consentimiento.hash_contenido[:16]}",
     )
 
     distribute_payload = _fetch_documenso_json(
@@ -363,6 +365,22 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
     consentimiento.save(update_fields=["documenso_documento_id", "documenso_signing_token", "updated_at"])
 
     return {"signing_token": signing_token or "", "document_id": str(envelope_id)}
+
+
+def eliminar_sobre_documenso(envelope_id: str, *, consentimiento_id=None) -> None:
+    """Borra en Documenso un sobre que ya no sirve (documento regenerado) para
+    que el link enviado al paciente deje de abrirse. Best effort: si falla, el
+    webhook igual descarta la firma por la huella del contenido."""
+    from apps.historia_clinica.services import _fetch_documenso_json
+
+    try:
+        _fetch_documenso_json("POST", "/api/v2/envelope/delete", json_payload={"envelopeId": envelope_id})
+        logger.info("[eliminar_sobre_documenso] sobre eliminado | envelope_id=%s | consentimiento_id=%s", envelope_id, consentimiento_id)
+    except Exception:
+        logger.warning(
+            "[eliminar_sobre_documenso] no se pudo eliminar | envelope_id=%s | consentimiento_id=%s",
+            envelope_id, consentimiento_id, exc_info=True,
+        )
 
 
 def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
@@ -414,6 +432,9 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento, *, usar_num
                 usar_numero_cliniq=usar_numero_cliniq,
             )
             enviado = True
+            consentimiento.link_enviado_en = timezone.now()
+            consentimiento.link_enviado_a = telefono
+            consentimiento.save(update_fields=["link_enviado_en", "link_enviado_a", "updated_at"])
         except NumeroPropioNoDisponibleError as exc:
             exc.signing_url, exc.telefono = signing_url, telefono
             raise
