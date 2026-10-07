@@ -37,6 +37,7 @@ import { NavigationProgress } from './NavigationProgress'
 import { ImpersonationBanner } from './ImpersonationBanner'
 import { TrialBanner } from './TrialBanner'
 import { ThemeApplier } from './ThemeApplier'
+import { ConfirmarNumeroCliniqDialog } from './ConfirmarNumeroCliniqDialog'
 import { hasPermission, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
@@ -396,6 +397,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-gray-50 overflow-x-hidden">
       <ThemeApplier />
+      <ConfirmarNumeroCliniqDialog />
       <aside className={cn('hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:left-0 lg:w-60 z-40', SIDEBAR_BG)}>
         <Sidebar />
       </aside>

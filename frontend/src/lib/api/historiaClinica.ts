@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
 import type {
   HistoriaClinica,
   NotaClinica,
@@ -189,13 +190,13 @@ export const historiaClinicaApi = {
       )
       return res.data
     },
-    enviarLinkFirma: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
-      const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(
-        `/historia-clinica/consentimientos/${id}/enviar_link_firma/`,
-        {}
-      )
-      return res.data
-    },
+    enviarLinkFirma: (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> =>
+      enviarConConfirmacion(async (usar) => {
+        const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(
+          `/historia-clinica/consentimientos/${id}/enviar_link_firma/`, cuerpoNumeroCliniq(usar),
+        )
+        return res.data
+      }, linkSinEnviar),
     // Consulta a Documenso si ya firmó (p. ej. desde el link de WhatsApp); respaldo del webhook.
     verificarFirma: async (id: string): Promise<ConsentimientoInformado> => {
       const res = await apiClient.post<ConsentimientoInformado>(
@@ -274,10 +275,13 @@ export const historiaClinicaApi = {
       const res = await apiClient.post<OrdenMedica>('/historia-clinica/ordenes-medicas/', data)
       return res.data
     },
-    enviarWhatsapp: async (id: string): Promise<{ enviado: boolean }> => {
-      const res = await apiClient.post<{ enviado: boolean }>(`/historia-clinica/ordenes-medicas/${id}/enviar_whatsapp/`, {})
-      return res.data
-    },
+    enviarWhatsapp: (id: string): Promise<{ enviado: boolean }> =>
+      enviarConConfirmacion(async (usar) => {
+        const res = await apiClient.post<{ enviado: boolean }>(
+          `/historia-clinica/ordenes-medicas/${id}/enviar_whatsapp/`, cuerpoNumeroCliniq(usar),
+        )
+        return res.data
+      }),
     descargarPdf: async (id: string): Promise<Blob> => {
       const res = await apiClient.get(`/historia-clinica/ordenes-medicas/${id}/pdf/`, { responseType: 'blob' })
       return res.data as Blob

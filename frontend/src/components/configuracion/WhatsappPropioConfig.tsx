@@ -118,7 +118,7 @@ function NumeroEnUso({ estado }: { estado: WhatsappPropioEstado }) {
   } else {
     titulo = `Desde el número de CliniQ${estado.numero_cliniq ? ` (${estado.numero_cliniq})` : ''}`
     detalle = pendientes
-      ? 'Tu número ya está conectado: mientras Meta aprueba tus mensajes, se siguen enviando desde el número de CliniQ.'
+      ? 'Tu número ya está conectado. Mientras Meta aprueba tus mensajes, cada envío te pide confirmar si sale desde el número de CliniQ.'
       : estado.numeros.length > 0 && !estado.habilitado
         ? 'Tus números siguen conectados, pero el add-on de número propio está inactivo.'
         : 'Tus pacientes ven el número de CliniQ y, si responden, su mensaje no llega a tu clínica.'
@@ -230,7 +230,8 @@ function CambiarANumeroPropio({ onConectar }: { onConectar: () => void }) {
         </p>
         <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">
           Tu plan ya incluye el número propio. Conecta el WhatsApp Business de tu clínica en unos minutos: todas tus
-          sedes lo usarán. Hasta que Meta apruebe tus mensajes, todo se sigue enviando desde el número de CliniQ.
+          sedes lo usarán. Hasta que Meta apruebe tus mensajes, cada envío te pide confirmar si sale desde el número
+          de CliniQ.
         </p>
       </div>
       <ComparacionNumeros />
@@ -303,7 +304,7 @@ function ConectarDialog({ estado, open, onClose, reconectar }: {
             <p className="text-sm leading-relaxed text-muted-foreground">
               {reconectar
                 ? 'Los mensajes vuelven a salir desde tu número.'
-                : 'Meta está revisando los mensajes de CliniQ (de minutos a un día). Mientras tanto, todo se envía como hasta ahora.'}
+                : 'Meta está revisando los mensajes de CliniQ (de minutos a un día). Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.'}
               {!reconectar && (primero
                 ? ' Todas tus sedes usarán este número.'
                 : ' Asígnalo a tus sedes en la sección Asignación.')}
@@ -564,8 +565,8 @@ function TusNumeros({ estado, onConectar, onReconectar, onDarDeBaja }: {
               )}>
                 {n.estado === 'activo' && 'Enviando mensajes.'}
                 {(n.estado === 'conectado' || n.estado === 'plantillas_pendientes')
-                  && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto se usa el número de CliniQ.'}
-                {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto se usa otro número.')}
+                  && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.'}
+                {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.')}
               </p>
               <LimiteDiario numero={n} />
               {n.bloqueo === 'conexion' && (
@@ -692,7 +693,11 @@ function Asignacion({ estado }: { estado: WhatsappPropioEstado }) {
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{sede.nombre}</p>
                 <p className="text-[12.5px] text-muted-foreground">
-                  {efectivo ? `Enviando desde ${etiquetaNumero(efectivo)}` : 'Enviando desde el número de CliniQ'}
+                  {efectivo
+                    ? `Enviando desde ${etiquetaNumero(efectivo)}`
+                    : sede.tipo === 'cliniq'
+                      ? 'Enviando desde el número de CliniQ'
+                      : 'Tu número aún no está disponible: cada envío pide confirmar si sale desde el de CliniQ'}
                 </p>
               </div>
               <Select
@@ -726,7 +731,8 @@ function Asignacion({ estado }: { estado: WhatsappPropioEstado }) {
         <p>
           Los documentos sin sede (consentimientos, órdenes médicas, firmas) usan la sede de la cita relacionada o,
           si no hay, la última sede donde se atendió el paciente. Si el número de una sede tiene un problema, el
-          mensaje sale desde el número por defecto, y si ninguno está disponible, desde el número de CliniQ.
+          mensaje sale desde el número por defecto. Si ninguno está disponible, CliniQ te pregunta antes de enviarlo
+          desde su número; si Meta lo rechaza después de enviado, lo verás en el inicio como un envío que no salió.
         </p>
       </div>
     </section>

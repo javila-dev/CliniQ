@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { cuerpoNumeroCliniq, enviarConConfirmacion } from '@/store/numeroCliniqStore'
 import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { NotaClinica } from '@/types/historia'
@@ -114,10 +115,13 @@ export const cotizacionesApi = {
     return res.data as Blob
   },
 
-  enviarWhatsapp: async (id: string): Promise<{ enviado: boolean; envio_id?: string }> => {
-    const res = await apiClient.post<{ enviado: boolean; envio_id?: string }>(`/cotizaciones/${id}/enviar_whatsapp/`)
-    return res.data
-  },
+  enviarWhatsapp: (id: string): Promise<{ enviado: boolean; envio_id?: string }> =>
+    enviarConConfirmacion(async (usar) => {
+      const res = await apiClient.post<{ enviado: boolean; envio_id?: string }>(
+        `/cotizaciones/${id}/enviar_whatsapp/`, cuerpoNumeroCliniq(usar),
+      )
+      return res.data
+    }),
 
   enviarEmail: async (id: string, body: { destinatario?: string; notas?: string }): Promise<{ enviado: boolean; envio_id?: string }> => {
     const res = await apiClient.post<{ enviado: boolean; envio_id?: string }>(`/cotizaciones/${id}/enviar_email/`, body)

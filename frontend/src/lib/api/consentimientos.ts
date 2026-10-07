@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
 import type {
   PlantillaConsentimiento,
   PlantillaConsentimientoInput,
@@ -58,10 +59,13 @@ export const consentimientosApi = {
     return res.data
   },
 
-  enviarLinkDocumenso: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
-    const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(`/consentimientos/${id}/enviar_link_documenso/`)
-    return res.data
-  },
+  enviarLinkDocumenso: (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> =>
+    enviarConConfirmacion(async (usar) => {
+      const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(
+        `/consentimientos/${id}/enviar_link_documenso/`, cuerpoNumeroCliniq(usar),
+      )
+      return res.data
+    }, linkSinEnviar),
 
   revocar: async (id: string): Promise<Consentimiento> => {
     const res = await apiClient.post<Consentimiento>(`/consentimientos/${id}/revocar/`)

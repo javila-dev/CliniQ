@@ -1,4 +1,5 @@
 import { apiClient } from './client'
+import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
 import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
 import type { Paginated } from '@/types/common'
 
@@ -87,10 +88,11 @@ export const agendaApi = {
       const res = await apiClient.post<Cita>(`/agenda/citas/${id}/solicitar_recordatorio/`)
       return res.data
     },
-    enviarRecordatorioInmediato: async (id: string): Promise<Cita> => {
-      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/enviar_recordatorio_inmediato/`)
-      return res.data
-    },
+    enviarRecordatorioInmediato: (id: string): Promise<Cita> =>
+      enviarConConfirmacion(async (usar) => {
+        const res = await apiClient.post<Cita>(`/agenda/citas/${id}/enviar_recordatorio_inmediato/`, cuerpoNumeroCliniq(usar))
+        return res.data
+      }),
     recordatoriosPendientes: async (): Promise<RecordatorioPendiente[]> => {
       const res = await apiClient.get<RecordatorioPendiente[]>('/agenda/citas/recordatorios_pendientes/')
       return res.data
@@ -107,10 +109,13 @@ export const agendaApi = {
       const res = await apiClient.post<{ signing_token: string; document_id: string }>(`/agenda/citas/${id}/iniciar_registro_asistencia/`)
       return res.data
     },
-    enviarLinkFirmaAsistencia: async (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> => {
-      const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(`/agenda/citas/${id}/enviar_link_firma_asistencia/`)
-      return res.data
-    },
+    enviarLinkFirmaAsistencia: (id: string): Promise<{ enviado: boolean; signing_url: string; telefono: string }> =>
+      enviarConConfirmacion(async (usar) => {
+        const res = await apiClient.post<{ enviado: boolean; signing_url: string; telefono: string }>(
+          `/agenda/citas/${id}/enviar_link_firma_asistencia/`, cuerpoNumeroCliniq(usar),
+        )
+        return res.data
+      }, linkSinEnviar),
     confirmarFirmaAsistencia: async (id: string): Promise<Cita> => {
       const res = await apiClient.post<Cita>(`/agenda/citas/${id}/confirmar_firma_asistencia/`)
       return res.data
