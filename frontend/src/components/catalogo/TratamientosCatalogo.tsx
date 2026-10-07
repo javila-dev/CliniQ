@@ -125,7 +125,10 @@ export function TratamientosCatalogo() {
   const toggleMut = useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       clinicasApi.tratamientos.update(id, { activo }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['tratamientos', 'all'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tratamientos', 'all'] })
+      qc.invalidateQueries({ queryKey: ['tratamientos-activos'] })
+    },
   })
 
   const tratamientos = data?.results ?? []

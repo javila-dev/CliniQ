@@ -451,6 +451,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
       esEdicion ? clinicasApi.tratamientos.update(tratamiento!.id, payload) : clinicasApi.tratamientos.create(payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['tratamientos'] })
+      qc.invalidateQueries({ queryKey: ['tratamientos-activos'] })
       qc.invalidateQueries({ queryKey: ['setup-checklist'] })
       try { window.localStorage.removeItem(claveBorrador) } catch { /* nada que limpiar */ }
       toast.success(esEdicion ? 'Tratamiento guardado' : 'Tratamiento creado')

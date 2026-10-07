@@ -266,6 +266,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     },
     onSuccess: (result, { otro }) => {
       qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] })
+      qc.invalidateQueries({ queryKey: ['procedimientos-activos'] })
       qc.invalidateQueries({ queryKey: ['procedimiento', result.id] })
       qc.invalidateQueries({ queryKey: ['servicios', 'all'] }) // backward compat
       qc.invalidateQueries({ queryKey: ['setup-checklist'] })

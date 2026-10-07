@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2 } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -419,6 +419,11 @@ export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormPr
   const subtotalBruto = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1), 0)
   const totalDescuentos = items.reduce((a, i) => a + (i.valor_unitario || 0) * (i.num_citas || 1) * ((i.descuento_porcentaje || 0) / 100), 0)
   const total = subtotalBruto - totalDescuentos
+  // Requisitos visibles en la card de aceptación (el backend vuelve a validarlos).
+  const formasPagoForm = useWatch({ control, name: 'formas_pago' })
+  const sumaPagosForm = formasPagoForm.reduce((a, p) => a + (p.valor || 0), 0)
+  const pagosCuadran = formasPagoForm.length > 0 && Math.abs(sumaPagosForm - total) <= 1
+  const tieneItemsCobrables = items.some((i) => !i.es_obsequio)
   // Valor de lista de lo obsequiado (informativo: nunca entra al total).
   const valorObsequios = items.reduce(
     (a, i) => a + (i.es_obsequio ? (i.valor_referencia || 0) * (i.tipo === 'insumo' ? 1 : (i.num_citas || 1)) : 0),
@@ -681,6 +686,29 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   }
   const aplicandoCampana = false
 
+  /** Tope de descuento del catálogo: avisa y devuelve true si algún ítem lo supera.
+   * Guardar y Aprobar comparten la regla para que el aviso del campo y el bloqueo coincidan. */
+  function avisarDescuentoExcedido(items: FormValues['items']): boolean {
+    const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
+      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [])
+      if (!info) return false
+      const desc = item.descuento_porcentaje || 0
+      const efectivo = (item.valor_unitario || 0) * (1 - desc / 100)
+      const piso = info.precioLista * (1 - info.descMaxPct / 100)
+      const campanaExacta = !!item.precio_campana_disponible && desc === 0 && item.valor_unitario === parseFloat(item.precio_campana_disponible)
+      return !campanaExacta && efectivo < piso - 1
+    })
+    if (!itemDescExcedido) return false
+    const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [])
+    toast.error(
+      'Descuento sobre el máximo',
+      info && info.descMaxPct > 0
+        ? `"${itemDescExcedido.descripcion}" supera el descuento máximo permitido (${info.descMaxPct}%).`
+        : `"${itemDescExcedido.descripcion}" no admite descuento.`,
+    )
+    return true
+  }
+
   async function handleAceptar() {
     const values = getValues()
     const { formas_pago, items } = values
@@ -694,25 +722,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       return
     }
 
-    const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
-      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [])
-      if (!info) return false
-      const desc = item.descuento_porcentaje || 0
-      const efectivo = (item.valor_unitario || 0) * (1 - desc / 100)
-      const piso = info.precioLista * (1 - info.descMaxPct / 100)
-      const campanaExacta = !!item.precio_campana_disponible && desc === 0 && item.valor_unitario === parseFloat(item.precio_campana_disponible)
-      return !campanaExacta && efectivo < piso - 1
-    })
-    if (itemDescExcedido) {
-      const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [])
-      toast.error(
-        'Descuento sobre el máximo',
-        info && info.descMaxPct > 0
-          ? `"${itemDescExcedido.descripcion}" supera el descuento máximo permitido (${info.descMaxPct}%).`
-          : `"${itemDescExcedido.descripcion}" no admite descuento.`,
-      )
-      return
-    }
+    if (avisarDescuentoExcedido(items)) return
 
     const totalItems = items.reduce((acc, i) => acc + (i.valor_unitario || 0) * (i.num_citas || 1) * (1 - (i.descuento_porcentaje || 0) / 100), 0)
     const sumPagos = formas_pago.reduce((acc, p) => acc + (p.valor || 0), 0)
@@ -922,16 +932,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Descartar'}
               </Button>
             )}
-            {cotizacion?.estado === 'borrador' && canGestionar && (
-              <Button
-                size="sm"
-                className="bg-green-600 hover:bg-green-700"
-                disabled={cambiando}
-                onClick={handleAceptar}
-              >
-                {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Aceptar'}
-              </Button>
-            )}
             {!soloLectura && (
               <Button
                 size="sm"
@@ -949,13 +949,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
                     return
                   }
+                  if (avisarDescuentoExcedido(v.items)) return
                   esNueva ? crear(v) : actualizar(v)
                 })}
               >
                 {guardando
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
                   : <Save className="h-3.5 w-3.5 mr-1.5" />}
-                {esNueva ? 'Crear cotización' : 'Guardar'}
+                {esNueva ? 'Crear cotización' : 'Guardar borrador'}
               </Button>
             )}
           </div>
@@ -964,6 +965,49 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+
+        {/* ── Aceptación del cliente (solo borrador ya creado) ─────────────── */}
+        {cotizacion?.estado === 'borrador' && canGestionar && (
+          <div className="bg-white rounded-xl border border-green-200 p-5 flex flex-col md:flex-row md:items-center gap-4">
+            <div className="flex-1 min-w-0 space-y-2">
+              <p className="text-sm font-semibold text-foreground">¿El cliente aceptó la cotización?</p>
+              <p className="text-xs text-muted-foreground">
+                Al confirmarla se guardan los cambios, se crea la cartera con las cuotas y se habilita agendar las sesiones.
+                Después ya no se puede editar.
+              </p>
+              <ul className="space-y-1 text-xs">
+                <li className={cn('flex items-center gap-1.5', tieneItemsCobrables ? 'text-green-700' : 'text-muted-foreground')}>
+                  {tieneItemsCobrables ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+                  Al menos un ítem cotizado
+                </li>
+                <li className={cn('flex items-center gap-1.5', pagosCuadran ? 'text-green-700' : 'text-muted-foreground')}>
+                  {pagosCuadran ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+                  {pagosCuadran
+                    ? 'Las formas de pago suman el total'
+                    : formasPagoForm.length === 0
+                      ? 'Falta registrar las formas de pago'
+                      : `Las formas de pago (${cop(sumaPagosForm)}) no suman el total (${cop(total)})`}
+                </li>
+                {cotizacion.compromiso_pago?.estado === 'pendiente' && (
+                  <li className="flex items-center gap-1.5 text-amber-700">
+                    <Clock className="h-3.5 w-3.5" />
+                    Falta la firma del compromiso de pago: queda aceptada cuando el cliente firme
+                  </li>
+                )}
+              </ul>
+            </div>
+            <Button
+              className="bg-green-600 hover:bg-green-700 shrink-0"
+              disabled={cambiando || actualizando}
+              onClick={handleAceptar}
+            >
+              {cambiando
+                ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
+                : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
+              El cliente aceptó
+            </Button>
+          </div>
+        )}
 
         {/* ── Fila 1: Cliente + Sede/Detalles ──────────────────────────────── */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">

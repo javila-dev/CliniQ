@@ -175,7 +175,10 @@ export function ProcedimientosCatalogo() {
   const toggleMut = useMutation({
     mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
       clinicasApi.procedimientos.update(id, { activo }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['procedimientos', 'all'] })
+      qc.invalidateQueries({ queryKey: ['procedimientos-activos'] })
+    },
   })
 
   const deleteMut = useMutation({
@@ -183,6 +186,7 @@ export function ProcedimientosCatalogo() {
     onSuccess: () => {
       toast({ title: 'Procedimiento eliminado' })
       qc.invalidateQueries({ queryKey: ['procedimientos'] })
+      qc.invalidateQueries({ queryKey: ['procedimientos-activos'] })
     },
     onError: (err: any) => {
       toast({
