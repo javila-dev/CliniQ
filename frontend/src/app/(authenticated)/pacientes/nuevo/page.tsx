@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ShieldCheck, CheckCircle2, Loader2, X, Camera } from 'lucide-react'
@@ -21,6 +21,12 @@ export default function NuevoPacientePage() {
   const [serverError, setServerError] = useState<string | null>(null)
   const [enrollmentPacienteId, setEnrollmentPacienteId] = useState<string | null>(null)
   const [navigating, setNavigating] = useState(false)
+  const errorRef = useRef<HTMLDivElement>(null)
+
+  // El error se pinta arriba de la tarjeta y el botón está abajo: llevarlo a la vista.
+  useEffect(() => {
+    if (serverError) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [serverError])
 
   const { data: wizardConfig } = useQuery({
     queryKey: ['wizard-config'],
@@ -88,7 +94,7 @@ export default function NuevoPacientePage() {
       <Card className="w-4/5 mx-auto">
         <CardContent className="pt-6">
           {serverError && (
-            <div className="mb-4 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+            <div ref={errorRef} className="mb-4 rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
               <p className="text-sm text-destructive">{serverError}</p>
             </div>
           )}

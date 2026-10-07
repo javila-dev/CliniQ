@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { Loader2, Lock } from 'lucide-react'
-import { useForm, Controller } from 'react-hook-form'
+import { useForm, Controller, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Button } from '@/components/ui/button'
@@ -71,6 +71,18 @@ const schema = z.object({
 })
 
 type FormValues = z.infer<typeof schema>
+
+// Pestaña donde vive cada campo, para llevar al usuario al error (autoriza_datos siempre está visible).
+const TABS_LABEL = { basico: 'Identificación y contacto', personal: 'Datos personales', salud: 'Salud y afiliación' } as const
+type TabKey = keyof typeof TABS_LABEL
+const CAMPOS_TAB: Partial<Record<keyof FormValues, TabKey>> = {
+  nombres: 'basico', apellidos: 'basico', tipo_documento: 'basico', numero_documento: 'basico', sexo: 'basico',
+  fecha_nacimiento: 'basico', telefono: 'basico', email: 'basico', canal_confirmacion: 'basico',
+  direccion: 'personal', ciudad: 'personal', barrio: 'personal', estado_civil: 'personal', ocupacion: 'personal',
+  escolaridad: 'personal', grupo_etnico: 'personal', nombre_responsable: 'personal',
+  parentesco_responsable: 'personal', telefono_responsable: 'personal',
+  grupo_sanguineo: 'salud', eps: 'salud', tipo_afiliado: 'salud', regimen: 'salud',
+}
 
 interface PacienteFormProps {
   defaultValues?: Paciente
@@ -145,6 +157,15 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
 
   const tipoDoc = watch('tipo_documento')
   const autorizaDatos = watch('autoriza_datos')
+
+  const tabsConError = new Set(
+    (Object.keys(errors) as (keyof FormValues)[]).map((k) => CAMPOS_TAB[k]).filter(Boolean) as TabKey[],
+  )
+  // Si la validación falla, mostrar la pestaña del primer error (si no, el botón parece no hacer nada).
+  const handleInvalid = (errs: FieldErrors<FormValues>) => {
+    const primero = (Object.keys(errs) as (keyof FormValues)[]).map((k) => CAMPOS_TAB[k]).find(Boolean)
+    if (primero) setTab(primero)
+  }
 
   const handleFormSubmit = async (values: FormValues) => {
     const payload: CreatePacienteRequest = {
@@ -315,7 +336,7 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
   // ── Modo compact: solo básicos + autorización ─────────────────────────────────
   if (compact) {
     return (
-      <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+      <form onSubmit={handleSubmit(handleFormSubmit, handleInvalid)} className="space-y-5">
         {BasicFields}
         {AuthBlock}
         <div className="flex justify-end">
@@ -330,12 +351,12 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
 
   // ── Modo completo: tabs ────────────────────────────────────────────────────────
   return (
-    <form onSubmit={handleSubmit(handleFormSubmit)} className="space-y-5">
+    <form onSubmit={handleSubmit(handleFormSubmit, handleInvalid)} className="space-y-5">
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full grid grid-cols-3 h-9">
-          <TabsTrigger value="basico" className="text-xs">Identificación y contacto</TabsTrigger>
-          <TabsTrigger value="personal" className="text-xs">Datos personales</TabsTrigger>
-          <TabsTrigger value="salud" className="text-xs">Salud y afiliación</TabsTrigger>
+          <TabsTrigger value="basico" className="text-xs gap-1.5">Identificación y contacto{tabsConError.has('basico') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
+          <TabsTrigger value="personal" className="text-xs gap-1.5">Datos personales{tabsConError.has('personal') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
+          <TabsTrigger value="salud" className="text-xs gap-1.5">Salud y afiliación{tabsConError.has('salud') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
         </TabsList>
 
         {/* ── Tab 1: básico ── */}
@@ -467,7 +488,12 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
 
       {AuthBlock}
 
-      <div className="flex justify-end">
+      <div className="flex items-center justify-end gap-3">
+        {[...tabsConError].some((t) => t !== tab) && (
+          <p className="text-xs text-destructive">
+            Revisa los campos marcados en {[...tabsConError].filter((t) => t !== tab).map((t) => `«${TABS_LABEL[t]}»`).join(' y ')}.
+          </p>
+        )}
         <Button type="submit" disabled={isLoading || !autorizaDatos}>
           {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
           {isLoading ? 'Guardando...' : submitLabel}
