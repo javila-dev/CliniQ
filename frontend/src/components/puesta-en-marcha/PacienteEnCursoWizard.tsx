@@ -143,7 +143,12 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   }, [tipo, tratSel, numSesionesTotal])
 
   const [filas, setFilas] = useState<SesionRow[]>([])
-  const entrarSesiones = () => setFilas(filasBase.map((f) => ({ ...f })))
+  // Al volver a este paso conserva lo ya marcado en las filas que siguen existiendo
+  // (si cambió el tratamiento o el número de sesiones, las nuevas arrancan sin marcar).
+  const entrarSesiones = () => setFilas((prev) => {
+    const marcadas = new Map(prev.map((f) => [f.key, f.done]))
+    return filasBase.map((f) => ({ ...f, done: marcadas.get(f.key) ?? false }))
+  })
 
   const hechas = filas.filter((f) => f.done).length
   const setFila = (key: string, patch: Partial<SesionRow>) =>
@@ -174,7 +179,8 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
   const pagado = Number(valorPagado) || 0
   const saldo = total - pagado
   const planSuma = plan.reduce((s, c) => s + (Number(c.valor_esperado) || 0), 0)
-  const planCuadra = saldo <= 0 ? plan.length === 0 : Math.abs(planSuma - saldo) < 1
+  // Sin saldo, las cuotas que hayan quedado de antes se ignoran (el payload manda plan_saldo vacío).
+  const planCuadra = saldo <= 0 ? true : Math.abs(planSuma - saldo) < 1
 
   const mut = useMutation({
     mutationFn: () => {
