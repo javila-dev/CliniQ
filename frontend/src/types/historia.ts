@@ -54,6 +54,7 @@ export type TipoFitzpatrick = 'I' | 'II' | 'III' | 'IV' | 'V' | 'VI'
 
 export interface HistoriaClinica {
   id: string
+  numero: string
   paciente: string
   paciente_nombre: string
   motivo_consulta: string

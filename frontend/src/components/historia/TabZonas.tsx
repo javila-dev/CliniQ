@@ -302,7 +302,7 @@ function PinBubble({
   const [editing, setEditing] = useState(false)
   const [fixedPos, setFixedPos] = useState<{ left: number; top: number } | null>(null)
   const dotRef   = useRef<HTMLDivElement>(null)
-  const hideTimer = useRef<ReturnType<typeof setTimeout>>()
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const show = () => {
     clearTimeout(hideTimer.current)
