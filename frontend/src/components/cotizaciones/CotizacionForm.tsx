@@ -970,10 +970,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         {cotizacion?.estado === 'borrador' && canGestionar && (
           <div className="bg-white rounded-xl border border-green-200 p-5 flex flex-col md:flex-row md:items-center gap-4">
             <div className="flex-1 min-w-0 space-y-2">
-              <p className="text-sm font-semibold text-foreground">¿El cliente aceptó la cotización?</p>
+              <p className="text-sm font-semibold text-foreground">Cuando el cliente acepte, regístralo aquí</p>
               <p className="text-xs text-muted-foreground">
-                Al confirmarla se guardan los cambios, se crea la cartera con las cuotas y se habilita agendar las sesiones.
-                Después ya no se puede editar.
+                Pulsa <span className="font-medium text-foreground">Registrar aceptación</span>: se guardan los cambios,
+                se crea la cartera con las cuotas y se habilita agendar las sesiones. Después ya no se puede editar.
               </p>
               <ul className="space-y-1 text-xs">
                 <li className={cn('flex items-center gap-1.5', tieneItemsCobrables ? 'text-green-700' : 'text-muted-foreground')}>
@@ -1004,7 +1004,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               {cambiando
                 ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
                 : <CheckCircle2 className="h-4 w-4 mr-1.5" />}
-              El cliente aceptó
+              Registrar aceptación
             </Button>
           </div>
         )}
