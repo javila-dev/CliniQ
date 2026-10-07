@@ -22,6 +22,25 @@ class WhatsAppNoDisponibleError(Exception):
         self.code = code
 
 
+class NumeroPropioNoDisponibleError(WhatsAppNoDisponibleError):
+    """La clinica envia desde su numero propio pero este envio no puede salir
+    por el: la vista responde con este codigo y el usuario confirma si lo
+    manda desde el numero de CliniQ (reintento con `usar_numero_cliniq`).
+    Hereda de WhatsAppNoDisponibleError para que las vistas que ya la
+    capturan respondan con el mensaje y el codigo."""
+
+    CODE = "NUMERO_PROPIO_NO_DISPONIBLE"
+
+    def __init__(self, message):
+        super().__init__(message, code=self.CODE)
+
+
+def pidio_numero_cliniq(request) -> bool:
+    """El usuario ya confirmo enviar desde el numero de CliniQ."""
+    valor = request.data.get("usar_numero_cliniq") if hasattr(request, "data") else None
+    return valor is True or str(valor).lower() in ("true", "1")
+
+
 def _envios_que_cuentan_cupo(clinica, hoy):
     """Envios del mes que descuentan cupo: solo la ruta compartida (los envios
     por numero propio los paga la clinica a Meta)."""
@@ -240,23 +259,35 @@ class RutaWhatsApp:
     motivo: str = ""
 
 
-def resolver_ruta_whatsapp(clinica, sede=None, *, tipo=None, paciente=None, cita=None) -> RutaWhatsApp:
+def resolver_ruta_whatsapp(
+    clinica, sede=None, *, tipo=None, paciente=None, cita=None, usar_numero_cliniq=False,
+) -> RutaWhatsApp:
     """Decide por donde sale el envio y valida que la clinica pueda enviar.
     Levanta WhatsAppNoDisponibleError (solo en la ruta compartida: la propia no
-    descuenta cupo). Llamarla antes de crear efectos que haya que deshacer (OTP,
-    documentos) y pasar el resultado a enviar_whatsapp. Sin `tipo` siempre
-    resuelve el compartido."""
-    from apps.notificaciones.numero_propio import elegir_numero
+    descuenta cupo) y NumeroPropioNoDisponibleError si el envio deberia salir
+    por el numero de la clinica y no puede: nunca se cae al de CliniQ sin que el
+    usuario lo confirme (`usar_numero_cliniq`). Llamarla antes de crear efectos
+    que haya que deshacer (OTP, documentos) y pasar el resultado a
+    enviar_whatsapp. Sin `tipo` siempre resuelve el compartido."""
+    from apps.notificaciones.numero_propio import MOTIVOS_A_CONFIRMAR, elegir_numero, mensaje_no_disponible
 
+    if usar_numero_cliniq:
+        verificar_disponibilidad_whatsapp(clinica)
+        return RutaWhatsApp(clinica=clinica, sede=sede, motivo="confirmado_por_usuario")
     numero, motivo = elegir_numero(clinica, tipo=tipo, sede=sede, cita=cita, paciente=paciente)
     if numero is not None:
         return RutaWhatsApp(clinica=clinica, sede=sede, canal="propio", numero=numero, motivo=motivo)
+    if motivo in MOTIVOS_A_CONFIRMAR:
+        raise NumeroPropioNoDisponibleError(
+            mensaje_no_disponible(clinica, motivo, tipo=tipo, sede=sede, cita=cita, paciente=paciente),
+        )
     verificar_disponibilidad_whatsapp(clinica)
     return RutaWhatsApp(clinica=clinica, sede=sede, motivo=motivo)
 
 
 def enviar_whatsapp(
-    *, tipo: str, paciente, clinica=None, sede=None, cita=None, ruta: RutaWhatsApp | None = None, **datos,
+    *, tipo: str, paciente, clinica=None, sede=None, cita=None, ruta: RutaWhatsApp | None = None,
+    usar_numero_cliniq=False, **datos,
 ):
     """Punto unico de envio de WhatsApp: resuelve la ruta (si no viene), envia
     y registra el envio. Todos los envios del backend pasan por aqui. `cita`
@@ -268,12 +299,15 @@ def enviar_whatsapp(
     - envio_cotizacion / envio_formula: pdf_bytes, nombre_archivo_pdf, metadata
     - recordatorio_cita: payload
 
-    Errores: WhatsAppNoDisponibleError (addon/cupo), ValueError (webhook no
+    Errores: WhatsAppNoDisponibleError (addon/cupo; NumeroPropioNoDisponibleError
+    si el numero de la clinica no puede enviarlo), ValueError (webhook no
     configurado) y requests.RequestException (fallo del webhook). En la ruta
-    compartida, si falla no se registra nada; en la propia, un fallo sale por
-    el compartido (ver numero_propio.enviar_por_numero_propio)."""
+    compartida, si falla no se registra nada; en la propia, un fallo levanta
+    NumeroPropioNoDisponibleError (ver numero_propio.enviar_por_numero_propio)."""
     if ruta is None:
-        ruta = resolver_ruta_whatsapp(clinica, sede, tipo=tipo, paciente=paciente, cita=cita)
+        ruta = resolver_ruta_whatsapp(
+            clinica, sede, tipo=tipo, paciente=paciente, cita=cita, usar_numero_cliniq=usar_numero_cliniq,
+        )
     if ruta.canal == "propio":
         from apps.notificaciones.numero_propio import enviar_por_numero_propio
 

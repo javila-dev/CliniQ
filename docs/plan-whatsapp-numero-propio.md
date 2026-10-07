@@ -674,6 +674,14 @@ Después de conectar:
 - **D10 — El respaldo descuenta cupo** (2026-09-25). Si un envío propio falla
   y se reenvía por el compartido, ese reenvío cuenta contra el cupo. Si no
   hay cupo, el respaldo no sale y queda registrado como fallido.
+  **Reemplazada el 2026-10-07: sin respaldo automático.** Si un envío debería
+  salir por el número de la clínica y no puede (número con error, en
+  aprobación, plantilla sin aprobar, teléfono inválido o fallo de Lyvio al
+  enviar), el backend responde `NUMERO_PROPIO_NO_DISPONIBLE` y el frontend
+  pregunta si sale por el de CliniQ (reintento con `usar_numero_cliniq`; ese
+  envío sí descuenta cupo). Si Meta lo rechaza después (webhook, p. ej. 131042
+  sin pago), no se reenvía: queda en "Envíos que no salieron" con el motivo y
+  la indicación de revisar Configuración → WhatsApp o avisar al administrador.
 - **D11 — Número de la clínica antes que el compartido** (2026-09-25). Lo que
   no tiene sede, o cuya sede no tiene número activo, sale por el **número por
   defecto** de la clínica, no por el compartido: el paciente debe poder

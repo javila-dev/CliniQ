@@ -1034,22 +1034,28 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
     @patch(f"{SERVICES}.enviar_documento_whatsapp_webhook")
     @patch(f"{SERVICES}.subir_pdf_whatsapp", return_value="https://cdn.test/c1.pdf")
     @patch("apps.notificaciones.lyvio.requests.request")
-    def test_error_de_lyvio_sale_por_el_compartido(self, req, _subir, compartido):
+    def test_error_de_lyvio_pide_confirmar_el_compartido(self, req, _subir, compartido):
+        """Sin reenvio automatico: el usuario decide si sale por el de CliniQ."""
+        from apps.notificaciones.services import NumeroPropioNoDisponibleError
+
         req.side_effect = [
             _respuesta(200, {"payload": {"contact": {"id": 11}}}),
             _respuesta(200, {"payload": []}),
             _respuesta(200, {"id": 21}),
             _respuesta(422, {"error": "Template not found"}),
         ]
-        self._enviar_cotizacion()
-        compartido.assert_called_once()
-        self.assertEqual(compartido.call_args.kwargs["pdf_url"], "https://cdn.test/c1.pdf")
+        with self.assertRaises(NumeroPropioNoDisponibleError) as ctx:
+            self._enviar_cotizacion()
+        self.assertIn("Template not found", str(ctx.exception))
+        compartido.assert_not_called()
+        self.assertEqual(EnvioWhatsApp.objects.get(ruta="propio").estado, "fallido")
 
-        propio = EnvioWhatsApp.objects.get(ruta="propio")
-        respaldo = EnvioWhatsApp.objects.get(ruta="compartido")
-        self.assertEqual(propio.estado, "fallido")
-        self.assertEqual(respaldo.respaldo_de, propio)
-        self.assertEqual(respaldo.motivo_ruta, "respaldo_por_fallo")
+        # El usuario confirma: sale por el compartido sin volver a intentar el propio.
+        req.reset_mock()
+        self._enviar_cotizacion(usar_numero_cliniq=True)
+        req.assert_not_called()
+        compartido.assert_called_once()
+        self.assertEqual(EnvioWhatsApp.objects.get(ruta="compartido").motivo_ruta, "confirmado_por_usuario")
 
     @patch(f"{SERVICES}.enviar_documento_whatsapp_webhook")
     @patch(f"{SERVICES}.subir_pdf_whatsapp", return_value="https://cdn.test/c1.pdf")
@@ -1124,14 +1130,17 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
         self.assertEqual(self._webhook({"event": "message_updated"}).status_code, 401)
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_failed_reenvia_una_sola_vez(self, compartido):
+    def test_webhook_failed_no_reenvia_y_avisa_una_sola_vez(self, compartido):
+        from apps.notificaciones.models import NotificacionFallida
+
         envio = self._enviado()
         evento = _evento_fallido(501, "131000: Something went wrong")
-        self.assertEqual(self._webhook(evento).json()["resultado"], "respaldo_enviado")
+        self.assertEqual(self._webhook(evento).json()["resultado"], "fallo_registrado")
         self.assertEqual(self._webhook(evento).json()["resultado"], "ya_procesado")
-        compartido.assert_called_once_with(
-            paciente=self.paciente, documento_tipo="consentimiento", link="https://f.test/x", metadata=None,
-        )
+        compartido.assert_not_called()
+        motivo = NotificacionFallida.objects.get().motivo
+        self.assertIn("No se reenvió desde el número de CliniQ", motivo)
+        self.assertIn("avísale al administrador", motivo)
         envio.refresh_from_db()
         self.assertEqual(envio.estado, "fallido")
         self.norte.refresh_from_db()
@@ -1139,18 +1148,30 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
     def test_webhook_sin_pago_bloquea_el_numero_hasta_confirmar_el_pago(self, compartido):
+        from apps.notificaciones.models import NotificacionFallida
         from apps.notificaciones.numero_propio import configurar
+        from apps.notificaciones.services import NumeroPropioNoDisponibleError
 
         self.conexion.pago_meta_configurado = True
         self.conexion.save()
         self._enviado()
         res = self._webhook(_evento_fallido(501, "131042: Business eligibility payment issue"))
-        self.assertEqual(res.json()["resultado"], "respaldo_enviado")
+        self.assertEqual(res.json()["resultado"], "fallo_registrado")
+        compartido.assert_not_called()
+        self.assertIn("método de pago", NotificacionFallida.objects.get().motivo)
         self.norte.refresh_from_db()
         self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "pago"))
         self.assertIn("método de pago", self.norte.ultimo_error)
         self.conexion.refresh_from_db()
         self.assertFalse(self.conexion.pago_meta_configurado)
+
+        # El siguiente envio pide confirmar el de CliniQ y dice por que.
+        with self.assertRaises(NumeroPropioNoDisponibleError) as ctx:
+            enviar_whatsapp(
+                clinica=self.clinica, sede=self.sede_a, tipo=Tipo.FIRMA_DOCUMENTO, paciente=self.paciente,
+                documento_tipo="consentimiento", link="https://f.test/x", metadata=None,
+            )
+        self.assertIn("método de pago", str(ctx.exception))
 
         configurar(self.clinica, pago_meta_configurado=True)
         self.norte.refresh_from_db()
@@ -1160,15 +1181,15 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
     def test_webhook_numero_desconectado_bloquea_por_conexion(self, compartido):
         self._enviado()
         self._webhook(_evento_fallido(501, "131045: Incorrect certificate"))
-        compartido.assert_called_once()
+        compartido.assert_not_called()
         self.norte.refresh_from_db()
         self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "conexion"))
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_plantilla_pausada_saca_el_numero_y_reenvia(self, compartido):
+    def test_webhook_plantilla_pausada_saca_el_numero(self, compartido):
         self._enviado()
         self._webhook(_evento_fallido(501, "132015: Template is paused"))
-        compartido.assert_called_once()
+        compartido.assert_not_called()
         plantilla = self.norte.plantillas.get(tipo=Tipo.FIRMA_DOCUMENTO)
         self.assertEqual(plantilla.estado, "PAUSED")
         self.norte.refresh_from_db()
@@ -1176,37 +1197,25 @@ class EnvioNumeroPropioTests(_BaseNumeroPropio):
         self.assertIn("cliniq_firma_documento_v1", self.norte.ultimo_error)
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_error_del_paciente_no_reenvia(self, compartido):
-        """131026: el paciente no tiene WhatsApp; el numero de CliniQ tampoco lo entregaria."""
+    def test_webhook_error_del_paciente_no_bloquea_el_numero(self, compartido):
+        """131026: el paciente no tiene WhatsApp; no es problema del numero."""
         from apps.notificaciones.models import NotificacionFallida
 
         self._enviado()
         res = self._webhook(_evento_fallido(501, "131026: Message undeliverable"))
-        self.assertEqual(res.json()["resultado"], "sin_respaldo_paciente")
+        self.assertEqual(res.json()["resultado"], "fallo_del_paciente")
         compartido.assert_not_called()
         self.assertIn("no tiene WhatsApp", NotificacionFallida.objects.get().motivo)
         self.norte.refresh_from_db()
         self.assertEqual(self.norte.estado, "activo")
 
-    @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_fallo_tardio_no_reenvia(self, compartido):
-        from apps.notificaciones.models import NotificacionFallida
-
-        envio = self._enviado()
-        EnvioWhatsApp.objects.filter(pk=envio.pk).update(created_at=timezone.now() - timedelta(hours=3))
-        res = self._webhook(_evento_fallido(501, "131000: Something went wrong"))
-        self.assertEqual(res.json()["resultado"], "fallo_tardio")
-        compartido.assert_not_called()
-        self.assertIn("avisó tarde", NotificacionFallida.objects.get().motivo)
-
-    @patch(f"{SERVICES}.enviar_link_firma_whatsapp", side_effect=ValueError("Webhook no configurado"))
-    def test_webhook_respaldo_fallido_queda_como_notificacion_fallida(self, _compartido):
+    def test_webhook_fallo_sin_error_externo_se_reconoce_por_el_estado(self):
         """Fallo sin external_error: se reconoce por el estado del ultimo mensaje de la conversacion."""
         from apps.notificaciones.models import NotificacionFallida
 
         self._enviado()
         res = self._webhook(_evento_fallido(501, None))
-        self.assertEqual(res.json()["resultado"], "respaldo_fallido")
+        self.assertEqual(res.json()["resultado"], "fallo_registrado")
         self.assertEqual(NotificacionFallida.objects.get().tipo_notificacion, Tipo.FIRMA_DOCUMENTO)
 
     def test_webhook_otros_eventos(self):
@@ -1256,8 +1265,8 @@ class CorreccionesRevisionTests(_BaseNumeroPropio):
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
     def test_fallo_que_llega_antes_del_message_id(self, compartido):
         """Meta rechaza tan rapido que el webhook llega mientras el POST del
-        mensaje todavia no volvio: el envio se encuentra por conversacion, sale
-        por el compartido y no queda como `enviado`."""
+        mensaje todavia no volvio: el envio se encuentra por conversacion, queda
+        registrado como fallido y no queda como `enviado`."""
         from apps.notificaciones.numero_propio import procesar_webhook
 
         resultados = []
@@ -1276,22 +1285,27 @@ class CorreccionesRevisionTests(_BaseNumeroPropio):
         with patch("apps.notificaciones.lyvio.requests.request", side_effect=lyvio):
             self._firma()
 
-        self.assertEqual(resultados, ["respaldo_enviado"])
-        compartido.assert_called_once()
+        self.assertEqual(resultados, ["fallo_registrado"])
+        compartido.assert_not_called()
         propio = EnvioWhatsApp.objects.get(ruta="propio")
         self.assertEqual((propio.estado, propio.lyvio_message_id), ("fallido", "777"))
 
-    @patch("apps.notificaciones.lyvio.requests.request")
-    def test_respaldo_que_tambien_falla_queda_registrado(self, req):
-        from apps.notificaciones.models import NotificacionFallida
+    def test_numero_en_aprobacion_pide_confirmar(self):
+        """Con plantillas pendientes tambien se pregunta antes de usar el de CliniQ."""
+        from apps.notificaciones.services import NumeroPropioNoDisponibleError
 
-        req.return_value = _respuesta(422, {"error": "Template not found"})
-        with patch(f"{SERVICES}.enviar_link_firma_whatsapp", side_effect=requests.ConnectionError("n8n caido")):
-            with self.assertRaises(requests.ConnectionError):
-                self._firma()
-        self.assertEqual(EnvioWhatsApp.objects.get(ruta="propio").estado, "fallido")
-        fallida = NotificacionFallida.objects.get()
-        self.assertIn("Template not found", fallida.motivo)
+        self.norte.plantillas.update(estado="PENDING")
+        self.norte.estado = "plantillas_pendientes"
+        self.norte.save()
+        with self.assertRaises(NumeroPropioNoDisponibleError) as ctx:
+            self._firma()
+        self.assertIn("aprobando", str(ctx.exception))
+
+    def test_sede_asignada_a_cliniq_no_pregunta(self):
+        with patch(f"{SERVICES}.enviar_link_firma_whatsapp") as compartido:
+            self._asignar(self.sede_a, "cliniq")
+            self._firma()
+        compartido.assert_called_once()
 
     @patch("apps.notificaciones.lyvio.requests.request")
     def test_plantilla_rechazada_no_se_reenvia(self, req):
@@ -1343,13 +1357,13 @@ class LimitesYReconexionTests(_BaseNumeroPropio):
         self.assertIsNone(estado(self.clinica)["numeros_permitidos_meta"])
 
     @patch(f"{SERVICES}.enviar_link_firma_whatsapp")
-    def test_webhook_limite_pausa_el_numero_un_dia_y_reenvia(self, compartido):
+    def test_webhook_limite_pausa_el_numero_un_dia(self, compartido):
         from apps.notificaciones.numero_propio import PAUSA_POR_LIMITE
 
         self._enviado()
         res = self._webhook(_evento_fallido(501, "131048: Spam rate limit hit"))
-        self.assertEqual(res.json()["resultado"], "respaldo_enviado")
-        compartido.assert_called_once()
+        self.assertEqual(res.json()["resultado"], "fallo_registrado")
+        compartido.assert_not_called()
         self.norte.refresh_from_db()
         self.assertEqual((self.norte.estado, self.norte.bloqueo), ("error", "limite"))
         self.assertIn("límite diario", self.norte.ultimo_error)

@@ -375,15 +375,16 @@ def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     return "consentimiento"
 
 
-def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
+def enviar_link_firma_consentimiento(consentimiento: Consentimiento, *, usar_numero_cliniq=False) -> dict:
     """Genera (o recupera) el envelope de Documenso y envia el enlace de firma
     al paciente por WhatsApp via n8n (rama generica `firma_documento`). Si el
     paciente no tiene telefono, no envia nada y solo devuelve el link para copiar.
     Sirve para compromiso de pago y para cualquier consentimiento con flujo
-    Documenso."""
+    Documenso. Si el numero de la clinica no puede enviarlo, levanta
+    NumeroPropioNoDisponibleError con el link ya generado (`signing_url`)."""
     from apps.historia_clinica.services import DocumensoIntegrationError, url_firma_documenso
     from apps.notificaciones.models import EnvioWhatsApp
-    from apps.notificaciones.services import WhatsAppNoDisponibleError, enviar_whatsapp
+    from apps.notificaciones.services import NumeroPropioNoDisponibleError, WhatsAppNoDisponibleError, enviar_whatsapp
 
     result = iniciar_firma_compromiso_pago_documenso(consentimiento)
     signing_token = result.get("signing_token") or ""
@@ -410,8 +411,12 @@ def enviar_link_firma_consentimiento(consentimiento: Consentimiento) -> dict:
                     "cotizacion_id": str(consentimiento.cotizacion_id) if consentimiento.cotizacion_id else "",
                     "cita_id": str(consentimiento.cita_id) if consentimiento.cita_id else "",
                 },
+                usar_numero_cliniq=usar_numero_cliniq,
             )
             enviado = True
+        except NumeroPropioNoDisponibleError as exc:
+            exc.signing_url, exc.telefono = signing_url, telefono
+            raise
         except ValueError:
             # Webhook no configurado: devolvemos el link igual para copiar.
             logger.warning("[enviar_link_firma_consentimiento] webhook no configurado | consentimiento_id=%s", consentimiento.id)

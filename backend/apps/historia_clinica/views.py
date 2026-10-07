@@ -61,8 +61,10 @@ from apps.core.logging import registrar_accion
 from apps.core.storage import read_public_file
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
+    NumeroPropioNoDisponibleError,
     WhatsAppNoDisponibleError,
     enviar_whatsapp,
+    pidio_numero_cliniq,
     resolver_ruta_whatsapp,
 )
 from apps.users.authorization import user_has_permission, user_is_tenant_admin
@@ -861,8 +863,14 @@ class ConsentimientoInformadoViewSet(
                     documento_tipo=consentimiento.documenso_template_nombre or "consentimiento informado",
                     link=link,
                     metadata={"consentimiento_informado_id": str(consentimiento.id)},
+                    usar_numero_cliniq=pidio_numero_cliniq(request),
                 )
                 enviado = True
+            except NumeroPropioNoDisponibleError as exc:
+                return Response(
+                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": telefono},
+                    status=status.HTTP_409_CONFLICT,
+                )
             except (ValueError, WhatsAppNoDisponibleError, requests.RequestException):
                 # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
@@ -1025,6 +1033,7 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
             ruta = resolver_ruta_whatsapp(
                 orden.historia.clinica,
                 tipo=EnvioWhatsApp.Tipo.ENVIO_FORMULA, paciente=orden.historia.paciente, cita=orden.cita,
+                usar_numero_cliniq=pidio_numero_cliniq(request),
             )
         except WhatsAppNoDisponibleError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
@@ -1046,7 +1055,7 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
                 },
             )
         except WhatsAppNoDisponibleError as exc:
-            # El numero de la clinica fallo y el respaldo por el de CliniQ no tiene cupo.
+            # NUMERO_PROPIO_NO_DISPONIBLE: el numero de la clinica fallo; el usuario confirma si usa el de CliniQ.
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except ValueError:
             return Response(

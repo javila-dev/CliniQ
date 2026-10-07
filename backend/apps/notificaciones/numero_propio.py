@@ -28,8 +28,8 @@ EVENTO_COEXISTENCE = "FINISH_WHATSAPP_BUSINESS_APP_ONBOARDING"
 
 # Motivos de bloqueo del numero (NumeroWhatsapp.bloqueo) que ve la clinica.
 MENSAJE_REAUTORIZAR = (
-    "Meta no terminó de conectar el número con CliniQ. Pulsa \"Reconectar\"; mientras tanto, los "
-    "mensajes salen por el número de CliniQ."
+    "Meta no terminó de conectar el número con CliniQ. Pulsa \"Reconectar\"; mientras tanto, CliniQ te "
+    "pedirá confirmar antes de enviar desde su número."
 )
 MENSAJE_FUERA_DE_LA_APP = (
     "El número dejó de estar en WhatsApp Business. Abre WhatsApp Business en el teléfono de la clínica y "
@@ -841,6 +841,47 @@ def elegir_numero(clinica, *, tipo=None, sede=None, cita=None, paciente=None):
     return numero, "ok"
 
 
+# Motivos de elegir_numero en los que el envio deberia salir por el numero de la
+# clinica y no puede: se pide confirmacion antes de usar el de CliniQ. Los
+# demas (sin addon, sin numero, sede asignada a CliniQ, OTP) son la ruta normal.
+MOTIVOS_A_CONFIRMAR = {"numero_no_activo", "plantilla_no_aprobada", "telefono_invalido"}
+
+_TIPO_LEGIBLE = {
+    Tipo.RECORDATORIO_CITA: "el recordatorio de cita",
+    Tipo.FIRMA_DOCUMENTO: "el enlace de firma",
+    Tipo.ENVIO_COTIZACION: "la cotización",
+    Tipo.ENVIO_FORMULA: "la orden médica",
+}
+
+
+def _numero_previsto(clinica, *, sede=None, cita=None, paciente=None):
+    """El numero propio por el que deberia salir el envio (el de la sede o el
+    por defecto), este o no activo."""
+    sede_envio = _sede_del_envio(clinica, sede=sede, cita=cita, paciente=paciente)
+    asignacion = (
+        AsignacionWhatsappSede.objects.filter(sede=sede_envio).select_related("numero").first() if sede_envio else None
+    )
+    if asignacion is not None and asignacion.tipo == AsignacionWhatsappSede.Tipo.NUMERO and asignacion.numero:
+        return asignacion.numero
+    conexion = ConexionWhatsappPropio.objects.filter(clinica=clinica).select_related("numero_por_defecto").first()
+    return conexion.numero_por_defecto if conexion else None
+
+
+def mensaje_no_disponible(clinica, motivo, *, tipo=None, sede=None, cita=None, paciente=None) -> str:
+    """Por que este envio no puede salir por el numero de la clinica, en una
+    frase para el usuario (la guia de que hacer la agrega el frontend)."""
+    numero = _numero_previsto(clinica, sede=sede, cita=cita, paciente=paciente)
+    cual = f"tu número {numero.numero_visible}" if numero and numero.numero_visible else "tu número"
+    if motivo == "telefono_invalido":
+        return f"El teléfono del paciente no tiene un formato válido para enviarle desde {cual}."
+    if motivo == "plantilla_no_aprobada":
+        que = _TIPO_LEGIBLE.get(tipo, "este mensaje")
+        return f"Meta todavía no aprueba en {cual} el mensaje para {que}."
+    if numero is not None and numero.estado == NumeroWhatsapp.Estado.ERROR:
+        return f"No se puede enviar desde {cual}: {numero.ultimo_error or 'tiene un problema en Meta.'}"
+    return f"Meta todavía está aprobando los mensajes de {cual} (puede tardar hasta un día)."
+
+
 _DIAS = ("lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo")
 _MESES = (
     "enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -928,8 +969,9 @@ def enviar_por_numero_propio(ruta, *, tipo, paciente, datos):
     """Envio por el inbox del numero propio. La fila de EnvioWhatsApp se crea
     antes de llamar a Lyvio (estado `incierto`):
 
-    - error de Lyvio o sin conexion antes del mensaje -> `fallido` y respaldo por
-      el compartido en el mismo request (descuenta cupo, D10);
+    - error de Lyvio o sin conexion antes del mensaje -> `fallido` y
+      NumeroPropioNoDisponibleError: el usuario decide si lo manda desde el
+      numero de CliniQ (nunca se reenvia solo);
     - timeout al crear el mensaje -> queda `incierto`: no se reintenta ni se
       reenvia, podria duplicarse;
     - OK -> `enviado` con el message_id; el fallo real de Meta llega por webhook.
@@ -965,7 +1007,7 @@ def enviar_por_numero_propio(ruta, *, tipo, paciente, datos):
     try:
         conversation_id = _conversacion(numero, paciente, telefono)
     except (lyvio.LyvioError, requests.RequestException) as exc:
-        return _fallo_y_respaldo(envio, exc)
+        return _fallo_sin_respaldo(envio, exc)
 
     contenido = plantilla.renderizar(contexto)
     for intento in range(2):
@@ -983,12 +1025,12 @@ def enviar_por_numero_propio(ruta, *, tipo, paciente, datos):
                 try:
                     conversation_id = _conversacion(numero, paciente, telefono, refrescar=True)
                 except (lyvio.LyvioError, requests.RequestException) as exc_conv:
-                    return _fallo_y_respaldo(envio, exc_conv)
+                    return _fallo_sin_respaldo(envio, exc_conv)
                 continue
-            return _fallo_y_respaldo(envio, exc)
+            return _fallo_sin_respaldo(envio, exc)
         except requests.ConnectionError as exc:
             # incluye ConnectTimeout: el pedido no llego a Lyvio
-            return _fallo_y_respaldo(envio, exc)
+            return _fallo_sin_respaldo(envio, exc)
         except requests.Timeout:
             logger.warning("Timeout enviando por número propio: envío %s queda incierto", envio.id)
             EnvioWhatsApp.objects.filter(pk=envio.pk).update(
@@ -1025,46 +1067,24 @@ def _registrar_fallida(envio, motivo: str) -> None:
     )
 
 
-def _registrar_sin_respaldo(envio, error, exc):
-    """El envio fallo por el numero de la clinica y tampoco salio por el compartido."""
-    logger.warning("No se pudo reenviar por el compartido el envío %s: %s", envio.id, exc)
-    _registrar_fallida(envio, f"Falló por el número de la clínica ({error}) y no se pudo reenviar: {exc}")
+def _cual_numero(numero) -> str:
+    return f"tu número {numero.numero_visible}" if numero and numero.numero_visible else "tu número"
 
 
-def _fallo_y_respaldo(envio, exc):
-    """Fallo inmediato por el numero propio: se reenvia por el compartido en el
-    mismo request. Si el respaldo tambien falla, se registra y se levanta el
-    error del respaldo (WhatsAppNoDisponibleError, ValueError o
-    requests.RequestException) para que la vista responda como con el
-    compartido."""
+def _fallo_sin_respaldo(envio, exc):
+    """Fallo inmediato por el numero propio: el envio queda `fallido` y se
+    levanta NumeroPropioNoDisponibleError. No se reenvia por el de CliniQ: el
+    usuario decide si lo manda desde ahi (reintento con `usar_numero_cliniq`)."""
     from apps.notificaciones.models import EnvioWhatsApp
-    from apps.notificaciones.services import WhatsAppNoDisponibleError
+    from apps.notificaciones.services import NumeroPropioNoDisponibleError
 
     envio.estado = EnvioWhatsApp.Estado.FALLIDO
     envio.error_externo = getattr(exc, "mensaje", None) or str(exc)
     envio.save(update_fields=["estado", "error_externo", "updated_at"])
-    logger.warning("Envío por número propio %s falló (%s); sale por el compartido", envio.id, envio.error_externo)
-    try:
-        return reenviar_por_compartido(envio)
-    except (WhatsAppNoDisponibleError, ValueError, requests.RequestException) as exc_respaldo:
-        _registrar_sin_respaldo(envio, envio.error_externo, exc_respaldo)
-        raise
-
-
-def reenviar_por_compartido(envio):
-    """Respaldo de un envio propio fallido por el numero compartido, una sola vez
-    (respaldo_de es unico). Descuenta cupo (D10); sin cupo levanta
-    WhatsAppNoDisponibleError y el envio queda fallido."""
-    from apps.notificaciones.models import EnvioWhatsApp
-    from apps.notificaciones.services import enviar_por_compartido, verificar_disponibilidad_whatsapp
-
-    if EnvioWhatsApp.objects.filter(respaldo_de=envio).exists():
-        return {"envio_id": str(envio.id), "respaldo": "ya_enviado"}
-    verificar_disponibilidad_whatsapp(envio.clinica)
-    return enviar_por_compartido(
-        envio.clinica, tipo=envio.tipo, paciente=envio.paciente, datos=dict(envio.datos),
-        motivo="respaldo_por_fallo", respaldo_de=envio,
-    )
+    logger.warning("Envío por número propio %s falló (%s)", envio.id, envio.error_externo)
+    raise NumeroPropioNoDisponibleError(
+        f"No se pudo enviar desde {_cual_numero(envio.numero)}: {envio.error_externo}",
+    ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1080,10 +1100,10 @@ MENSAJE_SIN_PAGO = (
 )
 # Errores de Meta (Cloud API) segun de quien es el problema. Referencia:
 # developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
-# Un codigo que no esta aqui (o un error sin codigo) sale por el compartido.
+# Un codigo que no esta aqui (o un error sin codigo) solo queda registrado.
 #
 # Del numero de la clinica: el numero queda bloqueado para que los envios
-# siguientes no fallen uno por uno, y este sale por el compartido.
+# siguientes pidan confirmacion en vez de fallar uno por uno.
 _ERRORES_DEL_NUMERO = {
     ERROR_SIN_PAGO: (NumeroWhatsapp.Bloqueo.PAGO, MENSAJE_SIN_PAGO),
     "131045": (
@@ -1097,7 +1117,7 @@ _ERRORES_DEL_NUMERO = {
         NumeroWhatsapp.Bloqueo.LIMITE,
         "Meta frenó los envíos desde tu número por hoy: llegaste al límite diario de pacientes o varios "
         "pacientes bloquearon o reportaron mensajes recientes. Se reanudan solos en 24 horas; mientras tanto "
-        "salen por el número de CliniQ y descuentan del cupo de tu plan.",
+        "CliniQ te pedirá confirmar antes de enviar desde su número (descuenta del cupo de tu plan).",
     ),
     "131031": (
         NumeroWhatsapp.Bloqueo.CONEXION,
@@ -1110,15 +1130,14 @@ _ERRORES_DEL_NUMERO = {
     ),
 }
 # De la plantilla de la clinica en Meta: se marca la plantilla (el numero deja
-# de estar activo hasta revisarla en la consola) y este envio sale por el
-# compartido, que usa sus propias plantillas.
+# de estar activo hasta revisarla en la consola).
 _ERRORES_DE_PLANTILLA = {
     "132001": PlantillaWhatsappNumero.Estado.ERROR,  # no existe o no esta aprobada en ese idioma
     "132015": PlantillaWhatsappNumero.Estado.PAUSED,
     "132016": PlantillaWhatsappNumero.Estado.DISABLED,
 }
 # Del paciente: el numero de CliniQ tampoco lo entregaria, o pasaria por encima
-# de una decision del paciente. Sin respaldo; queda en "Envios que no salieron".
+# de una decision del paciente. Queda en "Envios que no salieron" con su motivo.
 _ERRORES_DEL_PACIENTE = {
     "131026": "El paciente no tiene WhatsApp activo en ese número o no puede recibir mensajes.",
     "131049": "Meta no entregó el mensaje para no saturar al paciente con mensajes de marketing.",
@@ -1129,10 +1148,6 @@ _ERRORES_DEL_PACIENTE = {
 # Ventana para asociar un fallo que llego antes que el message_id (ver
 # _envio_del_webhook).
 VENTANA_FALLO_TEMPRANO = timedelta(minutes=5)
-# Un fallo que Meta reporta tarde (p. ej. el telefono del paciente estuvo
-# apagado) ya no se reenvia: el mensaje podria no tener sentido, como el
-# recordatorio de una cita que ya paso.
-VENTANA_RESPALDO = timedelta(hours=1)
 
 
 def _error_externo(payload: dict) -> str:
@@ -1207,8 +1222,12 @@ def _envio_del_webhook(message_id: str, payload: dict):
 
 
 def _mensaje_fallido(payload: dict) -> str:
+    """Meta rechazo un envio por el numero de la clinica despues de aceptarlo.
+    No se reenvia por el de CliniQ (ya no hay a quien pedirle confirmacion):
+    queda en "Envios que no salieron" con el motivo y que hacer, y si el
+    problema es del numero, este queda bloqueado para que los envios
+    siguientes pidan confirmacion."""
     from apps.notificaciones.models import EnvioWhatsApp
-    from apps.notificaciones.services import WhatsAppNoDisponibleError
 
     message_id = str(payload.get("id") or "")
     if not message_id:
@@ -1218,9 +1237,6 @@ def _mensaje_fallido(payload: dict) -> str:
     # Meta lo rechazo en el momento del envio.
     codigo = error.split(":", 1)[0].strip()
 
-    # Primero se marca el fallo con la fila bloqueada, y el reenvio (una llamada
-    # HTTP a n8n) se hace despues del commit para no retener el bloqueo. Un
-    # aviso repetido encuentra el envio ya `fallido` y no reenvia.
     with transaction.atomic():
         envio = _envio_del_webhook(message_id, payload)
         if envio is None:
@@ -1237,18 +1253,20 @@ def _mensaje_fallido(payload: dict) -> str:
 
     if codigo in _ERRORES_DEL_PACIENTE:
         _registrar_fallida(envio, f"{_ERRORES_DEL_PACIENTE[codigo]} ({error})")
-        return "sin_respaldo_paciente"
-    if timezone.now() - envio.created_at > VENTANA_RESPALDO:
-        _registrar_fallida(
-            envio, f"Meta avisó tarde que el mensaje no se entregó ({error}); ya no se reenvió por el número de CliniQ.",
-        )
-        return "fallo_tardio"
-    try:
-        reenviar_por_compartido(envio)
-    except (WhatsAppNoDisponibleError, ValueError, requests.RequestException) as exc:
-        _registrar_sin_respaldo(envio, error, exc)
-        return "respaldo_fallido"
-    return "respaldo_enviado"
+        return "fallo_del_paciente"
+    if codigo in _ERRORES_DEL_NUMERO:
+        motivo = _ERRORES_DEL_NUMERO[codigo][1]
+    elif codigo in _ERRORES_DE_PLANTILLA:
+        motivo = f"Meta no aceptó el mensaje aprobado para este envío ({error})."
+    else:
+        motivo = error
+    _registrar_fallida(
+        envio,
+        f"No salió desde {_cual_numero(envio.numero)}: {motivo} No se reenvió desde el número de CliniQ. "
+        "Revisa Configuración → WhatsApp (si no tienes acceso, avísale al administrador de la clínica) y "
+        "vuelve a enviarlo.",
+    )
+    return "fallo_registrado"
 
 
 def _marcar_problema_del_numero(envio, codigo: str, error: str) -> None:

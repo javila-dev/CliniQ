@@ -23,6 +23,7 @@ from apps.consentimientos.services import (
     verificar_firma_compromiso_pago_en_documenso,
 )
 from apps.historia_clinica.services import DocumensoIntegrationError
+from apps.notificaciones.services import NumeroPropioNoDisponibleError, pidio_numero_cliniq
 from apps.core.logging import registrar_accion
 from apps.users.permissions import RequirePermission
 
@@ -148,7 +149,14 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         with transaction.atomic():
             consentimiento = Consentimiento.objects.select_for_update().get(pk=self.get_object().pk)
             try:
-                result = enviar_link_firma_consentimiento(consentimiento)
+                result = enviar_link_firma_consentimiento(
+                    consentimiento, usar_numero_cliniq=pidio_numero_cliniq(request),
+                )
+            except NumeroPropioNoDisponibleError as exc:
+                return Response(
+                    {"error": str(exc), "code": exc.code, "signing_url": exc.signing_url, "telefono": exc.telefono},
+                    status=status.HTTP_409_CONFLICT,
+                )
             except DocumensoIntegrationError as exc:
                 return Response({"error": str(exc), "code": "DOCUMENSO_ERROR"}, status=status.HTTP_502_BAD_GATEWAY)
             except ValueError as exc:

@@ -36,6 +36,7 @@ from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
     email_provider_config,
+    pidio_numero_cliniq,
     enviar_email,
     enviar_whatsapp,
     resolver_ruta_whatsapp,
@@ -395,6 +396,7 @@ class CotizacionViewSet(ModelViewSet):
             ruta = resolver_ruta_whatsapp(
                 cotizacion.clinica, cotizacion.sede,
                 tipo=EnvioWhatsApp.Tipo.ENVIO_COTIZACION, paciente=cotizacion.paciente,
+                usar_numero_cliniq=pidio_numero_cliniq(request),
             )
         except WhatsAppNoDisponibleError as exc:
             return Response(
@@ -418,7 +420,7 @@ class CotizacionViewSet(ModelViewSet):
                 },
             )
         except WhatsAppNoDisponibleError as exc:
-            # El numero de la clinica fallo y el respaldo por el de CliniQ no tiene cupo.
+            # NUMERO_PROPIO_NO_DISPONIBLE: el numero de la clinica fallo; el usuario confirma si usa el de CliniQ.
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except ValueError:
             return Response(

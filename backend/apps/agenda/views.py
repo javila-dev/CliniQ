@@ -40,8 +40,10 @@ from apps.clinicas.models import Clinica, Sede, Servicio
 from apps.core.logging import registrar_accion
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
+    NumeroPropioNoDisponibleError,
     WhatsAppNoDisponibleError,
     enviar_whatsapp,
+    pidio_numero_cliniq,
     registrar_envio_whatsapp,
     resolver_ruta_whatsapp,
     uso_whatsapp_mes_actual,
@@ -849,6 +851,7 @@ class CitaViewSet(ModelViewSet):
             ruta = resolver_ruta_whatsapp(
                 cita_qs.sede.clinica, cita_qs.sede,
                 tipo=EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita_qs.paciente, cita=cita_qs,
+                usar_numero_cliniq=pidio_numero_cliniq(request),
             )
         except WhatsAppNoDisponibleError as exc:
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
@@ -858,6 +861,9 @@ class CitaViewSet(ModelViewSet):
             enviar_whatsapp(
                 ruta=ruta, tipo=EnvioWhatsApp.Tipo.RECORDATORIO_CITA, paciente=cita_qs.paciente, payload=dict(payload),
             )
+        except WhatsAppNoDisponibleError as exc:
+            # NUMERO_PROPIO_NO_DISPONIBLE: el numero de la clinica fallo; el usuario confirma si usa el de CliniQ.
+            return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except Exception as exc:
             logger.error("Error al enviar recordatorio inmediato cita=%s: %s", cita.pk, exc)
             return Response(
@@ -1008,8 +1014,14 @@ class CitaViewSet(ModelViewSet):
                     documento_tipo="registro de asistencia",
                     link=link,
                     metadata={"cita_id": str(cita.id)},
+                    usar_numero_cliniq=pidio_numero_cliniq(request),
                 )
                 enviado = True
+            except NumeroPropioNoDisponibleError as exc:
+                return Response(
+                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": telefono},
+                    status=status.HTTP_409_CONFLICT,
+                )
             except (ValueError, WhatsAppNoDisponibleError, http_requests.RequestException):
                 # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
