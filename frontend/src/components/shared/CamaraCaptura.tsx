@@ -29,7 +29,7 @@ export function CamaraCaptura({ onCaptura, onCancelar, labelCapturar = 'Capturar
   const detectRef   = useRef<HTMLCanvasElement | null>(null)
   const streamRef   = useRef<MediaStream | null>(null)
   const rafRef      = useRef<number | null>(null)
-  const detectorRef = useRef<{ detect: (src: HTMLVideoElement) => Promise<{ boundingBox: DOMRectReadOnly }[]> } | null>(null)
+  const detectorRef = useRef<{ detect: (src: HTMLVideoElement | HTMLCanvasElement) => Promise<{ boundingBox: DOMRectReadOnly }[]> } | null>(null)
 
   const [estado, setEstado]           = useState<'iniciando' | 'activa' | 'preview' | 'error'>('iniciando')
   const [preview, setPreview]         = useState<string | null>(null)

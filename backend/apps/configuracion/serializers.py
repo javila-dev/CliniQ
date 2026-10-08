@@ -1,6 +1,7 @@
 from rest_framework import serializers
 
 from apps.configuracion.models import (
+    ATENCION_TABS_DISPONIBLES,
     HISTORIA_TABS_DISPONIBLES,
     ConfiguracionCartera,
     ConfiguracionHistoria,
@@ -144,47 +145,61 @@ class ConfiguracionSignosVitalesSerializer(serializers.ModelSerializer):
         return value
 
 
+def _normalizar_tabs(value, disponibles):
+    """Solo slugs conocidos, sin repetidos y con las obligatorias. Lista vacia
+    o invalida = todas las pestanas."""
+    if not isinstance(value, list) or len(value) == 0:
+        return [slug for slug, _, _ in disponibles]
+    conocidos = {slug for slug, _, _ in disponibles}
+    normalized = []
+    for slug in value:
+        if slug in conocidos and slug not in normalized:
+            normalized.append(slug)
+    for slug, _, obligatorio in reversed(disponibles):
+        if obligatorio and slug not in normalized:
+            normalized.insert(0, slug)
+    return normalized
+
+
 class ConfiguracionHistoriaSerializer(serializers.ModelSerializer):
+    """Pestanas visibles de la clinica: historia del paciente (`tabs_activos`)
+    y pantalla del profesional en una atencion (`atencion_tabs_activos`)."""
+
     tabs_disponibles = serializers.SerializerMethodField()
+    atencion_tabs_disponibles = serializers.SerializerMethodField()
 
     class Meta:
         model = ConfiguracionHistoria
-        fields = ("tabs_activos", "tabs_disponibles", "updated_at")
-        read_only_fields = ("tabs_disponibles", "updated_at")
+        fields = (
+            "tabs_activos", "tabs_disponibles", "atencion_tabs_activos", "atencion_tabs_disponibles", "updated_at",
+        )
+        read_only_fields = ("tabs_disponibles", "atencion_tabs_disponibles", "updated_at")
+
+    @staticmethod
+    def _detalle(value, disponibles):
+        activos = _normalizar_tabs(value, disponibles)
+        return [
+            {"slug": slug, "label": label, "activo": slug in activos, "obligatorio": obligatorio}
+            for slug, label, obligatorio in disponibles
+        ]
 
     def get_tabs_disponibles(self, obj):
-        activos = self._normalize_tabs(obj.tabs_activos)
-        return [
-            {
-                "slug": slug,
-                "label": label,
-                "activo": slug in activos,
-                "obligatorio": obligatorio,
-            }
-            for slug, label, obligatorio in HISTORIA_TABS_DISPONIBLES
-        ]
+        return self._detalle(obj.tabs_activos, HISTORIA_TABS_DISPONIBLES)
+
+    def get_atencion_tabs_disponibles(self, obj):
+        return self._detalle(obj.atencion_tabs_activos, ATENCION_TABS_DISPONIBLES)
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        data["tabs_activos"] = self._normalize_tabs(instance.tabs_activos)
+        data["tabs_activos"] = _normalizar_tabs(instance.tabs_activos, HISTORIA_TABS_DISPONIBLES)
+        data["atencion_tabs_activos"] = _normalizar_tabs(instance.atencion_tabs_activos, ATENCION_TABS_DISPONIBLES)
         return data
 
     def validate_tabs_activos(self, value):
-        return self._normalize_tabs(value)
+        return _normalizar_tabs(value, HISTORIA_TABS_DISPONIBLES)
 
-    def _normalize_tabs(self, value):
-        disponibles = {slug: (label, obligatorio) for slug, label, obligatorio in HISTORIA_TABS_DISPONIBLES}
-        if not isinstance(value, list) or len(value) == 0:
-            return [slug for slug, _, _ in HISTORIA_TABS_DISPONIBLES]
-
-        selected = value
-        normalized = []
-        for slug in selected:
-            if slug in disponibles and slug not in normalized:
-                normalized.append(slug)
-        if "datos-generales" not in normalized:
-            normalized.insert(0, "datos-generales")
-        return normalized
+    def validate_atencion_tabs_activos(self, value):
+        return _normalizar_tabs(value, ATENCION_TABS_DISPONIBLES)
 
 
 class ConfiguracionWizardSerializer(serializers.ModelSerializer):

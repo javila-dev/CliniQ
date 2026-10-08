@@ -38,6 +38,8 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
     cita_fecha_inicio = serializers.DateTimeField(source="cita.fecha_inicio", read_only=True)
     cotizacion_referencia = serializers.SerializerMethodField()
     pdf_url = serializers.SerializerMethodField()
+    # Siempre enmascarado: solo sirve para confirmar a que numero salio el link.
+    link_enviado_a = serializers.SerializerMethodField()
 
     class Meta:
         model = Consentimiento
@@ -60,6 +62,8 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "firma_ip",
             "firma_user_agent",
             "documenso_signing_token",
+            "link_enviado_en",
+            "link_enviado_a",
             "pdf_url",
             "revocado_en",
             "motivo_revocacion",
@@ -77,11 +81,18 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "firma_ip",
             "firma_user_agent",
             "documenso_signing_token",
+            "link_enviado_en",
+            "link_enviado_a",
             "pdf_url",
             "revocado_en",
             "motivo_revocacion",
             "created_at",
         )
+
+    def get_link_enviado_a(self, obj):
+        from apps.pacientes.serializers import enmascarar_cola
+
+        return enmascarar_cola(obj.link_enviado_a)
 
     def get_pdf_url(self, obj):
         if not obj.pdf_archivo:

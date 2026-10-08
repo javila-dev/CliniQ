@@ -148,13 +148,33 @@ def _handle_firma_asistencia(external_id: str, event: str, document_id: str | No
             )
 
 
+def _sobre_compromiso_vigente(consentimiento, huella: str) -> bool:
+    """True si el sobre que firmo el paciente corresponde al contenido actual."""
+    if huella:
+        return consentimiento.hash_contenido.startswith(huella)
+    # Sobre sin huella (anterior a este cambio): si el envelope se descarto al
+    # regenerar el documento y aun no hay uno nuevo, el firmado es el viejo.
+    return bool(consentimiento.documenso_documento_id)
+
+
 def _handle_compromiso_pago(external_id: str, event: str, document_id: str | None = None) -> None:
     from apps.consentimientos.models import Consentimiento
 
-    consentimiento_id = external_id[len(_COMPROMISO_PAGO_PREFIX):]
+    # `compromiso_pago:<id>:<huella>`; los sobres creados antes de la huella
+    # traen solo `compromiso_pago:<id>`.
+    consentimiento_id, _, huella = external_id[len(_COMPROMISO_PAGO_PREFIX):].partition(":")
     consentimiento = Consentimiento.objects.filter(id=consentimiento_id).first()
     if consentimiento is None:
         logger.warning("Webhook Documenso compromiso_pago: consentimiento no encontrado | id=%s", consentimiento_id)
+        return
+
+    if not _sobre_compromiso_vigente(consentimiento, huella):
+        # El documento cambio (cotizacion editada) despues de crear este sobre:
+        # firmar el link viejo no acepta la cotizacion con un contenido distinto.
+        logger.warning(
+            "Webhook Documenso compromiso_pago: sobre desactualizado ignorado | id=%s | event=%s | document_id=%s",
+            consentimiento_id, event, document_id,
+        )
         return
 
     if event not in {"DOCUMENT_COMPLETED", "document.completed"}:

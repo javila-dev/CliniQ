@@ -1,6 +1,7 @@
 from collections import defaultdict
 from datetime import datetime, timedelta
 import hmac
+import uuid
 import logging
 
 from django.conf import settings
@@ -48,6 +49,7 @@ from apps.notificaciones.services import (
     resolver_ruta_whatsapp,
     uso_whatsapp_mes_actual,
 )
+from apps.pacientes.serializers import enmascarar_cola
 from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
 from apps.users.models import User
 from apps.users.permissions import CanChangeAppointmentState, RequirePermission, get_clinica_activa
@@ -568,6 +570,8 @@ class CitaViewSet(ModelViewSet):
         servicio_id = request.query_params.get("servicio_id")
         item_cotizacion_id = request.query_params.get("item_cotizacion_id")
         duracion_min_param = request.query_params.get("duracion_min")
+        # Al editar una cita, su propio horario no cuenta como ocupado.
+        cita_id = request.query_params.get("cita_id")
 
         logger.debug(
             "[slots_disponibles] params: profesional_id=%s, sede_id=%s, fecha=%s, "
@@ -697,7 +701,18 @@ class CitaViewSet(ModelViewSet):
 
         logger.debug("[slots_disponibles] llamando get_slots_disponibles: profesional=%s, sede=%s, fecha=%s, duracion=%s", profesional.id, sede.id, fecha, duracion_min)
         fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
-        slots = services.get_slots_disponibles(profesional.id, sede.id, fecha_date, duracion_min)
+        excluir_cita_id = None
+        if cita_id:
+            try:
+                excluir_cita_id = (
+                    Cita.objects.filter(id=uuid.UUID(cita_id), sede__clinica=sede.clinica)
+                    .values_list("id", flat=True).first()
+                )
+            except ValueError as exc:
+                raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
+        slots = services.get_slots_disponibles(
+            profesional.id, sede.id, fecha_date, duracion_min, excluir_cita_id=excluir_cita_id,
+        )
         logger.debug("[slots_disponibles] slots encontrados: %s", slots)
         return Response([slot.isoformat() for slot in slots], status=status.HTTP_200_OK)
 
@@ -1019,14 +1034,14 @@ class CitaViewSet(ModelViewSet):
                 enviado = True
             except NumeroPropioNoDisponibleError as exc:
                 return Response(
-                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": telefono},
+                    {"error": str(exc), "code": exc.code, "signing_url": link, "telefono": enmascarar_cola(telefono)},
                     status=status.HTTP_409_CONFLICT,
                 )
             except (ValueError, WhatsAppNoDisponibleError, http_requests.RequestException):
                 # Sin WhatsApp el link igual se devuelve para copiarlo.
                 pass
 
-        return Response({"enviado": enviado, "signing_url": link, "telefono": telefono}, status=status.HTTP_200_OK)
+        return Response({"enviado": enviado, "signing_url": link, "telefono": enmascarar_cola(telefono)}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="confirmar_firma_asistencia")
     def confirmar_firma_asistencia(self, request, pk=None):

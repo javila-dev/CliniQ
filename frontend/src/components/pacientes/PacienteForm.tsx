@@ -44,7 +44,7 @@ const NONE = '__none__'
 const sel = (v: string | undefined) => v || NONE
 const unsel = (v: string) => v === NONE ? undefined : v
 
-const schema = z.object({
+const baseSchema = z.object({
   nombres:            z.string().min(2, 'Mínimo 2 caracteres'),
   apellidos:          z.string().min(2, 'Mínimo 2 caracteres'),
   tipo_documento:     z.enum(['CC', 'CE', 'PA', 'TI', 'NIT']),
@@ -64,13 +64,36 @@ const schema = z.object({
   tipo_afiliado: z.string().optional(), regimen: z.string().optional(),
   nombre_responsable: z.string().optional(), parentesco_responsable: z.string().optional(),
   telefono_responsable: z.string().optional(),
-}).superRefine((data, ctx) => {
-  if (DOCS_NUMERICOS.includes(data.tipo_documento) && !/^\d+$/.test(data.numero_documento)) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo números para este tipo de documento', path: ['numero_documento'] })
-  }
 })
 
-type FormValues = z.infer<typeof schema>
+type FormValues = z.infer<typeof baseSchema>
+
+/** Pestañas que la clínica exige en el autorregistro (Configuración → Clínica).
+ *  Misma regla que el backend (configuracion/registro_publico.py): al menos un
+ *  campo con valor; el responsable no cuenta. */
+export interface TabsRequeridos { personal?: boolean; salud?: boolean }
+const CAMPOS_REQUERIDOS = {
+  personal: ['direccion', 'ciudad', 'barrio', 'estado_civil', 'ocupacion', 'escolaridad', 'grupo_etnico'],
+  salud: ['eps', 'tipo_afiliado', 'regimen', 'grupo_sanguineo'],
+} as const satisfies Record<'personal' | 'salud', readonly (keyof FormValues)[]>
+
+function crearSchema(tabsRequeridos?: TabsRequeridos) {
+  return baseSchema.superRefine((data, ctx) => {
+    if (DOCS_NUMERICOS.includes(data.tipo_documento) && !/^\d+$/.test(data.numero_documento)) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo números para este tipo de documento', path: ['numero_documento'] })
+    }
+    for (const tab of ['personal', 'salud'] as const) {
+      const campos = CAMPOS_REQUERIDOS[tab]
+      if (tabsRequeridos?.[tab] && !campos.some((c) => String(data[c] ?? '').trim())) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Completa al menos un dato de «${TABS_LABEL[tab]}».`,
+          path: [campos[0]],
+        })
+      }
+    }
+  })
+}
 
 // Pestaña donde vive cada campo, para llevar al usuario al error (autoriza_datos siempre está visible).
 const TABS_LABEL = { basico: 'Identificación y contacto', personal: 'Datos personales', salud: 'Salud y afiliación' } as const
@@ -94,6 +117,8 @@ interface PacienteFormProps {
   /** false → los datos sensibles (documento, teléfono, email, dirección, fecha de
    *  nacimiento) llegan enmascarados; se muestran de solo lectura y no se envían. */
   canEditSensitive?: boolean
+  /** Autorregistro: pestañas que la clínica exige completar. */
+  tabsRequeridos?: TabsRequeridos
 }
 
 // Campo reutilizable: label + input + error
@@ -122,7 +147,10 @@ function OptionalSelect({ value, onChange, placeholder = '—', children }: {
   )
 }
 
-export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, compact = false, canEditSensitive = true }: PacienteFormProps) {
+export function PacienteForm({
+  defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, compact = false, canEditSensitive = true,
+  tabsRequeridos,
+}: PacienteFormProps) {
   const [tab, setTab] = useState('basico')
 
   // Solo al editar: si el usuario no puede ver datos sensibles, llegan enmascarados.
@@ -132,7 +160,7 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(crearSchema(tabsRequeridos)),
     defaultValues: defaultValues ? {
       nombres: defaultValues.nombres, apellidos: defaultValues.apellidos,
       tipo_documento: defaultValues.tipo_documento, numero_documento: defaultValues.numero_documento,
@@ -355,8 +383,8 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="w-full grid grid-cols-3 h-9">
           <TabsTrigger value="basico" className="text-xs gap-1.5">Identificación y contacto{tabsConError.has('basico') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
-          <TabsTrigger value="personal" className="text-xs gap-1.5">Datos personales{tabsConError.has('personal') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
-          <TabsTrigger value="salud" className="text-xs gap-1.5">Salud y afiliación{tabsConError.has('salud') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
+          <TabsTrigger value="personal" className="text-xs gap-1.5">Datos personales{tabsRequeridos?.personal && ' *'}{tabsConError.has('personal') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
+          <TabsTrigger value="salud" className="text-xs gap-1.5">Salud y afiliación{tabsRequeridos?.salud && ' *'}{tabsConError.has('salud') && <span className="h-1.5 w-1.5 rounded-full bg-destructive" />}</TabsTrigger>
         </TabsList>
 
         {/* ── Tab 1: básico ── */}
@@ -366,8 +394,11 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
 
         {/* ── Tab 2: datos personales ── */}
         <TabsContent value="personal" className="pt-4 space-y-3">
+          {tabsRequeridos?.personal && (
+            <p className="text-xs text-muted-foreground">La clínica pide completar al menos un dato de esta sección.</p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            <Field label="Dirección" className="sm:col-span-2">
+            <Field label="Dirección" className="sm:col-span-2" error={errors.direccion?.message}>
               <Input className="h-9" placeholder="Calle 45 # 12-30 Apto 201" disabled={lockSensitive} {...register('direccion')} />
             </Field>
             <Field label="Barrio">
@@ -441,6 +472,9 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
 
         {/* ── Tab 3: salud y afiliación ── */}
         <TabsContent value="salud" className="pt-4 space-y-3">
+          {tabsRequeridos?.salud && (
+            <p className="text-xs text-muted-foreground">La clínica pide completar al menos un dato de esta sección.</p>
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <Field label="Grupo sanguíneo">
               <Controller name="grupo_sanguineo" control={control} render={({ field }) => (
@@ -451,7 +485,7 @@ export function PacienteForm({ defaultValues, onSubmit, isLoading, submitLabel =
                 </OptionalSelect>
               )} />
             </Field>
-            <Field label="EPS / Aseguradora" className="sm:col-span-2">
+            <Field label="EPS / Aseguradora" className="sm:col-span-2" error={errors.eps?.message}>
               <Input className="h-9" placeholder="Sura, Nueva EPS, Sánitas…" {...register('eps')} />
             </Field>
           </div>

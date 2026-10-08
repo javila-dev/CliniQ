@@ -37,7 +37,7 @@ import {
   citaRequiereFirmaProfesional,
   esErrorFirmaProfesional,
 } from '@/components/atenciones/FirmaProfesionalModal'
-import { useAtencionConfig } from '@/store/atencionConfigStore'
+import { useAtencionConfig } from '@/hooks/usePestanasClinica'
 import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion } from '@/lib/permissions'

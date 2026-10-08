@@ -121,10 +121,13 @@ class WebhookCompromisoPagoIdempotenciaTests(TestCase):
             documenso_documento_id="envelope-cp-1",
         )
 
-    def _post_webhook(self, document_id="doc-cp-1", event="DOCUMENT_COMPLETED"):
+    def _post_webhook(self, document_id="doc-cp-1", event="DOCUMENT_COMPLETED", huella=None):
+        external_id = f"compromiso_pago:{self.consentimiento.id}"
+        if huella is not None:
+            external_id += f":{huella}"
         payload = {
             "event": event,
-            "payload": {"externalId": f"compromiso_pago:{self.consentimiento.id}", "id": document_id},
+            "payload": {"externalId": external_id, "id": document_id},
         }
         return self.client.post(
             "/webhooks/documenso/", data=json.dumps(payload), content_type="application/json",
@@ -167,6 +170,72 @@ class WebhookCompromisoPagoIdempotenciaTests(TestCase):
         self.assertEqual(response.status_code, 401)
         self.consentimiento.refresh_from_db()
         self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
+
+    @patch("apps.historia_clinica.webhooks.descargar_pdf_documenso", return_value=None)
+    def test_webhook_acepta_la_cotizacion_en_borrador_sin_nadie_en_pantalla(self, _descargar):
+        """Link enviado por WhatsApp y modal cerrado: la firma llega solo por el
+        webhook y la cotizacion pasa a aceptada (con su cartera) sin el front."""
+        from apps.cartera.models import Cartera
+        from apps.configuracion.models import ConfiguracionCartera
+
+        ConfiguracionCartera.objects.create(clinica=self.clinica, requiere_consentimiento_promocional=True)
+        borrador = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin, sede=self.sede,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        self.consentimiento = Consentimiento.objects.create(
+            cotizacion=borrador, paciente=self.paciente, plantilla=None,
+            contenido_snapshot="<p>Compromiso</p>", hash_contenido="d" * 64,
+            documenso_documento_id="envelope-cp-2",
+            link_enviado_en=timezone.now(), link_enviado_a="3000000004",
+        )
+
+        response = self._post_webhook(document_id="doc-cp-2")
+
+        self.assertEqual(response.status_code, 200)
+        borrador.refresh_from_db()
+        self.assertEqual(borrador.estado, Cotizacion.Estado.ACEPTADA)
+        self.assertTrue(Cartera.objects.filter(cotizacion=borrador).exists())
+
+    @patch("apps.historia_clinica.webhooks.descargar_pdf_documenso", return_value=None)
+    def test_firma_de_un_sobre_con_la_huella_vigente_se_acepta(self, _descargar):
+        response = self._post_webhook(huella=self.consentimiento.hash_contenido[:16])
+
+        self.assertEqual(response.status_code, 200)
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.FIRMADO)
+
+    @patch("apps.historia_clinica.webhooks.descargar_pdf_documenso", return_value=None)
+    def test_firma_de_un_sobre_de_contenido_anterior_se_ignora(self, _descargar):
+        """Se envio el link, luego se edito la cotizacion (el documento cambio) y
+        el paciente firmo el link viejo: no cuenta como firma del documento nuevo."""
+        response = self._post_webhook(huella="0" * 16)
+
+        self.assertEqual(response.status_code, 200)
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
+
+    @patch("apps.historia_clinica.webhooks.descargar_pdf_documenso", return_value=None)
+    def test_sobre_sin_huella_ya_descartado_se_ignora(self, _descargar):
+        # Sobre creado antes de la huella; el documento se regenero (envelope
+        # descartado) y aun no hay uno nuevo.
+        self.consentimiento.documenso_documento_id = ""
+        self.consentimiento.save()
+
+        self._post_webhook()
+
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
+
+    def test_el_numero_al_que_se_envio_el_link_sale_enmascarado(self):
+        self.consentimiento.link_enviado_en = timezone.now()
+        self.consentimiento.link_enviado_a = "3000000004"
+        self.consentimiento.save()
+        self.client.force_authenticate(self.superadmin)
+
+        data = self.client.get(f"/api/v1/consentimientos/{self.consentimiento.id}/").json()
+
+        self.assertEqual(data["link_enviado_a"], "••••••0004")
 
 
 @override_settings(

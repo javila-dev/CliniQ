@@ -284,6 +284,39 @@ class HorarioColaboradorApiTests(ColaboradoresBaseTests):
         self.assertEqual(response.json()["sede_nombre"], self.sede.nombre)
         self.assertEqual(HorarioColaborador.objects.count(), 1)
 
+    def test_crear_dia_que_no_atiende_ignora_horas(self):
+        response = self.client.post(
+            "/api/v1/colaboradores/horarios/",
+            {
+                "colaborador": str(self.colaborador.id),
+                "sede": str(self.sede.id),
+                "dia_semana": HorarioColaborador.DiaSemana.LUNES,
+                "no_atiende": True,
+                "hora_inicio": "09:00:00",
+                "hora_fin": "13:00:00",
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 201, response.json())
+        self.assertTrue(response.json()["no_atiende"])
+        self.assertIsNone(response.json()["hora_inicio"])
+        self.assertIsNone(response.json()["hora_fin"])
+
+    def test_horario_especial_exige_horas(self):
+        response = self.client.post(
+            "/api/v1/colaboradores/horarios/",
+            {
+                "colaborador": str(self.colaborador.id),
+                "sede": str(self.sede.id),
+                "dia_semana": HorarioColaborador.DiaSemana.LUNES,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("hora_inicio", response.json())
+
     def test_rechaza_hora_fin_menor_o_igual_inicio(self):
         response = self.client.post(
             "/api/v1/colaboradores/horarios/",

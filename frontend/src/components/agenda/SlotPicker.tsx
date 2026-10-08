@@ -14,6 +14,8 @@ interface SlotPickerProps {
   servicioId?: string
   itemCotizacionId?: string
   duracionMin?: number
+  /** Al editar una cita: no cuenta su propio horario como ocupado. */
+  citaId?: string
 }
 
 const PLACEHOLDER: Record<string, string> = {
@@ -32,18 +34,19 @@ export function SlotPicker({
   servicioId,
   itemCotizacionId,
   duracionMin,
+  citaId,
 }: SlotPickerProps) {
   const tieneFuente = Boolean(servicioId || itemCotizacionId || (duracionMin && duracionMin > 0))
   const enabled = Boolean(profesionalId && sedeId && fecha && tieneFuente)
 
   const slotParams = (() => {
-    const base = { profesional_id: profesionalId, sede_id: sedeId, fecha }
+    const base = { profesional_id: profesionalId, sede_id: sedeId, fecha, ...(citaId ? { cita_id: citaId } : {}) }
     if (itemCotizacionId) return { ...base, item_cotizacion_id: itemCotizacionId }
     if (duracionMin)      return { ...base, duracion_min: duracionMin }
     return { ...base, servicio_id: servicioId! }
   })()
 
-  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, duracionMin]
+  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, duracionMin, citaId]
 
   const { data: slots, isLoading } = useQuery({
     queryKey,

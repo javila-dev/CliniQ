@@ -39,6 +39,9 @@ export interface Consentimiento {
   hash_contenido: string
   firmado_en: string | null
   documenso_signing_token?: string
+  /** Último envío del link de firma por WhatsApp (null si nunca se envió). */
+  link_enviado_en?: string | null
+  link_enviado_a?: string
   pdf_url: string | null
   created_at: string
 }

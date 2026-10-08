@@ -20,16 +20,19 @@ export interface HorarioColaborador {
   sede: string
   sede_nombre?: string
   dia_semana: DiaSemana
-  hora_inicio: string  // "HH:MM"
-  hora_fin: string     // "HH:MM"
+  /** Ese día no atiende en la sede. Sin registro para el día = horario de la sede. */
+  no_atiende: boolean
+  hora_inicio: string | null  // "HH:MM:SS"; null si no_atiende
+  hora_fin: string | null
 }
 
 export interface CreateHorarioColaboradorRequest {
   colaborador: string
   sede: string
   dia_semana: DiaSemana
-  hora_inicio: string
-  hora_fin: string
+  no_atiende?: boolean
+  hora_inicio?: string | null
+  hora_fin?: string | null
 }
 
 export interface Colaborador {

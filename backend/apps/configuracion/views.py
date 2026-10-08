@@ -210,16 +210,18 @@ class ConfiguracionSignosVitalesViewSet(GenericViewSet):
 
 
 class ConfiguracionHistoriaViewSet(GenericViewSet):
+    """Pestanas visibles en la historia clinica y en la pantalla del
+    profesional. Se editan desde Configuracion (mismo permiso que esas
+    pantallas); las lee cualquiera que abra una historia o una atencion."""
+
     serializer_class = ConfiguracionHistoriaSerializer
     queryset = ConfiguracionHistoria.objects.select_related("clinica").all()
     http_method_names = ["get", "patch", "head", "options"]
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
-        else:
-            permission_classes = (IsAuthenticated,)
-        return [permission() for permission in permission_classes]
+            return [RequirePermission("clinicas.editar")()]
+        return [IsAuthenticated()]
 
     def _get_clinica(self):
         clinica = get_clinica_activa(self.request)

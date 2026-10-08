@@ -107,6 +107,11 @@ class Consentimiento(BaseModel):
     # registro de asistencia) — alternativa al flujo propio de token+canvas.
     documenso_documento_id = models.CharField(max_length=200, blank=True)
     documenso_signing_token = models.CharField(max_length=500, blank=True)
+    # Ultimo envio del link de firma por WhatsApp: la UI lo muestra para que
+    # recepcion sepa si ya se mando y a que numero. Se limpia si el envelope
+    # se regenera (el link anterior deja de servir).
+    link_enviado_en = models.DateTimeField(null=True, blank=True)
+    link_enviado_a = models.CharField(max_length=30, blank=True)
     revocado_en = models.DateTimeField(null=True, blank=True)
     motivo_revocacion = models.TextField(blank=True)
 

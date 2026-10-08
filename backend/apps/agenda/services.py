@@ -144,7 +144,15 @@ def citas_sin_confirmar_proximo_dia_habil(clinica, sede_ids=None, profesional_id
     }
 
 
+NO_ATIENDE = "no_atiende"
+
+
 def obtener_rango_horario_profesional(profesional_id, sede_id, fecha):
+    """Horario especial del profesional ese día en la sede.
+
+    None = no tiene horario especial (atiende en el horario de la sede);
+    NO_ATIENDE = ese día no atiende en esa sede; si no, (inicio, fin).
+    """
     horario = (
         HorarioColaborador.objects.select_related("colaborador")
         .filter(
@@ -157,6 +165,8 @@ def obtener_rango_horario_profesional(profesional_id, sede_id, fecha):
     )
     if not horario:
         return None
+    if horario.no_atiende:
+        return NO_ATIENDE
 
     tz = timezone.get_current_timezone()
     return (
@@ -167,13 +177,17 @@ def obtener_rango_horario_profesional(profesional_id, sede_id, fecha):
 
 def verificar_horario_profesional(profesional_id, sede_id, fecha_inicio: datetime, fecha_fin: datetime) -> bool:
     rango_profesional = obtener_rango_horario_profesional(profesional_id, sede_id, fecha_inicio.date())
-    if not rango_profesional:
+    if rango_profesional is None:
         return True
+    if rango_profesional == NO_ATIENDE:
+        return False
     inicio_habil, fin_habil = rango_profesional
     return inicio_habil <= fecha_inicio and fecha_fin <= fin_habil
 
 
-def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> list[datetime]:
+def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, excluir_cita_id=None) -> list[datetime]:
+    """Horarios libres del profesional en la sede. `excluir_cita_id`: al editar
+    una cita, su propio horario no cuenta como ocupado."""
     sede = Sede.objects.select_related("clinica").get(id=sede_id)
     key_dia = DIAS_SEMANA.get(fecha.weekday())
     rango = sede.horario.get(key_dia)
@@ -188,6 +202,8 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> 
     limite = timezone.make_aware(datetime.combine(fecha, hora_fin), tz)
 
     rango_profesional = obtener_rango_horario_profesional(profesional_id, sede_id, fecha)
+    if rango_profesional == NO_ATIENDE:
+        return []
     if rango_profesional:
         actual, limite = rango_profesional
 
@@ -207,7 +223,7 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int) -> 
         if (
             not bloqueado_sede
             and verificar_horario_sede(sede, actual, fin)
-            and verificar_disponibilidad_profesional(profesional_id, actual, fin)
+            and verificar_disponibilidad_profesional(profesional_id, actual, fin, excluir_cita_id=excluir_cita_id)
         ):
             slots.append(actual)
         actual = actual + timedelta(minutes=intervalo_min)

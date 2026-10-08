@@ -3,7 +3,7 @@
 import { Stethoscope } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Switch } from '@/components/ui/switch'
-import { useAtencionConfig, type TabAtencion } from '@/store/atencionConfigStore'
+import { useAtencionConfig, type TabAtencion } from '@/hooks/usePestanasClinica'
 
 interface TabConfig {
   value: TabAtencion
@@ -62,7 +62,7 @@ const TABS_CONFIG: TabConfig[] = [
 ]
 
 export default function ConfiguracionAtencionPage() {
-  const { tabsActivos, setTabActivo } = useAtencionConfig()
+  const { tabsActivos, setTabActivo, isLoading, guardando, error } = useAtencionConfig()
 
   return (
     <div className="space-y-6">
@@ -93,7 +93,7 @@ export default function ConfiguracionAtencionPage() {
               </div>
               <Switch
                 checked={obligatorio ? true : activo}
-                disabled={obligatorio}
+                disabled={obligatorio || isLoading || guardando}
                 onCheckedChange={(checked) => {
                   if (!obligatorio) setTabActivo(value, checked)
                 }}
@@ -102,6 +102,10 @@ export default function ConfiguracionAtencionPage() {
           )
         })}
       </div>
+
+      {error && (
+        <p className="text-sm text-red-600">No se pudo guardar el cambio. Intenta de nuevo.</p>
+      )}
 
       <p className="text-xs text-muted-foreground">
         Los cambios se aplican inmediatamente. La pestaña <strong>Datos Generales</strong> siempre

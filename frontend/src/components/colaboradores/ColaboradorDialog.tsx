@@ -5,7 +5,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, ChevronsUpDown, Loader2, Plus, Search, Trash2, X } from 'lucide-react'
+import { AlertCircle, Check, ChevronsUpDown, Loader2, Search, X } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { usuariosApi } from '@/lib/api/usuarios'
 import { rolesApi } from '@/lib/api/roles'
@@ -20,9 +20,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
-import type { Colaborador, CreateHorarioColaboradorRequest } from '@/types/colaboradores'
+import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
 import type { Rol } from '@/types/usuarios'
-import type { DiaSemana } from '@/types/clinicas'
+import type { DiaSemana, HorarioSede } from '@/types/clinicas'
 
 // ─── Constantes ───────────────────────────────────────────────
 
@@ -222,195 +222,156 @@ function SedesCheckboxes({
 }
 
 // ─── Sección de horarios (solo en edición) ────────────────────
+// Por defecto el colaborador atiende en el horario de la sede. Cada día se
+// puede marcar como horario especial o como "no atiende"; volver a "Igual a la
+// sede" borra el registro del día.
+
+type ModoDia = 'sede' | 'especial' | 'no_atiende'
+
+const hhmm = (t: string | null | undefined) => (t ?? '').slice(0, 5)
+
+function errorHorario(err: unknown) {
+  const data = (err as any)?.response?.data
+  const primero = data && typeof data === 'object'
+    ? Object.values(data).flat().find((v) => typeof v === 'string')
+    : null
+  return (primero as string) || 'No se pudo guardar el horario.'
+}
+
+function DiaHorarioRow({
+  colaboradorId,
+  sedeId,
+  dia,
+  rangoSede,
+  horario,
+}: {
+  colaboradorId: string
+  sedeId: string
+  dia: { value: DiaSemana; label: string }
+  rangoSede?: [string, string]
+  horario?: HorarioColaborador
+}) {
+  const qc = useQueryClient()
+  const modoGuardado: ModoDia = !horario ? 'sede' : horario.no_atiende ? 'no_atiende' : 'especial'
+  const [modo, setModo] = useState<ModoDia>(modoGuardado)
+  const [inicio, setInicio] = useState(hhmm(horario?.hora_inicio) || rangoSede?.[0] || '')
+  const [fin, setFin] = useState(hhmm(horario?.hora_fin) || rangoSede?.[1] || '')
+
+  useEffect(() => {
+    setModo(modoGuardado)
+    setInicio(hhmm(horario?.hora_inicio) || rangoSede?.[0] || '')
+    setFin(hhmm(horario?.hora_fin) || rangoSede?.[1] || '')
+  }, [horario?.id, horario?.no_atiende, horario?.hora_inicio, horario?.hora_fin]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const guardarMut = useMutation({
+    mutationFn: async (nuevo: ModoDia) => {
+      if (nuevo === 'sede') {
+        if (horario) await colaboradoresApi.horarios.delete(horario.id)
+        return
+      }
+      const datos = nuevo === 'no_atiende'
+        ? { no_atiende: true, hora_inicio: null, hora_fin: null }
+        : { no_atiende: false, hora_inicio: inicio, hora_fin: fin }
+      if (horario) await colaboradoresApi.horarios.update(horario.id, datos)
+      else await colaboradoresApi.horarios.create({ colaborador: colaboradorId, sede: sedeId, dia_semana: dia.value, ...datos })
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['colaborador-horarios', colaboradorId] }),
+  })
+
+  if (!rangoSede) {
+    return (
+      <div className="flex items-center gap-3 px-3 py-2 text-sm">
+        <span className="w-24 shrink-0 font-medium text-muted-foreground">{dia.label}</span>
+        <span className="text-xs text-muted-foreground">La sede no abre este día</span>
+      </div>
+    )
+  }
+
+  const cambiarModo = (nuevo: ModoDia) => {
+    guardarMut.reset()
+    setModo(nuevo)
+    // El horario especial se guarda con su botón, después de elegir las horas.
+    if (nuevo !== 'especial' && nuevo !== modoGuardado) guardarMut.mutate(nuevo)
+  }
+
+  const especialSinGuardar = modo === 'especial' && (
+    modoGuardado !== 'especial' || inicio !== hhmm(horario?.hora_inicio) || fin !== hhmm(horario?.hora_fin)
+  )
+
+  return (
+    <div className="space-y-1.5 px-3 py-2 text-sm">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <span className="w-24 shrink-0 font-medium text-muted-foreground">{dia.label}</span>
+        <Select value={modo} onValueChange={(v) => cambiarModo(v as ModoDia)} disabled={guardarMut.isPending}>
+          <SelectTrigger className="h-8 w-56 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="sede">Igual a la sede ({rangoSede[0]} – {rangoSede[1]})</SelectItem>
+            <SelectItem value="especial">Horario especial</SelectItem>
+            <SelectItem value="no_atiende">No atiende</SelectItem>
+          </SelectContent>
+        </Select>
+        {modo === 'especial' && (
+          <div className="flex items-center gap-1.5">
+            <Input type="time" className="h-8 w-28 text-sm" value={inicio}
+              onChange={(e) => { guardarMut.reset(); setInicio(e.target.value) }} />
+            <span className="text-xs text-muted-foreground">a</span>
+            <Input type="time" className="h-8 w-28 text-sm" value={fin}
+              onChange={(e) => { guardarMut.reset(); setFin(e.target.value) }} />
+            {especialSinGuardar && (
+              <Button type="button" size="sm" className="h-8 text-xs"
+                disabled={!inicio || !fin || guardarMut.isPending}
+                onClick={() => guardarMut.mutate('especial')}>
+                Guardar
+              </Button>
+            )}
+          </div>
+        )}
+        {guardarMut.isPending && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />}
+      </div>
+      {guardarMut.isError && (
+        <p className="pl-[6.75rem] text-xs text-destructive">{errorHorario(guardarMut.error)}</p>
+      )}
+    </div>
+  )
+}
 
 function HorariosSection({
   colaboradorId,
   sedes,
 }: {
   colaboradorId: string
-  sedes: { id: string; nombre: string }[]
+  sedes: { id: string; nombre: string; horario?: HorarioSede }[]
 }) {
-  const qc = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
-  const [newHorario, setNewHorario] = useState<Partial<CreateHorarioColaboradorRequest>>({
-    colaborador: colaboradorId,
-  })
-
   const { data: horarios = [], isLoading } = useQuery({
     queryKey: ['colaborador-horarios', colaboradorId],
     queryFn: () => colaboradoresApi.horarios.list(colaboradorId),
     enabled: !!colaboradorId,
   })
 
-  const createMut = useMutation({
-    mutationFn: colaboradoresApi.horarios.create,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['colaborador-horarios', colaboradorId] })
-      setShowForm(false)
-      setNewHorario({ colaborador: colaboradorId })
-    },
-  })
-
-  const deleteMut = useMutation({
-    mutationFn: colaboradoresApi.horarios.delete,
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['colaborador-horarios', colaboradorId] })
-    },
-  })
-
-  const canSubmitNew =
-    newHorario.sede &&
-    newHorario.dia_semana &&
-    newHorario.hora_inicio &&
-    newHorario.hora_fin
-
-  const handleAdd = () => {
-    if (!canSubmitNew) return
-    createMut.mutate(newHorario as CreateHorarioColaboradorRequest)
-  }
+  if (isLoading) return <p className="text-xs text-muted-foreground">Cargando horarios…</p>
+  if (!sedes.length) return <p className="text-xs text-muted-foreground">Asígnale una sede para configurar su horario.</p>
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-end">
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs gap-1"
-          onClick={() => setShowForm((v) => !v)}
-        >
-          <Plus className="h-3.5 w-3.5" />
-          Agregar
-        </Button>
-      </div>
-
-      {/* Formulario para agregar horario */}
-      {showForm && (
-        <div className="rounded-lg border border-dashed p-3 space-y-2.5">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label className="text-xs">Sede</Label>
-              <Select
-                value={newHorario.sede ?? ''}
-                onValueChange={(v) => { createMut.reset(); setNewHorario((h) => ({ ...h, sede: v })) }}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Sede" />
-                </SelectTrigger>
-                <SelectContent>
-                  {sedes.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs">Día</Label>
-              <Select
-                value={newHorario.dia_semana ?? ''}
-                onValueChange={(v) => { createMut.reset(); setNewHorario((h) => ({ ...h, dia_semana: v as DiaSemana })) }}
-              >
-                <SelectTrigger className="h-8 text-sm">
-                  <SelectValue placeholder="Día" />
-                </SelectTrigger>
-                <SelectContent>
-                  {DIAS.map((d) => (
-                    <SelectItem key={d.value} value={d.value}>{d.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs">Hora inicio</Label>
-              <Input
-                type="time"
-                className="h-8 text-sm"
-                value={newHorario.hora_inicio ?? ''}
-                onChange={(e) => { createMut.reset(); setNewHorario((h) => ({ ...h, hora_inicio: e.target.value })) }}
+    <div className="space-y-4">
+      {sedes.map((sede) => (
+        <div key={sede.id} className="space-y-1.5">
+          {sedes.length > 1 && <p className="text-xs font-medium">{sede.nombre}</p>}
+          <div className="divide-y rounded-lg border">
+            {DIAS.map((dia) => (
+              <DiaHorarioRow
+                key={dia.value}
+                colaboradorId={colaboradorId}
+                sedeId={sede.id}
+                dia={dia}
+                rangoSede={sede.horario?.[dia.value]}
+                horario={horarios.find((h) => h.sede === sede.id && h.dia_semana === dia.value)}
               />
-            </div>
-
-            <div className="space-y-1">
-              <Label className="text-xs">Hora fin</Label>
-              <Input
-                type="time"
-                className="h-8 text-sm"
-                value={newHorario.hora_fin ?? ''}
-                onChange={(e) => { createMut.reset(); setNewHorario((h) => ({ ...h, hora_fin: e.target.value })) }}
-              />
-            </div>
-          </div>
-
-          {createMut.isError && (
-            <p className="text-xs text-destructive">
-              {(createMut.error as any)?.response?.data?.non_field_errors?.[0] ||
-                (createMut.error as any)?.response?.data?.detail ||
-                (createMut.error as any)?.response?.data?.error ||
-                'No se pudo guardar el horario. Verifica que no se solape con uno existente.'}
-            </p>
-          )}
-
-          <div className="flex justify-end gap-2">
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              onClick={() => { setShowForm(false); setNewHorario({ colaborador: colaboradorId }) }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              className="h-7 text-xs"
-              disabled={!canSubmitNew || createMut.isPending}
-              onClick={handleAdd}
-            >
-              {createMut.isPending && <Loader2 className="h-3 w-3 mr-1 animate-spin" />}
-              Guardar
-            </Button>
+            ))}
           </div>
         </div>
-      )}
-
-      {/* Lista de horarios existentes */}
-      {isLoading ? (
-        <p className="text-xs text-muted-foreground">Cargando horarios…</p>
-      ) : horarios.length === 0 ? (
-        <p className="rounded-lg border border-dashed px-3 py-2.5 text-xs text-muted-foreground">
-          Sin horarios propios: atiende en el horario de cada sede.
-        </p>
-      ) : (
-        <div className="divide-y rounded-lg border overflow-hidden">
-          {horarios.map((h) => {
-            const diaLabel = DIAS.find((d) => d.value === h.dia_semana)?.label ?? h.dia_semana
-            return (
-              <div key={h.id} className="flex items-center justify-between px-3 py-2 text-sm">
-                <span className="font-medium text-muted-foreground w-24 shrink-0">{diaLabel}</span>
-                <span className="flex-1 text-xs text-muted-foreground truncate">
-                  {h.sede_nombre ?? sedes.find((s) => s.id === h.sede)?.nombre ?? h.sede}
-                </span>
-                <span className="text-xs font-mono tabular-nums shrink-0">
-                  {h.hora_inicio} – {h.hora_fin}
-                </span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-6 w-6 ml-2 text-muted-foreground hover:text-destructive shrink-0"
-                  disabled={deleteMut.isPending}
-                  onClick={() => deleteMut.mutate(h.id)}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            )
-          })}
-        </div>
-      )}
+      ))}
     </div>
   )
 }
@@ -816,7 +777,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
 
                 {/* ── Horarios por sede (solo en edición) ── */}
                 {colaborador && (
-                  <Seccion titulo="Horarios" descripcion="Opcional. Úsalo si atiende menos horas que la sede. Los días sin horario usan el de la sede.">
+                  <Seccion titulo="Horarios" descripcion="Por defecto atiende en el horario de cada sede. Cambia solo los días en que tiene un horario especial o no atiende.">
                     <div className="sm:col-span-2">
                       <HorariosSection
                         colaboradorId={colaborador.id}
