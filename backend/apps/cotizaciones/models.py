@@ -4,8 +4,29 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
+from django.db.models import DateField, DateTimeField, DurationField, Exists, ExpressionWrapper, F, OuterRef, Value
+from django.db.models.functions import Cast, Coalesce, TruncDate
+from django.utils import timezone
 
 from apps.core.models import BaseModel
+
+
+class MotivoDescarte(models.TextChoices):
+    PRECIO = "precio", "Precio"
+    OTRA_CLINICA = "otra_clinica", "Eligió otra clínica"
+    NO_RESPONDE = "no_responde", "No responde"
+    NO_CANDIDATO = "no_candidato", "No es candidato"
+    OTRO = "otro", "Otro"
+
+
+class EstadoComercial(models.TextChoices):
+    """Estado que ve la clínica. Solo ``estado`` se guarda; el resto se deriva."""
+
+    BORRADOR = "borrador", "Borrador"
+    ENVIADA = "enviada", "Enviada"
+    VENCIDA = "vencida", "Vencida"
+    ACEPTADA = "aceptada", "Aceptada"
+    DESCARTADA = "descartada", "Descartada"
 
 
 class Cotizacion(BaseModel):
@@ -46,6 +67,22 @@ class Cotizacion(BaseModel):
     es_migracion = models.BooleanField(default=False, db_index=True)
     lote_migracion = models.UUIDField(null=True, blank=True, db_index=True)
 
+    # ── Embudo comercial (docs/plan-funnel-comercial.md) ──
+    # aceptada_en es la fecha de venta: todos los KPI de ventas filtran por ella.
+    aceptada_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    aceptada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cotizaciones_aceptadas",
+    )
+    descartada_en = models.DateTimeField(null=True, blank=True)
+    motivo_descarte = models.CharField(max_length=20, choices=MotivoDescarte.choices, blank=True, default="")
+    nota_descarte = models.TextField(blank=True, default="")
+    # Renovar una cotización reinicia su vigencia sin tocar created_at.
+    vigente_desde = models.DateField(null=True, blank=True)
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._estado_anterior = self.estado
@@ -56,7 +93,29 @@ class Cotizacion(BaseModel):
 
     @property
     def fecha_vencimiento(self):
-        return (self.created_at + timedelta(days=self.validez_dias)).date()
+        inicio = self.vigente_desde or timezone.localdate(self.created_at)
+        return inicio + timedelta(days=self.validez_dias)
+
+    @property
+    def esta_vencida(self) -> bool:
+        """Borrador cuya vigencia ya pasó. Se calcula; el estado guardado no cambia."""
+        return self.estado == self.Estado.BORRADOR and self.fecha_vencimiento < timezone.localdate()
+
+    @property
+    def estado_comercial(self) -> str:
+        """Estado para la interfaz: borrador, enviada, vencida, aceptada o descartada.
+
+        "enviada" y "vencida" se derivan (envíos registrados y vigencia); no se
+        guardan para no cambiar el significado de ``estado``.
+        """
+        if self.estado != self.Estado.BORRADOR:
+            return self.estado
+        if self.esta_vencida:
+            return EstadoComercial.VENCIDA
+        tiene_envios = getattr(self, "_tiene_envios", None)
+        if tiene_envios is None:
+            tiene_envios = self.envios.exists()
+        return EstadoComercial.ENVIADA if tiene_envios else EstadoComercial.BORRADOR
 
     @property
     def total(self):
@@ -356,3 +415,45 @@ class FormaPagoCotizacion(BaseModel):
     class Meta:
         db_table = "formas_pago_cotizacion"
         ordering = ["created_at"]
+
+
+# ── Estado comercial en consultas ──
+# Mismas reglas que Cotizacion.estado_comercial, pero en SQL para poder filtrar
+# y contar listas sin recorrerlas en Python.
+
+ESTADOS_COMERCIALES_FILTRO = {*EstadoComercial.values, "abiertas"}
+
+
+def con_estado_comercial(queryset):
+    """Anota ``_fecha_vencimiento`` y ``_tiene_envios`` (este último también lo
+    usa la propiedad ``estado_comercial`` para no consultar fila por fila)."""
+    duracion = ExpressionWrapper(F("validez_dias") * Value(timedelta(days=1)), output_field=DurationField())
+    vencimiento = Cast(
+        ExpressionWrapper(
+            Coalesce(F("vigente_desde"), TruncDate("created_at")) + duracion,
+            output_field=DateTimeField(),
+        ),
+        DateField(),
+    )
+    return queryset.annotate(
+        _fecha_vencimiento=vencimiento,
+        _tiene_envios=Exists(CotizacionEnvio.objects.filter(cotizacion=OuterRef("pk"))),
+    )
+
+
+def filtrar_estado_comercial(queryset, valor: str):
+    """Filtra por estado comercial. ``abiertas`` = borrador o enviada (no vencida).
+
+    El queryset debe venir de ``con_estado_comercial``.
+    """
+    hoy = timezone.localdate()
+    borrador = Cotizacion.Estado.BORRADOR
+    if valor == EstadoComercial.VENCIDA:
+        return queryset.filter(estado=borrador, _fecha_vencimiento__lt=hoy)
+    if valor == "abiertas":
+        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy)
+    if valor == EstadoComercial.ENVIADA:
+        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy, _tiene_envios=True)
+    if valor == EstadoComercial.BORRADOR:
+        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy, _tiene_envios=False)
+    return queryset.filter(estado=valor)

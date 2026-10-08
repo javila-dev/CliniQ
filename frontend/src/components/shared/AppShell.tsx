@@ -19,7 +19,6 @@ import {
   Stethoscope,
   ClipboardList,
   Wallet,
-  Zap,
   Building2,
   PieChart,
   HelpCircle,
@@ -27,6 +26,9 @@ import {
   Truck,
   ShoppingCart,
   Layers,
+  ShoppingBag,
+  Tag,
+  Briefcase,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -55,11 +57,15 @@ const NAV = {
   pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
   catalogo:       { href: '/catalogo',       label: 'Catálogo',        icon: Layers,          perm: PERM.SERVICIOS_VER         },
   cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER      },
+  // Ventas = cotizaciones aceptadas: mismo permiso, nadie pierde acceso.
+  ventas:         { href: '/ventas',         label: 'Ventas',          icon: ShoppingBag,     perm: PERM.COTIZACIONES_VER      },
   cartera:        { href: '/cartera',        label: 'Cartera',         icon: Wallet,          perm: PERM.CARTERA_VER           },
   consentimientos:{ href: '/consentimientos',label: 'Consentimientos', icon: FileText,        perm: PERM.CONSENTIMIENTOS_VER   },
   cobros:         { href: '/ingresos',       label: 'Ingresos',        icon: Receipt,         perm: PERM.COBROS_VER            },
   resultados:     { href: '/resultados',     label: 'Resultados',      icon: PieChart,        perm: PERM.REPORTES_VER_FINANCIEROS },
-  campanas:       { href: '/configuracion/campanas', label: 'Campañas', icon: Zap,            perm: PERM.CAMPANAS_GESTIONAR    },
+  // El modelo sigue siendo Campana; en pantalla son promociones de precio
+  // ("Campañas" queda para los envíos por WhatsApp, docs/plan-funnel-comercial.md).
+  campanas:       { href: '/configuracion/campanas', label: 'Promociones', icon: Tag,         perm: PERM.CAMPANAS_GESTIONAR    },
   insumos:        { href: '/inventario',     label: 'Insumos',         icon: Package,         perm: PERM.INVENTARIO_VER        },
   compras:        { href: '/compras', label: 'Compras',    icon: ShoppingCart,    perm: PERM.PROVEEDORES_ORDENES_VER },
   proveedores:    { href: '/proveedores',    label: 'Proveedores',     icon: Truck,           perm: PERM.PROVEEDORES_VER       },
@@ -79,7 +85,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
   const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
-  const ventasItems: NavItem[]   = [n.catalogo, n.cotizaciones, n.campanas].filter(vis)
+  const comercialItems: NavItem[] = [n.cotizaciones, n.ventas, n.catalogo, n.campanas].filter(vis)
   const insumosItems: NavItem[]  = [n.insumos, n.compras, n.proveedores].filter(vis)
   const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
 
@@ -90,7 +96,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
   if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems, icon: Stethoscope })
-  if (ventasItems.length)   entries.push({ section: 'Ventas',   items: ventasItems,   icon: Zap         })
+  if (comercialItems.length) entries.push({ section: 'Comercial', items: comercialItems, icon: Briefcase })
   if (insumosItems.length)  entries.push({ section: 'Insumos',  items: insumosItems,  icon: Package     })
   if (finanzasItems.length) entries.push({ section: 'Finanzas', items: finanzasItems, icon: Wallet      })
   if (vis(n.configuracion)) entries.push(n.configuracion)

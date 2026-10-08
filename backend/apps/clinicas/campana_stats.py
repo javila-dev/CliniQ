@@ -20,18 +20,27 @@ _DEFAULT_STATS = {
 }
 
 
-def get_stats_map(campana_ids):
-    """Aggregate sales stats for accepted cotizaciones grouped by campana_id."""
+def get_stats_map(campana_ids, desde=None, hasta=None):
+    """Aggregate sales stats for accepted cotizaciones grouped by campana_id.
+
+    ``desde``/``hasta`` (fechas, opcionales) acotan por fecha de venta
+    (``Cotizacion.aceptada_en``).
+    """
     if not campana_ids:
         return {}
 
+    items = ItemCotizacion.objects.filter(
+        campana_id__in=campana_ids,
+        activo=True,
+        cotizacion__estado=Cotizacion.Estado.ACEPTADA,
+        cotizacion__activo=True,
+    )
+    if desde:
+        items = items.filter(cotizacion__aceptada_en__date__gte=desde)
+    if hasta:
+        items = items.filter(cotizacion__aceptada_en__date__lte=hasta)
     rows = (
-        ItemCotizacion.objects.filter(
-            campana_id__in=campana_ids,
-            activo=True,
-            cotizacion__estado=Cotizacion.Estado.ACEPTADA,
-            cotizacion__activo=True,
-        )
+        items
         .values("campana_id")
         .annotate(
             items_vendidos=Count("id"),

@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion } from '@/store/numeroCliniqStore'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, PreciosCampanaMap, SesionesCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, Venta } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { NotaClinica } from '@/types/historia'
 import type { Paginated } from '@/types/common'
@@ -32,6 +32,7 @@ export interface CambiarEstadoResponse extends Cotizacion {
 export const cotizacionesApi = {
   list: async (params?: {
     estado?: EstadoCotizacion
+    estado_comercial?: EstadoComercial | 'abiertas'
     paciente?: string
     search?: string
     fecha_desde?: string
@@ -70,8 +71,18 @@ export const cotizacionesApi = {
     await apiClient.delete(`/cotizaciones/${id}/`)
   },
 
-  cambiarEstado: async (id: string, estado: EstadoCotizacion): Promise<CambiarEstadoResponse> => {
-    const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado })
+  cambiarEstado: async (
+    id: string,
+    estado: EstadoCotizacion,
+    extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean },
+  ): Promise<CambiarEstadoResponse> => {
+    const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado, ...extra })
+    return res.data
+  },
+
+  // Reinicia la vigencia de una cotización abierta (p. ej. una vencida que el paciente retoma).
+  renovar: async (id: string): Promise<Cotizacion> => {
+    const res = await apiClient.post<Cotizacion>(`/cotizaciones/${id}/renovar/`)
     return res.data
   },
 
@@ -149,4 +160,20 @@ export const cotizacionesApi = {
     return res.data
   },
 
+}
+
+export const ventasApi = {
+  list: async (params?: {
+    search?: string
+    aceptada_desde?: string
+    aceptada_hasta?: string
+    sede?: string
+    vendedor?: string
+    paciente?: string
+    con_mora?: '1'
+    page?: number
+  }): Promise<Paginated<Venta>> => {
+    const res = await apiClient.get<Paginated<Venta>>('/ventas/', { params })
+    return res.data
+  },
 }

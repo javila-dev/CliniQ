@@ -114,6 +114,29 @@ export interface CotizacionesMesMetrics {
   ventas_cantidad: number
 }
 
+// GET /reportes/comercial/: cotizaciones y ventas por separado, cada métrica
+// con su propia fecha (ver docs/plan-funnel-comercial.md).
+export interface ComercialMetrics {
+  periodo: { desde: string; hasta: string }
+  cotizaciones: {
+    creadas: number
+    creadas_valor: string
+    enviadas: number
+    abiertas: number          // foto de hoy, no del periodo
+    abiertas_valor: string
+    perdidas: number          // descartadas + vencidas en el periodo
+    descartadas: number
+    vencidas: number
+    motivo_principal: string | null
+  }
+  ventas: {
+    valor: string
+    cantidad: number
+    tasa_cierre_pct: string   // ganadas / decididas en el periodo
+    dias_promedio_cierre: number | null
+  }
+}
+
 export interface Vendedor {
   id: string
   nombre: string

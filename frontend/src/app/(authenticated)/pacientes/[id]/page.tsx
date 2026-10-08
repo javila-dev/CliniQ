@@ -509,13 +509,13 @@ export default function PacienteDetailPage({ params }: Props) {
                 {cotizacionesData!.results.map((c) => (
                   <Link
                     key={c.id}
-                    href={`/cotizaciones/${c.id}`}
+                    href={c.estado === 'aceptada' ? `/ventas/${c.id}` : `/cotizaciones/${c.id}`}
                     onClick={() => setActiveModal(null)}
                     className="flex items-center justify-between gap-3 px-6 py-3 hover:bg-muted/30 transition-colors group"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
-                        <CotizacionEstadoBadge estado={c.estado} />
+                        <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
                         <span className="text-xs text-muted-foreground">{formatDate(c.created_at)}</span>
                       </div>
                       <p className="text-sm font-medium mt-0.5">

@@ -798,7 +798,9 @@ class ObsequiosCotizacionTests(TestCase):
             f"/api/v1/cotizaciones/{creada['id']}/cambiar_estado/", {"estado": "aceptada"}, format="json",
         )
         # Vieja y sin citas: aparece en el reporte con sus ítems que sí tienen cupo.
-        Cotizacion.objects.filter(id=creada["id"]).update(created_at=timezone.now() - timedelta(days=90))
+        # El reporte cuenta desde la fecha de venta (aceptada_en).
+        hace_90 = timezone.now() - timedelta(days=90)
+        Cotizacion.objects.filter(id=creada["id"]).update(created_at=hace_90, aceptada_en=hace_90)
 
         response = self.client.get("/api/v1/reportes/pacientes-sin-reagendar/")
 

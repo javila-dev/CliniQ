@@ -5,7 +5,7 @@ from django.db.models import Q
 from rest_framework import serializers
 
 from apps.clinicas.models import FormaDePago, Sede
-from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion
+from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion, MotivoDescarte
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
@@ -644,6 +644,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     fecha_vencimiento = serializers.DateField(read_only=True)
+    estado_comercial = serializers.CharField(read_only=True)
+    aceptada_por_nombre = serializers.CharField(source="aceptada_por.nombre_completo", read_only=True, default=None)
     total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     total_pagado = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
@@ -659,8 +661,16 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "profesional_nombre",
             "sede",
             "estado",
+            "estado_comercial",
             "validez_dias",
             "fecha_vencimiento",
+            "vigente_desde",
+            "aceptada_en",
+            "aceptada_por",
+            "aceptada_por_nombre",
+            "descartada_en",
+            "motivo_descarte",
+            "nota_descarte",
             "notas",
             "items",
             "formas_pago",
@@ -678,6 +688,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "id",
             "es_migracion",
             "fecha_vencimiento",
+            "vigente_desde",
+            "aceptada_en",
+            "aceptada_por",
+            "descartada_en",
+            "motivo_descarte",
+            "nota_descarte",
             "total",
             "total_pagado",
             "saldo_pendiente",
@@ -943,6 +959,11 @@ class CambiarEstadoCotizacionSerializer(serializers.Serializer):
         (Cotizacion.Estado.DESCARTADA, "Descartada"),
         (Cotizacion.Estado.BORRADOR, "Borrador"),
     ))
+    # Al descartar (opcionales: los clientes viejos no los mandan).
+    motivo_descarte = serializers.ChoiceField(choices=MotivoDescarte.choices, required=False, allow_blank=True)
+    nota_descarte = serializers.CharField(required=False, allow_blank=True, max_length=1000)
+    # Al aceptar una cotización vencida hay que confirmarlo explícitamente.
+    confirmar_vencida = serializers.BooleanField(required=False, default=False)
 
 
 class EnviarCotizacionEmailSerializer(serializers.Serializer):

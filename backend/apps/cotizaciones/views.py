@@ -21,7 +21,13 @@ from rest_framework.viewsets import ModelViewSet
 from apps.agenda.models import Cita, RegistroConfirmacion
 from apps.core.logging import registrar_accion
 from apps.core.models import LogAccion
-from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
+from apps.cotizaciones.models import (
+    ESTADOS_COMERCIALES_FILTRO,
+    Cotizacion,
+    CotizacionEnvio,
+    con_estado_comercial,
+    filtrar_estado_comercial,
+)
 from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_cotizacion_pdf
 from apps.cotizaciones.serializers import (
     CambiarEstadoCotizacionSerializer,
@@ -116,6 +122,12 @@ class CotizacionViewSet(ModelViewSet):
             queryset = queryset.filter(activo=True)
 
         queryset = self._filtrar_por_fecha(queryset)
+        queryset = con_estado_comercial(queryset)
+        estado_comercial = self.request.query_params.get("estado_comercial")
+        if estado_comercial:
+            if estado_comercial not in ESTADOS_COMERCIALES_FILTRO:
+                raise ValidationError({"error": "Estado comercial invalido.", "code": "ESTADO_INVALIDO"})
+            queryset = filtrar_estado_comercial(queryset, estado_comercial)
         return queryset
 
     def _filtrar_por_fecha(self, queryset):
@@ -231,6 +243,17 @@ class CotizacionViewSet(ModelViewSet):
             from apps.consentimientos.models import Consentimiento
             from apps.cotizaciones.services import aceptar_cotizacion, validar_plan_de_pagos
 
+            if cotizacion.esta_vencida and not serializer.validated_data["confirmar_vencida"]:
+                raise ValidationError(
+                    {
+                        "error": (
+                            f"Esta cotización venció el {cotizacion.fecha_vencimiento:%d/%m/%Y}. "
+                            "Confirma si la aceptas igual o renuévala."
+                        ),
+                        "code": "COTIZACION_VENCIDA",
+                        "fecha_vencimiento": cotizacion.fecha_vencimiento.isoformat(),
+                    }
+                )
             validar_plan_de_pagos(cotizacion)
             compromiso_pago = self._generar_compromiso_pago_si_aplica(cotizacion)
             requiere_firma = (
@@ -253,8 +276,27 @@ class CotizacionViewSet(ModelViewSet):
             payload["requiere_firma_compromiso"] = False
             return Response(payload, status=status.HTTP_200_OK)
 
-        cotizacion.estado = nuevo_estado
-        cotizacion.save(update_fields=["estado", "updated_at"])
+        if nuevo_estado == Cotizacion.Estado.DESCARTADA:
+            from apps.cotizaciones.services import descartar_cotizacion
+
+            descartar_cotizacion(
+                cotizacion,
+                motivo=serializer.validated_data.get("motivo_descarte", ""),
+                nota=serializer.validated_data.get("nota_descarte", ""),
+            )
+        else:
+            cotizacion.estado = nuevo_estado
+            cotizacion.save(update_fields=["estado", "updated_at"])
+        return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="renovar")
+    def renovar(self, request, pk=None):
+        """Reinicia la vigencia de una cotización abierta (p. ej. una vencida que el paciente retoma)."""
+        from apps.cotizaciones.services import renovar_cotizacion
+
+        cotizacion = self.get_object()
+        renovar_cotizacion(cotizacion)
+        registrar_accion(request, "cotizacion.renovar", cotizacion, {"vigente_desde": cotizacion.vigente_desde.isoformat()})
         return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
 
     def _refrescar_compromiso_pendiente(self, cotizacion, compromiso=None):

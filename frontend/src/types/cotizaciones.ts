@@ -1,6 +1,18 @@
 import type { Consentimiento } from './consentimientos'
 
 export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida' | 'descartada'
+// Estado que ve la clínica: "enviada" y "vencida" se derivan en el backend
+// (envíos registrados y vigencia); `estado` sigue siendo el guardado.
+export type EstadoComercial = 'borrador' | 'enviada' | 'vencida' | 'aceptada' | 'descartada'
+export type MotivoDescarte = 'precio' | 'otra_clinica' | 'no_responde' | 'no_candidato' | 'otro'
+
+export const MOTIVOS_DESCARTE: { value: MotivoDescarte; label: string }[] = [
+  { value: 'precio',       label: 'Precio' },
+  { value: 'otra_clinica', label: 'Eligió otra clínica' },
+  { value: 'no_responde',  label: 'No responde' },
+  { value: 'no_candidato', label: 'No es candidato' },
+  { value: 'otro',         label: 'Otro' },
+]
 export type CanalEnvio = 'whatsapp' | 'email' | 'pdf'
 export type TipoItemCotizacion = 'tratamiento' | 'procedimiento' | 'libre'
 /** Un obsequio de producto usa `insumo`; solo existe como obsequio (es_obsequio = true). */
@@ -128,8 +140,15 @@ export interface Cotizacion {
   sede: string | null
   sede_nombre?: string | null
   estado: EstadoCotizacion
+  estado_comercial: EstadoComercial
   validez_dias: number
   fecha_vencimiento: string | null
+  vigente_desde?: string | null
+  aceptada_en?: string | null      // fecha de venta
+  aceptada_por_nombre?: string | null
+  descartada_en?: string | null
+  motivo_descarte?: MotivoDescarte | ''
+  nota_descarte?: string
   notas: string
   items: ItemCotizacion[]
   formas_pago: FormaPagoCotizacion[]
@@ -196,4 +215,22 @@ export interface CreateCotizacionRequest {
   notas: string
   items: CreateItemCotizacion[]
   formas_pago: CreateFormaPago[]
+}
+
+// Venta = cotización aceptada (GET /ventas/). El detalle es el de la cotización.
+export interface Venta {
+  id: string
+  paciente: string
+  paciente_nombre: string
+  profesional: string | null
+  vendedor_nombre: string | null
+  sede: string | null
+  sede_nombre: string | null
+  aceptada_en: string | null
+  total: string
+  total_pagado: string
+  saldo_pendiente: string
+  en_mora: boolean
+  cartera_id: string | null
+  sesiones: { completadas: number; total: number } | null
 }

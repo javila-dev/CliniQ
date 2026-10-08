@@ -30,6 +30,8 @@ import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
+import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
+import { CotizacionVencidaDialog } from './CotizacionVencidaDialog'
 import { BuscadorPopover } from '@/components/ui/buscador-popover'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
@@ -41,7 +43,7 @@ import { useFormasPago } from '@/hooks/useFormasPago'
 import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
-import type { Cotizacion, EstadoCotizacion, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, EstadoCotizacion, MotivoDescarte, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento } from '@/types/clinicas'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
@@ -311,15 +313,21 @@ function errorGuardado(error: unknown): { titulo: string; mensaje: string } {
 interface CotizacionFormProps {
   cotizacion?: Cotizacion | null
   pacienteInicial?: BusquedaPaciente | null
+  /** 'venta' cuando se abre desde /ventas/[id] (cotización aceptada). */
+  vista?: 'cotizacion' | 'venta'
 }
 
 // ── Componente ─────────────────────────────────────────────────────────────────
 
-export function CotizacionForm({ cotizacion, pacienteInicial }: CotizacionFormProps) {
+export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacion' }: CotizacionFormProps) {
   const router = useRouter()
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const esNueva = !cotizacion
+  const esVistaVenta = vista === 'venta'
+  // Una aceptada se muestra como venta (título, regreso a /ventas).
+  const esVenta = cotizacion?.estado === 'aceptada'
+  const rutaVolver = esVenta ? '/ventas' : '/cotizaciones'
   const canEditPrice = hasPermission(user, PERM.COTIZACIONES_CAMBIAR_PRECIO)
   // Precio bloqueado = el de catálogo (o el de campaña) es un mínimo para quien no tiene
   // cotizaciones.cambiar_precio: puede subirlo, no bajarlo. Mismo criterio que el backend.
@@ -643,22 +651,59 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     }
   }
 
-  const { mutate: cambiarEstado, isPending: cambiando } = useMutation({
-    mutationFn: (estado: EstadoCotizacion) => cotizacionesApi.cambiarEstado(cotizacion!.id, estado),
+  const [descartarOpen, setDescartarOpen] = useState(false)
+  // Fecha de vencimiento cuando el backend pide confirmar la aceptación de una vencida.
+  const [vencidaAlAceptar, setVencidaAlAceptar] = useState<string | null>(null)
+
+  const { mutate: cambiarEstadoMut, isPending: cambiando } = useMutation({
+    mutationFn: ({ estado, extra }: {
+      estado: EstadoCotizacion
+      extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean }
+    }) => cotizacionesApi.cambiarEstado(cotizacion!.id, estado, extra),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+      queryClient.invalidateQueries({ queryKey: ['ventas'] })
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
+      setDescartarOpen(false)
+      setVencidaAlAceptar(null)
       if (data.compromiso_pago?.estado === 'pendiente' && data.compromiso_pago.id) {
         setCompromisoPagoId(data.compromiso_pago.id)
       } else if (data.estado === 'aceptada' && canFirmarConsentimientos && (data.consentimientos_pendientes?.length ?? 0) > 0) {
         queryClient.setQueryData([CONSENTIMIENTOS_PENDIENTES_KEY, data.id], data.consentimientos_pendientes)
         setConsentimientosWizardOpen(true)
+      } else if (data.estado === 'aceptada' && !esVistaVenta) {
+        // Aceptada = venta: se sigue en su pantalla. Con el asistente de
+        // consentimientos abierto se queda aquí (la misma vista, sin perderlo).
+        toast.success('¡Venta registrada!', 'La cotización quedó aceptada.')
+        router.replace(`/ventas/${data.id}`)
+        return
       }
       router.refresh()
     },
     onError: (err: any) => {
       const data = err?.response?.data
+      if (data?.code === 'COTIZACION_VENCIDA') {
+        setVencidaAlAceptar(data.fecha_vencimiento ?? cotizacion?.fecha_vencimiento ?? '')
+        return
+      }
       toast.error('No se pudo cambiar el estado', data?.error ?? data?.detail ?? 'Vuelve a intentarlo en un momento.')
+    },
+  })
+  const cambiarEstado = (estado: EstadoCotizacion, extra?: { confirmar_vencida?: boolean }) =>
+    cambiarEstadoMut({ estado, extra })
+
+  const { mutate: renovar, isPending: renovando } = useMutation({
+    mutationFn: () => cotizacionesApi.renovar(cotizacion!.id),
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+      queryClient.setQueryData<Cotizacion>(['cotizacion', cotizacion!.id], (prev) => (prev ? { ...prev, ...data } : data))
+      setVencidaAlAceptar(null)
+      toast.success('Vigencia renovada', `Ahora vence el ${formatFechaLocal(data.fecha_vencimiento)}.`)
+      router.refresh()
+    },
+    onError: (err: any) => {
+      const data = err?.response?.data
+      toast.error('No se pudo renovar', data?.error ?? data?.detail ?? 'Vuelve a intentarlo en un momento.')
     },
   })
 
@@ -682,7 +727,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
   function aplicarPrecioCampana({ idx, precio }: { idx: number; itemId?: string; precio: number }) {
     setValue(`items.${idx}.valor_unitario`, precio, { shouldDirty: true })
-    toast.success('Precio de campaña aplicado', 'Guarda la cotización para confirmar el cambio.')
+    toast.success('Precio de promoción aplicado', 'Guarda la cotización para confirmar el cambio.')
   }
   const aplicandoCampana = false
 
@@ -852,21 +897,25 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" asChild>
-              <Link href="/cotizaciones"><ArrowLeft className="h-4 w-4" /></Link>
+              <Link href={rutaVolver}><ArrowLeft className="h-4 w-4" /></Link>
             </Button>
             <div className="min-w-0">
               <p className="text-sm font-semibold truncate">
                 {esNueva
                   ? 'Nueva cotización'
-                  : `Cotización · ${cotizacion?.paciente_nombre}`}
+                  : `${esVenta ? 'Venta' : 'Cotización'} · ${cotizacion?.paciente_nombre}`}
               </p>
               {cotizacion && (
                 <p className="text-xs text-muted-foreground">
-                  Creada el {new Date(cotizacion.created_at).toLocaleDateString('es-CO')}
+                  {esVenta && cotizacion.aceptada_en
+                    ? `Vendida el ${new Date(cotizacion.aceptada_en).toLocaleDateString('es-CO')} · cotizada el ${new Date(cotizacion.created_at).toLocaleDateString('es-CO')}`
+                    : cotizacion.estado === 'borrador' && cotizacion.fecha_vencimiento
+                      ? `Creada el ${new Date(cotizacion.created_at).toLocaleDateString('es-CO')} · ${cotizacion.estado_comercial === 'vencida' ? 'venció' : 'vence'} el ${formatFechaLocal(cotizacion.fecha_vencimiento)}`
+                      : `Creada el ${new Date(cotizacion.created_at).toLocaleDateString('es-CO')}`}
                 </p>
               )}
             </div>
-            {cotizacion && <CotizacionEstadoBadge estado={cotizacion.estado} />}
+            {cotizacion && !esVenta && <CotizacionEstadoBadge estado={cotizacion.estado_comercial ?? cotizacion.estado} />}
             {cotizacion?.es_migracion && (
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                 Datos previos
@@ -898,6 +947,19 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Cobros
               </Button>
             )}
+            {cotizacion?.estado_comercial === 'vencida' && canGestionar && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="text-amber-700 border-amber-200 hover:bg-amber-50"
+                disabled={renovando}
+                onClick={() => renovar()}
+                title={`Venció el ${formatFechaLocal(cotizacion.fecha_vencimiento)}: vuelve a contar ${cotizacion.validez_dias} días desde hoy`}
+              >
+                {renovando ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" /> : <Clock className="h-3.5 w-3.5 mr-1.5" />}
+                Renovar vigencia
+              </Button>
+            )}
             {cotizacion && canGestionar && cotizacion.estado !== 'aceptada' && (
               <Button
                 size="sm"
@@ -927,9 +989,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 variant="outline"
                 className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
                 disabled={cambiando}
-                onClick={() => cambiarEstado('descartada')}
+                onClick={() => setDescartarOpen(true)}
               >
-                {cambiando ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : 'Descartar'}
+                Descartar
               </Button>
             )}
             {!soloLectura && (
@@ -1269,7 +1331,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                         <div className="flex items-center gap-1.5 min-w-0">
                           <Zap className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                           <span className="text-amber-800 font-medium truncate">
-                            Campaña {items[idx]?.campana_nombre && `"${items[idx].campana_nombre}"`} —&nbsp;
+                            Promoción {items[idx]?.campana_nombre && `"${items[idx].campana_nombre}"`} —&nbsp;
                             precio especial: {cop(parseFloat(precioCampana))}
                           </span>
                         </div>
@@ -1377,7 +1439,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                         {campanaAplicada && (
                           <div className="flex items-center justify-end gap-1 mt-0.5">
                             <Zap className="h-3 w-3 text-amber-500" />
-                            <span className="text-[10px] text-amber-600 font-medium">Campaña aplicada</span>
+                            <span className="text-[10px] text-amber-600 font-medium">Promoción aplicada</span>
                           </div>
                         )}
                       </div>
@@ -1748,6 +1810,25 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           open={datosClinicosOpen}
           onOpenChange={setDatosClinicosOpen}
         />
+      )}
+
+      {cotizacion?.estado === 'borrador' && canGestionar && (
+        <>
+          <DescartarCotizacionDialog
+            open={descartarOpen}
+            onOpenChange={setDescartarOpen}
+            pacienteNombre={cotizacion.paciente_nombre}
+            loading={cambiando}
+            onConfirm={(extra) => cambiarEstadoMut({ estado: 'descartada', extra })}
+          />
+          <CotizacionVencidaDialog
+            fechaVencimiento={vencidaAlAceptar}
+            onOpenChange={(v) => { if (!v) setVencidaAlAceptar(null) }}
+            loading={cambiando || renovando}
+            onAceptarIgual={() => cambiarEstado('aceptada', { confirmar_vencida: true })}
+            onRenovar={() => renovar()}
+          />
+        </>
       )}
 
       {puedeEliminar && (

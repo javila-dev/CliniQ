@@ -13,18 +13,21 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
-import { cn } from '@/lib/utils'
+import { cn, formatFechaLocal } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
-import type { Cotizacion, EstadoCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, EstadoComercial } from '@/types/cotizaciones'
 
+// Solo propuestas: las aceptadas son ventas y viven en /ventas ("Convertidas"
+// queda para ver qué cotizaciones se cerraron).
 const ESTADO_TABS: { value: string; label: string }[] = [
-  { value: 'todas',      label: 'Todas'       },
-  { value: 'borrador',   label: 'Borrador'    },
-  { value: 'aceptada',   label: 'Aceptadas'   },
+  { value: 'abiertas',   label: 'Abiertas'    },
+  { value: 'enviada',    label: 'Enviadas'    },
   { value: 'vencida',    label: 'Vencidas'    },
   { value: 'descartada', label: 'Descartadas' },
+  { value: 'aceptada',   label: 'Convertidas' },
+  { value: 'todas',      label: 'Todas'       },
 ]
 
 const PAGE_SIZE = 25
@@ -35,61 +38,6 @@ function formatCOP(value: string | number): string {
 
 function formatFechaCorta(iso: string): string {
   return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-// ─── Progreso de sesiones ─────────────────────────────────────
-
-function resumenSesiones(c: Cotizacion) {
-  let total = 0
-  let agendadas = 0
-  let completadas = 0
-  for (const item of c.items) {
-    const ag = item.citas_agendadas ?? 0
-    const comp = item.citas_completadas ?? 0
-    const rest = item.citas_restantes ?? 0
-    total += ag + rest
-    agendadas += ag
-    completadas += comp
-  }
-  return { total, agendadas, completadas }
-}
-
-function ProgresoSesiones({ cotizacion }: { cotizacion: Cotizacion }) {
-  const { total, agendadas, completadas } = resumenSesiones(cotizacion)
-  if (total === 0) {
-    return <span className="text-xs text-muted-foreground">—</span>
-  }
-  const pctCompletadas = Math.min(100, Math.round((completadas / total) * 100))
-  const pctAgendadas = Math.min(100, Math.round((agendadas / total) * 100))
-  const help = `${completadas} de ${total} sesiones completadas · ${agendadas} agendada${agendadas !== 1 ? 's' : ''}`
-
-  return (
-    <div className="w-32 space-y-1" title={help}>
-      <div className="flex items-center justify-between text-xs tabular-nums">
-        <span className="font-medium text-foreground">{completadas}/{total}</span>
-        <span className="text-muted-foreground">sesiones</span>
-      </div>
-      <div
-        className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted"
-        role="progressbar"
-        aria-valuenow={completadas}
-        aria-valuemin={0}
-        aria-valuemax={total}
-        aria-label={help}
-      >
-        {/* Agendadas (fondo tenue) */}
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-primary/30"
-          style={{ width: `${pctAgendadas}%` }}
-        />
-        {/* Completadas (relleno sólido) */}
-        <div
-          className="absolute inset-y-0 left-0 rounded-full bg-primary transition-all"
-          style={{ width: `${pctCompletadas}%` }}
-        />
-      </div>
-    </div>
-  )
 }
 
 // ─── Paginación ───────────────────────────────────────────────
@@ -166,7 +114,7 @@ export default function CotizacionesPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
-  const [tabEstado, setTabEstado] = useState('todas')
+  const [tabEstado, setTabEstado] = useState('abiertas')
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -176,13 +124,13 @@ export default function CotizacionesPage() {
   const debouncedBusqueda = useDebounce(busqueda, 350)
 
   const params: {
-    estado?: EstadoCotizacion
+    estado_comercial?: EstadoComercial | 'abiertas'
     search?: string
     fecha_desde?: string
     fecha_hasta?: string
     page: number
   } = { page }
-  if (tabEstado !== 'todas') params.estado = tabEstado as EstadoCotizacion
+  if (tabEstado !== 'todas') params.estado_comercial = tabEstado as EstadoComercial | 'abiertas'
   if (debouncedBusqueda) params.search = debouncedBusqueda
   if (fechaDesde) params.fecha_desde = fechaDesde
   if (fechaHasta) params.fecha_hasta = fechaHasta
@@ -225,14 +173,14 @@ export default function CotizacionesPage() {
 
   function abrirDetalle(c: Cotizacion) {
     setLoadingId(c.id)
-    router.push(`/cotizaciones/${c.id}`)
+    router.push(c.estado === 'aceptada' ? `/ventas/${c.id}` : `/cotizaciones/${c.id}`)
   }
 
   return (
     <div className="space-y-4">
       <PageHeader
         title="Cotizaciones"
-        description="Gestiona las propuestas comerciales para los pacientes"
+        description="Propuestas enviadas a los pacientes. Las aceptadas pasan a Ventas."
         helpSlug="crear-y-enviar-una-cotizacion"
         action={
           <div className="flex items-center gap-2">
@@ -307,11 +255,13 @@ export default function CotizacionesPage() {
           <CardContent className="py-16 text-center">
             <FileText className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-muted-foreground">
-              {tabEstado !== 'todas' || hayFiltros
-                ? 'Sin cotizaciones para los filtros seleccionados'
-                : 'Aún no hay cotizaciones creadas'}
+              {tabEstado === 'abiertas' && !hayFiltros
+                ? 'No hay cotizaciones abiertas'
+                : tabEstado !== 'todas' || hayFiltros
+                  ? 'Sin cotizaciones para los filtros seleccionados'
+                  : 'Aún no hay cotizaciones creadas'}
             </p>
-            {canGestionar && !hayFiltros && tabEstado === 'todas' && (
+            {canGestionar && !hayFiltros && (tabEstado === 'todas' || tabEstado === 'abiertas') && (
               <Button variant="outline" size="sm" className="mt-4" onClick={abrirNueva}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
                 Crear la primera
@@ -328,11 +278,9 @@ export default function CotizacionesPage() {
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Paciente</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Pagado</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Pendiente</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden lg:table-cell">Sesiones</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Vence</th>
                   <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Profesional</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Fecha</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Creada</th>
                   <th className="px-4 py-2.5" />
                 </tr>
               </thead>
@@ -347,23 +295,17 @@ export default function CotizacionesPage() {
                       <p className="font-medium">{c.paciente_nombre}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <CotizacionEstadoBadge estado={c.estado} />
+                      <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
                     </td>
                     <td className="px-4 py-3 font-semibold tabular-nums">
                       {formatCOP(c.total)}
                     </td>
-                    <td className="px-4 py-3 tabular-nums hidden sm:table-cell">
-                      {c.total_pagado == null
-                        ? <span className="text-muted-foreground">—</span>
-                        : <span className={Number(c.total_pagado) > 0 ? 'text-green-600 font-medium' : 'text-muted-foreground'}>{formatCOP(c.total_pagado)}</span>}
-                    </td>
-                    <td className="px-4 py-3 tabular-nums hidden sm:table-cell">
-                      {c.saldo_pendiente == null
-                        ? <span className="text-muted-foreground">—</span>
-                        : <span className={Number(c.saldo_pendiente) > 0 ? 'text-amber-600 font-medium' : 'text-green-600'}>{formatCOP(c.saldo_pendiente)}</span>}
-                    </td>
-                    <td className="px-4 py-3 hidden lg:table-cell">
-                      <ProgresoSesiones cotizacion={c} />
+                    <td className="px-4 py-3 text-muted-foreground tabular-nums hidden sm:table-cell">
+                      {c.estado === 'aceptada'
+                        ? <span className="text-green-700">Vendida</span>
+                        : c.estado === 'descartada' || !c.fecha_vencimiento
+                          ? '—'
+                          : <span className={c.estado_comercial === 'vencida' ? 'text-amber-700' : undefined}>{formatFechaLocal(c.fecha_vencimiento)}</span>}
                     </td>
                     <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
                       {c.profesional_nombre ?? '—'}

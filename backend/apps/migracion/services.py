@@ -68,6 +68,7 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         sede=sede,
         profesional=None,
         estado=Cotizacion.Estado.ACEPTADA,
+        aceptada_en=timezone.now(),
         notas="Datos previos — puesta en marcha",
         es_migracion=True,
         lote_migracion=lote.id,

@@ -71,7 +71,7 @@ interface ItemDraft {
   precio_regular: number | null
 }
 
-// ─── CampañaDialog ────────────────────────────────────────────
+// ─── PromociónDialog ────────────────────────────────────────────
 
 function CampanaDialog({
   open, onOpenChange, editing,
@@ -157,10 +157,10 @@ function CampanaDialog({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
-      toast.success('Campaña creada')
+      toast.success('Promoción creada')
       onOpenChange(false)
     },
-    onError: () => toast.error('Error al crear la campaña'),
+    onError: () => toast.error('Error al crear la promoción'),
   })
 
   const updateMutation = useMutation({
@@ -187,10 +187,10 @@ function CampanaDialog({
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
-      toast.success('Campaña actualizada')
+      toast.success('Promoción actualizada')
       onOpenChange(false)
     },
-    onError: () => toast.error('Error al guardar la campaña'),
+    onError: () => toast.error('Error al guardar la promoción'),
   })
 
   const isPending = createMutation.isPending || updateMutation.isPending
@@ -239,7 +239,7 @@ function CampanaDialog({
 
   const precioRegularActual = itemTargetId ? getPrecioRegular(itemTipo, itemTargetId) : undefined
 
-  // IDs de procedimientos/tratamientos ya usados en OTRAS campañas activas hoy
+  // IDs de procedimientos/tratamientos ya usados en OTRAS promociones activas hoy
   const hoy = todayStr()
   const otrasActivas = todasCampanas.filter(
     (c) => c.id !== editing?.id && c.activo && c.fecha_inicio <= hoy && c.fecha_fin >= hoy
@@ -264,7 +264,7 @@ function CampanaDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader className="pb-2">
-          <DialogTitle className="text-lg">{editing ? 'Editar campaña' : 'Nueva campaña'}</DialogTitle>
+          <DialogTitle className="text-lg">{editing ? 'Editar promoción' : 'Nueva promoción'}</DialogTitle>
         </DialogHeader>
 
         <form onSubmit={handleSubmit(handleSubmit_withItemsCheck)} className="space-y-6">
@@ -277,7 +277,7 @@ function CampanaDialog({
               {/* Nombre */}
               <div className="col-span-2 space-y-1.5">
                 <Label>Nombre</Label>
-                <Input {...register('nombre')} placeholder="Ej. Campaña Verano 2026" />
+                <Input {...register('nombre')} placeholder="Ej. Promoción Verano 2026" />
                 {errors.nombre && <p className="text-xs text-destructive">{errors.nombre.message}</p>}
               </div>
 
@@ -314,7 +314,7 @@ function CampanaDialog({
                       checked={field.value}
                       onChange={(e) => field.onChange(e.target.checked)}
                     />
-                    <Label htmlFor="activo" className="cursor-pointer font-normal">Campaña activa</Label>
+                    <Label htmlFor="activo" className="cursor-pointer font-normal">Promoción activa</Label>
                   </div>
                 )}
               />
@@ -351,10 +351,10 @@ function CampanaDialog({
             )}
           </section>
 
-          {/* ── Ítems de campaña ── */}
+          {/* ── Ítems de promoción ── */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ítems de campaña</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Ítems de promoción</p>
               {itemsError && <p className="text-xs text-destructive font-medium">Agrega al menos un ítem</p>}
             </div>
 
@@ -366,7 +366,7 @@ function CampanaDialog({
                     <tr className="border-b bg-muted/40">
                       <th className="px-4 py-2.5 text-left font-medium text-muted-foreground text-xs">Nombre</th>
                       <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">P. regular</th>
-                      <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">P. campaña</th>
+                      <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">P. promoción</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
@@ -449,10 +449,10 @@ function CampanaDialog({
                   {itemTargetId && (
                     <p className="text-xs text-muted-foreground mt-1.5">
                       {itemYaAgregado
-                        ? <span className="text-destructive font-medium">Ya está en esta campaña</span>
+                        ? <span className="text-destructive font-medium">Ya está en esta promoción</span>
                         : itemBloqueadoPorOtraCampana
                           ? <span className="text-destructive font-medium">
-                              En campaña activa: {campanaQueBloquea?.nombre ?? '—'}
+                              En promoción activa: {campanaQueBloquea?.nombre ?? '—'}
                             </span>
                           : <>Precio referencia:{' '}
                               {precioRegularActual != null
@@ -498,7 +498,7 @@ function CampanaDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
             <Button type="submit" disabled={isPending}>
               {isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-              {editing ? 'Guardar cambios' : 'Crear campaña'}
+              {editing ? 'Guardar cambios' : 'Crear promoción'}
             </Button>
           </DialogFooter>
         </form>
@@ -512,7 +512,7 @@ function CampanaDialog({
 function CampanaItems({ campana }: { campana: Campana }) {
   const items = campana.items ?? []
   if (items.length === 0) {
-    return <p className="px-4 py-3 text-xs text-muted-foreground italic">Sin ítems en esta campaña.</p>
+    return <p className="px-4 py-3 text-xs text-muted-foreground italic">Sin ítems en esta promoción.</p>
   }
   return (
     <div className="px-4 pb-3 pt-1 space-y-1">
@@ -616,19 +616,19 @@ function CampanaStatsModal({ campana, open, onClose }: { campana: Campana | null
 
           <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded-lg px-3 py-2">
             <Package2 className="h-3.5 w-3.5 shrink-0" />
-            <span><span className="font-semibold text-foreground">{itemsVendidos}</span> ítems vendidos en total · <span className="font-semibold text-foreground">{totalItems}</span> {totalItems === 1 ? 'ítem' : 'ítems'} en campaña</span>
+            <span><span className="font-semibold text-foreground">{itemsVendidos}</span> ítems vendidos en total · <span className="font-semibold text-foreground">{totalItems}</span> {totalItems === 1 ? 'ítem' : 'ítems'} en promoción</span>
           </div>
 
           {/* Ítems */}
           {totalItems > 0 && (
             <div>
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Ítems de la campaña</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Ítems de la promoción</p>
               <div className="rounded-lg border overflow-hidden">
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b bg-muted/40">
                       <th className="px-3 py-2 text-left font-medium text-muted-foreground">Nombre</th>
-                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio campaña</th>
+                      <th className="px-3 py-2 text-right font-medium text-muted-foreground">Precio promoción</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y">
@@ -694,9 +694,9 @@ export default function CampanasPage() {
     mutationFn: (id: string) => campanasApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
-      toast.success('Campaña eliminada')
+      toast.success('Promoción eliminada')
     },
-    onError: () => toast.error('No se pudo eliminar la campaña'),
+    onError: () => toast.error('No se pudo eliminar la promoción'),
   })
 
   function openCreate() {
@@ -716,12 +716,12 @@ export default function CampanasPage() {
     <div className="space-y-6">
       <PageHeader
         helpSlug="campanas-y-precios-promocionales"
-        title="Campañas"
+        title="Promociones"
         description="Precios especiales por período para procedimientos y tratamientos."
         action={
           <Button size="sm" onClick={openCreate}>
             <Plus className="h-4 w-4 mr-1.5" />
-            Nueva campaña
+            Nueva promoción
           </Button>
         }
       />
@@ -733,11 +733,11 @@ export default function CampanasPage() {
       ) : rows.length === 0 ? (
         <div className="rounded-xl border bg-white p-12 text-center">
           <Zap className="h-8 w-8 text-muted-foreground mx-auto mb-3 opacity-40" />
-          <p className="text-sm font-medium text-muted-foreground">Sin campañas</p>
-          <p className="text-xs text-muted-foreground mt-1">Crea una campaña para ofrecer precios especiales por período.</p>
+          <p className="text-sm font-medium text-muted-foreground">Sin promociones</p>
+          <p className="text-xs text-muted-foreground mt-1">Crea una promoción para ofrecer precios especiales por período.</p>
           <Button size="sm" className="mt-4" onClick={openCreate}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />
-            Nueva campaña
+            Nueva promoción
           </Button>
         </div>
       ) : (
@@ -746,7 +746,7 @@ export default function CampanasPage() {
             <thead>
               <tr className="border-b bg-gray-50/60">
                 <th className="w-8" />
-                <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campaña</th>
+                <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">Promoción</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden md:table-cell">Vigencia</th>
                 <th className="px-4 py-2.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide hidden sm:table-cell">Sedes</th>
                 <th className="px-4 py-2.5 text-center text-xs font-semibold text-muted-foreground uppercase tracking-wide w-20">Estado</th>
@@ -866,7 +866,7 @@ export default function CampanasPage() {
                             <DropdownMenuItem
                               className="text-destructive focus:text-destructive"
                               onClick={() => {
-                                if (confirm(`¿Eliminar la campaña "${c.nombre}"?`)) {
+                                if (confirm(`¿Eliminar la promoción "${c.nombre}"?`)) {
                                   deleteMutation.mutate(c.id)
                                 }
                               }}

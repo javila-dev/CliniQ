@@ -2,7 +2,22 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from django.db import connection
-from django.db.models import Case, Count, DecimalField, ExpressionWrapper, F, Max, OuterRef, Q, Subquery, Sum, When
+from django.db.models import (
+    Avg,
+    Case,
+    Count,
+    DecimalField,
+    DurationField,
+    ExpressionWrapper,
+    F,
+    Max,
+    Min,
+    OuterRef,
+    Q,
+    Subquery,
+    Sum,
+    When,
+)
 from django.db.models.functions import TruncDate, TruncMonth, TruncWeek
 from django.utils import timezone
 from rest_framework.request import Request
@@ -395,6 +410,104 @@ class CotizacionesReporteView(APIView):
         })
 
 
+_ITEM_SUBTOTAL = ExpressionWrapper(
+    F("num_citas") * F("valor_unitario") * (Decimal("1") - F("descuento_porcentaje") / Decimal("100")),
+    output_field=DecimalField(max_digits=14, decimal_places=2),
+)
+
+
+def _valor_cotizaciones(cotizaciones_qs) -> Decimal:
+    """Suma de los ítems cobrables (sin obsequios) de esas cotizaciones."""
+    return ItemCotizacion.objects.filter(
+        cotizacion__in=cotizaciones_qs.values("pk"), activo=True, es_obsequio=False,
+    ).aggregate(v=Sum(_ITEM_SUBTOTAL))["v"] or Decimal("0")
+
+
+class ComercialReporteView(APIView):
+    """KPI de cotizaciones y ventas por separado (docs/plan-funnel-comercial.md).
+
+    Cada métrica usa su propia fecha: creadas por ``created_at``, enviadas por
+    el primer envío, perdidas por ``descartada_en`` o por vencimiento, y
+    vendidas por ``aceptada_en``. Los datos previos migrados no cuentan.
+    """
+
+    permission_classes = (RequirePermission("reportes.ver_financieros"),)
+
+    def get(self, request: Request):
+        from apps.cotizaciones.models import con_estado_comercial, filtrar_estado_comercial
+
+        user = request.user
+        hoy = timezone.localdate()
+        fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
+        fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
+        sede_ids = sede_ids_para_filtro(user, request.query_params.get("sede_id"))
+
+        base = Cotizacion.objects.filter(activo=True, es_migracion=False)
+        if user.rol != "superadmin":
+            base = base.filter(clinica=user.clinica)
+        if sede_ids is not None:
+            base = base.filter(sede_id__in=sede_ids)
+        vendedor_ids = _vendedor_ids(request)
+        if vendedor_ids:
+            base = base.filter(profesional_id__in=vendedor_ids)
+        base = con_estado_comercial(base)
+
+        def en_periodo(campo):
+            return {f"{campo}__gte": fecha_inicio, f"{campo}__lte": fecha_fin}
+
+        creadas = base.filter(**en_periodo("created_at__date"))
+        enviadas = base.annotate(primer_envio=Min("envios__created_at")).filter(**en_periodo("primer_envio__date"))
+        abiertas = filtrar_estado_comercial(base, "abiertas")
+
+        descartadas = base.filter(estado=Cotizacion.Estado.DESCARTADA, **en_periodo("descartada_en__date"))
+        # Vencidas en el periodo: la vigencia terminó dentro del rango (y ya pasó).
+        vencidas = filtrar_estado_comercial(base, "vencida").filter(
+            _fecha_vencimiento__gte=fecha_inicio, _fecha_vencimiento__lte=fecha_fin,
+        )
+        motivo_principal = (
+            descartadas.exclude(motivo_descarte="")
+            .values("motivo_descarte")
+            .annotate(n=Count("id"))
+            .order_by("-n")
+            .first()
+        )
+
+        vendidas = base.filter(estado=Cotizacion.Estado.ACEPTADA, **en_periodo("aceptada_en__date"))
+        ventas = vendidas.aggregate(
+            valor=Sum("cartera__total"),
+            cantidad=Count("id"),
+            dias_cierre=Avg(ExpressionWrapper(F("aceptada_en") - F("created_at"), output_field=DurationField())),
+        )
+
+        ganadas = ventas["cantidad"] or 0
+        perdidas = descartadas.count()
+        n_vencidas = vencidas.count()
+        decididas = ganadas + perdidas + n_vencidas
+        tasa_cierre = (ganadas / decididas * 100) if decididas else 0
+        dias_cierre = ventas["dias_cierre"]
+
+        return Response({
+            "periodo": {"desde": fecha_inicio.isoformat(), "hasta": fecha_fin.isoformat()},
+            "cotizaciones": {
+                "creadas": creadas.count(),
+                "creadas_valor": _money(_valor_cotizaciones(creadas)),
+                "enviadas": enviadas.count(),
+                "abiertas": abiertas.count(),
+                "abiertas_valor": _money(_valor_cotizaciones(abiertas)),
+                "perdidas": perdidas + n_vencidas,
+                "descartadas": perdidas,
+                "vencidas": n_vencidas,
+                "motivo_principal": motivo_principal["motivo_descarte"] if motivo_principal else None,
+            },
+            "ventas": {
+                "valor": _money(ventas["valor"]),
+                "cantidad": ganadas,
+                "tasa_cierre_pct": f"{tasa_cierre:.2f}",
+                "dias_promedio_cierre": round(dias_cierre.total_seconds() / 86400, 1) if dias_cierre else None,
+            },
+        })
+
+
 class VendedoresView(APIView):
     """Usuarios por los que se puede filtrar el reporte de ventas.
 
@@ -495,7 +608,8 @@ class PacientesSinReagendarView(APIView):
                     continue
                 dias_sin_agendar = (hoy - ultima_cita).days
             else:
-                fecha_ref = item.cotizacion.created_at.date()
+                compra = item.cotizacion.aceptada_en or item.cotizacion.created_at
+                fecha_ref = timezone.localdate(compra)
                 if fecha_ref > corte:
                     continue
                 dias_sin_agendar = (hoy - fecha_ref).days

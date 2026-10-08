@@ -1414,8 +1414,17 @@ class CampanaViewSet(HasClinicamente, ModelViewSet):
     def _stats_context(self, campanas):
         from apps.clinicas.campana_stats import get_stats_map
 
+        from datetime import date
+
+        def fecha(param):
+            try:
+                return date.fromisoformat(self.request.query_params.get(param) or "")
+            except ValueError:
+                return None
+
         campana_ids = [campana.id for campana in campanas]
-        return {**self.get_serializer_context(), "stats_map": get_stats_map(campana_ids)}
+        stats_map = get_stats_map(campana_ids, desde=fecha("ventas_desde"), hasta=fecha("ventas_hasta"))
+        return {**self.get_serializer_context(), "stats_map": stats_map}
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())

@@ -86,7 +86,10 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
         return consentimientos_pendientes_cotizacion(cotizacion)
 
     cotizacion.estado = Cotizacion.Estado.ACEPTADA
-    cotizacion.save(update_fields=["estado", "updated_at"])
+    cotizacion.aceptada_en = timezone.now()
+    # Nulo cuando la acepta la firma del compromiso de pago (sin usuario).
+    cotizacion.aceptada_por = actor if getattr(actor, "is_authenticated", False) else None
+    cotizacion.save(update_fields=["estado", "aceptada_en", "aceptada_por", "updated_at"])
 
     cartera, created = Cartera.objects.get_or_create(
         cotizacion=cotizacion,
@@ -110,6 +113,24 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
         cotizacion.id, getattr(actor, "id", None),
     )
     return consentimientos_pendientes_cotizacion(cotizacion)
+
+
+def descartar_cotizacion(cotizacion, *, motivo: str = "", nota: str = "") -> None:
+    cotizacion.estado = Cotizacion.Estado.DESCARTADA
+    cotizacion.descartada_en = timezone.now()
+    cotizacion.motivo_descarte = motivo
+    cotizacion.nota_descarte = nota
+    cotizacion.save(update_fields=["estado", "descartada_en", "motivo_descarte", "nota_descarte", "updated_at"])
+
+
+def renovar_cotizacion(cotizacion) -> None:
+    """Reinicia la vigencia desde hoy (mismos días de validez)."""
+    if cotizacion.estado != Cotizacion.Estado.BORRADOR:
+        raise ValidationError(
+            {"error": "Solo se pueden renovar cotizaciones abiertas.", "code": "COTIZACION_NO_RENOVABLE"}
+        )
+    cotizacion.vigente_desde = timezone.localdate()
+    cotizacion.save(update_fields=["vigente_desde", "updated_at"])
 
 
 def _bloquear_obsequio_producto(item) -> ItemCotizacion:

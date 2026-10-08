@@ -6,7 +6,7 @@ import {
   CalendarDays, Users, CheckCircle2,
   ArrowRight, Plus, TrendingUp, DollarSign,
   FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
-  ChevronDown, Search,
+  ChevronDown, Search, ShoppingBag,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -38,6 +38,7 @@ import {
 import { toast } from '@/hooks/use-toast'
 import type { EstadoCita } from '@/types/agenda'
 import type { PacienteSinReagendar, Vendedor } from '@/types/reportes'
+import { MOTIVOS_DESCARTE } from '@/types/cotizaciones'
 
 const STALE = 5 * 60 * 1000
 
@@ -271,16 +272,18 @@ function FiltroVendedores({ opciones, selected, onChange }: {
 }
 
 function MetricaCotizacion({
-  label, value, sub, color, loading,
+  label, value, sub, color, loading, ayuda,
 }: {
   label: string
   value: string | number
   sub?: string
   color: string
   loading?: boolean
+  /** De dónde sale el número, en una frase (tooltip). */
+  ayuda?: string
 }) {
   return (
-    <div className="flex-1 text-center px-4 py-3">
+    <div className={cn('flex-1 text-center px-4 py-3', ayuda && 'cursor-help')} title={ayuda}>
       {loading ? (
         <>
           <Skeleton className="h-8 w-12 mx-auto mb-1" />
@@ -546,12 +549,12 @@ function DashboardContent() {
   })
   const citasHoy = citasHoyData?.results
 
-  const { data: cotizacionesMes, isLoading: cotizacionesMesLoading } = useQuery({
-    queryKey: ['reportes', 'cotizaciones', periodo, sede, vendedores],
+  const { data: comercial, isLoading: comercialLoading } = useQuery({
+    queryKey: ['reportes', 'comercial', periodo, sede, vendedores],
     queryFn: () => {
       // periodo 'hoy' -> mes en curso (comportamiento original de la tarjeta).
       const { ini, fin } = periodo === 'hoy' ? mesActual() : rango
-      return reportesApi.getCotizacionesMes({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede, vendedores })
+      return reportesApi.getComercial({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede, vendedores })
     },
     staleTime: STALE,
     refetchInterval: STALE,
@@ -930,64 +933,106 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Ventas del mes + Cartera: Ventas lleva 4 métricas y el filtro, Cartera 2 */}
+      {/* Cotizaciones del periodo: propuestas, cada número con su propia fecha */}
+      {canVerCotizaciones && (
+        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div className="flex items-center justify-between px-5 py-3 border-b">
+            <div className="flex items-center gap-2">
+              <FileText className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold text-sm">Cotizaciones {periodoSufijoRetro}</h2>
+            </div>
+            <div className="flex items-center gap-3">
+              {canVerFinanzas && (
+                <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
+              )}
+              <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
+                Ver cotizaciones <ArrowRight className="h-3 w-3" />
+              </Link>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:flex sm:divide-x">
+            <MetricaCotizacion
+              label="Creadas"
+              value={comercial?.cotizaciones.creadas ?? 0}
+              sub={comercial && canVerFinanzas ? abrevCOP(Number(comercial.cotizaciones.creadas_valor)) : undefined}
+              color="text-foreground"
+              loading={comercialLoading}
+              ayuda="Cotizaciones creadas en el periodo, sin importar cómo terminaron."
+            />
+            <MetricaCotizacion
+              label="Enviadas"
+              value={comercial?.cotizaciones.enviadas ?? 0}
+              color="text-blue-600"
+              loading={comercialLoading}
+              ayuda="Cotizaciones enviadas por primera vez al paciente en el periodo (WhatsApp, correo o PDF)."
+            />
+            <MetricaCotizacion
+              label="Abiertas hoy"
+              value={comercial?.cotizaciones.abiertas ?? 0}
+              sub={comercial && canVerFinanzas ? abrevCOP(Number(comercial.cotizaciones.abiertas_valor)) : undefined}
+              color="text-amber-600"
+              loading={comercialLoading}
+              ayuda="Cotizaciones vigentes que el paciente todavía no acepta. Es la foto de hoy, no depende del periodo."
+            />
+            <MetricaCotizacion
+              label="Perdidas"
+              value={comercial?.cotizaciones.perdidas ?? 0}
+              sub={comercial?.cotizaciones.motivo_principal
+                ? `sobre todo: ${MOTIVOS_DESCARTE.find((m) => m.value === comercial.cotizaciones.motivo_principal)?.label.toLowerCase() ?? comercial.cotizaciones.motivo_principal}`
+                : undefined}
+              color="text-red-500"
+              loading={comercialLoading}
+              ayuda="Descartadas en el periodo más las que vencieron en el periodo sin respuesta."
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Ventas del periodo + Cartera: Ventas lleva 3 métricas, Cartera 2 */}
       <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
-        {canVerCotizaciones && (
+        {canVerFinanzas && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <div className="flex items-center justify-between px-5 py-3 border-b">
               <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4 text-primary" />
+                <ShoppingBag className="h-4 w-4 text-primary" />
                 <h2 className="font-semibold text-sm">Ventas {periodoSufijoRetro}</h2>
               </div>
-              <div className="flex items-center gap-3">
-                {canVerFinanzas && (
-                  <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
-                )}
-                <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
-                  Ver cotizaciones <ArrowRight className="h-3 w-3" />
-                </Link>
-              </div>
+              <Link href="/ventas" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
+                Ver ventas <ArrowRight className="h-3 w-3" />
+              </Link>
             </div>
             <div className="flex divide-x">
               <MetricaCotizacion
-                label="Cotizadas"
-                value={cotizacionesMes?.total_mes ?? 0}
-                color="text-foreground"
-                loading={cotizacionesMesLoading}
+                label="Vendido"
+                value={comercial ? abrevCOP(Number(comercial.ventas.valor)) : '—'}
+                sub={comercial && comercial.ventas.cantidad > 0
+                  ? `${comercial.ventas.cantidad} venta${comercial.ventas.cantidad !== 1 ? 's' : ''} · prom. ${abrevCOP(Number(comercial.ventas.valor) / comercial.ventas.cantidad)}`
+                  : 'sin ventas'}
+                color="text-primary"
+                loading={comercialLoading}
+                ayuda="Valor de las cotizaciones aceptadas en el periodo (por fecha de aceptación)."
               />
               <MetricaCotizacion
-                label="Aceptadas"
-                value={cotizacionesMes?.aceptadas_mes ?? 0}
-                color="text-emerald-600"
-                loading={cotizacionesMesLoading}
+                label="Tasa de cierre"
+                value={comercial ? `${Number(comercial.ventas.tasa_cierre_pct).toFixed(0)}%` : '—'}
+                color={comercial
+                  ? Number(comercial.ventas.tasa_cierre_pct) >= 50
+                    ? 'text-emerald-600'
+                    : Number(comercial.ventas.tasa_cierre_pct) >= 25
+                      ? 'text-amber-600'
+                      : 'text-red-500'
+                  : 'text-muted-foreground'}
+                loading={comercialLoading}
+                ayuda="De las cotizaciones que se decidieron en el periodo (aceptadas, descartadas o vencidas), cuántas se aceptaron."
               />
-              {canVerFinanzas && (
-                <MetricaCotizacion
-                  label="Conversión"
-                  value={cotizacionesMes ? `${Number(cotizacionesMes.tasa_conversion_pct).toFixed(0)}%` : '—'}
-                  sub={cotizacionesMes && Number(cotizacionesMes.tasa_conversion_pct) >= 50 ? 'buen ritmo' : cotizacionesMes ? 'por mejorar' : undefined}
-                  color={cotizacionesMes
-                    ? Number(cotizacionesMes.tasa_conversion_pct) >= 50
-                      ? 'text-emerald-600'
-                      : Number(cotizacionesMes.tasa_conversion_pct) >= 25
-                        ? 'text-amber-600'
-                        : 'text-red-500'
-                    : 'text-muted-foreground'
-                  }
-                  loading={cotizacionesMesLoading}
-                />
-              )}
-              {canVerFinanzas && (
-                <MetricaCotizacion
-                  label="Vendido"
-                  value={cotizacionesMes ? abrevCOP(Number(cotizacionesMes.ventas_valor)) : '—'}
-                  sub={cotizacionesMes && cotizacionesMes.ventas_cantidad > 0
-                    ? `${cotizacionesMes.ventas_cantidad} venta${cotizacionesMes.ventas_cantidad !== 1 ? 's' : ''} · prom. ${abrevCOP(Number(cotizacionesMes.ventas_valor) / cotizacionesMes.ventas_cantidad)}`
-                    : 'sin ventas'}
-                  color="text-primary"
-                  loading={cotizacionesMesLoading}
-                />
-              )}
+              <MetricaCotizacion
+                label="Días para cerrar"
+                value={comercial?.ventas.dias_promedio_cierre != null ? Math.round(comercial.ventas.dias_promedio_cierre) : '—'}
+                sub="promedio"
+                color="text-foreground"
+                loading={comercialLoading}
+                ayuda="Días promedio entre que se crea la cotización y el paciente la acepta, en las ventas del periodo."
+              />
             </div>
           </div>
         )}
