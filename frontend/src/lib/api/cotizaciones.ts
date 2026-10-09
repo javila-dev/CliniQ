@@ -22,6 +22,8 @@ export interface ConsentimientoRequeridoCotizacion {
   fecha_vencimiento: string | null
   archivo_url: string | null
   origen: 'documenso' | 'manual' | null
+  /** El paciente firmó pero falta el profesional: aún no hay PDF sellado. */
+  pendiente_firma_profesional?: boolean
 }
 
 export interface CambiarEstadoResponse extends Cotizacion {
