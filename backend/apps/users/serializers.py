@@ -226,6 +226,10 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             instance.rol = legacy_storage_role(role.slug)
             # Cambiar de rol no toca el check "atiende pacientes": se conserva el
             # valor enviado (o el actual).
+        if instance.es_profesional and validated_data.get("es_profesional") is False:
+            from apps.colaboradores.grupos import al_dejar_de_atender_pacientes
+
+            al_dejar_de_atender_pacientes(instance)
         return super().update(instance, validated_data)
 
 

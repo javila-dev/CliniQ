@@ -38,10 +38,13 @@ def profesionales_activos(clinica):
 
 
 def procedimientos_sin_profesional(clinica):
-    """Procedimientos activos que ningún profesional activo tiene asociado."""
+    """Procedimientos activos que ningún profesional activo realiza, ni
+    directamente ni por un grupo de atención."""
+    activos = profesionales_activos(clinica)
     return list(
         Servicio.objects.filter(clinica=clinica, activo=True)
-        .exclude(colaboradores__in=profesionales_activos(clinica))
+        .exclude(colaboradores__in=activos)
+        .exclude(grupos_atencion__miembros__in=activos)
         .distinct()
         .order_by("nombre")
     )

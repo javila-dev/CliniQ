@@ -3,7 +3,8 @@ from rest_framework import serializers
 
 from django.db import models, transaction
 
-from apps.colaboradores.models import Colaborador
+from apps.colaboradores import grupos as reglas_grupos
+from apps.colaboradores.models import Colaborador, GrupoAtencion
 from apps.core.storage import get_public_url
 from apps.clinicas.models import (
     Campana,
@@ -498,6 +499,16 @@ class ProcedimientoSerializer(ServicioSerializer):
         queryset=Colaborador.objects.select_related("user", "sede_principal"),
     )
     profesionales_detalle = serializers.SerializerMethodField()
+    # Grupos de atención asignados: sus miembros también realizan el procedimiento.
+    grupos = serializers.PrimaryKeyRelatedField(
+        many=True,
+        source="grupos_atencion",
+        required=False,
+        queryset=GrupoAtencion.objects.all(),
+    )
+    grupos_detalle = serializers.SerializerMethodField()
+    # Profesionales disponibles que lo realizan, directos o por grupo.
+    cobertura = serializers.SerializerMethodField()
 
     class Meta(ServicioSerializer.Meta):
         fields = (
@@ -518,6 +529,9 @@ class ProcedimientoSerializer(ServicioSerializer):
             "diagramas",
             "profesionales",
             "profesionales_detalle",
+            "grupos",
+            "grupos_detalle",
+            "cobertura",
             "activo",
             "created_at",
             "updated_at",
@@ -528,6 +542,29 @@ class ProcedimientoSerializer(ServicioSerializer):
             {"id": str(c.id), "nombre": c.user.nombre_completo}
             for c in obj.colaboradores.all()
         ]
+
+    def get_grupos_detalle(self, obj):
+        return [{"id": str(g.id), "nombre": g.nombre} for g in obj.grupos_atencion.all()]
+
+    def get_cobertura(self, obj):
+        # Se calcula una vez por clínica y se reutiliza en todo el listado.
+        cache = self.context.setdefault("_cobertura_por_clinica", {})
+        if obj.clinica_id not in cache:
+            cache[obj.clinica_id] = reglas_grupos.cobertura_por_procedimiento(obj.clinica_id)
+        return cache[obj.clinica_id].get(obj.id, 0)
+
+    def validate_grupos(self, value):
+        request = self.context.get("request")
+        actuales = set(self.instance.grupos_atencion.values_list("id", flat=True)) if self.instance else set()
+        for grupo in value:
+            if request and request.user.rol != "superadmin" and grupo.clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError("Algún grupo no pertenece a esta clínica.")
+            # Un grupo vacío no se puede elegir; si ya estaba asignado se conserva.
+            if grupo.id not in actuales and not reglas_grupos.miembros_disponibles(grupo).exists():
+                raise serializers.ValidationError(
+                    f"El grupo «{grupo.nombre}» no tiene miembros que atiendan pacientes."
+                )
+        return value
 
     def validate_profesionales(self, value):
         request = self.context.get("request")

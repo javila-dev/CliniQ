@@ -93,3 +93,41 @@ class HorarioColaborador(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.colaborador} - {self.sede} - {self.dia_semana}"
+
+
+class GrupoAtencion(BaseModel):
+    """Grupo de profesionales que se asigna en bloque a procedimientos.
+
+    Quien está en un grupo realiza todos los procedimientos asignados al grupo,
+    además de los que tenga asignados directamente (Colaborador.especialidades).
+    No es un rol (los roles son permisos) ni el menú "Equipo" (usuarios). Ver
+    apps.colaboradores.grupos para la regla de quién realiza qué.
+    """
+
+    clinica = models.ForeignKey(
+        "clinicas.Clinica",
+        on_delete=models.CASCADE,
+        related_name="grupos_atencion",
+    )
+    nombre = models.CharField(max_length=100)
+    descripcion = models.CharField(max_length=255, blank=True)
+    miembros = models.ManyToManyField(
+        Colaborador,
+        blank=True,
+        related_name="grupos_atencion",
+    )
+    procedimientos = models.ManyToManyField(
+        "clinicas.Servicio",
+        blank=True,
+        related_name="grupos_atencion",
+    )
+
+    class Meta:
+        db_table = "grupos_atencion"
+        ordering = ["nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["clinica", "nombre"], name="grupo_atencion_nombre_unico_por_clinica"),
+        ]
+
+    def __str__(self) -> str:
+        return self.nombre
