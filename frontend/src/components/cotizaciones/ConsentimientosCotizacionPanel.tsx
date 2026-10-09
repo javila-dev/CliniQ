@@ -33,36 +33,38 @@ export function ConsentimientosCotizacionPanel({ consentimientos, canFirmar, onF
 
   return (
     <>
-      <div className={cn('bg-white rounded-xl border p-4 flex items-center justify-between gap-3', className)}>
-        <div className="flex items-center gap-2.5 min-w-0">
-          <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
-          <div className="min-w-0">
+      <div className={cn('bg-white rounded-xl border p-4 space-y-2', className)}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-2 min-w-0">
+            <ShieldCheck className="h-4 w-4 text-primary shrink-0" />
             <p className="text-sm font-medium">Consentimientos informados</p>
-            <p className="text-xs text-muted-foreground">
-              {todosFirmados
-                ? `${firmados.length} de ${consentimientos.length} firmados`
-                : `${firmados.length} de ${consentimientos.length} firmados — faltan ${pendientes.length}`}
-              {esperanProfesional > 0 &&
-                ` · ${esperanProfesional === 1 ? '1 espera' : `${esperanProfesional} esperan`} la firma del profesional`}
-            </p>
           </div>
-        </div>
-        <div className="flex items-center gap-2 shrink-0">
-          <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1', tone.badge)}>
+          <span className={cn('inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1 shrink-0', tone.badge)}>
             <span className={cn('h-1.5 w-1.5 rounded-full', tone.dot)} />
             {label}
           </span>
-          {!todosFirmados && canFirmar && (
-            <Button variant="outline" size="sm" onClick={onFirmar}>
-              Firmar ahora
-            </Button>
-          )}
-          {firmados.length > 0 && (
-            <Button variant="outline" size="sm" onClick={() => setListadoOpen(true)}>
-              <FileText className="h-3.5 w-3.5 mr-1.5" />
-              {completos ? 'Ver PDF' : 'Ver firmados'}
-            </Button>
-          )}
+        </div>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground pl-6">
+            {!todosFirmados
+              ? `${firmados.length} de ${consentimientos.length} firmados — faltan ${pendientes.length}`
+              : esperanProfesional > 0
+                ? `${firmados.length} de ${consentimientos.length} firmados por el paciente`
+                : `${firmados.length} de ${consentimientos.length} firmados`}
+          </p>
+          <div className="flex flex-wrap items-center gap-2 ml-auto">
+            {!todosFirmados && canFirmar && (
+              <Button variant="outline" size="sm" onClick={onFirmar}>
+                Firmar ahora
+              </Button>
+            )}
+            {firmados.length > 0 && (
+              <Button variant="outline" size="sm" onClick={() => setListadoOpen(true)}>
+                <FileText className="h-3.5 w-3.5 mr-1.5" />
+                {completos ? 'Ver PDF' : 'Ver firmados'}
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 
