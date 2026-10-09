@@ -166,6 +166,10 @@ export interface Servicio {
   consentimientos_requeridos?: ServicioConsentimientoRequerido[]
   diagramas?: { id: string; nombre: string; imagen_url: string | null }[]
   profesionales_detalle?: { id: string; nombre: string }[]  // solo procedimientos: profesionales que lo realizan
+  grupos?: string[]                                         // solo procedimientos: grupos de atención asignados
+  grupos_detalle?: { id: string; nombre: string }[]
+  /** Profesionales disponibles que lo realizan, directos o por grupo. */
+  cobertura?: number
 }
 
 /** Alias semántico post-H26 */
@@ -192,6 +196,7 @@ export interface CreateProcedimientoRequest {
   descuento_maximo_pct?: number | null  // tope de descuento sobre precio_base (0 = sin descuento)
   vigencia_meses?: number
   profesionales?: string[]   // ids de Colaborador que realizan el procedimiento
+  grupos?: string[]          // ids de GrupoAtencion asignados
 }
 export type UpdateProcedimientoRequest = Partial<CreateProcedimientoRequest> & { activo?: boolean }
 

@@ -35,6 +35,40 @@ export interface CreateHorarioColaboradorRequest {
   hora_fin?: string | null
 }
 
+/** Grupo de atención: profesionales que se asignan en bloque a procedimientos.
+ *  No es un rol (permisos) ni el menú "Equipo" (usuarios). */
+export interface GrupoAtencion {
+  id: string
+  nombre: string
+  descripcion: string
+  miembros: string[]                      // ids de Colaborador
+  miembros_detalle: { id: string; nombre: string; disponible: boolean }[]
+  /** Miembros activos que atienden pacientes: los únicos que cuentan. */
+  miembros_disponibles: number
+  procedimientos: string[]
+  procedimientos_detalle: { id: string; nombre: string }[]
+  created_at: string
+  updated_at: string
+}
+
+export interface GrupoAtencionRequest {
+  nombre?: string
+  descripcion?: string
+  miembros?: string[]
+  procedimientos?: string[]
+}
+
+/** Grupo visto desde el usuario. En el listado solo llegan id y nombre. */
+export interface GrupoDelColaborador {
+  id: string
+  nombre: string
+  /** Asignado a algún procedimiento. */
+  asignado?: boolean
+  miembros_disponibles?: number
+  /** Asignado a procedimientos y este usuario es su único miembro disponible. */
+  depende_de_el?: boolean
+}
+
 export interface Colaborador {
   id: string
   user: string
@@ -62,6 +96,10 @@ export interface Colaborador {
   invitacion_pendiente?: boolean          // colaborador activo cuyo usuario aún no acepta la invitación
   especialidades: string[]               // array of IDs
   especialidades_detalle: ColaboradorEspecialidad[]
+  grupos?: string[]                                   // ids de GrupoAtencion (solo detalle)
+  grupos_detalle?: GrupoDelColaborador[]
+  /** Procedimientos que realiza por pertenecer a sus grupos (solo detalle). */
+  procedimientos_por_grupos?: { id: string; nombre: string }[]
   numero_documento?: string | null
   created_at: string
 }
@@ -79,6 +117,8 @@ export interface CreateColaboradorRequest {
   tipo_contrato: TipoContrato
   fecha_ingreso: string
   especialidades: string[]
+  es_profesional?: boolean
+  grupos?: string[]
 }
 
 export interface UpdateColaboradorRequest {
@@ -93,6 +133,8 @@ export interface UpdateColaboradorRequest {
   tipo_contrato?: TipoContrato
   fecha_ingreso?: string
   especialidades?: string[]
+  es_profesional?: boolean
+  grupos?: string[]
   activo?: boolean
 }
 

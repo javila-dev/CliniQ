@@ -6,6 +6,8 @@ import type {
   UpdateColaboradorRequest,
   HorarioColaborador,
   CreateHorarioColaboradorRequest,
+  GrupoAtencion,
+  GrupoAtencionRequest,
 } from '@/types/colaboradores'
 import type { Paginated } from '@/types/common'
 
@@ -59,6 +61,38 @@ export const colaboradoresApi = {
       params: Object.keys(params).length ? params : undefined,
     })
     return res.data
+  },
+
+  // ─── Grupos de atención ─────────────────────────────────────────────────────
+  // Endpoint: /colaboradores/grupos/
+
+  grupos: {
+    list: async (): Promise<GrupoAtencion[]> => {
+      const res = await apiClient.get<GrupoAtencion[]>('/colaboradores/grupos/')
+      return res.data
+    },
+
+    create: async (data: GrupoAtencionRequest): Promise<GrupoAtencion> => {
+      const res = await apiClient.post<GrupoAtencion>('/colaboradores/grupos/', data)
+      return res.data
+    },
+
+    update: async (id: string, data: GrupoAtencionRequest): Promise<GrupoAtencion> => {
+      const res = await apiClient.patch<GrupoAtencion>(`/colaboradores/grupos/${id}/`, data)
+      return res.data
+    },
+
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/colaboradores/grupos/${id}/`)
+    },
+
+    /** Agrega el grupo a estos procedimientos sin quitar los que ya tiene. */
+    asignarProcedimientos: async (id: string, procedimientos: string[]): Promise<GrupoAtencion> => {
+      const res = await apiClient.post<GrupoAtencion>(
+        `/colaboradores/grupos/${id}/asignar_procedimientos/`, { procedimientos },
+      )
+      return res.data
+    },
   },
 
   // ─── Horarios de colaborador ────────────────────────────────────────────────

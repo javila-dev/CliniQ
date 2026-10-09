@@ -208,6 +208,13 @@ export const CATEGORIAS: CategoriaConfig[] = [
         perm: PERM.USUARIOS_VER,
       },
       {
+        href: '/configuracion/grupos-atencion',
+        label: 'Grupos de atención',
+        description: 'Profesionales que se asignan en bloque a los procedimientos.',
+        keywords: 'grupos atencion profesionales procedimientos asignar especialidades esteticistas medicos',
+        perm: PERM.USUARIOS_VER,
+      },
+      {
         href: '/configuracion/roles',
         label: 'Roles y permisos',
         description: 'Define roles personalizados y sus privilegios.',

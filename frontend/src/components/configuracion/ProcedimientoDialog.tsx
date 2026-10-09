@@ -12,6 +12,7 @@ import { configuracionApi } from '@/lib/api/configuracion'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/hooks/use-toast'
 import { DiagramasProcedimiento } from './DiagramasProcedimiento'
+import { GruposAtencionSelect } from '@/components/colaboradores/GruposAtencionSelect'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -37,6 +38,7 @@ const schema = z.object({
   consentimiento_cada_vez: z.boolean(),
   vigencia_meses: z.number().int().min(1).max(120),
   profesionales: z.array(z.string()).optional(),
+  grupos: z.array(z.string()).optional(),
   activo: z.boolean().optional(),
 })
 type FormValues = z.infer<typeof schema>
@@ -46,12 +48,12 @@ const DEFAULT_VALUES: FormValues = {
   precio_base: null, descuento_maximo_pct: 0,
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, consentimiento_cada_vez: false,
-  vigencia_meses: 12, profesionales: [], activo: true,
+  vigencia_meses: 12, profesionales: [], grupos: [], activo: true,
 }
 
 const ETIQUETAS_DE_ERROR: Record<string, string> = {
   nombre: 'Nombre', duracion_min: 'Duración', precio_base: 'Precio',
-  descuento_maximo_pct: 'Descuento máximo', profesionales: 'Profesionales',
+  descuento_maximo_pct: 'Descuento máximo', profesionales: 'Profesionales', grupos: 'Grupos de atención',
   documenso_template_id: 'Plantilla de consentimiento', vigencia_meses: 'Vigencia',
 }
 
@@ -208,6 +210,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       consentimiento_cada_vez: primerConsentimiento?.requiere_firma_cada_vez ?? false,
       vigencia_meses: fullTarget.vigencia_meses ?? 12,
       profesionales: fullTarget.profesionales_detalle?.map((p) => p.id) ?? [],
+      grupos: fullTarget.grupos ?? [],
       activo: fullTarget.activo ?? true,
     })
   }, [open, target?.id, fullTarget])
@@ -241,6 +244,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
         descuento_maximo_pct: data.descuento_maximo_pct ?? 0,
         vigencia_meses: data.requiere_consentimiento ? data.vigencia_meses : undefined,
         profesionales: data.profesionales ?? [],
+        grupos: data.grupos ?? [],
       }
       const result = isEdit
         ? await clinicasApi.procedimientos.update(target!.id, payload)
@@ -270,6 +274,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       qc.invalidateQueries({ queryKey: ['procedimiento', result.id] })
       qc.invalidateQueries({ queryKey: ['servicios', 'all'] }) // backward compat
       qc.invalidateQueries({ queryKey: ['setup-checklist'] })
+      qc.invalidateQueries({ queryKey: ['grupos-atencion'] })
       onCreated?.(result)
       if (isEdit) {
         handleClose()
@@ -301,21 +306,48 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     return lineas.length ? lineas : ['Ocurrió un error. Intenta de nuevo.']
   })()
 
+  // Quién lo realiza: grupos de atención (todos sus miembros) y profesionales sueltos.
   const campoProfesionales = (
-    <div className="space-y-1.5">
-      <Label>Profesionales que lo realizan</Label>
-      <Controller name="profesionales" control={control} render={({ field }) => (
-        <ProfesionalesMultiSelect
-          opciones={profesionales ?? []}
-          selected={field.value ?? []}
-          onChange={field.onChange}
-        />
-      )} />
-      <p className="text-xs text-muted-foreground">
-        {filtroActivo
-          ? 'Tu clínica solo ofrece al agendar a los profesionales asociados. Sin ninguno, este procedimiento no se puede agendar.'
-          : 'Opcional. También se puede editar desde cada perfil de personal.'}
-      </p>
+    <div className="space-y-3 rounded-lg border px-4 py-3">
+      <div>
+        <p className="text-sm font-medium">Quién lo realiza</p>
+        <p className="text-xs text-muted-foreground">
+          {filtroActivo
+            ? 'Tu clínica solo ofrece al agendar a quienes lo realizan. Sin nadie, este procedimiento no se puede agendar.'
+            : 'Opcional mientras tu clínica ofrezca todos los profesionales al agendar.'}
+        </p>
+      </div>
+      <div className="space-y-1.5">
+        <LabelConAyuda ayuda="Todos los miembros del grupo lo realizan, también quienes se agreguen después. Un grupo sin miembros no se puede elegir.">
+          Grupos de atención
+        </LabelConAyuda>
+        <Controller name="grupos" control={control} render={({ field }) => (
+          <GruposAtencionSelect
+            modo="procedimiento"
+            value={field.value ?? []}
+            onChange={field.onChange}
+            asignadosAlAbrir={fullTarget?.grupos ?? []}
+          />
+        )} />
+      </div>
+      <div className="space-y-1.5">
+        <Label>Profesionales sueltos</Label>
+        <Controller name="profesionales" control={control} render={({ field }) => (
+          <ProfesionalesMultiSelect
+            opciones={profesionales ?? []}
+            selected={field.value ?? []}
+            onChange={field.onChange}
+          />
+        )} />
+        <p className="text-xs text-muted-foreground">Quienes lo hacen sin estar en uno de los grupos elegidos. También se edita desde cada usuario.</p>
+      </div>
+      {isEdit && fullTarget?.cobertura != null && (
+        <p className={cn('text-xs', fullTarget.cobertura === 0 ? 'text-amber-700' : 'text-muted-foreground')}>
+          {fullTarget.cobertura === 0
+            ? 'Hoy nadie disponible lo realiza.'
+            : `Hoy lo ${fullTarget.cobertura === 1 ? 'realiza 1 profesional' : `realizan ${fullTarget.cobertura} profesionales`} en total, contando sus grupos.`}
+        </p>
+      )}
     </div>
   )
 
