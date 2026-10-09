@@ -423,6 +423,89 @@ def _valor_cotizaciones(cotizaciones_qs) -> Decimal:
     ).aggregate(v=Sum(_ITEM_SUBTOTAL))["v"] or Decimal("0")
 
 
+def _serie_comercial(base, fecha_inicio, fecha_fin):
+    """Cotizado vs vendido por periodo, para el gráfico del dashboard.
+
+    El tamaño del periodo depende del rango: días hasta 2 semanas, semanas hasta
+    3 meses y meses después. Cotizado va por fecha de creación (valor de los
+    ítems cobrables) y vendido por fecha de aceptación (total de la cartera),
+    igual que los KPI. Los periodos sin datos van en cero.
+    """
+    dias = (fecha_fin - fecha_inicio).days + 1
+    if dias <= 14:
+        granularidad, trunc = "dia", TruncDate
+    elif dias <= 92:
+        granularidad, trunc = "semana", TruncWeek
+    else:
+        granularidad, trunc = "mes", TruncMonth
+
+    def clave(valor):
+        return valor.date() if hasattr(valor, "date") and callable(valor.date) else valor
+
+    cotizado = (
+        ItemCotizacion.objects.filter(
+            cotizacion__in=base.filter(created_at__date__gte=fecha_inicio, created_at__date__lte=fecha_fin).values("pk"),
+            activo=True, es_obsequio=False,
+        )
+        .annotate(p=trunc("cotizacion__created_at"))
+        .values("p")
+        .annotate(valor=Sum(_ITEM_SUBTOTAL), cantidad=Count("cotizacion", distinct=True))
+    )
+    vendido = (
+        base.filter(
+            estado=Cotizacion.Estado.ACEPTADA,
+            aceptada_en__date__gte=fecha_inicio, aceptada_en__date__lte=fecha_fin,
+        )
+        .annotate(p=trunc("aceptada_en"))
+        .values("p")
+        .annotate(valor=Sum("cartera__total"), cantidad=Count("id"))
+    )
+    filas = {}
+
+    def fila(periodo):
+        return filas.setdefault(clave(periodo), {
+            "cotizado_valor": Decimal("0"), "cotizadas": 0, "vendido_valor": Decimal("0"), "vendidas": 0,
+        })
+
+    for r in cotizado:
+        f = fila(r["p"])
+        f["cotizado_valor"] += r["valor"] or 0
+        f["cotizadas"] += r["cantidad"]
+    for r in vendido:
+        f = fila(r["p"])
+        f["vendido_valor"] += r["valor"] or 0
+        f["vendidas"] += r["cantidad"]
+
+    # Todos los periodos del rango, aunque estén vacíos.
+    inicio = fecha_inicio
+    if granularidad == "semana":
+        inicio = fecha_inicio - timedelta(days=fecha_inicio.weekday())
+    elif granularidad == "mes":
+        inicio = fecha_inicio.replace(day=1)
+    periodos, actual = [], inicio
+    while actual <= fecha_fin:
+        periodos.append(actual)
+        if granularidad == "dia":
+            actual += timedelta(days=1)
+        elif granularidad == "semana":
+            actual += timedelta(days=7)
+        else:
+            actual = (actual.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+    vacio = {"cotizado_valor": Decimal("0"), "cotizadas": 0, "vendido_valor": Decimal("0"), "vendidas": 0}
+    serie = []
+    for periodo in periodos:
+        f = filas.get(periodo, vacio)
+        serie.append({
+            "periodo": periodo.isoformat(),
+            "cotizado_valor": _money(f["cotizado_valor"]),
+            "cotizadas": f["cotizadas"],
+            "vendido_valor": _money(f["vendido_valor"]),
+            "vendidas": f["vendidas"],
+        })
+    return granularidad, serie
+
+
 class ComercialReporteView(APIView):
     """KPI de cotizaciones y ventas por separado (docs/plan-funnel-comercial.md).
 
@@ -457,7 +540,7 @@ class ComercialReporteView(APIView):
 
         creadas = base.filter(**en_periodo("created_at__date"))
         enviadas = base.annotate(primer_envio=Min("envios__created_at")).filter(**en_periodo("primer_envio__date"))
-        abiertas = filtrar_estado_comercial(base, "abiertas")
+        abiertas = filtrar_estado_comercial(base, "borrador")
 
         descartadas = base.filter(estado=Cotizacion.Estado.DESCARTADA, **en_periodo("descartada_en__date"))
         # Vencidas en el periodo: la vigencia terminó dentro del rango (y ya pasó).
@@ -479,17 +562,25 @@ class ComercialReporteView(APIView):
             dias_cierre=Avg(ExpressionWrapper(F("aceptada_en") - F("created_at"), output_field=DurationField())),
         )
 
+        granularidad, serie = _serie_comercial(base, fecha_inicio, fecha_fin)
+
         ganadas = ventas["cantidad"] or 0
         perdidas = descartadas.count()
         n_vencidas = vencidas.count()
-        decididas = ganadas + perdidas + n_vencidas
-        tasa_cierre = (ganadas / decididas * 100) if decididas else 0
         dias_cierre = ventas["dias_cierre"]
+
+        # Tasa de cierre por cohorte: de las cotizaciones creadas en el periodo,
+        # cuántas ya se vendieron (sin importar cuándo). Cuadra con "creadas";
+        # el periodo en curso sube a medida que se cierran las que siguen abiertas.
+        n_creadas = creadas.count()
+        creadas_vendidas = creadas.filter(estado=Cotizacion.Estado.ACEPTADA).count()
+        creadas_abiertas = filtrar_estado_comercial(creadas, "borrador").count()
+        tasa_cierre = (creadas_vendidas / n_creadas * 100) if n_creadas else 0
 
         return Response({
             "periodo": {"desde": fecha_inicio.isoformat(), "hasta": fecha_fin.isoformat()},
             "cotizaciones": {
-                "creadas": creadas.count(),
+                "creadas": n_creadas,
                 "creadas_valor": _money(_valor_cotizaciones(creadas)),
                 "enviadas": enviadas.count(),
                 "abiertas": abiertas.count(),
@@ -503,8 +594,13 @@ class ComercialReporteView(APIView):
                 "valor": _money(ventas["valor"]),
                 "cantidad": ganadas,
                 "tasa_cierre_pct": f"{tasa_cierre:.2f}",
+                # Base de la tasa: las creadas en el periodo ya vendidas y las que siguen abiertas.
+                "creadas_vendidas": creadas_vendidas,
+                "creadas_abiertas": creadas_abiertas,
                 "dias_promedio_cierre": round(dias_cierre.total_seconds() / 86400, 1) if dias_cierre else None,
             },
+            "granularidad": granularidad,
+            "serie": serie,
         })
 
 

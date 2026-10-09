@@ -12,7 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
+import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
 import { cn, formatFechaLocal } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
@@ -22,8 +22,7 @@ import type { Cotizacion, EstadoComercial } from '@/types/cotizaciones'
 // Solo propuestas: las aceptadas son ventas y viven en /ventas ("Convertidas"
 // queda para ver qué cotizaciones se cerraron).
 const ESTADO_TABS: { value: string; label: string }[] = [
-  { value: 'abiertas',   label: 'Abiertas'    },
-  { value: 'enviada',    label: 'Enviadas'    },
+  { value: 'borrador',   label: 'Abiertas'    },
   { value: 'vencida',    label: 'Vencidas'    },
   { value: 'descartada', label: 'Descartadas' },
   { value: 'aceptada',   label: 'Convertidas' },
@@ -114,7 +113,7 @@ export default function CotizacionesPage() {
   const router = useRouter()
   const { user } = useAuthStore()
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
-  const [tabEstado, setTabEstado] = useState('abiertas')
+  const [tabEstado, setTabEstado] = useState('borrador')
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
@@ -124,13 +123,13 @@ export default function CotizacionesPage() {
   const debouncedBusqueda = useDebounce(busqueda, 350)
 
   const params: {
-    estado_comercial?: EstadoComercial | 'abiertas'
+    estado_comercial?: EstadoComercial
     search?: string
     fecha_desde?: string
     fecha_hasta?: string
     page: number
   } = { page }
-  if (tabEstado !== 'todas') params.estado_comercial = tabEstado as EstadoComercial | 'abiertas'
+  if (tabEstado !== 'todas') params.estado_comercial = tabEstado as EstadoComercial
   if (debouncedBusqueda) params.search = debouncedBusqueda
   if (fechaDesde) params.fecha_desde = fechaDesde
   if (fechaHasta) params.fecha_hasta = fechaHasta
@@ -255,13 +254,13 @@ export default function CotizacionesPage() {
           <CardContent className="py-16 text-center">
             <FileText className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
             <p className="text-muted-foreground">
-              {tabEstado === 'abiertas' && !hayFiltros
+              {tabEstado === 'borrador' && !hayFiltros
                 ? 'No hay cotizaciones abiertas'
                 : tabEstado !== 'todas' || hayFiltros
                   ? 'Sin cotizaciones para los filtros seleccionados'
                   : 'Aún no hay cotizaciones creadas'}
             </p>
-            {canGestionar && !hayFiltros && (tabEstado === 'todas' || tabEstado === 'abiertas') && (
+            {canGestionar && !hayFiltros && (tabEstado === 'todas' || tabEstado === 'borrador') && (
               <Button variant="outline" size="sm" className="mt-4" onClick={abrirNueva}>
                 <Plus className="h-3.5 w-3.5 mr-1.5" />
                 Crear la primera
@@ -295,7 +294,10 @@ export default function CotizacionesPage() {
                       <p className="font-medium">{c.paciente_nombre}</p>
                     </td>
                     <td className="px-4 py-3">
-                      <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
+                        {c.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={c.enviada_en} />}
+                      </div>
                     </td>
                     <td className="px-4 py-3 font-semibold tabular-nums">
                       {formatCOP(c.total)}

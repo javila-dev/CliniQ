@@ -18,7 +18,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
-import { CotizacionEstadoBadge } from './CotizacionEstadoBadge'
+import { CotizacionEnviadaChip, CotizacionEstadoBadge } from './CotizacionEstadoBadge'
 import { EnviarCotizacionModal } from './EnviarCotizacionModal'
 import { HistorialEnvios } from './HistorialEnvios'
 import { SesionesCotizacionPanel } from './SesionesCotizacionPanel'
@@ -685,7 +685,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const { mutate: cambiarEstadoMut, isPending: cambiando } = useMutation({
     mutationFn: ({ estado, extra }: {
       estado: EstadoCotizacion
-      extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean }
+      extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean; cerrar_oportunidad?: boolean }
     }) => cotizacionesApi.cambiarEstado(cotizacion!.id, estado, extra),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
@@ -825,6 +825,18 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       download: `cotizacion-${cotizacion.id.slice(0, 8)}.pdf`,
     }).click()
     URL.revokeObjectURL(url)
+    // Descargar el PDF de una propuesta cuenta como enviarla: se suele compartir
+    // por el WhatsApp de la clínica. Queda en el historial de envíos y marca la
+    // cotización como enviada. Sin bloquear la descarga si el registro falla.
+    if (cotizacion.estado === 'borrador') {
+      cotizacionesApi.registrarEnvioPdf(cotizacion.id)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+          queryClient.invalidateQueries({ queryKey: ['cotizacion-envios', cotizacion.id] })
+          queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+        })
+        .catch(() => null)
+    }
   }
 
   const guardando = creando || actualizando
@@ -856,7 +868,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 : cp.estado === 'revocado'
                   ? 'Revocado'
                   : enBorrador
-                    ? 'Firma pendiente — al firmarlo, la cotización se acepta automáticamente'
+                    ? 'Firma pendiente — al firmarlo, la cotización pasa a venta automáticamente'
                     : 'Pendiente de firma'}
             </p>
             {linkEnviado && (
@@ -952,6 +964,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               )}
             </div>
             {cotizacion && !esVenta && <CotizacionEstadoBadge estado={cotizacion.estado_comercial ?? cotizacion.estado} />}
+            {cotizacion?.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={cotizacion.enviada_en} />}
             {cotizacion?.es_migracion && (
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                 Datos previos
@@ -1070,8 +1083,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             <div className="flex-1 min-w-0 space-y-2">
               <p className="text-sm font-semibold text-foreground">Cuando el cliente acepte, regístralo aquí</p>
               <p className="text-xs text-muted-foreground">
-                Pulsa <span className="font-medium text-foreground">Registrar aceptación</span>: se guardan los cambios,
-                se crea la cartera con las cuotas y se habilita agendar las sesiones. Después ya no se puede editar.
+                Pulsa <span className="font-medium text-foreground">Registrar aceptación</span> y la cotización pasa a
+                ser una <span className="font-medium text-foreground">venta en firme</span>: aparece en Ventas, se crea la
+                cartera con las cuotas y se habilita agendar las sesiones. Después ya no se puede editar.
               </p>
               <ul className="space-y-1 text-xs">
                 <li className={cn('flex items-center gap-1.5', tieneItemsCobrables ? 'text-green-700' : 'text-muted-foreground')}>
@@ -1089,7 +1103,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 {cotizacion.compromiso_pago?.estado === 'pendiente' && (
                   <li className="flex items-center gap-1.5 text-amber-700">
                     <Clock className="h-3.5 w-3.5" />
-                    Falta la firma del compromiso de pago: queda aceptada cuando el cliente firme
+                    Falta la firma del compromiso de pago: pasa a venta cuando el cliente firme
                   </li>
                 )}
               </ul>
@@ -1164,7 +1178,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                         onValueChange={field.onChange}
                         disabled={soloLectura}
                       >
-                        <SelectTrigger className="h-8 text-sm flex-1">
+                        <SelectTrigger className="h-8 text-sm w-auto min-w-[11rem] max-w-[65%] gap-2">
                           <SelectValue placeholder="Elige una sede" />
                         </SelectTrigger>
                         <SelectContent>
@@ -1204,13 +1218,21 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
         {/* ── Fila 2: Seguimiento de sesiones + (Avance de cartera, Compromiso, Consentimientos) ── */}
         {cotizacion?.estado === 'aceptada' && (
-          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 items-start">
+          <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 md:items-stretch">
             <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
             {/* Misma columna/ancho para las tres: Avance de cartera siempre está
-               (cotización aceptada), Compromiso y Consentimientos son opcionales. */}
-            <div className="space-y-4">
-              <CarteraAvanceCotizacionPanel cotizacion={cotizacion} />
-              {compromisoCard}
+               (cotización aceptada), Compromiso y Consentimientos son opcionales.
+               La columna toma la altura de Seguimiento de sesiones y Avance de
+               cartera + Compromiso se la reparten mitad y mitad (contenido centrado). */}
+            <div className="flex flex-col gap-4">
+              <div className="flex-1 [&>*]:h-full [&>*]:flex [&>*]:flex-col [&>*]:justify-center">
+                <CarteraAvanceCotizacionPanel cotizacion={cotizacion} />
+              </div>
+              {compromisoCard && (
+                <div className="flex-1 [&>*]:h-full">
+                  {compromisoCard}
+                </div>
+              )}
               {hayConsentimientos && consentimientosRequeridos && (
                 <ConsentimientosCotizacionPanel
                   consentimientos={consentimientosRequeridos}
@@ -1854,6 +1876,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             open={descartarOpen}
             onOpenChange={setDescartarOpen}
             pacienteNombre={cotizacion.paciente_nombre}
+            conSeguimiento={!!cotizacion.oportunidad}
             loading={cambiando}
             onConfirm={(extra) => cambiarEstadoMut({ estado: 'descartada', extra })}
           />

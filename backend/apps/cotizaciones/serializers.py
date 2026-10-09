@@ -645,6 +645,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     fecha_vencimiento = serializers.DateField(read_only=True)
     estado_comercial = serializers.CharField(read_only=True)
+    enviada = serializers.BooleanField(read_only=True)
+    enviada_en = serializers.DateTimeField(read_only=True)
     aceptada_por_nombre = serializers.CharField(source="aceptada_por.nombre_completo", read_only=True, default=None)
     total = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
     total_pagado = serializers.SerializerMethodField()
@@ -662,6 +664,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "sede",
             "estado",
             "estado_comercial",
+            "enviada",
+            "enviada_en",
             "validez_dias",
             "fecha_vencimiento",
             "vigente_desde",
@@ -671,6 +675,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "descartada_en",
             "motivo_descarte",
             "nota_descarte",
+            "oportunidad",
             "notas",
             "items",
             "formas_pago",
@@ -694,6 +699,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "descartada_en",
             "motivo_descarte",
             "nota_descarte",
+            "oportunidad",
             "total",
             "total_pagado",
             "saldo_pendiente",
@@ -964,6 +970,8 @@ class CambiarEstadoCotizacionSerializer(serializers.Serializer):
     nota_descarte = serializers.CharField(required=False, allow_blank=True, max_length=1000)
     # Al aceptar una cotización vencida hay que confirmarlo explícitamente.
     confirmar_vencida = serializers.BooleanField(required=False, default=False)
+    # Al descartar: cerrar también como perdida la oportunidad del seguimiento.
+    cerrar_oportunidad = serializers.BooleanField(required=False, default=False)
 
 
 class EnviarCotizacionEmailSerializer(serializers.Serializer):

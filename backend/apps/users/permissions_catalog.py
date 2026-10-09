@@ -37,6 +37,8 @@ PERMISSION_CATALOG = [
     ("cotizaciones.cambiar_precio", "cotizaciones", "cambiar_precio", "Cambiar precio de items con precio bloqueado", False),
     ("cotizaciones.gestionar", "cotizaciones", "gestionar", "Gestionar cotizaciones", True),
     ("cotizaciones.ver", "cotizaciones", "ver", "Ver cotizaciones", True),
+    ("seguimiento.oportunidades.gestionar", "seguimiento", "oportunidades.gestionar", "Registrar interesados y gestionar el seguimiento (llamadas, etapas, cierres)", True),
+    ("seguimiento.oportunidades.ver", "seguimiento", "oportunidades.ver", "Ver la bandeja de seguimiento y el embudo", True),
     ("colaboradores.gestionar", "colaboradores", "gestionar", "Gestionar colaboradores", False),
     ("colaboradores.horarios.gestionar", "colaboradores", "horarios.gestionar", "Gestionar horarios", False),
     ("colaboradores.horarios.ver", "colaboradores", "horarios.ver", "Ver horarios", True),
@@ -317,6 +319,18 @@ CAPABILITY_CATALOG = [
                 "titulo": "Cambiar precios bloqueados en cotizaciones",
                 "descripcion": "Modificar items cuyo precio esta bloqueado.",
                 "permisos": ["cotizaciones.cambiar_precio"],
+            },
+            {
+                "clave": "seguimiento.ver",
+                "titulo": "Ver el seguimiento",
+                "descripcion": "Consultar a quién llamar hoy y el embudo de interesados.",
+                "permisos": ["seguimiento.oportunidades.ver"],
+            },
+            {
+                "clave": "seguimiento.gestionar",
+                "titulo": "Hacer seguimiento a interesados y pacientes",
+                "descripcion": "Registrar interesados, llamadas y mensajes, posponer y cerrar oportunidades.",
+                "permisos": ["seguimiento.oportunidades.ver", "seguimiento.oportunidades.gestionar"],
             },
             {
                 "clave": "ventas.campanas",
@@ -688,6 +702,8 @@ ROLE_PERMISSION_DEFAULTS = {
         "pacientes.ver",
         "reportes.ver_operativos",
         "sedes.ver",
+        "seguimiento.oportunidades.gestionar",
+        "seguimiento.oportunidades.ver",
         "servicios.ver",
     },
     "profesional": {

@@ -102,6 +102,10 @@ export const PERM = {
   COTIZACIONES_GESTIONAR:    'cotizaciones.gestionar',
   COTIZACIONES_CAMBIAR_PRECIO: 'cotizaciones.cambiar_precio',
 
+  // Seguimiento (embudo comercial y retención)
+  SEGUIMIENTO_VER:           'seguimiento.oportunidades.ver',
+  SEGUIMIENTO_GESTIONAR:     'seguimiento.oportunidades.gestionar',
+
   // Caja / egresos
   CAJA_GASTOS_VER:           'caja.gastos.ver',
   CAJA_GASTOS_REGISTRAR:     'caja.gastos.registrar',

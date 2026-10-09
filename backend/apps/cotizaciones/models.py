@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
-from django.db.models import DateField, DateTimeField, DurationField, Exists, ExpressionWrapper, F, OuterRef, Value
+from django.db.models import DateField, DateTimeField, DurationField, ExpressionWrapper, F, OuterRef, Subquery, Value
 from django.db.models.functions import Cast, Coalesce, TruncDate
 from django.utils import timezone
 
@@ -20,10 +20,12 @@ class MotivoDescarte(models.TextChoices):
 
 
 class EstadoComercial(models.TextChoices):
-    """Estado que ve la clínica. Solo ``estado`` se guarda; el resto se deriva."""
+    """Estado que ve la clínica. Solo ``estado`` se guarda; "vencida" se deriva.
+
+    Haber sido enviada no es un estado: es la marca ``enviada`` de un borrador.
+    """
 
     BORRADOR = "borrador", "Borrador"
-    ENVIADA = "enviada", "Enviada"
     VENCIDA = "vencida", "Vencida"
     ACEPTADA = "aceptada", "Aceptada"
     DESCARTADA = "descartada", "Descartada"
@@ -82,6 +84,15 @@ class Cotizacion(BaseModel):
     nota_descarte = models.TextField(blank=True, default="")
     # Renovar una cotización reinicia su vigencia sin tocar created_at.
     vigente_desde = models.DateField(null=True, blank=True)
+    # Oportunidad del embudo (seguimiento) de la que nace; las cotizaciones
+    # creadas sin pasar por el embudo la dejan vacía y funcionan igual.
+    oportunidad = models.ForeignKey(
+        "seguimiento.Oportunidad",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="cotizaciones",
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -103,19 +114,26 @@ class Cotizacion(BaseModel):
 
     @property
     def estado_comercial(self) -> str:
-        """Estado para la interfaz: borrador, enviada, vencida, aceptada o descartada.
+        """Estado para la interfaz: borrador, vencida, aceptada o descartada.
 
-        "enviada" y "vencida" se derivan (envíos registrados y vigencia); no se
-        guardan para no cambiar el significado de ``estado``.
+        "vencida" se deriva de la vigencia; no se guarda para no cambiar el
+        significado de ``estado``.
         """
-        if self.estado != self.Estado.BORRADOR:
-            return self.estado
-        if self.esta_vencida:
+        if self.estado == self.Estado.BORRADOR and self.esta_vencida:
             return EstadoComercial.VENCIDA
-        tiene_envios = getattr(self, "_tiene_envios", None)
-        if tiene_envios is None:
-            tiene_envios = self.envios.exists()
-        return EstadoComercial.ENVIADA if tiene_envios else EstadoComercial.BORRADOR
+        return self.estado
+
+    @property
+    def enviada_en(self):
+        """Fecha del primer envío al paciente (WhatsApp, correo o PDF), o None."""
+        if hasattr(self, "_primer_envio"):
+            return self._primer_envio
+        primero = self.envios.order_by("created_at").values_list("created_at", flat=True).first()
+        return primero
+
+    @property
+    def enviada(self) -> bool:
+        return self.enviada_en is not None
 
     @property
     def total(self):
@@ -421,12 +439,12 @@ class FormaPagoCotizacion(BaseModel):
 # Mismas reglas que Cotizacion.estado_comercial, pero en SQL para poder filtrar
 # y contar listas sin recorrerlas en Python.
 
-ESTADOS_COMERCIALES_FILTRO = {*EstadoComercial.values, "abiertas"}
+ESTADOS_COMERCIALES_FILTRO = set(EstadoComercial.values)
 
 
 def con_estado_comercial(queryset):
-    """Anota ``_fecha_vencimiento`` y ``_tiene_envios`` (este último también lo
-    usa la propiedad ``estado_comercial`` para no consultar fila por fila)."""
+    """Anota ``_fecha_vencimiento`` y ``_primer_envio`` (este último también lo
+    usa la propiedad ``enviada_en`` para no consultar fila por fila)."""
     duracion = ExpressionWrapper(F("validez_dias") * Value(timedelta(days=1)), output_field=DurationField())
     vencimiento = Cast(
         ExpressionWrapper(
@@ -437,12 +455,14 @@ def con_estado_comercial(queryset):
     )
     return queryset.annotate(
         _fecha_vencimiento=vencimiento,
-        _tiene_envios=Exists(CotizacionEnvio.objects.filter(cotizacion=OuterRef("pk"))),
+        _primer_envio=Subquery(
+            CotizacionEnvio.objects.filter(cotizacion=OuterRef("pk")).order_by("created_at").values("created_at")[:1]
+        ),
     )
 
 
 def filtrar_estado_comercial(queryset, valor: str):
-    """Filtra por estado comercial. ``abiertas`` = borrador o enviada (no vencida).
+    """Filtra por estado comercial. ``borrador`` = abierta y vigente (enviada o no).
 
     El queryset debe venir de ``con_estado_comercial``.
     """
@@ -450,10 +470,6 @@ def filtrar_estado_comercial(queryset, valor: str):
     borrador = Cotizacion.Estado.BORRADOR
     if valor == EstadoComercial.VENCIDA:
         return queryset.filter(estado=borrador, _fecha_vencimiento__lt=hoy)
-    if valor == "abiertas":
-        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy)
-    if valor == EstadoComercial.ENVIADA:
-        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy, _tiene_envios=True)
     if valor == EstadoComercial.BORRADOR:
-        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy, _tiene_envios=False)
+        return queryset.filter(estado=borrador, _fecha_vencimiento__gte=hoy)
     return queryset.filter(estado=valor)

@@ -6,7 +6,7 @@ import {
   CalendarDays, Users, CheckCircle2,
   ArrowRight, Plus, TrendingUp, DollarSign,
   FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
-  ChevronDown, Search, ShoppingBag,
+  ChevronDown, Search, ShoppingBag, CalendarX,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -37,8 +37,8 @@ import {
 } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
 import type { EstadoCita } from '@/types/agenda'
-import type { PacienteSinReagendar, Vendedor } from '@/types/reportes'
-import { MOTIVOS_DESCARTE } from '@/types/cotizaciones'
+import type { ComercialMetrics, PacienteSinReagendar, Vendedor } from '@/types/reportes'
+import type { ResumenCartera } from '@/types/cartera'
 
 const STALE = 5 * 60 * 1000
 
@@ -76,13 +76,6 @@ function todayLong() {
   return new Date().toLocaleDateString('es-CO', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
   })
-}
-
-function mesActual() {
-  const now = new Date()
-  const ini = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0]
-  const fin = now.toISOString().split('T')[0]
-  return { ini, fin }
 }
 
 type PeriodoKey = 'hoy' | 'mes' | '3m' | '6m' | '1a'
@@ -134,7 +127,7 @@ function fmtPeriodoGrafica(p: string): string {
 }
 
 function KPICard({
-  label, value, sub, icon: Icon, iconBg, iconColor, loading, alert,
+  label, value, sub, icon: Icon, iconBg, iconColor, loading, alert, onClick, ayuda,
 }: {
   label: string
   value: string | number
@@ -144,24 +137,35 @@ function KPICard({
   iconColor: string
   loading?: boolean
   alert?: boolean
+  /** Si viene, la tarjeta es un botón (p. ej. abre la lista detallada). */
+  onClick?: () => void
+  /** Detalle completo del número (tooltip), para no cargar el subtítulo. */
+  ayuda?: string
 }) {
+  const Contenedor = onClick ? 'button' : 'div'
   return (
-    <div className={cn(
-      'bg-white rounded-xl border p-4 flex items-center gap-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
-      alert ? 'border-red-200' : 'border-gray-100'
-    )}>
-      <div className={cn('rounded-xl p-3 shrink-0', iconBg)}>
+    <Contenedor
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      title={ayuda}
+      className={cn(
+        'bg-white rounded-xl border p-4 flex flex-col items-center justify-center gap-2 text-center transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
+        alert ? 'border-amber-200' : 'border-gray-100',
+        onClick && 'cursor-pointer',
+      )}
+    >
+      <div className={cn('rounded-xl p-2.5 shrink-0', iconBg)}>
         <Icon className={cn('h-5 w-5', iconColor)} />
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 w-full">
         {loading ? (
           <>
-            <Skeleton className="h-7 w-16 mb-1" />
-            <Skeleton className="h-3 w-24" />
+            <Skeleton className="h-7 w-16 mb-1 mx-auto" />
+            <Skeleton className="h-3 w-24 mx-auto" />
           </>
         ) : (
           <>
-            <p className={cn('text-2xl font-bold truncate', alert && Number(value) > 0 ? 'text-red-600' : 'text-foreground')}>
+            <p className={cn('text-2xl font-bold truncate', alert && Number(value) > 0 ? 'text-amber-700' : 'text-foreground')}>
               {value}
             </p>
             <p className="text-xs text-muted-foreground">{label}</p>
@@ -169,7 +173,7 @@ function KPICard({
           </>
         )}
       </div>
-    </div>
+    </Contenedor>
   )
 }
 
@@ -197,6 +201,201 @@ function GraficaIngresos({ data, loading }: { data: { periodo: string; total_cob
         <Bar dataKey="Gastos" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
       </BarChart>
     </ResponsiveContainer>
+  )
+}
+
+// ─── Comercial: KPI compactos + cotizado vs vendido ─────────────────────────
+
+function MetricaComercial({
+  label, value, sub, destacado, loading, ayuda,
+}: {
+  label: string
+  value: string
+  sub?: string
+  destacado?: boolean
+  loading?: boolean
+  /** De dónde sale el número, en una frase (tooltip). */
+  ayuda?: string
+}) {
+  return (
+    <div className="px-4 py-3 cursor-help" title={ayuda}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      {loading ? (
+        <Skeleton className="h-6 w-20 mt-1 mx-auto" />
+      ) : (
+        <>
+          <p className={cn('text-xl font-semibold tabular-nums text-center mt-0.5', destacado ? 'text-primary' : 'text-foreground')}>
+            {value}
+          </p>
+          {sub && <p className="text-xs text-muted-foreground text-center mt-0.5">{sub}</p>}
+        </>
+      )}
+    </div>
+  )
+}
+
+// Cotizado es el contexto (gris) y vendido el dato que importa (color de la clínica).
+const COLOR_COTIZADO = '#9ca3af'
+const COLOR_VENDIDO = 'hsl(var(--primary))'
+
+function fmtPeriodoComercial(periodo: string, granularidad: ComercialMetrics['granularidad']): string {
+  const fecha = new Date(periodo + 'T00:00:00')
+  if (granularidad === 'mes') return fecha.toLocaleDateString('es-CO', { month: 'short', year: '2-digit' })
+  return fecha.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+}
+
+function TooltipComercial({ active, payload }: { active?: boolean; payload?: { payload: Record<string, number | string> }[] }) {
+  if (!active || !payload?.length) return null
+  const d = payload[0].payload
+  return (
+    <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-sm">
+      <p className="font-medium text-foreground mb-1">{d.etiqueta}</p>
+      <p className="flex items-center gap-1.5 text-muted-foreground">
+        <span className="h-2 w-2 rounded-sm" style={{ background: COLOR_COTIZADO }} />
+        Cotizado <span className="ml-auto pl-3 tabular-nums text-foreground">{COP.format(Number(d.cotizado))}</span>
+        <span className="tabular-nums">({d.cotizadas})</span>
+      </p>
+      <p className="flex items-center gap-1.5 text-muted-foreground">
+        <span className="h-2 w-2 rounded-sm" style={{ background: COLOR_VENDIDO }} />
+        Vendido <span className="ml-auto pl-3 tabular-nums text-foreground">{COP.format(Number(d.vendido))}</span>
+        <span className="tabular-nums">({d.vendidas})</span>
+      </p>
+    </div>
+  )
+}
+
+function GraficaComercial({ data, loading }: { data?: ComercialMetrics; loading: boolean }) {
+  if (loading || !data) return <Skeleton className="h-44 w-full rounded-lg" />
+
+  const chartData = data.serie.map((p) => ({
+    etiqueta: fmtPeriodoComercial(p.periodo, data.granularidad),
+    cotizado: Number(p.cotizado_valor),
+    vendido: Number(p.vendido_valor),
+    cotizadas: p.cotizadas,
+    vendidas: p.vendidas,
+  }))
+  const sinDatos = chartData.every((p) => p.cotizado === 0 && p.vendido === 0)
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-xs text-muted-foreground">
+          Cotizado vs vendido por {data.granularidad === 'dia' ? 'día' : data.granularidad}
+        </p>
+        <div className="flex items-center gap-3 text-xs text-muted-foreground">
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: COLOR_COTIZADO }} />Cotizado</span>
+          <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm" style={{ background: COLOR_VENDIDO }} />Vendido</span>
+        </div>
+      </div>
+      {sinDatos ? (
+        <div className="h-40 grid place-items-center text-xs text-muted-foreground">Sin cotizaciones ni ventas en el periodo</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={160}>
+          <BarChart data={chartData} margin={{ top: 4, right: 0, left: -12, bottom: 0 }} barGap={2} barCategoryGap="28%">
+            <CartesianGrid vertical={false} stroke="#f0f0f0" />
+            <XAxis dataKey="etiqueta" tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+            <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} tickLine={false} axisLine={false} tickFormatter={(v: number) => abrevCOP(v)} width={52} />
+            <Tooltip content={<TooltipComercial />} cursor={{ fill: 'rgba(0,0,0,0.03)' }} />
+            <Bar dataKey="cotizado" name="Cotizado" fill={COLOR_COTIZADO} radius={[4, 4, 0, 0]} maxBarSize={24} />
+            <Bar dataKey="vendido" name="Vendido" fill={COLOR_VENDIDO} radius={[4, 4, 0, 0]} maxBarSize={24} />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
+    </div>
+  )
+}
+
+// ─── Cartera: recaudo, antigüedad de la mora y lo que vence pronto ──────────
+
+// Antigüedad de la mora: rampa secuencial de un solo tono (más oscuro = más viejo).
+const TRAMOS_MORA: { tramo: string; label: string; color: string }[] = [
+  { tramo: '1_30',   label: '1–30 días',  color: '#fca5a5' },
+  { tramo: '31_60',  label: '31–60',      color: '#f87171' },
+  { tramo: '61_90',  label: '61–90',      color: '#dc2626' },
+  { tramo: '90_mas', label: '+90',        color: '#991b1b' },
+]
+
+function CarteraDetalle({ resumen, loading }: { resumen?: ResumenCartera; loading: boolean }) {
+  if (loading || !resumen) {
+    return (
+      <div className="px-5 py-4 space-y-4 border-t">
+        <Skeleton className="h-8 w-full" />
+        <Skeleton className="h-10 w-full" />
+      </div>
+    )
+  }
+
+  const pct = Math.min(100, Math.max(0, Number(resumen.cobrado_pct)))
+  const vencido = Number(resumen.cuotas_vencidas_valor)
+  const tramos = TRAMOS_MORA.map((t) => {
+    const dato = resumen.mora_por_antiguedad.find((m) => m.tramo === t.tramo)
+    return { ...t, valor: Number(dato?.valor ?? 0), cuotas: dato?.cuotas ?? 0 }
+  })
+
+  return (
+    <div className="px-5 py-4 space-y-4 border-t">
+      {/* Recaudo */}
+      <div title="Lo abonado sobre el total vendido a crédito (todas las carteras activas).">
+        <div className="flex items-baseline justify-between text-xs">
+          <span className="text-muted-foreground">Recaudado</span>
+          <span className="tabular-nums">
+            <span className="font-semibold text-foreground">{pct.toFixed(0)}%</span>
+            <span className="text-muted-foreground"> de {abrevCOP(Number(resumen.total_cartera))}</span>
+          </span>
+        </div>
+        <div className="mt-1.5 h-2 w-full overflow-hidden rounded-full bg-primary/10">
+          <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
+        </div>
+      </div>
+
+      {/* Antigüedad de la mora */}
+      <div>
+        <p className="text-xs text-muted-foreground">Mora por antigüedad</p>
+        {vencido > 0 ? (
+          <>
+            <div className="mt-1.5 flex h-2 w-full gap-0.5 overflow-hidden rounded-full">
+              {tramos.filter((t) => t.valor > 0).map((t) => (
+                <div
+                  key={t.tramo}
+                  className="h-full first:rounded-l-full last:rounded-r-full"
+                  style={{ width: `${(t.valor / vencido) * 100}%`, background: t.color }}
+                  title={`${t.label}: ${COP.format(t.valor)} · ${t.cuotas} cuota${t.cuotas !== 1 ? 's' : ''}`}
+                />
+              ))}
+            </div>
+            <div className="mt-2 grid grid-cols-4 gap-2">
+              {tramos.map((t) => (
+                <div key={t.tramo} className="min-w-0">
+                  <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                    <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: t.color }} />
+                    {t.label}
+                  </p>
+                  <p className="text-xs font-medium tabular-nums text-foreground truncate">
+                    {t.valor > 0 ? abrevCOP(t.valor) : '—'}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </>
+        ) : (
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-green-700">
+            <Check className="h-3.5 w-3.5" />
+            Sin cuotas vencidas
+          </p>
+        )}
+      </div>
+
+      {/* Próximos vencimientos */}
+      <div className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2 text-xs">
+        <span className="text-muted-foreground">Vence en los próximos 30 días</span>
+        <span className="tabular-nums">
+          <span className="font-semibold text-foreground">{abrevCOP(Number(resumen.por_vencer_30.valor))}</span>
+          <span className="text-muted-foreground">
+            {' '}· {resumen.por_vencer_30.cuotas} cuota{resumen.por_vencer_30.cuotas !== 1 ? 's' : ''}
+          </span>
+        </span>
+      </div>
+    </div>
   )
 }
 
@@ -449,7 +648,6 @@ function DashboardContent() {
 
   const { allDone: checklistDone } = useSetupChecklist()
   const esSoloProfesional = user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.REPORTES_VER)
-  const canVerCotizaciones = hasPermission(user, PERM.COTIZACIONES_VER)
   // KPIs financieros/comerciales de dueño: cartera agregada, P&L 30 días,
   // ingresos por servicio, conversión de cotizaciones, tasa de completado por
   // profesional. Recepción / profesional ven un dashboard operativo sin esto.
@@ -551,14 +749,12 @@ function DashboardContent() {
 
   const { data: comercial, isLoading: comercialLoading } = useQuery({
     queryKey: ['reportes', 'comercial', periodo, sede, vendedores],
-    queryFn: () => {
-      // periodo 'hoy' -> mes en curso (comportamiento original de la tarjeta).
-      const { ini, fin } = periodo === 'hoy' ? mesActual() : rango
-      return reportesApi.getComercial({ fecha_inicio: ini, fecha_fin: fin, sede_id: sede, vendedores })
-    },
+    // Sigue el filtro de periodo del dashboard, incluido "Hoy".
+    queryFn: () => reportesApi.getComercial({ fecha_inicio: rango.ini, fecha_fin: rango.fin, sede_id: sede, vendedores }),
     staleTime: STALE,
     refetchInterval: STALE,
-    enabled: canVerCotizaciones,
+    // El reporte exige reportes.ver_financieros; la tarjeta solo se muestra con ese permiso.
+    enabled: canVerFinanzas,
   })
 
   const { data: vendedoresOpciones = [] } = useQuery({
@@ -618,8 +814,8 @@ function DashboardContent() {
   // se mantienen "de hoy" para el hero y "Progreso del día").
   const citasKpi = kpisView?.citas_hoy.total ?? 0
   const completadasKpi = kpisView?.citas_hoy.completadas ?? 0
-  // Cotizaciones y Servicios: con 'hoy' muestran el mes en curso (su etiqueta
-  // dice "del mes"). "No atendidas" y "Ocupación" sí siguen el filtro completo.
+  // Servicios: con 'hoy' muestra el mes en curso (su etiqueta dice "del mes").
+  // Comercial, "No atendidas" y "Ocupación" sí siguen el filtro completo.
   const periodoSufijoRetro = periodo === 'hoy' ? 'del mes' : periodoSufijo
   // Etiqueta corta para el tab de "Ocupación" (que comparte espacio con "Hoy").
   const periodoTabCorto: Record<PeriodoKey, string> = { hoy: 'Hoy', mes: 'Mes', '3m': '3M', '6m': '6M', '1a': '1A' }
@@ -628,6 +824,9 @@ function DashboardContent() {
   const ocupacionLoading = tabOcupacion === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
 
   const sinReagendar = pacientesSinReagendar ?? []
+  const canVerSinReagendar = hasPermission(user, PERM.REPORTES_VER)
+  // 4 o 5 tarjetas según permisos (Ingresos y Sin reagendar son opcionales).
+  const nKpis = 3 + (canVerFinanzas ? 1 : 0) + (canVerSinReagendar ? 1 : 0)
 
   // Citas del periodo por desenlace (todo por fecha de la cita).
   const sinCerrarPeriodo = citasSinCerrarData?.count ?? 0
@@ -679,12 +878,26 @@ function DashboardContent() {
       <KPICard
         label={`No atendidas ${periodoSufijo}`}
         value={ocupacionMesLoading ? '—' : totalNoAtendidas}
-        sub={`${totalCanceladasMes} cancel. · ${totalNoAsistioMes} no asistió${totalCitasMes > 0 ? ` (${pctNoAsistioMes.toFixed(0)}%)` : ''} · ${sinCerrarPeriodo} sin cerrar`}
+        sub={`${totalNoAsistioMes} no asistió · ${sinCerrarPeriodo} sin cerrar`}
+        ayuda={`${totalNoAsistioMes} no asistieron${totalCitasMes > 0 ? ` (${pctNoAsistioMes.toFixed(0)}% de las citas)` : ''} y ${sinCerrarPeriodo} quedaron sin cerrar. Aparte, ${totalCanceladasMes} se cancelaron (no suman aquí).`}
         icon={UserX}
         iconBg={totalNoAtendidas > 0 ? 'bg-orange-50' : 'bg-gray-50'}
         iconColor={totalNoAtendidas > 0 ? 'text-orange-500' : 'text-gray-400'}
         loading={ocupacionMesLoading}
       />
+      {canVerSinReagendar && (
+        <KPICard
+          label="Sin reagendar"
+          value={sinReagendar.length}
+          sub={sinReagendar.length > 0 ? 'más de un mes sin cita · ver lista' : 'todos tienen su próxima cita'}
+          icon={CalendarX}
+          iconBg={sinReagendar.length > 0 ? 'bg-amber-50' : 'bg-gray-50'}
+          iconColor={sinReagendar.length > 0 ? 'text-amber-500' : 'text-gray-400'}
+          alert={sinReagendar.length > 0}
+          loading={pacientesLoading}
+          onClick={sinReagendar.length > 0 ? () => setSheetPacientes(true) : undefined}
+        />
+      )}
     </>
   )
 
@@ -928,111 +1141,172 @@ function DashboardContent() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className={cn('grid grid-cols-2 gap-4', nKpis >= 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
           {kpiCards}
         </div>
       )}
 
-      {/* Cotizaciones del periodo: propuestas, cada número con su propia fecha */}
-      {canVerCotizaciones && (
-        <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <div className="flex items-center justify-between px-5 py-3 border-b">
+      {/* Citas del día + Accesos rápidos: segunda fila, justo después de los KPI */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          <div className="flex items-center justify-between px-5 py-4 border-b">
             <div className="flex items-center gap-2">
-              <FileText className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-sm">Cotizaciones {periodoSufijoRetro}</h2>
+              <CalendarDays className="h-4 w-4 text-primary" />
+              <h2 className="font-semibold text-sm">Citas de hoy</h2>
             </div>
-            <div className="flex items-center gap-3">
-              {canVerFinanzas && (
-                <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
-              )}
-              <Link href="/cotizaciones" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
-                Ver cotizaciones <ArrowRight className="h-3 w-3" />
-              </Link>
-            </div>
+            <Link href="/agenda" className="text-xs text-primary hover:underline flex items-center gap-1">
+              Ver agenda <ArrowRight className="h-3 w-3" />
+            </Link>
           </div>
-          <div className="grid grid-cols-2 sm:flex sm:divide-x">
-            <MetricaCotizacion
-              label="Creadas"
-              value={comercial?.cotizaciones.creadas ?? 0}
-              sub={comercial && canVerFinanzas ? abrevCOP(Number(comercial.cotizaciones.creadas_valor)) : undefined}
-              color="text-foreground"
-              loading={comercialLoading}
-              ayuda="Cotizaciones creadas en el periodo, sin importar cómo terminaron."
-            />
-            <MetricaCotizacion
-              label="Enviadas"
-              value={comercial?.cotizaciones.enviadas ?? 0}
-              color="text-blue-600"
-              loading={comercialLoading}
-              ayuda="Cotizaciones enviadas por primera vez al paciente en el periodo (WhatsApp, correo o PDF)."
-            />
-            <MetricaCotizacion
-              label="Abiertas hoy"
-              value={comercial?.cotizaciones.abiertas ?? 0}
-              sub={comercial && canVerFinanzas ? abrevCOP(Number(comercial.cotizaciones.abiertas_valor)) : undefined}
-              color="text-amber-600"
-              loading={comercialLoading}
-              ayuda="Cotizaciones vigentes que el paciente todavía no acepta. Es la foto de hoy, no depende del periodo."
-            />
-            <MetricaCotizacion
-              label="Perdidas"
-              value={comercial?.cotizaciones.perdidas ?? 0}
-              sub={comercial?.cotizaciones.motivo_principal
-                ? `sobre todo: ${MOTIVOS_DESCARTE.find((m) => m.value === comercial.cotizaciones.motivo_principal)?.label.toLowerCase() ?? comercial.cotizaciones.motivo_principal}`
-                : undefined}
-              color="text-red-500"
-              loading={comercialLoading}
-              ayuda="Descartadas en el periodo más las que vencieron en el periodo sin respuesta."
-            />
+          <div className="divide-y">
+            {citasLoading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
+              </div>
+            ) : !citasHoy?.length ? (
+              <div className="flex flex-col items-center py-12 text-center px-4">
+                <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
+                <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
+                <Button size="sm" className="mt-3" asChild>
+                  <Link href="/agenda">
+                    <Plus className="h-3.5 w-3.5 mr-1.5" />
+                    Agendar cita
+                  </Link>
+                </Button>
+              </div>
+            ) : (
+              citasHoy.map(cita => (
+                <Link
+                  key={cita.id}
+                  href={`/agenda?cita=${cita.id}`}
+                  className={cn(
+                    'flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors border-l-4',
+                    ESTADO_LEFT[cita.estado]
+                  )}
+                >
+                  <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
+                    <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
+                    <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      <span className="uppercase">{cita.servicio_nombre}</span> · {cita.profesional_nombre}
+                    </p>
+                  </div>
+                  <CitaStatusBadge estado={cita.estado} />
+                </Link>
+              ))
+            )}
           </div>
         </div>
-      )}
 
-      {/* Ventas del periodo + Cartera: Ventas lleva 3 métricas, Cartera 2 */}
+        <div className="space-y-4">
+          <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+            <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
+            <div className="space-y-2">
+              {[
+                { href: '/agenda', icon: CalendarDays, label: 'Nueva cita', desc: 'Agendar para hoy' },
+                { href: '/pacientes/nuevo', icon: Users, label: 'Nuevo paciente', desc: 'Registrar paciente' },
+                { href: '/cotizaciones', icon: FileText, label: 'Cotizaciones', desc: 'Ver y crear cotizaciones' },
+              ].map(({ href, icon: Icon, label, desc }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
+                >
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                    <Icon className="h-4 w-4 text-primary" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-xs text-muted-foreground">{desc}</p>
+                  </div>
+                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {!kpisLoading && totalCitas > 0 && (
+            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+              <h2 className="font-semibold text-sm mb-3">Progreso del día</h2>
+              <div className="space-y-2">
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>{completadas} de {totalCitas} completadas</span>
+                  <span>{Math.round((completadas / totalCitas) * 100)}%</span>
+                </div>
+                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full bg-green-400 rounded-full transition-all"
+                    style={{ width: `${(completadas / totalCitas) * 100}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Comercial (cotizado vs vendido) + Cartera */}
       <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
         {canVerFinanzas && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <div className="flex items-center justify-between px-5 py-3 border-b">
-              <div className="flex items-center gap-2">
-                <ShoppingBag className="h-4 w-4 text-primary" />
-                <h2 className="font-semibold text-sm">Ventas {periodoSufijoRetro}</h2>
+            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b">
+              <div className="flex items-center gap-2 min-w-0">
+                <ShoppingBag className="h-4 w-4 text-primary shrink-0" />
+                <h2 className="font-semibold text-sm truncate">Comercial {periodoSufijo}</h2>
               </div>
-              <Link href="/ventas" className="text-xs text-primary hover:underline flex items-center gap-1 shrink-0">
-                Ver ventas <ArrowRight className="h-3 w-3" />
-              </Link>
+              <div className="flex items-center gap-3 shrink-0">
+                <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
+                <Link href="/cotizaciones" className="text-xs text-primary hover:underline">Cotizaciones</Link>
+                <Link href="/ventas" className="text-xs text-primary hover:underline flex items-center gap-1">
+                  Ventas <ArrowRight className="h-3 w-3" />
+                </Link>
+              </div>
             </div>
-            <div className="flex divide-x">
-              <MetricaCotizacion
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 sm:divide-x border-b">
+              <MetricaComercial
                 label="Vendido"
                 value={comercial ? abrevCOP(Number(comercial.ventas.valor)) : '—'}
-                sub={comercial && comercial.ventas.cantidad > 0
-                  ? `${comercial.ventas.cantidad} venta${comercial.ventas.cantidad !== 1 ? 's' : ''} · prom. ${abrevCOP(Number(comercial.ventas.valor) / comercial.ventas.cantidad)}`
-                  : 'sin ventas'}
-                color="text-primary"
+                sub={comercial
+                  ? `${comercial.ventas.cantidad} venta${comercial.ventas.cantidad !== 1 ? 's' : ''}${
+                      comercial.ventas.dias_promedio_cierre != null ? ` · ~${Math.round(comercial.ventas.dias_promedio_cierre)} días para cerrar` : ''}`
+                  : undefined}
+                destacado
                 loading={comercialLoading}
                 ayuda="Valor de las cotizaciones aceptadas en el periodo (por fecha de aceptación)."
               />
-              <MetricaCotizacion
+              <MetricaComercial
                 label="Tasa de cierre"
                 value={comercial ? `${Number(comercial.ventas.tasa_cierre_pct).toFixed(0)}%` : '—'}
-                color={comercial
-                  ? Number(comercial.ventas.tasa_cierre_pct) >= 50
-                    ? 'text-emerald-600'
-                    : Number(comercial.ventas.tasa_cierre_pct) >= 25
-                      ? 'text-amber-600'
-                      : 'text-red-500'
-                  : 'text-muted-foreground'}
+                sub={comercial
+                  ? comercial.ventas.creadas_abiertas > 0
+                    ? `${comercial.ventas.creadas_vendidas} de ${comercial.cotizaciones.creadas} · ${comercial.ventas.creadas_abiertas} siguen abiertas`
+                    : `${comercial.ventas.creadas_vendidas} de ${comercial.cotizaciones.creadas} cotizaciones`
+                  : undefined}
                 loading={comercialLoading}
-                ayuda="De las cotizaciones que se decidieron en el periodo (aceptadas, descartadas o vencidas), cuántas se aceptaron."
+                ayuda="De las cotizaciones creadas en el periodo, cuántas ya se vendieron. Mientras haya cotizaciones abiertas, el porcentaje puede subir."
               />
-              <MetricaCotizacion
-                label="Días para cerrar"
-                value={comercial?.ventas.dias_promedio_cierre != null ? Math.round(comercial.ventas.dias_promedio_cierre) : '—'}
-                sub="promedio"
-                color="text-foreground"
+              <MetricaComercial
+                label="Cotizado"
+                value={comercial ? abrevCOP(Number(comercial.cotizaciones.creadas_valor)) : '—'}
+                sub={comercial ? `${comercial.cotizaciones.creadas} cotizaci${comercial.cotizaciones.creadas !== 1 ? 'ones' : 'ón'}` : undefined}
                 loading={comercialLoading}
-                ayuda="Días promedio entre que se crea la cotización y el paciente la acepta, en las ventas del periodo."
+                ayuda="Valor de las cotizaciones creadas en el periodo, sin importar cómo terminaron."
               />
+              <MetricaComercial
+                label="Cotizaciones abiertas"
+                value={comercial ? abrevCOP(Number(comercial.cotizaciones.abiertas_valor)) : '—'}
+                sub={comercial ? `${comercial.cotizaciones.abiertas} por cerrar, a hoy` : undefined}
+                loading={comercialLoading}
+                ayuda="Cotizaciones vigentes que el paciente todavía no acepta. Es la foto de hoy, no depende del periodo."
+              />
+            </div>
+
+            <div className="px-5 pt-3 pb-4">
+              <GraficaComercial data={comercial} loading={comercialLoading} />
             </div>
           </div>
         )}
@@ -1062,36 +1336,23 @@ function DashboardContent() {
                 label="Cuotas vencidas"
                 value={resumenCartera?.cuotas_vencidas ?? 0}
                 sub={resumenCartera && resumenCartera.cuotas_vencidas > 0
-                  ? abrevCOP(Number(resumenCartera.cuotas_vencidas_valor))
+                  ? `${abrevCOP(Number(resumenCartera.cuotas_vencidas_valor))} · ${resumenCartera.pacientes_en_mora} paciente${resumenCartera.pacientes_en_mora !== 1 ? 's' : ''}`
                   : 'sin vencimientos'}
                 color={(resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'text-red-600' : 'text-muted-foreground'}
                 loading={carteraLoading}
               />
             </div>
+            <CarteraDetalle resumen={resumenCartera} loading={carteraLoading} />
           </div>
         )}
       </div>
 
-      {/* Pacientes sin reagendar */}
-      {!pacientesLoading && sinReagendar.length > 0 && (
-        <>
-          <button
-            onClick={() => setSheetPacientes(true)}
-            className="w-full flex items-center gap-3 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 hover:bg-amber-100 transition-colors text-left"
-          >
-            <UserX className="h-4 w-4 shrink-0" />
-            <span className="flex-1 font-medium">
-              {sinReagendar.length} paciente{sinReagendar.length !== 1 ? 's' : ''} con más de un mes sin reagendar
-            </span>
-            <ArrowRight className="h-4 w-4 shrink-0" />
-          </button>
-          <SheetPacientesSinReagendar
-            open={sheetPacientes}
-            onClose={() => setSheetPacientes(false)}
-            pacientes={sinReagendar}
-          />
-        </>
-      )}
+      {/* Lista de pacientes sin reagendar (se abre desde su tarjeta de KPI) */}
+      <SheetPacientesSinReagendar
+        open={sheetPacientes}
+        onClose={() => setSheetPacientes(false)}
+        pacientes={sinReagendar}
+      />
 
       {/* Envíos de WhatsApp fallidos (recordatorios, OTP, cotizaciones, órdenes) */}
       {notificacionesFallidas.length > 0 && (
@@ -1275,107 +1536,6 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* Citas del día + Accesos rápidos */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <div className="flex items-center justify-between px-5 py-4 border-b">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-sm">Citas de hoy</h2>
-            </div>
-            <Link href="/agenda" className="text-xs text-primary hover:underline flex items-center gap-1">
-              Ver agenda <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="divide-y">
-            {citasLoading ? (
-              <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
-              </div>
-            ) : !citasHoy?.length ? (
-              <div className="flex flex-col items-center py-12 text-center px-4">
-                <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
-                <Button size="sm" className="mt-3" asChild>
-                  <Link href="/agenda">
-                    <Plus className="h-3.5 w-3.5 mr-1.5" />
-                    Agendar cita
-                  </Link>
-                </Button>
-              </div>
-            ) : (
-              citasHoy.map(cita => (
-                <Link
-                  key={cita.id}
-                  href={`/agenda?cita=${cita.id}`}
-                  className={cn(
-                    'flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors border-l-4',
-                    ESTADO_LEFT[cita.estado]
-                  )}
-                >
-                  <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
-                    <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
-                    <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      <span className="uppercase">{cita.servicio_nombre}</span> · {cita.profesional_nombre}
-                    </p>
-                  </div>
-                  <CitaStatusBadge estado={cita.estado} />
-                </Link>
-              ))
-            )}
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
-            <div className="space-y-2">
-              {[
-                { href: '/agenda', icon: CalendarDays, label: 'Nueva cita', desc: 'Agendar para hoy' },
-                { href: '/pacientes/nuevo', icon: Users, label: 'Nuevo paciente', desc: 'Registrar paciente' },
-                { href: '/cotizaciones', icon: FileText, label: 'Cotizaciones', desc: 'Ver y crear cotizaciones' },
-              ].map(({ href, icon: Icon, label, desc }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
-                >
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                    <Icon className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{label}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </div>
-                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {!kpisLoading && totalCitas > 0 && (
-            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <h2 className="font-semibold text-sm mb-3">Progreso del día</h2>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{completadas} de {totalCitas} completadas</span>
-                  <span>{Math.round((completadas / totalCitas) * 100)}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full bg-green-400 rounded-full transition-all"
-                    style={{ width: `${(completadas / totalCitas) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
     </div>
   )
 }

@@ -23,7 +23,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
+import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
 import { formatDate, cn } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import { useAuthStore } from '@/store/authStore'
@@ -516,6 +516,7 @@ export default function PacienteDetailPage({ params }: Props) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
+                        {c.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={c.enviada_en} />}
                         <span className="text-xs text-muted-foreground">{formatDate(c.created_at)}</span>
                       </div>
                       <p className="text-sm font-medium mt-0.5">

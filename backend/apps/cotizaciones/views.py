@@ -129,6 +129,12 @@ class CotizacionViewSet(ModelViewSet):
             if estado_comercial not in ESTADOS_COMERCIALES_FILTRO:
                 raise ValidationError({"error": "Estado comercial invalido.", "code": "ESTADO_INVALIDO"})
             queryset = filtrar_estado_comercial(queryset, estado_comercial)
+        # Haber sido enviada es una marca, no un estado: ?enviada=true|false.
+        enviada = self.request.query_params.get("enviada")
+        if enviada in {"true", "1"}:
+            queryset = queryset.filter(_primer_envio__isnull=False)
+        elif enviada in {"false", "0"}:
+            queryset = queryset.filter(_primer_envio__isnull=True)
         return queryset
 
     def _filtrar_por_fecha(self, queryset):
@@ -285,6 +291,10 @@ class CotizacionViewSet(ModelViewSet):
                 motivo=serializer.validated_data.get("motivo_descarte", ""),
                 nota=serializer.validated_data.get("nota_descarte", ""),
             )
+            if serializer.validated_data["cerrar_oportunidad"]:
+                from apps.seguimiento.services import cerrar_por_descarte
+
+                cerrar_por_descarte(cotizacion, usuario=request.user)
         else:
             cotizacion.estado = nuevo_estado
             cotizacion.save(update_fields=["estado", "updated_at"])

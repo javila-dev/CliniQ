@@ -1,8 +1,8 @@
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 
 from django.db import transaction
-from django.db.models import DecimalField, ExpressionWrapper, F, OuterRef, Prefetch, Subquery, Sum, Value
+from django.db.models import Count, DecimalField, ExpressionWrapper, F, OuterRef, Prefetch, Subquery, Sum, Value
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import status
@@ -268,6 +268,35 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         )
         cuotas_vencidas = cuotas_vencidas_qs.count()
         cuotas_vencidas_valor = cuotas_vencidas_qs.aggregate(s=Sum("pendiente"))["s"] or Decimal("0")
+
+        # Antigüedad de la mora (saldo vencido por días de atraso de cada cuota).
+        hoy = timezone.localdate()
+        tramos = [("1_30", 1, 30), ("31_60", 31, 60), ("61_90", 61, 90), ("90_mas", 91, None)]
+        mora = {clave: {"valor": Decimal("0"), "cuotas": 0} for clave, _, _ in tramos}
+        carteras_en_mora = set()
+        for fecha, pendiente, cartera_id in cuotas_vencidas_qs.values_list("fecha_esperada", "pendiente", "cartera_id"):
+            dias = (hoy - fecha).days
+            carteras_en_mora.add(cartera_id)
+            for clave, desde_dias, hasta_dias in tramos:
+                if dias >= desde_dias and (hasta_dias is None or dias <= hasta_dias):
+                    mora[clave]["valor"] += pendiente
+                    mora[clave]["cuotas"] += 1
+                    break
+
+        # Lo que vence en los próximos 30 días (incluye hoy).
+        por_vencer = (
+            CuotaCartera.objects.filter(
+                cartera__in=queryset,
+                anulada=False,
+                fecha_esperada__gte=hoy,
+                fecha_esperada__lte=hoy + timedelta(days=30),
+            )
+            .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+            .filter(pendiente__gt=0)
+            .aggregate(valor=Sum("pendiente"), cuotas=Count("id"))
+        )
+        cobrado_pct = (total_cobrado / total_cartera * 100) if total_cartera else Decimal("0")
+
         return Response(
             {
                 "total_cartera": self._money(total_cartera),
@@ -275,6 +304,16 @@ class CarteraViewSet(ReadOnlyModelViewSet):
                 "saldo_pendiente": self._money(saldo_pendiente),
                 "cuotas_vencidas": cuotas_vencidas,
                 "cuotas_vencidas_valor": self._money(cuotas_vencidas_valor),
+                "cobrado_pct": f"{cobrado_pct:.1f}",
+                "pacientes_en_mora": len(carteras_en_mora),
+                "mora_por_antiguedad": [
+                    {"tramo": clave, "valor": self._money(mora[clave]["valor"]), "cuotas": mora[clave]["cuotas"]}
+                    for clave, _, _ in tramos
+                ],
+                "por_vencer_30": {
+                    "valor": self._money(por_vencer["valor"] or 0),
+                    "cuotas": por_vencer["cuotas"] or 0,
+                },
             },
             status=status.HTTP_200_OK,
         )

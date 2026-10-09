@@ -1,9 +1,9 @@
 import type { Consentimiento } from './consentimientos'
 
 export type EstadoCotizacion = 'borrador' | 'aceptada' | 'vencida' | 'descartada'
-// Estado que ve la clínica: "enviada" y "vencida" se derivan en el backend
-// (envíos registrados y vigencia); `estado` sigue siendo el guardado.
-export type EstadoComercial = 'borrador' | 'enviada' | 'vencida' | 'aceptada' | 'descartada'
+// Estado que ve la clínica: "vencida" se deriva en el backend de la vigencia;
+// `estado` sigue siendo el guardado. Haber sido enviada es la marca `enviada`.
+export type EstadoComercial = 'borrador' | 'vencida' | 'aceptada' | 'descartada'
 export type MotivoDescarte = 'precio' | 'otra_clinica' | 'no_responde' | 'no_candidato' | 'otro'
 
 export const MOTIVOS_DESCARTE: { value: MotivoDescarte; label: string }[] = [
@@ -141,6 +141,8 @@ export interface Cotizacion {
   sede_nombre?: string | null
   estado: EstadoCotizacion
   estado_comercial: EstadoComercial
+  enviada?: boolean
+  enviada_en?: string | null       // primer envío al paciente (WhatsApp, correo o PDF)
   validez_dias: number
   fecha_vencimiento: string | null
   vigente_desde?: string | null
@@ -149,6 +151,7 @@ export interface Cotizacion {
   descartada_en?: string | null
   motivo_descarte?: MotivoDescarte | ''
   nota_descarte?: string
+  oportunidad?: string | null      // oportunidad del seguimiento de la que nace
   notas: string
   items: ItemCotizacion[]
   formas_pago: FormaPagoCotizacion[]

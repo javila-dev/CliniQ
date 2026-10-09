@@ -81,7 +81,7 @@ function SesionRow({
 }) {
   const tieneHistorial = !!historial && historial.eventos.length > 0
   return (
-    <div>
+    <div className={fila.agendable ? 'bg-primary/[0.03]' : undefined}>
       <div className="flex items-center justify-between px-3 py-2 gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
@@ -96,7 +96,7 @@ function SesionRow({
           ) : fila.detalle ? (
             <p className="text-xs text-muted-foreground truncate">{fila.detalle}</p>
           ) : (
-            <p className="text-xs text-muted-foreground">Sin agendar</p>
+            <p className="text-xs text-primary/80">Sin agendar</p>
           )}
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
@@ -117,7 +117,7 @@ function SesionRow({
             <Button
               size="sm"
               variant="outline"
-              className="h-7 text-xs"
+              className="h-7 text-xs border-primary/30 text-primary hover:bg-primary hover:text-primary-foreground"
               onClick={() => onAgendar(fila.sesionEjecutadaId ?? null)}
             >
               <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
@@ -308,6 +308,14 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
               : construirFilasOrdinales(item.descripcion, item.num_citas, item.citas)
 
             const abierto = expandidos.has(item.item_id)
+            const porAgendar = filas.filter((f) => f.agendable)
+            const proxima = porAgendar[0]
+            const abrirAgenda = (sesionEjecutadaId: string | null) =>
+              setModal({
+                itemId: item.item_id,
+                itemTipo: (item.tipo ?? 'libre') as TipoItemCotizacion,
+                sesionEjecutadaId,
+              })
 
             return (
               <div key={item.item_id} className="space-y-3">
@@ -356,6 +364,39 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
                   </div>
                 </div>
 
+                {/* Próxima sesión por agendar: visible sin desplegar la lista */}
+                {proxima ? (
+                  <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-gradient-to-r from-primary/[0.08] via-primary/[0.04] to-transparent px-4 py-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-primary/10 text-primary">
+                        <CalendarPlus className="h-4 w-4" />
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{proxima.titulo}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {proxima.detalle ? `${proxima.detalle} · ` : ''}
+                          {porAgendar.length === 1
+                            ? 'Es la última sin cita'
+                            : `Próxima por agendar · ${porAgendar.length} sin cita`}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="shrink-0 shadow-sm"
+                      onClick={() => abrirAgenda(proxima.sesionEjecutadaId ?? null)}
+                    >
+                      <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
+                      Agendar
+                    </Button>
+                  </div>
+                ) : filas.length > 0 && item.citas_restantes === 0 ? (
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                    <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
+                    Todas las sesiones tienen cita
+                  </p>
+                ) : null}
+
                 {/* Lista de sesiones individuales (desplegable) */}
                 {filas.length > 0 && (
                   <div className="rounded-md border">
@@ -381,13 +422,7 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
                             historial={fila.citaId ? historialByCita.get(fila.citaId) : undefined}
                             historialAbierto={!!fila.citaId && historialAbierto.has(fila.citaId)}
                             onToggleHistorial={() => { if (fila.citaId) toggleHistorial(fila.citaId) }}
-                            onAgendar={(sesionEjecutadaId) =>
-                              setModal({
-                                itemId: item.item_id,
-                                itemTipo: (item.tipo ?? 'libre') as TipoItemCotizacion,
-                                sesionEjecutadaId,
-                              })
-                            }
+                            onAgendar={abrirAgenda}
                           />
                         ))}
                       </div>

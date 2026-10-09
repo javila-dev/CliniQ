@@ -128,6 +128,11 @@ export interface ResumenCartera {
   saldo_pendiente: string
   cuotas_vencidas: number
   cuotas_vencidas_valor: string
+  cobrado_pct: string                 // abonado / total, 1 decimal
+  pacientes_en_mora: number
+  // Saldo vencido por días de atraso: 1_30, 31_60, 61_90, 90_mas
+  mora_por_antiguedad: { tramo: string; valor: string; cuotas: number }[]
+  por_vencer_30: { valor: string; cuotas: number }
 }
 
 export interface RegistrarPagoPayload {

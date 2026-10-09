@@ -132,9 +132,19 @@ export interface ComercialMetrics {
   ventas: {
     valor: string
     cantidad: number
-    tasa_cierre_pct: string   // ganadas / decididas en el periodo
+    tasa_cierre_pct: string   // de las creadas en el periodo, % ya vendidas
+    creadas_vendidas: number
+    creadas_abiertas: number  // creadas en el periodo que siguen abiertas
     dias_promedio_cierre: number | null
   }
+  granularidad: 'dia' | 'semana' | 'mes'
+  serie: {
+    periodo: string           // inicio del día/semana/mes (YYYY-MM-DD)
+    cotizado_valor: string
+    cotizadas: number
+    vendido_valor: string
+    vendidas: number
+  }[]
 }
 
 export interface Vendedor {

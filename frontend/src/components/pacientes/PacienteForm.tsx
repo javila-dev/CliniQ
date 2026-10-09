@@ -113,6 +113,8 @@ interface PacienteFormProps {
   isLoading?: boolean
   submitLabel?: string
   initialNombre?: string
+  /** Teléfono precargado al crear (p. ej. al pasar un interesado a paciente). */
+  initialTelefono?: string
   compact?: boolean
   /** false → los datos sensibles (documento, teléfono, email, dirección, fecha de
    *  nacimiento) llegan enmascarados; se muestran de solo lectura y no se envían. */
@@ -148,7 +150,7 @@ function OptionalSelect({ value, onChange, placeholder = '—', children }: {
 }
 
 export function PacienteForm({
-  defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, compact = false, canEditSensitive = true,
+  defaultValues, onSubmit, isLoading, submitLabel = 'Guardar', initialNombre, initialTelefono, compact = false, canEditSensitive = true,
   tabsRequeridos,
 }: PacienteFormProps) {
   const [tab, setTab] = useState('basico')
@@ -156,7 +158,11 @@ export function PacienteForm({
   // Solo al editar: si el usuario no puede ver datos sensibles, llegan enmascarados.
   const lockSensitive = defaultValues != null && !canEditSensitive
 
-  const detectado = defaultValues?.telefono ? detectarPais(defaultValues.telefono) : null
+  const detectado = defaultValues?.telefono
+    ? detectarPais(defaultValues.telefono)
+    : initialTelefono
+      ? detectarPais(initialTelefono.replace(/\s/g, ''))
+      : null
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
@@ -177,6 +183,7 @@ export function PacienteForm({
       telefono_responsable: defaultValues.telefono_responsable ?? '',
     } : {
       nombres: initialNombre ?? '', tipo_documento: 'CC', sexo: 'F',
+      telefono: detectado ? detectado.localPhone.replace(/\D/g, '') : undefined,
       canal_confirmacion: 'whatsapp', autoriza_datos: false,
     },
   })

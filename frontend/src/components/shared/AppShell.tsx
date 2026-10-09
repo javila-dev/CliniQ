@@ -29,6 +29,7 @@ import {
   ShoppingBag,
   Tag,
   Briefcase,
+  PhoneCall,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -56,6 +57,8 @@ const NAV = {
   agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER            },
   pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
   catalogo:       { href: '/catalogo',       label: 'Catálogo',        icon: Layers,          perm: PERM.SERVICIOS_VER         },
+  // Bandeja diaria ("Para hoy") y embudo de interesados.
+  seguimiento:    { href: '/seguimiento',    label: 'Seguimiento',     icon: PhoneCall,       perm: PERM.SEGUIMIENTO_VER       },
   cotizaciones:   { href: '/cotizaciones',   label: 'Cotizaciones',    icon: ClipboardList,   perm: PERM.COTIZACIONES_VER      },
   // Ventas = cotizaciones aceptadas: mismo permiso, nadie pierde acceso.
   ventas:         { href: '/ventas',         label: 'Ventas',          icon: ShoppingBag,     perm: PERM.COTIZACIONES_VER      },
@@ -85,7 +88,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
   const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
-  const comercialItems: NavItem[] = [n.cotizaciones, n.ventas, n.catalogo, n.campanas].filter(vis)
+  const comercialItems: NavItem[] = [n.seguimiento, n.cotizaciones, n.ventas, n.catalogo, n.campanas].filter(vis)
   const insumosItems: NavItem[]  = [n.insumos, n.compras, n.proveedores].filter(vis)
   const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
 

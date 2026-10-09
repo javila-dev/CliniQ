@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
-  MessageCircle, Mail, FileDown, CheckCircle2, AlertCircle, Loader2,
+  MessageCircle, Mail, CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -12,6 +12,10 @@ import { Label } from '@/components/ui/label'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { cn } from '@/lib/utils'
 import type { CanalEnvio } from '@/types/cotizaciones'
+
+// Descargar el PDF no es una opción de envío: se hace con el botón PDF de la
+// cotización, que también deja registrado el envío.
+type CanalModal = Exclude<CanalEnvio, 'pdf'>
 
 // ── Channel card ──────────────────────────────────────────────────────────────
 
@@ -77,7 +81,7 @@ interface Props {
 }
 
 const CHANNELS: {
-  canal: CanalEnvio
+  canal: CanalModal
   icon: React.ElementType
   label: string
   description: string
@@ -97,18 +101,11 @@ const CHANNELS: {
     description: 'Envía un email con la cotización adjunta en PDF',
     color: 'text-blue-600 bg-blue-50',
   },
-  {
-    canal: 'pdf',
-    icon: FileDown,
-    label: 'Descargar PDF',
-    description: 'Descarga el PDF para compartirlo manualmente',
-    color: 'text-gray-600 bg-gray-100',
-  },
 ]
 
 export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTelefono, pacienteEmail }: Props) {
   const qc = useQueryClient()
-  const [canal, setCanal] = useState<CanalEnvio>('whatsapp')
+  const [canal, setCanal] = useState<CanalModal>('whatsapp')
   const [emailDest, setEmailDest] = useState(pacienteEmail ?? '')
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
@@ -130,7 +127,7 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
         await cotizacionesApi.enviarWhatsapp(cotizacionId)
         setFeedback({ type: 'success', message: 'Cotización enviada por WhatsApp correctamente.' })
 
-      } else if (canal === 'email') {
+      } else {
         if (!emailDest.trim()) {
           setFeedback({ type: 'error', message: 'Ingresa el correo electrónico del destinatario.' })
           setLoading(false)
@@ -138,29 +135,16 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
         }
         await cotizacionesApi.enviarEmail(cotizacionId, { destinatario: emailDest.trim() })
         setFeedback({ type: 'success', message: `Cotización enviada a ${emailDest.trim()}.` })
-
-      } else {
-        // PDF download + register
-        const blob = await cotizacionesApi.descargarPdf(cotizacionId)
-        const url = URL.createObjectURL(blob)
-        Object.assign(document.createElement('a'), {
-          href: url,
-          download: `cotizacion-${cotizacionId.slice(0, 8)}.pdf`,
-        }).click()
-        URL.revokeObjectURL(url)
-        // Register the download event (best-effort, non-blocking)
-        cotizacionesApi.registrarEnvioPdf(cotizacionId).catch(() => null)
-        setFeedback({ type: 'success', message: 'PDF descargado y envío registrado.' })
       }
 
       qc.invalidateQueries({ queryKey: ['cotizacion', cotizacionId] })
       qc.invalidateQueries({ queryKey: ['cotizacion-envios', cotizacionId] })
+      qc.invalidateQueries({ queryKey: ['cotizaciones'] })
 
     } catch {
-      const msgs: Record<CanalEnvio, string> = {
+      const msgs: Record<CanalModal, string> = {
         whatsapp: 'No se pudo enviar por WhatsApp. Verifica que el paciente tenga un teléfono registrado.',
         email: 'No se pudo enviar el correo. Revisa la configuración de email.',
-        pdf: 'No se pudo descargar el PDF. Intenta de nuevo.',
       }
       setFeedback({ type: 'error', message: msgs[canal] })
     } finally {
@@ -227,7 +211,7 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
               <Button type="button" className="flex-1" onClick={handleEnviar} disabled={loading}>
                 {loading
                   ? <><Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />Enviando…</>
-                  : canal === 'pdf' ? 'Descargar PDF' : 'Enviar'}
+                  : 'Enviar'}
               </Button>
             ) : null}
           </div>

@@ -167,8 +167,8 @@ Sin envío automático (apagado o sin número propio), M1 entra directo a
 
 **M2. Cotización enviada y no aceptada** (`cotizacion_abierta`)
 
-- Cotización con `estado_comercial = enviada` (borrador con al menos un
-  `CotizacionEnvio` y no vencida; ver el plan del embudo).
+- Cotización en borrador, no vencida, con la marca `enviada` (al menos un
+  `CotizacionEnvio`; ver el plan del embudo).
 - Último envío hace más de N días (config, por defecto 3).
 - Si la cotización ya tiene una `Oportunidad` del embudo, **no se crea otra**:
   se actualiza esa (su `proximo_contacto` pasa a hoy). Si no tiene, se crea una

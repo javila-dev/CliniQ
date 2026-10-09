@@ -32,7 +32,8 @@ export interface CambiarEstadoResponse extends Cotizacion {
 export const cotizacionesApi = {
   list: async (params?: {
     estado?: EstadoCotizacion
-    estado_comercial?: EstadoComercial | 'abiertas'
+    estado_comercial?: EstadoComercial
+    enviada?: 'true' | 'false'
     paciente?: string
     search?: string
     fecha_desde?: string
@@ -74,7 +75,7 @@ export const cotizacionesApi = {
   cambiarEstado: async (
     id: string,
     estado: EstadoCotizacion,
-    extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean },
+    extra?: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; confirmar_vencida?: boolean; cerrar_oportunidad?: boolean },
   ): Promise<CambiarEstadoResponse> => {
     const res = await apiClient.post<CambiarEstadoResponse>(`/cotizaciones/${id}/cambiar_estado/`, { estado, ...extra })
     return res.data
@@ -171,9 +172,16 @@ export const ventasApi = {
     vendedor?: string
     paciente?: string
     con_mora?: '1'
+    ordering?: string
     page?: number
   }): Promise<Paginated<Venta>> => {
     const res = await apiClient.get<Paginated<Venta>>('/ventas/', { params })
+    return res.data
+  },
+
+  // Profesionales con ventas, para el filtro de la lista.
+  vendedores: async (): Promise<{ id: string; nombre: string }[]> => {
+    const res = await apiClient.get<{ id: string; nombre: string }[]>('/ventas/vendedores/')
     return res.data
   },
 }

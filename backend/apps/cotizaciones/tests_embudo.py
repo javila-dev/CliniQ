@@ -63,7 +63,7 @@ class EmbudoComercialTests(TestCase):
 
     # ── Estado comercial ──
 
-    def test_estado_comercial_borrador_enviada_vencida(self):
+    def test_estado_comercial_y_marca_enviada(self):
         borrador = self._crear()
         enviada = self._crear()
         CotizacionEnvio.objects.create(cotizacion=enviada, canal=CotizacionEnvio.Canal.PDF)
@@ -71,20 +71,28 @@ class EmbudoComercialTests(TestCase):
         self._antedatar(vencida, 40)
 
         self.assertEqual(borrador.estado_comercial, "borrador")
-        self.assertEqual(enviada.estado_comercial, "enviada")
+        self.assertFalse(borrador.enviada)
+        # Enviada no es un estado: sigue en borrador con la marca.
+        self.assertEqual(enviada.estado_comercial, "borrador")
+        self.assertTrue(enviada.enviada)
         self.assertEqual(vencida.estado_comercial, "vencida")
         # El estado guardado no cambia.
         self.assertEqual(vencida.estado, Cotizacion.Estado.BORRADOR)
 
-        def ids(estado):
-            response = self.client.get(f"/api/v1/cotizaciones/?estado_comercial={estado}")
+        def ids(query):
+            response = self.client.get(f"/api/v1/cotizaciones/?{query}")
             self.assertEqual(response.status_code, 200, response.content)
             return {row["id"] for row in response.json()["results"]}
 
-        self.assertEqual(ids("borrador"), {str(borrador.id)})
-        self.assertEqual(ids("enviada"), {str(enviada.id)})
-        self.assertEqual(ids("vencida"), {str(vencida.id)})
-        self.assertEqual(ids("abiertas"), {str(borrador.id), str(enviada.id)})
+        self.assertEqual(ids("estado_comercial=borrador"), {str(borrador.id), str(enviada.id)})
+        self.assertEqual(ids("estado_comercial=vencida"), {str(vencida.id)})
+        self.assertEqual(ids("estado_comercial=borrador&enviada=true"), {str(enviada.id)})
+        self.assertEqual(ids("estado_comercial=borrador&enviada=false"), {str(borrador.id)})
+
+        response = self.client.get(f"/api/v1/cotizaciones/{enviada.id}/")
+        self.assertEqual(response.json()["estado_comercial"], "borrador")
+        self.assertTrue(response.json()["enviada"])
+        self.assertIsNotNone(response.json()["enviada_en"])
 
     def test_estado_comercial_invalido(self):
         response = self.client.get("/api/v1/cotizaciones/?estado_comercial=otro")
@@ -149,6 +157,31 @@ class EmbudoComercialTests(TestCase):
         response = self.client.get(f"/api/v1/ventas/?aceptada_hasta={ayer}")
         self.assertEqual(len(response.json()["results"]), 0)
 
+    def test_ventas_ordena_por_total_y_lista_vendedores(self):
+        barata = self._crear()
+        self._cambiar_estado(barata, estado="aceptada")
+        payload = self._payload()
+        payload["items"][0]["valor_unitario"] = "500000.00"
+        payload["formas_pago"][0]["valor"] = "500000.00"
+        cara = Cotizacion.objects.get(pk=self.client.post("/api/v1/cotizaciones/", payload, format="json").json()["id"])
+        Cotizacion.objects.filter(pk__in=[barata.pk, cara.pk]).update(profesional=self.superadmin)
+        self._cambiar_estado(cara, estado="aceptada")
+
+        def orden(campo):
+            response = self.client.get(f"/api/v1/ventas/?ordering={campo}")
+            self.assertEqual(response.status_code, 200, response.content)
+            return [row["id"] for row in response.json()["results"]]
+
+        self.assertEqual(orden("total_venta"), [str(barata.id), str(cara.id)])
+        self.assertEqual(orden("-saldo_venta"), [str(cara.id), str(barata.id)])
+        self.assertEqual(len(orden("pagado_venta")), 2)
+
+        response = self.client.get(f"/api/v1/ventas/?vendedor={self.superadmin.id}")
+        self.assertEqual(len(response.json()["results"]), 2)
+        response = self.client.get("/api/v1/ventas/vendedores/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([v["id"] for v in response.json()], [str(self.superadmin.id)])
+
     # ── KPI comerciales ──
 
     def _reporte(self, desde, hasta):
@@ -177,6 +210,28 @@ class EmbudoComercialTests(TestCase):
         self.assertEqual(actual["ventas"]["cantidad"], 1)
         self.assertEqual(actual["ventas"]["valor"], "350000.00")
 
+    def test_serie_cotizado_vs_vendido(self):
+        hoy = timezone.localdate()
+        ganada = self._crear()
+        self._cambiar_estado(ganada, estado="aceptada")
+        self._crear()
+
+        # 10 días: un punto por día, todos presentes aunque estén en cero.
+        data = self._reporte(hoy - timedelta(days=9), hoy)
+        self.assertEqual(data["granularidad"], "dia")
+        self.assertEqual(len(data["serie"]), 10)
+        ultimo = data["serie"][-1]
+        self.assertEqual(ultimo["periodo"], hoy.isoformat())
+        self.assertEqual(ultimo["cotizadas"], 2)
+        self.assertEqual(ultimo["cotizado_valor"], "700000.00")
+        self.assertEqual(ultimo["vendidas"], 1)
+        self.assertEqual(ultimo["vendido_valor"], "350000.00")
+
+        # Un año: por mes.
+        data = self._reporte(hoy - timedelta(days=364), hoy)
+        self.assertEqual(data["granularidad"], "mes")
+        self.assertEqual(data["serie"][-1]["vendidas"], 1)
+
     def test_tasa_de_cierre_y_migradas(self):
         hoy = timezone.localdate()
         ganada = self._crear()
@@ -194,6 +249,35 @@ class EmbudoComercialTests(TestCase):
         self.assertEqual(data["cotizaciones"]["descartadas"], 1)
         self.assertEqual(data["cotizaciones"]["motivo_principal"], "precio")
         self.assertEqual(data["ventas"]["cantidad"], 1)
-        # 1 ganada de 2 decididas; la abierta no cuenta.
-        self.assertEqual(data["ventas"]["tasa_cierre_pct"], "50.00")
+        # De las 3 creadas en el periodo (sin la migrada), 1 ya se vendió.
+        self.assertEqual(data["ventas"]["tasa_cierre_pct"], "33.33")
+        self.assertEqual(data["ventas"]["creadas_vendidas"], 1)
+        self.assertEqual(data["ventas"]["creadas_abiertas"], 1)
         self.assertIsNotNone(abierta)
+
+    # ── Resumen de cartera ──
+
+    def test_resumen_cartera_antiguedad_y_por_vencer(self):
+        from apps.cartera.models import CuotaCartera
+
+        cotizacion = self._crear()
+        self._cambiar_estado(cotizacion, estado="aceptada")
+        cuota = CuotaCartera.objects.get(cartera__cotizacion=cotizacion)
+        hoy = timezone.localdate()
+        cuota.fecha_esperada = hoy - timedelta(days=45)
+        cuota.save(update_fields=["fecha_esperada"])
+        CuotaCartera.objects.create(
+            cartera=cuota.cartera, tipo=cuota.tipo, descripcion="Próxima",
+            valor_esperado="100000.00", fecha_esperada=hoy + timedelta(days=10),
+        )
+
+        response = self.client.get("/api/v1/cartera/resumen/")
+        self.assertEqual(response.status_code, 200, response.content)
+        data = response.json()
+        tramos = {t["tramo"]: t for t in data["mora_por_antiguedad"]}
+        self.assertEqual(tramos["31_60"]["cuotas"], 1)
+        self.assertEqual(tramos["31_60"]["valor"], "350000.00")
+        self.assertEqual(tramos["1_30"]["cuotas"], 0)
+        self.assertEqual(data["pacientes_en_mora"], 1)
+        self.assertEqual(data["por_vencer_30"], {"valor": "100000.00", "cuotas": 1})
+        self.assertEqual(data["cobrado_pct"], "0.0")

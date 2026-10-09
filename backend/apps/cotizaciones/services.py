@@ -112,6 +112,10 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
         "[aceptar_cotizacion] cotizacion aceptada | cotizacion_id=%s | actor=%s",
         cotizacion.id, getattr(actor, "id", None),
     )
+    # Cierra como ganada la oportunidad del embudo (nunca rompe la aceptación).
+    from apps.seguimiento.services import al_aceptar_cotizacion
+
+    transaction.on_commit(lambda: al_aceptar_cotizacion(cotizacion))
     return consentimientos_pendientes_cotizacion(cotizacion)
 
 

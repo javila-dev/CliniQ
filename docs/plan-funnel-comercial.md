@@ -110,7 +110,7 @@ Cuatro entradas, en el orden en que se usan:
 | Entrada | Ruta | Qué muestra |
 |---|---|---|
 | **Seguimiento** | `/seguimiento` | **La pantalla principal.** Pestaña **Para hoy** (lista de a quién llamar: interesados, cotizaciones sin respuesta, sesiones pendientes, no asistió) y pestaña **Embudo** (tablero Nuevo / Valoración / Cotizado con totales por columna). Botón grande **+ Nuevo interesado** |
-| **Cotizaciones** | `/cotizaciones` | Solo propuestas: abiertas, enviadas, vencidas, descartadas. Las ganadas se ven en una pestaña "Convertidas" que enlaza a la venta |
+| **Cotizaciones** | `/cotizaciones` | Solo propuestas: abiertas (con chip "Enviada" si ya salió al paciente), vencidas, descartadas. Las ganadas se ven en una pestaña "Convertidas" que enlaza a la venta |
 | **Ventas** | `/ventas` | Cotizaciones aceptadas vistas como contrato: total, saldo, sesiones usadas de las vendidas, vendedor, consentimientos, estado de la cartera |
 | **Campañas** | `/campanas` | Envíos de marketing por WhatsApp (ver [Campañas de marketing](#campañas-de-marketing-por-whatsapp)). Solo con el addon de número propio; sin él, una página que explica el addon |
 
@@ -169,14 +169,17 @@ cartera de la cotización, y si no tiene, `Cotizacion.updated_at`. Las
 migradas (`es_migracion`) usan su `created_at`. Se acepta que el dato
 histórico sea aproximado; desde el deploy es exacto.
 
-### "Enviada" y "vencida": derivadas, no persistidas
+### "Vencida" derivada; "enviada" es una marca, no un estado
 
 Para no cambiar el significado del campo `estado` ni migrar datos:
 
-- **Enviada** = `borrador` con al menos un `CotizacionEnvio`. Se expone como
-  `estado_comercial` en el serializer (`borrador`, `enviada`, `vencida`,
-  `aceptada`, `descartada`) y como filtro de la lista. Una enviada se puede
-  seguir editando, como hoy.
+- **Enviada** (decisión 2026-10-08) **no es un estado**: la cotización sigue en
+  **borrador** y lleva la marca `enviada` / `enviada_en` (fecha del primer
+  `CotizacionEnvio`: WhatsApp, correo o PDF descargado desde el modal de
+  envío). En pantalla es un chip "Enviada 8 oct" junto al badge. Filtro
+  aparte: `?enviada=true|false`. Una enviada se puede seguir editando.
+- `estado_comercial` en el serializer: `borrador`, `vencida`, `aceptada`,
+  `descartada`; también filtro de la lista.
 - **Vencida** = `borrador` con `fecha_vencimiento < hoy`. Se calcula, no se
   guarda. El valor `vencida` de `Estado` se deja como está (sin uso), para no
   tocar datos.
@@ -649,7 +652,7 @@ pida; suite completa de backend.
 1. **Cotizaciones y ventas** (sin dependencias, menor riesgo):
    - `aceptada_en` + backfill, `aceptada_por`, `descartada_en`, motivo de
      descarte, `vigente_desde`;
-   - `estado_comercial` derivado (enviada, vencida), aceptar vencida con
+   - `estado_comercial` derivado (vencida) y marca `enviada`, aceptar vencida con
      confirmación, renovar;
    - `/ventas` y `/ventas/[id]`, redirección desde `/cotizaciones/[id]`
      (partir `CotizacionForm` queda como refactor aparte);
@@ -665,6 +668,19 @@ pida; suite completa de backend.
    - etiquetas calculadas en la ficha del paciente;
    - pestaña Ventas en la bandeja de seguimiento;
    - tarjeta Embudo.
+
+   Implementado (2026-10-08, app `backend/apps/seguimiento/`): modelo
+   `Oportunidad` completo (sin `campana_marketing`, que llega con la fase 3)
+   y `GestionOportunidad`; `Cotizacion.oportunidad`; permisos
+   `seguimiento.oportunidades.ver/gestionar` (roles de sistema admin y
+   recepción); API `/api/v1/seguimiento/oportunidades/` (lista con
+   `para_hoy`, alta de interesado, PATCH, `gestiones`, `perder`, `reabrir`,
+   `vincular_paciente`, `embudo`); avance por señales de cita y envío y desde
+   `aceptar_cotizacion`; al descartar una cotización se ofrece cerrar su
+   oportunidad. Front: `/seguimiento` (Para hoy + Embudo), diálogos de
+   interesado, gestión, posponer y perdida, "completar ficha" antes de agendar
+   la valoración. **Pendiente**: etiquetas en la ficha del paciente y tarjeta
+   del dashboard.
 3. **Campañas de marketing** (addon de número propio):
    - página pública de preferencias (autorizar y darse de baja);
    - autorización de marketing en paciente, autorregistro e importación;

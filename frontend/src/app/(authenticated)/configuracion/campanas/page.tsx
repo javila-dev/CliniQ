@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { Fragment, useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -760,9 +760,8 @@ export default function CampanasPage() {
                 const estado = campanaEstado(c)
                 const expanded = expandedId === c.id
                 return (
-                  <>
+                  <Fragment key={c.id}>
                     <tr
-                      key={c.id}
                       className={cn('hover:bg-gray-50/50 transition-colors', !c.activo && 'opacity-60')}
                     >
                       {/* Expand toggle */}
@@ -887,7 +886,7 @@ export default function CampanasPage() {
                         </td>
                       </tr>
                     )}
-                  </>
+                  </Fragment>
                 )
               })}
             </tbody>
