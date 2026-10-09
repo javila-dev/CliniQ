@@ -404,6 +404,7 @@ def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False)
                 "archivo_url": None,
                 "origen": None,
                 "requiere_firma_cada_vez": cada_vez,
+                "pendiente_firma_profesional": False,
             }
             # Sin una cita concreta todavia (estamos a nivel cotizacion), un procedimiento
             # "cada vez" nunca puede mostrarse como ya satisfecho: se firma en cada sesion.
@@ -426,6 +427,8 @@ def consentimientos_requeridos_cotizacion(cotizacion, *, incluir_archivos=False)
                     fecha_vencimiento=informado.fecha_vencimiento,
                     origen="documenso",
                     archivo_url=_archivo_url(informado) if incluir_archivos else None,
+                    # El paciente ya firmo pero el documento sigue abierto: sin PDF sellado todavia.
+                    pendiente_firma_profesional=informado.pendiente_firma_profesional,
                 )
             elif legado is not None:
                 datos.update(
