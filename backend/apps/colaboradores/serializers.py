@@ -2,9 +2,11 @@ from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
+from rest_framework.exceptions import PermissionDenied
 
-from apps.clinicas.models import Sede
-from apps.colaboradores.models import Colaborador, HorarioColaborador
+from apps.clinicas.models import Sede, Servicio
+from apps.colaboradores import grupos as reglas_grupos
+from apps.colaboradores.models import Colaborador, GrupoAtencion, HorarioColaborador
 from apps.core.storage import get_public_url
 from apps.users.serializers import (
     legacy_storage_role,
@@ -119,6 +121,16 @@ class ColaboradorSerializer(serializers.ModelSerializer):
     sedes_detalle = serializers.SerializerMethodField()
     horarios = HorarioColaboradorSerializer(many=True, read_only=True)
     invitacion_pendiente = serializers.SerializerMethodField()
+    # Grupos de atención: solo para quien atiende pacientes. Al dejar de atender
+    # pacientes sale de todos sus grupos.
+    grupos = serializers.PrimaryKeyRelatedField(
+        source="grupos_atencion",
+        many=True,
+        queryset=GrupoAtencion.objects.all(),
+        required=False,
+    )
+    grupos_detalle = serializers.SerializerMethodField()
+    procedimientos_por_grupos = serializers.SerializerMethodField()
 
     class Meta:
         model = Colaborador
@@ -146,6 +158,9 @@ class ColaboradorSerializer(serializers.ModelSerializer):
             "fecha_ingreso",
             "especialidades",
             "especialidades_detalle",
+            "grupos",
+            "grupos_detalle",
+            "procedimientos_por_grupos",
             "numero_documento",
             "horarios",
             "activo",
@@ -199,6 +214,50 @@ class ColaboradorSerializer(serializers.ModelSerializer):
 
     def get_sedes_detalle(self, obj):
         return [{"id": str(sede.id), "nombre": sede.nombre} for sede in obj.sedes.all()]
+
+    def get_grupos_detalle(self, obj):
+        # `miembros_disponibles` permite al front avisar antes de desactivar al
+        # unico miembro de un grupo asignado a procedimientos.
+        return [
+            {
+                "id": str(grupo.id),
+                "nombre": grupo.nombre,
+                "asignado": grupo.procedimientos.exists(),
+                "miembros_disponibles": reglas_grupos.miembros_disponibles(grupo).count(),
+                # Asignado y él es su único miembro disponible: si sale, queda vacío.
+                "depende_de_el": reglas_grupos.quedaria_vacio_sin(grupo, obj),
+            }
+            for grupo in obj.grupos_atencion.all()
+        ]
+
+    def get_procedimientos_por_grupos(self, obj):
+        return [
+            {"id": str(servicio.id), "nombre": servicio.nombre}
+            for servicio in Servicio.objects.filter(grupos_atencion__miembros=obj).distinct().order_by("nombre")
+        ]
+
+    def validate_grupos(self, value):
+        request = self.context.get("request")
+        if request and request.user.rol != User.Role.SUPERADMIN:
+            if any(grupo.clinica_id != request.user.clinica_id for grupo in value):
+                raise serializers.ValidationError("Algún grupo no pertenece a tu clínica.")
+        return value
+
+    def _apply_grupos(self, instance, grupos, es_profesional):
+        """Aplica los grupos sin dejar vacío ninguno asignado a procedimientos.
+
+        Quien deja de atender pacientes sale de todos sus grupos."""
+        actuales = set(instance.grupos_atencion.all())
+        if not es_profesional:
+            nuevos = set()
+        elif grupos is not None:
+            nuevos = set(grupos)
+        else:
+            nuevos = actuales
+        if nuevos == actuales:
+            return
+        reglas_grupos.validar_que_no_quede_vacio(instance, actuales - nuevos)
+        instance.grupos_atencion.set(nuevos)
 
     def validate_user(self, value):
         request = self.context.get("request")
@@ -288,8 +347,14 @@ class ColaboradorSerializer(serializers.ModelSerializer):
         user_fields = ("first_name", "last_name", "telefono", "es_profesional")
         user_data = {field: validated_data.pop(field) for field in user_fields if field in validated_data}
         sedes = validated_data.pop("sedes", None)
+        grupos = validated_data.pop("grupos_atencion", None)
 
         activo_cambio = "activo" in validated_data and validated_data["activo"] != instance.activo
+
+        # Antes de guardar nada: salir de un grupo (o dejar de atender pacientes)
+        # no puede dejar vacío un grupo asignado a procedimientos.
+        es_profesional = user_data.get("es_profesional", instance.user.es_profesional)
+        self._apply_grupos(instance, grupos, es_profesional)
 
         if user_data:
             self._save_user_updates(instance.user, user_data)
@@ -361,6 +426,7 @@ class ColaboradorCreateSerializer(ColaboradorSerializer):
         user = validated_data.pop("user", None)
         sedes = validated_data.pop("sedes", None)
         especialidades = validated_data.pop("especialidades", [])
+        grupos = validated_data.pop("grupos_atencion", [])
         role = validated_data.pop("_rol_dinamico")
         validated_data.pop("role_id", None)
         validated_data.pop("rol", None)
@@ -392,6 +458,8 @@ class ColaboradorCreateSerializer(ColaboradorSerializer):
         colaborador = Colaborador.objects.create(user=user, **validated_data)
         if especialidades:
             colaborador.especialidades.set(especialidades)
+        if grupos and user.es_profesional:
+            colaborador.grupos_atencion.set(grupos)
         self._apply_sedes(colaborador, sedes)
 
         if user and not user.activo:
@@ -410,6 +478,7 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     sede_principal_nombre = serializers.CharField(source="sede_principal.nombre", read_only=True)
     especialidades = serializers.SerializerMethodField()
+    grupos_detalle = serializers.SerializerMethodField()
     invitacion_pendiente = serializers.SerializerMethodField()
 
     class Meta:
@@ -428,6 +497,7 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
             "sede_principal",
             "sede_principal_nombre",
             "especialidades",
+            "grupos_detalle",
             "tipo_contrato",
             "fecha_ingreso",
             "numero_documento",
@@ -437,6 +507,9 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_grupos_detalle(self, obj):
+        return [{"id": str(grupo.id), "nombre": grupo.nombre} for grupo in obj.grupos_atencion.all()]
 
     def get_invitacion_pendiente(self, obj):
         return bool(obj.activo and not obj.user.activo)
@@ -526,6 +599,125 @@ class ProfesionalListSerializer(serializers.ModelSerializer):
 
     def get_role_nombre(self, obj):
         return user_role_name(obj)
+
+
+class GrupoAtencionSerializer(serializers.ModelSerializer):
+    """Grupo de atención. La clínica llega en el contexto (`clinica`)."""
+
+    miembros = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Colaborador.objects.select_related("user", "sede_principal"),
+        required=False,
+    )
+    procedimientos = serializers.PrimaryKeyRelatedField(
+        many=True,
+        queryset=Servicio.objects.all(),
+        required=False,
+    )
+    miembros_detalle = serializers.SerializerMethodField()
+    miembros_disponibles = serializers.SerializerMethodField()
+    procedimientos_detalle = serializers.SerializerMethodField()
+
+    class Meta:
+        model = GrupoAtencion
+        fields = (
+            "id",
+            "nombre",
+            "descripcion",
+            "miembros",
+            "miembros_detalle",
+            "miembros_disponibles",
+            "procedimientos",
+            "procedimientos_detalle",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+
+    def get_miembros_detalle(self, obj):
+        disponibles = set(reglas_grupos.miembros_disponibles(obj).values_list("id", flat=True))
+        return [
+            {"id": str(c.id), "nombre": c.user.nombre_completo, "disponible": c.id in disponibles}
+            for c in obj.miembros.all()
+        ]
+
+    def get_miembros_disponibles(self, obj):
+        return reglas_grupos.miembros_disponibles(obj).count()
+
+    def get_procedimientos_detalle(self, obj):
+        return [{"id": str(p.id), "nombre": p.nombre} for p in obj.procedimientos.all()]
+
+    def _clinica(self):
+        return self.context["clinica"]
+
+    def validate_nombre(self, value):
+        nombre = value.strip()
+        if not nombre:
+            raise serializers.ValidationError("Escribe un nombre para el grupo.")
+        repetido = GrupoAtencion.objects.filter(clinica=self._clinica(), nombre__iexact=nombre)
+        if self.instance:
+            repetido = repetido.exclude(id=self.instance.id)
+        if repetido.exists():
+            raise serializers.ValidationError("Ya existe un grupo con ese nombre.")
+        return nombre
+
+    def validate_miembros(self, value):
+        clinica = self._clinica()
+        actuales = set(self.instance.miembros.values_list("id", flat=True)) if self.instance else set()
+        for colaborador in value:
+            if colaborador.clinica != clinica:
+                raise serializers.ValidationError("Algún miembro no pertenece a esta clínica.")
+            # Quien ya estaba y dejó de estar disponible (p. ej. cuenta desactivada)
+            # puede seguir en la lista; solo se valida a los que entran.
+            if colaborador.id not in actuales and not colaborador.user.es_profesional:
+                raise serializers.ValidationError(
+                    f"{colaborador.user.nombre_completo} no atiende pacientes: no puede estar en un grupo de atención."
+                )
+        return value
+
+    def validate_procedimientos(self, value):
+        from apps.users.authorization import user_has_permission
+
+        request = self.context.get("request")
+        if request and not user_has_permission(request.user, "servicios.gestionar"):
+            raise PermissionDenied("No tienes permiso para asignar procedimientos.")
+        clinica = self._clinica()
+        if any(procedimiento.clinica_id != clinica.id for procedimiento in value):
+            raise serializers.ValidationError("Algún procedimiento no pertenece a esta clínica.")
+        return value
+
+    def _validar_que_no_quede_vacio(self, datos):
+        """Un grupo asignado a procedimientos necesita algún miembro disponible.
+
+        Se valida al guardar (no en validate) para que el error salga plano
+        ({"error", "code"}), igual que el resto de los errores de grupos."""
+        instancia = self.instance
+        miembros = datos.get("miembros", list(instancia.miembros.all()) if instancia else [])
+        procedimientos = datos.get("procedimientos", list(instancia.procedimientos.all()) if instancia else [])
+        if not procedimientos or any(reglas_grupos.esta_disponible(c) for c in miembros):
+            return
+        # Queda sin miembros disponibles. Solo se bloquea si este cambio lo causa:
+        # un grupo que ya estaba vacío (p. ej. su miembro se desactivó) se puede
+        # renombrar o limpiar sin que lo frene esta regla.
+        antes_disponibles = bool(instancia) and reglas_grupos.miembros_disponibles(instancia).exists()
+        antes_procedimientos = set(instancia.procedimientos.values_list("id", flat=True)) if instancia else set()
+        agrega_procedimientos = bool({p.id for p in procedimientos} - antes_procedimientos)
+        if antes_disponibles and antes_procedimientos:
+            raise reglas_grupos.error_grupo_asignado(instancia)
+        if not agrega_procedimientos:
+            return
+        raise serializers.ValidationError({
+            "error": "Agrega al menos un miembro que atienda pacientes antes de asignar el grupo a procedimientos.",
+            "code": "GRUPO_SIN_MIEMBROS",
+        })
+
+    def create(self, validated_data):
+        self._validar_que_no_quede_vacio(validated_data)
+        return super().create({**validated_data, "clinica": self._clinica()})
+
+    def update(self, instance, validated_data):
+        self._validar_que_no_quede_vacio(validated_data)
+        return super().update(instance, validated_data)
 
 
 def colaborador_tiene_citas_futuras(colaborador):

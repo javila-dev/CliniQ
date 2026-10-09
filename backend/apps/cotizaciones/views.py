@@ -92,13 +92,14 @@ class CotizacionViewSet(ModelViewSet):
             output_field=DecimalField(max_digits=14, decimal_places=2),
         )
     ).order_by("-created_at")
-    filterset_fields = ("estado", "paciente", "profesional", "activo")
+    filterset_fields = ("estado", "paciente", "profesional", "sede", "activo")
     search_fields = ("paciente__nombres", "paciente__apellidos", "notas")
     ordering_fields = ("created_at", "updated_at")
 
     def get_permissions(self):
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
-                           "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos"}:
+                           "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos",
+                           "profesionales"}:
             return [RequirePermission("cotizaciones.ver")()]
         # Entregar un obsequio es una salida de inventario: mismos permisos que
         # registrar y eliminar un consumo de insumo en una atención.
@@ -741,6 +742,19 @@ class CotizacionViewSet(ModelViewSet):
             {"cotizacion_id": str(cotizacion.id), "sesiones": sesiones},
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="profesionales")
+    def profesionales(self, request):
+        """Opciones del filtro por profesional del listado: quienes figuran como
+        profesional en las cotizaciones de la clinica (por defecto, quien la creo,
+        que no siempre tiene rol profesional)."""
+        from apps.users.models import User
+
+        cotizaciones = Cotizacion.objects.filter(activo=True)
+        if request.user.rol != "superadmin":
+            cotizaciones = cotizaciones.filter(clinica=request.user.clinica)
+        usuarios = User.objects.filter(id__in=cotizaciones.values("profesional_id")).order_by("first_name", "last_name")
+        return Response([{"id": str(u.id), "nombre": u.nombre_completo} for u in usuarios])
 
     @action(detail=False, methods=["get"], url_path="precios_campana")
     def precios_campana(self, request):

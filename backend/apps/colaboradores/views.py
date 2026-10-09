@@ -10,11 +10,13 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
-from apps.colaboradores.models import Colaborador, HorarioColaborador
+from apps.colaboradores import grupos as reglas_grupos
+from apps.colaboradores.models import Colaborador, GrupoAtencion, HorarioColaborador
 from apps.colaboradores.serializers import (
     ColaboradorListSerializer,
     ColaboradorSerializer,
     ColaboradorCreateSerializer,
+    GrupoAtencionSerializer,
     HorarioColaboradorSerializer,
     ProfesionalListSerializer,
     colaborador_tiene_citas_futuras,
@@ -34,7 +36,7 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         "user__rol_dinamico",
         "sede_principal",
         "sede_principal__clinica",
-    ).prefetch_related("especialidades", "sedes", "horarios", "horarios__sede").all()
+    ).prefetch_related("especialidades", "sedes", "horarios", "horarios__sede", "grupos_atencion").all()
     search_fields = ("user__first_name", "user__last_name", "user__email")
     ordering_fields = ("fecha_ingreso", "created_at", "user__first_name", "user__last_name")
 
@@ -169,7 +171,7 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         if clinica is not None and clinica.filtrar_profesionales_por_procedimiento:
             requeridos = self._procedimientos_requeridos(clinica, servicio_ids, item_id, sesion_id)
             if requeridos:
-                queryset = queryset.filter(colaborador__especialidades__id__in=requeridos).distinct()
+                queryset = queryset.filter(reglas_grupos.q_realiza(requeridos, "colaborador__")).distinct()
 
         serializer = ProfesionalListSerializer(queryset.order_by("last_name", "first_name"), many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -219,6 +221,71 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
             )
             requeridos |= procedimientos_de_la_cita(item_cotizacion=item, sesion=sesion)
         return requeridos
+
+
+class GrupoAtencionViewSet(ModelViewSet):
+    """Grupos de atención: profesionales que se asignan en bloque a procedimientos."""
+
+    serializer_class = GrupoAtencionSerializer
+    pagination_class = None
+    queryset = GrupoAtencion.objects.prefetch_related("miembros__user", "procedimientos")
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve"}:
+            # Los selectores del catálogo y del usuario listan los grupos.
+            permission_classes = (IsAuthenticated,)
+        elif self.action == "asignar_procedimientos":
+            permission_classes = (RequirePermission("servicios.gestionar"),)
+        else:
+            permission_classes = (RequirePermission("colaboradores.gestionar"),)
+        return [permission() for permission in permission_classes]
+
+    def _clinica(self):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"error": "Selecciona una clínica.", "code": "SIN_CLINICA"})
+        return clinica
+
+    def get_queryset(self):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            return self.queryset.none()
+        return self.queryset.filter(clinica=clinica)
+
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        if self.action not in {"list", "retrieve"}:
+            context["clinica"] = self._clinica()
+        return context
+
+    def perform_destroy(self, instance):
+        if instance.procedimientos.exists():
+            raise ValidationError({
+                "error": f"El grupo «{instance.nombre}» está asignado a procedimientos. Quítalo de ellos antes de eliminarlo.",
+                "code": "GRUPO_ASIGNADO",
+            })
+        instance.delete()
+
+    @action(detail=True, methods=["post"], url_path="asignar_procedimientos")
+    def asignar_procedimientos(self, request, pk=None):
+        """Agrega el grupo a varios procedimientos sin quitar los que ya tiene
+        (p. ej. a todos los de un tratamiento)."""
+        from apps.clinicas.models import Servicio
+
+        grupo = self.get_object()
+        ids = request.data.get("procedimientos") or []
+        if not isinstance(ids, list) or not ids:
+            raise ValidationError({"procedimientos": "Indica los procedimientos."})
+        procedimientos = list(Servicio.objects.filter(clinica=grupo.clinica, id__in=ids))
+        if len(procedimientos) != len(set(map(str, ids))):
+            raise ValidationError({"procedimientos": "Algún procedimiento no pertenece a esta clínica."})
+        if not reglas_grupos.miembros_disponibles(grupo).exists():
+            raise ValidationError({
+                "error": "Agrega al menos un miembro que atienda pacientes antes de asignar el grupo a procedimientos.",
+                "code": "GRUPO_SIN_MIEMBROS",
+            })
+        grupo.procedimientos.add(*procedimientos)
+        return Response(self.get_serializer(grupo).data, status=status.HTTP_200_OK)
 
 
 class HorarioColaboradorViewSet(ModelViewSet):

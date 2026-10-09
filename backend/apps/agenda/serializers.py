@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.agenda.models import BloqueoAgenda, Cita, RegistroConfirmacion
 from apps.clinicas.models import Sede
+from apps.colaboradores.grupos import q_realiza
 from apps.colaboradores.models import Colaborador
 from apps.core.storage import get_signed_url
 from apps.historia_clinica.services import (
@@ -474,7 +475,7 @@ class CitaSerializer(serializers.ModelSerializer):
         requeridos = procedimientos_de_la_cita(servicio=servicio, item_cotizacion=item_cotizacion, sesion=sesion)
         if not requeridos:
             return
-        if not Colaborador.objects.filter(user=profesional, especialidades__id__in=requeridos).exists():
+        if not Colaborador.objects.filter(q_realiza(requeridos), user=profesional).exists():
             raise serializers.ValidationError(
                 {
                     "profesional": "Este profesional no realiza el procedimiento elegido.",

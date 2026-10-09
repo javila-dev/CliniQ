@@ -38,9 +38,17 @@ export const cotizacionesApi = {
     search?: string
     fecha_desde?: string
     fecha_hasta?: string
+    sede?: string
+    profesional?: string
     page?: number
   }): Promise<Paginated<Cotizacion>> => {
     const res = await apiClient.get<Paginated<Cotizacion>>('/cotizaciones/', { params })
+    return res.data
+  },
+
+  /** Opciones del filtro por profesional: quienes figuran en las cotizaciones de la clínica. */
+  profesionales: async (): Promise<{ id: string; nombre: string }[]> => {
+    const res = await apiClient.get<{ id: string; nombre: string }[]>('/cotizaciones/profesionales/')
     return res.data
   },
 

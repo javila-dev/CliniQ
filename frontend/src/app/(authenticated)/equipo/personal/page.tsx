@@ -180,17 +180,17 @@ function ColaboradorRow({
       </div>
 
       <div className="hidden xl:flex justify-center items-center gap-1 w-44 min-w-0 shrink-0 flex-wrap">
-        {(colaborador.especialidades_detalle ?? []).length === 0 ? (
+        {(colaborador.grupos_detalle ?? []).length === 0 ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
           <div className="contents">
-            {(colaborador.especialidades_detalle ?? []).slice(0, 2).map((e) => (
-              <span key={e.id} className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-[10px] text-gray-600 truncate max-w-[88px]">
-                {e.nombre}
+            {(colaborador.grupos_detalle ?? []).slice(0, 2).map((g) => (
+              <span key={g.id} className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-[10px] text-gray-600 truncate max-w-[88px]">
+                {g.nombre}
               </span>
             ))}
-            {(colaborador.especialidades_detalle ?? []).length > 2 && (
-              <span className="text-[10px] text-muted-foreground">+{(colaborador.especialidades_detalle ?? []).length - 2}</span>
+            {(colaborador.grupos_detalle ?? []).length > 2 && (
+              <span className="text-[10px] text-muted-foreground">+{(colaborador.grupos_detalle ?? []).length - 2}</span>
             )}
           </div>
         )}
@@ -488,7 +488,7 @@ export default function PersonalPage() {
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Rol</span>
           </div>
           <div className="hidden xl:flex justify-center w-44 shrink-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Especialidades</span>
+            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Grupos de atención</span>
           </div>
           <div className="w-[88px] shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Estado</span>

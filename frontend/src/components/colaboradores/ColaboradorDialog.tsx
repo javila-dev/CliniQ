@@ -5,7 +5,7 @@ import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, ChevronsUpDown, Loader2, Search, X } from 'lucide-react'
+import { AlertCircle, ArrowLeft, ArrowRight, Check, ChevronsUpDown, Info, Loader2, Search, X } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { usuariosApi } from '@/lib/api/usuarios'
 import { rolesApi } from '@/lib/api/roles'
@@ -20,6 +20,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
 import { cn } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
+import { GruposAtencionSelect, useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
 import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
 import type { Rol } from '@/types/usuarios'
 import type { DiaSemana, HorarioSede } from '@/types/clinicas'
@@ -51,6 +53,7 @@ const createSchema = z.object({
   fecha_ingreso: z.string().min(1, 'Requerido'),
   especialidades: z.array(z.string()),
   es_profesional: z.boolean().optional(),
+  grupos: z.array(z.string()),
 })
 
 const editSchema = createSchema.omit({ email: true, sede_principal: true }).extend({
@@ -414,6 +417,56 @@ function iniciales(nombre: string) {
   return nombre.slice(0, 2).toUpperCase()
 }
 
+// ─── Asistente de creación ────────────────────────────────────
+
+type PasoId = 'personales' | 'acceso' | 'atencion' | 'sedes'
+
+/** Pasos del asistente para crear un usuario; `campos` se validan al avanzar. */
+const PASOS: { id: PasoId; titulo: string; explicacion: string; campos: string[] }[] = [
+  {
+    id: 'personales',
+    titulo: 'Datos personales',
+    explicacion: 'Cómo aparece en la agenda, las atenciones y los documentos. Al terminar le llegará un correo de invitación para crear su contraseña.',
+    campos: ['first_name', 'last_name', 'numero_documento', 'telefono', 'email'],
+  },
+  {
+    id: 'acceso',
+    titulo: 'Rol y acceso',
+    explicacion: 'El rol define qué puede ver y hacer en CliniQ (por ejemplo, recepción no ve la historia clínica). Que atienda pacientes es aparte: actívalo si debe aparecer en la agenda, sea cual sea su rol.',
+    campos: ['role_id', 'es_profesional'],
+  },
+  {
+    id: 'atencion',
+    titulo: 'Qué atiende',
+    explicacion: 'Los grupos de atención reúnen a quienes hacen lo mismo, como «Esteticistas» o «Médicos estéticos». En vez de marcar procedimiento por procedimiento, agrégalo a su grupo y realizará todo lo que tenga asignado el grupo.',
+    campos: ['grupos', 'especialidades'],
+  },
+  {
+    id: 'sedes',
+    titulo: 'Sedes y vinculación',
+    explicacion: 'Dónde trabaja, a qué sedes tiene acceso y desde cuándo. Las sedes también limitan lo que ve en el sistema, no solo dónde atiende.',
+    campos: ['sede_principal', 'fecha_ingreso', 'tipo_contrato', 'sedes_ids'],
+  },
+]
+
+function valoresIniciales(): CreateForm {
+  return {
+    first_name: '',
+    last_name: '',
+    email: '',
+    telefono: '',
+    role_id: '',
+    numero_documento: '',
+    sede_principal: '',
+    tipo_contrato: 'empleado',
+    especialidades: [],
+    grupos: [],
+    sedes_ids: [],
+    fecha_ingreso: new Date().toISOString().split('T')[0],
+    es_profesional: false,
+  }
+}
+
 // ─── Modal ────────────────────────────────────────────────────
 
 interface Props {
@@ -474,6 +527,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
     tipo_contrato:    editSrc.tipo_contrato    ?? 'empleado',
     fecha_ingreso:    editSrc.fecha_ingreso    ?? '',
     especialidades:   editSrc.especialidades_detalle?.map((e) => e.id) ?? editSrc.especialidades ?? [],
+    grupos:           editSrc.grupos           ?? [],
     activo:           editSrc.activo           ?? true,
     es_profesional:   editSrc.es_profesional   ?? false,
   } : undefined
@@ -481,15 +535,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   // Create form
   const createForm = useForm<CreateForm>({
     resolver: zodResolver(createSchema),
-    defaultValues: {
-      role_id: '',
-      numero_documento: '',
-      tipo_contrato: 'empleado',
-      especialidades: [],
-      sedes_ids: [],
-      fecha_ingreso: new Date().toISOString().split('T')[0],
-      es_profesional: false,
-    },
+    defaultValues: valoresIniciales(),
   })
 
   // Edit form — `values` auto-syncs when editValues changes (no useEffect needed)
@@ -498,19 +544,40 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
     values: editValues,
   })
 
+  // Pasos del asistente de creación. "Qué atiende" solo aplica a quien atiende pacientes.
+  const [paso, setPaso] = useState(0)
+  const pasos = PASOS.filter((p) => p.id !== 'atencion' || !!createForm.watch('es_profesional'))
+  const pasoActual = pasos[Math.min(paso, pasos.length - 1)]
+  const esUltimoPaso = paso >= pasos.length - 1
+
   useEffect(() => {
     if (!open && !colaborador) {
-      createForm.reset({
-        role_id: '',
-        numero_documento: '',
-        tipo_contrato: 'empleado',
-        especialidades: [],
-        sedes_ids: [],
-        fecha_ingreso: new Date().toISOString().split('T')[0],
-        es_profesional: false,
-      })
+      createForm.reset(valoresIniciales())
+      setPaso(0)
     }
   }, [open, colaborador])
+
+  // Cada paso abre con el cursor en su primer campo: se puede crear un usuario solo con teclado.
+  useEffect(() => {
+    if (!open || isEdit) return
+    const t = setTimeout(() => {
+      // Selects y selectores propios no exponen ref: ahí no hay a dónde mover el foco.
+      try { createForm.setFocus(pasoActual.campos[0] as keyof CreateForm) } catch { /* sin ref */ }
+    }, 50)
+    return () => clearTimeout(t)
+  }, [open, isEdit, paso]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function siguientePaso() {
+    const ok = await createForm.trigger(pasoActual.campos as (keyof CreateForm)[])
+    if (ok) setPaso((p) => Math.min(p + 1, pasos.length - 1))
+  }
+
+  // Grupos de atención (para mostrar lo que hereda y avisar antes de vaciar uno)
+  const { data: gruposAtencion = [] } = useGruposAtencion(open)
+  const filtroPorProcedimiento = Boolean(useAuthStore((st) => st.user?.filtrar_profesionales_por_procedimiento))
+  const gruposAlAbrir = colaboradorDetail?.grupos_detalle ?? []
+  // Grupos asignados a procedimientos en los que es el único miembro disponible.
+  const gruposQueDependenDeEl = gruposAlAbrir.filter((g) => g.depende_de_el)
 
   const createMut = useMutation({
     mutationFn: colaboradoresApi.create,
@@ -521,7 +588,13 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
       onOpenChange(false)
     },
     onError: (err: any) => {
-      applyServerFieldErrors(err?.response?.data, createForm.setError, Object.keys(createSchema.shape))
+      const data = err?.response?.data
+      applyServerFieldErrors(data, createForm.setError, Object.keys(createSchema.shape))
+      // Lleva al paso donde está el primer campo con error (p. ej. correo repetido).
+      if (data && typeof data === 'object') {
+        const indice = pasos.findIndex((p) => p.campos.some((c) => c in data))
+        if (indice >= 0) setPaso(indice)
+      }
     },
   })
 
@@ -543,7 +616,9 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
     },
   })
 
-  const onCreateSubmit = (data: CreateForm) => createMut.mutate(data)
+  const onCreateSubmit = (data: CreateForm) => createMut.mutate(
+    data.es_profesional ? data : { ...data, grupos: [], especialidades: [] },
+  )
   const onEditSubmit = (data: EditForm) => {
     if (!colaborador) return
     // La API prohíbe enviar sedes_ids cuando sede_principal es null
@@ -565,24 +640,29 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
     !Array.isArray(serverErrorData) &&
     Object.keys(serverErrorData).some((k) => knownFormFields.includes(k))
 
-  // Campos compartidos entre crear y editar, agrupados por sección.
+  // Campos compartidos entre crear y editar, agrupados en bloques. La edición los
+  // muestra como secciones de un formulario; la creación, como pasos de un asistente.
   // `camposExtra` agrega lo que solo existe en un modo (correo al crear, estado al editar).
-  const renderSecciones = (
+  const renderBloques = (
     control: any,
     errors: any,
     watchRoleId: string,
     watchSedePrincipal: string,
     watchEsProfesional: boolean | undefined,
+    watchGrupos: string[] | undefined,
     setEsProfesional: (value: boolean) => void,
-    camposExtra: { personales?: React.ReactNode; acceso?: React.ReactNode },
+    camposExtra: { personales?: React.ReactNode; acceso?: React.ReactNode; avisoEsProfesional?: React.ReactNode; avisoGrupos?: React.ReactNode },
   ) => {
     // "Atiende pacientes" lo decide solo el check del usuario, no el rol.
     const selectedRol = roles.find(r => r.id === watchRoleId)
-    const esProfesional = !!watchEsProfesional
+    const gruposElegidos = gruposAtencion.filter((g) => (watchGrupos ?? []).includes(g.id))
+    const heredados = Array.from(
+      new Map(gruposElegidos.flatMap((g) => g.procedimientos_detalle).map((p) => [p.id, p])).values(),
+    ).sort((a, b) => a.nombre.localeCompare(b.nombre))
 
-    return (
-      <>
-        <Seccion titulo="Datos personales" descripcion="Cómo aparece en la agenda, las atenciones y los documentos.">
+    return {
+      personales: (
+        <>
           <Campo label="Nombres" error={errors.first_name?.message}>
             <Controller name="first_name" control={control}
               render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="Ana" />} />
@@ -600,9 +680,11 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="+57 300 000 0000" />} />
           </Campo>
           {camposExtra.personales}
-        </Seccion>
+        </>
+      ),
 
-        <Seccion titulo="Rol y acceso" descripcion="Qué puede ver y hacer en CliniQ, y si atiende pacientes.">
+      acceso: (
+        <>
           <Campo label="Rol" error={errors.role_id?.message}>
             <Controller name="role_id" control={control}
               render={({ field }) => (
@@ -629,32 +711,62 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
           {selectedRol && (
             <Controller name="es_profesional" control={control}
               render={({ field }) => (
-                <label className="sm:col-span-2 flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer select-none">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium">Atiende pacientes</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Aparecerá en la agenda y podrá atender citas: escribir en la historia clínica,
-                      editar antecedentes, subir fotos, gestionar consentimientos y registrar los
-                      insumos que use, sin importar su rol.
-                    </p>
-                  </div>
-                  <Switch checked={!!field.value} onCheckedChange={field.onChange} />
-                </label>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <label className="flex items-center gap-3 rounded-lg border px-4 py-3 cursor-pointer select-none">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium">Atiende pacientes</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Aparecerá en la agenda y podrá atender citas: escribir en la historia clínica,
+                        editar antecedentes, subir fotos, gestionar consentimientos y registrar los
+                        insumos que use, sin importar su rol.
+                      </p>
+                    </div>
+                    <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                  </label>
+                  {camposExtra.avisoEsProfesional}
+                </div>
               )} />
           )}
+        </>
+      ),
 
-          {esProfesional && (
-            <Campo label="Procedimientos que realiza" className="sm:col-span-2">
-              <Controller name="especialidades" control={control}
-                render={({ field }) => <EspecialidadesSelect value={field.value} onChange={field.onChange} />} />
-            </Campo>
+      atencion: (
+        <>
+          <Campo
+            label="Grupos de atención"
+            className="sm:col-span-2"
+            error={errors.grupos?.message}
+            ayuda="Realizará todos los procedimientos asignados a sus grupos, también los que se agreguen después. Si el grupo que necesitas no existe, escribe su nombre para crearlo."
+          >
+            <Controller name="grupos" control={control}
+              render={({ field }) => (
+                <GruposAtencionSelect modo="usuario" permitirCrear value={field.value ?? []} onChange={field.onChange} />
+              )} />
+            {camposExtra.avisoGrupos}
+          </Campo>
+          {gruposElegidos.length > 0 && (
+            <div className="sm:col-span-2 rounded-lg border bg-muted/30 px-3.5 py-2.5">
+              <p className="text-xs font-medium">Por sus grupos realizará</p>
+              <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
+                {heredados.length
+                  ? heredados.map((p) => p.nombre).join(', ')
+                  : 'Sus grupos aún no tienen procedimientos asignados. Se asignan desde cada procedimiento o desde Grupos de atención.'}
+              </p>
+            </div>
           )}
-        </Seccion>
+          <Campo
+            label="Otros procedimientos que realiza"
+            className="sm:col-span-2"
+            ayuda="Solo los que no vienen de sus grupos: algo puntual que hace esta persona y no el resto de su grupo."
+          >
+            <Controller name="especialidades" control={control}
+              render={({ field }) => <EspecialidadesSelect value={field.value} onChange={field.onChange} />} />
+          </Campo>
+        </>
+      ),
 
-        <Seccion
-          titulo="Sedes y vinculación"
-          descripcion="Dónde trabaja, a qué sedes tiene acceso y desde cuándo. Las sedes también limitan lo que ve en el sistema, no solo dónde atiende."
-        >
+      sedes: (
+        <>
           <Campo
             label="Sede principal"
             ayuda={sedes.length > 1 ? undefined : 'Solo verá la información de esta sede. Los administradores ven todas.'}
@@ -701,10 +813,23 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                 )} />
             </Campo>
           )}
-        </Seccion>
-      </>
-    )
+        </>
+      ),
+    }
   }
+
+  // Aviso cuando la clínica no filtra por procedimiento: los grupos aún no cambian la agenda.
+  const avisoSinFiltro = !filtroPorProcedimiento && (
+    <div className="sm:col-span-2 flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-xs text-sky-800">
+      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+      <span>
+        Hoy tu clínica ofrece todos los profesionales al agendar. Lo que elijas aquí se aplica cuando
+        actives «Profesionales por procedimiento» en Configuración → Agenda y recordatorios.
+      </span>
+    </div>
+  )
+
+  const listaGrupos = (grupos: { nombre: string }[]) => grupos.map((g) => `«${g.nombre}»`).join(', ')
 
   const nombreEdit = [editForm.watch('first_name'), editForm.watch('last_name')].filter(Boolean).join(' ')
     || colaborador?.nombre_completo || ''
@@ -741,14 +866,30 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               </div>
             ) : (
               <form id="colaborador-form" onSubmit={editForm.handleSubmit(onEditSubmit)} className="space-y-6">
-                {renderSecciones(
+                {(() => {
+                  const b = renderBloques(
                   editForm.control,
                   editForm.formState.errors,
                   editForm.watch('role_id'),
                   editForm.watch('sede_principal') ?? '',
                   editForm.watch('es_profesional'),
+                  editForm.watch('grupos'),
                   (value) => editForm.setValue('es_profesional', value, { shouldDirty: true }),
                   {
+                    avisoEsProfesional: !editForm.watch('es_profesional') && colaboradorDetail?.es_profesional && gruposQueDependenDeEl.length > 0 && (
+                      <p className="text-xs text-amber-700">
+                        Es el único miembro de {listaGrupos(gruposQueDependenDeEl)}, que está asignado a procedimientos.
+                        No podrá dejar de atender pacientes hasta que el grupo tenga otro miembro o se quite de esos procedimientos.
+                      </p>
+                    ),
+                    avisoGrupos: (() => {
+                      const quitados = gruposQueDependenDeEl.filter((g) => !(editForm.watch('grupos') ?? []).includes(g.id))
+                      return quitados.length > 0 && (
+                        <p className="text-xs text-amber-700">
+                          Es el único miembro de {listaGrupos(quitados)}: no se puede quitar mientras el grupo esté asignado a procedimientos.
+                        </p>
+                      )
+                    })(),
                     acceso: (
                       <Controller name="activo" control={editForm.control}
                         render={({ field }) => (
@@ -769,11 +910,40 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                                 Límite de usuarios activos alcanzado. No es posible reactivarlo.
                               </p>
                             )}
+                            {/* Desactivar no se bloquea (la persona pudo haberse ido), pero se avisa. */}
+                            {!field.value && colaborador?.activo && gruposQueDependenDeEl.length > 0 && (
+                              <p className="text-xs text-amber-700">
+                                {listaGrupos(gruposQueDependenDeEl)} quedará sin miembros y sus procedimientos no se podrán agendar.
+                              </p>
+                            )}
                           </Campo>
                         )} />
                     ),
                   },
-                )}
+                  )
+                  return (
+                    <>
+                      <Seccion titulo="Datos personales" descripcion="Cómo aparece en la agenda, las atenciones y los documentos.">
+                        {b.personales}
+                      </Seccion>
+                      <Seccion titulo="Rol y acceso" descripcion="Qué puede ver y hacer en CliniQ, y si atiende pacientes.">
+                        {b.acceso}
+                      </Seccion>
+                      {editForm.watch('es_profesional') && (
+                        <Seccion titulo="Qué atiende" descripcion="Los procedimientos que realiza: los de sus grupos de atención y, si hace falta, otros sueltos.">
+                          {avisoSinFiltro}
+                          {b.atencion}
+                        </Seccion>
+                      )}
+                      <Seccion
+                        titulo="Sedes y vinculación"
+                        descripcion="Dónde trabaja, a qué sedes tiene acceso y desde cuándo. Las sedes también limitan lo que ve en el sistema, no solo dónde atiende."
+                      >
+                        {b.sedes}
+                      </Seccion>
+                    </>
+                  )
+                })()}
 
                 {/* ── Horarios por sede (solo en edición) ── */}
                 {colaborador && (
@@ -795,8 +965,16 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               </form>
             )
           ) : (
-            // ── CREATE FORM ──
-            <form id="colaborador-form" onSubmit={createForm.handleSubmit(onCreateSubmit)} className="space-y-6">
+            // ── CREATE: asistente por pasos ──
+            <form
+              id="colaborador-form"
+              onSubmit={(e) => {
+                // Enter en un paso intermedio avanza en vez de crear.
+                if (!esUltimoPaso) { e.preventDefault(); siguientePaso(); return }
+                createForm.handleSubmit(onCreateSubmit)(e)
+              }}
+              className="space-y-6"
+            >
               {/* Bloqueo por límite de plan */}
               {!puedeAgregar && (
                 <div className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-3">
@@ -807,21 +985,51 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                 </div>
               )}
 
-              {renderSecciones(
-                createForm.control,
-                createForm.formState.errors,
-                createForm.watch('role_id'),
-                createForm.watch('sede_principal'),
-                createForm.watch('es_profesional'),
-                (value) => createForm.setValue('es_profesional', value, { shouldDirty: true }),
-                {
-                  personales: (
-                    <Campo label="Correo electrónico" className="sm:col-span-2" error={createForm.formState.errors.email?.message}>
-                      <Input type="email" {...createForm.register('email')} placeholder="colaborador@clinica.com" />
-                    </Campo>
-                  ),
-                },
-              )}
+              <ol className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                {pasos.map((p, i) => (
+                  <li key={p.id} className="flex items-center gap-2">
+                    {i > 0 && <span className="h-px w-5 bg-border" />}
+                    <span className={cn(
+                      'flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium',
+                      i === paso ? 'bg-primary text-primary-foreground' : i < paso ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground',
+                    )}>
+                      {i < paso ? <Check className="h-3 w-3" /> : <span className="tabular-nums">{i + 1}</span>}
+                      {p.titulo}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+
+              {(() => {
+                const b = renderBloques(
+                  createForm.control,
+                  createForm.formState.errors,
+                  createForm.watch('role_id'),
+                  createForm.watch('sede_principal'),
+                  createForm.watch('es_profesional'),
+                  createForm.watch('grupos'),
+                  (value) => createForm.setValue('es_profesional', value, { shouldDirty: true }),
+                  {
+                    personales: (
+                      <Campo label="Correo electrónico" className="sm:col-span-2" error={createForm.formState.errors.email?.message}>
+                        <Input type="email" {...createForm.register('email')} placeholder="colaborador@clinica.com" />
+                      </Campo>
+                    ),
+                  },
+                )
+                return (
+                  <div className="space-y-5">
+                    <div>
+                      <h3 className="text-base font-semibold">{pasoActual.titulo}</h3>
+                      <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{pasoActual.explicacion}</p>
+                    </div>
+                    <div className="grid content-start gap-4 sm:grid-cols-2">
+                      {pasoActual.id === 'atencion' && avisoSinFiltro}
+                      {b[pasoActual.id]}
+                    </div>
+                  </div>
+                )
+              })()}
             </form>
           )}
 
@@ -837,23 +1045,38 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
           )}
         </div>
 
-        <div className="shrink-0 border-t px-6 py-4 flex justify-end gap-3 bg-white sm:rounded-b-lg">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
-            Cancelar
-          </Button>
-          <Button
-            form="colaborador-form"
-            type="submit"
-            disabled={
-              isPending ||
-              (isEdit && (isLoadingDetail || isLoadingUsuario)) ||
-              (!isEdit && !puedeAgregar) ||
-              (reactivacionBloqueada && editForm.watch('activo') === true)
-            }
-          >
-            {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-            {isEdit ? 'Guardar cambios' : 'Crear colaborador'}
-          </Button>
+        <div className="shrink-0 border-t px-6 py-4 flex items-center gap-3 bg-white sm:rounded-b-lg">
+          {!isEdit && paso > 0 && (
+            <Button variant="ghost" onClick={() => setPaso((p) => p - 1)} disabled={isPending}>
+              <ArrowLeft className="h-4 w-4 mr-1.5" />
+              Atrás
+            </Button>
+          )}
+          <div className="ml-auto flex gap-3">
+            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>
+              Cancelar
+            </Button>
+            {!isEdit && !esUltimoPaso ? (
+              <Button type="button" onClick={siguientePaso} disabled={!puedeAgregar}>
+                Siguiente
+                <ArrowRight className="h-4 w-4 ml-1.5" />
+              </Button>
+            ) : (
+              <Button
+                form="colaborador-form"
+                type="submit"
+                disabled={
+                  isPending ||
+                  (isEdit && (isLoadingDetail || isLoadingUsuario)) ||
+                  (!isEdit && !puedeAgregar) ||
+                  (reactivacionBloqueada && editForm.watch('activo') === true)
+                }
+              >
+                {isPending && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {isEdit ? 'Guardar cambios' : 'Crear colaborador'}
+              </Button>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

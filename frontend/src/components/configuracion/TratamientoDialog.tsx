@@ -2,8 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowDown, ArrowUp, Info, Loader2, Plus, Search, Stethoscope, X } from 'lucide-react'
+import { ArrowDown, ArrowUp, Info, Loader2, Plus, Search, Stethoscope, Users, X } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
+import { colaboradoresApi } from '@/lib/api/colaboradores'
+import { useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/hooks/use-toast'
 import { ProcedimientoDialog } from './ProcedimientoDialog'
@@ -13,6 +15,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { CreateTratamientoCatalogoRequest, Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
 
@@ -412,10 +415,32 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
   const sinProfesional = useMemo(() => {
     if (!filtroActivo) return []
     const ids = new Set(filas.flatMap((f) => f.procs.map((p) => p.id)))
+    // `cobertura` cuenta también a los miembros de sus grupos de atención.
     return servicios
-      .filter((s) => ids.has(s.id) && (s.profesionales_detalle?.length ?? 0) === 0)
+      .filter((s) => ids.has(s.id) && (s.cobertura ?? s.profesionales_detalle?.length ?? 0) === 0)
       .map((s) => s.nombre)
   }, [filtroActivo, filas, servicios])
+
+  // Asignar un grupo de atención a todos los procedimientos del tratamiento.
+  const { data: gruposAtencion = [] } = useGruposAtencion(open)
+  const gruposConMiembros = gruposAtencion.filter((g) => g.miembros_disponibles > 0)
+  const [grupoParaAsignar, setGrupoParaAsignar] = useState('')
+  const idsProcedimientos = useMemo(
+    () => Array.from(new Set(filas.flatMap((f) => f.procs.map((p) => p.id)))),
+    [filas],
+  )
+  const asignarGrupo = useMutation({
+    mutationFn: () => colaboradoresApi.grupos.asignarProcedimientos(grupoParaAsignar, idsProcedimientos),
+    onSuccess: (grupo) => {
+      toast.success('Grupo asignado', `${grupo.nombre} realiza ahora los procedimientos de este tratamiento.`)
+      setGrupoParaAsignar('')
+      qc.invalidateQueries({ queryKey: ['procedimientos'] })
+      qc.invalidateQueries({ queryKey: ['grupos-atencion'] })
+    },
+    onError: (err: any) => {
+      toast.error('No se pudo asignar el grupo', err?.response?.data?.error ?? 'Intenta de nuevo.')
+    },
+  })
 
   // ── Edición de filas ──
   const cambiarFila = (i: number, f: Fila) => setFilas((prev) => prev.map((x, j) => (j === i ? f : x)))
@@ -629,6 +654,26 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
                 <p className="text-xs text-amber-700">
                   Sin profesionales asociados: {sinProfesional.join(', ')}. No se podrán agendar.
                 </p>
+              )}
+              {idsProcedimientos.length > 0 && gruposConMiembros.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 px-3 py-2">
+                  <Users className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">Asignar un grupo de atención a todos sus procedimientos:</span>
+                  <Select value={grupoParaAsignar} onValueChange={setGrupoParaAsignar}>
+                    <SelectTrigger className="h-8 w-48 text-xs"><SelectValue placeholder="Elegir grupo" /></SelectTrigger>
+                    <SelectContent>
+                      {gruposConMiembros.map((g) => <SelectItem key={g.id} value={g.id}>{g.nombre}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button" size="sm" variant="outline" className="h-8 text-xs"
+                    disabled={!grupoParaAsignar || asignarGrupo.isPending}
+                    onClick={() => asignarGrupo.mutate()}
+                  >
+                    {asignarGrupo.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+                    Asignar
+                  </Button>
+                </div>
               )}
             </div>
 

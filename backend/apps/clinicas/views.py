@@ -1239,7 +1239,7 @@ class ProcedimientoViewSet(ServicioViewSet):
     serializer_class = ProcedimientoSerializer
 
     def get_queryset(self):
-        return super().get_queryset().prefetch_related("colaboradores__user")
+        return super().get_queryset().prefetch_related("colaboradores__user", "grupos_atencion")
 
 
 class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):

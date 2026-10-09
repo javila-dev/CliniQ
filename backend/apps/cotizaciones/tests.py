@@ -1010,6 +1010,31 @@ class CotizacionFlowTests(TestCase):
         self.assertIsNone(detalle.json()["compromiso_pago"])
         self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
 
+    def test_listado_filtra_por_sede_y_profesional(self):
+        otra_sede = Sede.objects.create(
+            clinica=self.clinica, nombre="Norte", ciudad="Bogota", direccion="Calle 2", telefono="3000000009",
+        )
+        recepcion = User.objects.create_user(
+            email="recepcion-cotizacion@example.com", password="secret123",
+            first_name="Rita", last_name="Recepcion", rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        en_principal = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin, sede=self.sede,
+        )
+        en_norte = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=recepcion, sede=otra_sede,
+        )
+
+        por_sede = self.client.get(f"/api/v1/cotizaciones/?sede={otra_sede.id}").json()["results"]
+        self.assertEqual([c["id"] for c in por_sede], [str(en_norte.id)])
+
+        por_profesional = self.client.get(f"/api/v1/cotizaciones/?profesional={self.superadmin.id}").json()["results"]
+        self.assertEqual([c["id"] for c in por_profesional], [str(en_principal.id)])
+
+        # Las opciones del filtro incluyen a quien creo la cotizacion aunque no sea profesional.
+        opciones = self.client.get("/api/v1/cotizaciones/profesionales/").json()
+        self.assertEqual({o["id"] for o in opciones}, {str(self.superadmin.id), str(recepcion.id)})
+
     def test_listado_expone_total_pagado_y_saldo_pendiente(self):
         from apps.cobros.models import Cobro, PagoRecibido
 

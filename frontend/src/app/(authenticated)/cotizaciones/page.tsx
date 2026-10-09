@@ -12,11 +12,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
 import { cn, formatFechaLocal } from '@/lib/utils'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { useUserSedes } from '@/hooks/useUserSedes'
+import { hasPermission, isProfesional, PERM } from '@/lib/permissions'
 import type { Cotizacion, EstadoComercial } from '@/types/cotizaciones'
 
 // Solo propuestas: las aceptadas son ventas y viven en /ventas ("Convertidas"
@@ -117,22 +119,37 @@ export default function CotizacionesPage() {
   const [busqueda, setBusqueda] = useState('')
   const [fechaDesde, setFechaDesde] = useState('')
   const [fechaHasta, setFechaHasta] = useState('')
+  const [sede, setSede] = useState('todas')
+  const [profesional, setProfesional] = useState('todos')
   const [page, setPage] = useState(1)
   const [loadingId, setLoadingId] = useState<string | null>(null)
   const [loadingNueva, setLoadingNueva] = useState(false)
   const debouncedBusqueda = useDebounce(busqueda, 350)
+  const { sedes } = useUserSedes()
+  // Un profesional solo ve en el listado sus propias cotizaciones: el filtro no aplica.
+  const filtraPorProfesional = !isProfesional(user)
+  const { data: profesionales = [] } = useQuery({
+    queryKey: ['cotizaciones', 'profesionales'],
+    queryFn: () => cotizacionesApi.profesionales(),
+    enabled: filtraPorProfesional,
+    staleTime: 5 * 60 * 1000,
+  })
 
   const params: {
     estado_comercial?: EstadoComercial
     search?: string
     fecha_desde?: string
     fecha_hasta?: string
+    sede?: string
+    profesional?: string
     page: number
   } = { page }
   if (tabEstado !== 'todas') params.estado_comercial = tabEstado as EstadoComercial
   if (debouncedBusqueda) params.search = debouncedBusqueda
   if (fechaDesde) params.fecha_desde = fechaDesde
   if (fechaHasta) params.fecha_hasta = fechaHasta
+  if (sede !== 'todas') params.sede = sede
+  if (profesional !== 'todos') params.profesional = profesional
 
   const { data, isLoading } = useQuery({
     queryKey: ['cotizaciones', params],
@@ -140,7 +157,7 @@ export default function CotizacionesPage() {
   })
 
   const total = data?.count ?? 0
-  const hayFiltros = Boolean(debouncedBusqueda || fechaDesde || fechaHasta)
+  const hayFiltros = Boolean(debouncedBusqueda || fechaDesde || fechaHasta || sede !== 'todas' || profesional !== 'todos')
 
   function cambiarTab(v: string) {
     setTabEstado(v)
@@ -158,10 +175,17 @@ export default function CotizacionesPage() {
     setPage(1)
   }
 
+  function cambiarSelect(setter: (v: string) => void, v: string) {
+    setter(v)
+    setPage(1)
+  }
+
   function limpiarFiltros() {
     setBusqueda('')
     setFechaDesde('')
     setFechaHasta('')
+    setSede('todas')
+    setProfesional('todos')
     setPage(1)
   }
 
@@ -227,6 +251,38 @@ export default function CotizacionesPage() {
             className="w-40 h-9"
           />
         </div>
+        {sedes.length > 1 && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Sede</label>
+            <Select value={sede} onValueChange={(v) => cambiarSelect(setSede, v)}>
+              <SelectTrigger className="w-44 h-9">
+                <SelectValue placeholder="Sede" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todas">Todas las sedes</SelectItem>
+                {sedes.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        {filtraPorProfesional && profesionales.length > 1 && (
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-muted-foreground">Profesional</label>
+            <Select value={profesional} onValueChange={(v) => cambiarSelect(setProfesional, v)}>
+              <SelectTrigger className="w-52 h-9">
+                <SelectValue placeholder="Profesional" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos los profesionales</SelectItem>
+                {profesionales.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.nombre}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
         {hayFiltros && (
           <Button variant="ghost" size="sm" className="h-9" onClick={limpiarFiltros}>
             <X className="h-3.5 w-3.5 mr-1.5" />
