@@ -105,6 +105,8 @@ export const PERM = {
   // Seguimiento (embudo comercial y retención)
   SEGUIMIENTO_VER:           'seguimiento.oportunidades.ver',
   SEGUIMIENTO_GESTIONAR:     'seguimiento.oportunidades.gestionar',
+  // Quien atiende pacientes sin este permiso solo ve su propia actividad comercial.
+  COMERCIAL_VER_SEDE:        'comercial.ver_sede',
 
   // Caja / egresos
   CAJA_GASTOS_VER:           'caja.gastos.ver',

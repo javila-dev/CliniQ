@@ -20,7 +20,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
-from apps.users.authorization import sede_ids_para_filtro
+from apps.users.authorization import sede_ids_para_filtro, ve_solo_su_actividad_comercial
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
@@ -139,8 +139,9 @@ class VentaViewSet(ReadOnlyModelViewSet):
 
         user = self.request.user
         queryset = ventas_queryset(get_clinica_activa(self.request))
-        # Igual que el listado de cotizaciones: un profesional solo ve lo que vendió.
-        if user.rol == "profesional":
+        # Igual que el listado de cotizaciones: quien atiende pacientes sin permiso
+        # de ver toda la sede solo ve lo que vendió.
+        if ve_solo_su_actividad_comercial(user, self.request):
             queryset = queryset.filter(profesional=user)
 
         params = self.request.query_params
@@ -203,7 +204,7 @@ class VentaViewSet(ReadOnlyModelViewSet):
 
         user = request.user
         ventas = ventas_queryset(get_clinica_activa(request))
-        if user.rol == "profesional":
+        if ve_solo_su_actividad_comercial(user, request):
             ventas = ventas.filter(profesional=user)
         sede_ids = sede_ids_para_filtro(user)
         if sede_ids is not None:

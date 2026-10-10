@@ -50,6 +50,22 @@ def user_has_permission(user, permission_key: str, request=None) -> bool:
     return permission_key in get_user_permission_keys(user, request=request)
 
 
+PERM_COMERCIAL_VER_SEDE = "comercial.ver_sede"
+
+
+def ve_solo_su_actividad_comercial(user, request=None) -> bool:
+    """True si el usuario solo ve sus propias cotizaciones, ventas y seguimientos.
+
+    Aplica a quien atiende pacientes (check "atiende pacientes" o el rol de
+    sistema Profesional) sin el permiso ``comercial.ver_sede``. El resto ve lo
+    de sus sedes, y el admin todo.
+    """
+    if not user or not getattr(user, "is_authenticated", False) or user_is_tenant_admin(user):
+        return False
+    atiende = bool(getattr(user, "es_profesional", False)) or getattr(user, "rol", None) == "profesional"
+    return atiende and not user_has_permission(user, PERM_COMERCIAL_VER_SEDE, request=request)
+
+
 def user_is_tenant_admin(user) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False

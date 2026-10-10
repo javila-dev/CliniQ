@@ -26,7 +26,7 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal } from '@/lib/utils'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
@@ -170,6 +170,9 @@ export default function SeguimientoPage() {
   const qc = useQueryClient()
   const { user } = useAuthStore()
   const canGestionar = hasPermission(user, PERM.SEGUIMIENTO_GESTIONAR)
+  // Atiende pacientes sin permiso de ver toda la sede: el backend ya le muestra
+  // solo los suyos, así que "Todos / Míos" no aplica.
+  const soloLosSuyos = (!!user?.es_profesional || user?.rol === 'profesional') && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.COMERCIAL_VER_SEDE)
   const { sedes } = useUserSedes()
 
   const [tab, setTab] = useState<'hoy' | 'embudo'>('hoy')
@@ -333,7 +336,7 @@ export default function SeguimientoPage() {
 
         {tab === 'hoy' && (
           <>
-            <div className="inline-flex rounded-lg border bg-white p-0.5 text-sm">
+            {!soloLosSuyos && <div className="inline-flex rounded-lg border bg-white p-0.5 text-sm">
               {[{ v: false, l: 'Todos' }, { v: true, l: 'Míos' }].map((o) => (
                 <button
                   key={o.l}
@@ -346,7 +349,7 @@ export default function SeguimientoPage() {
                   {o.l}
                 </button>
               ))}
-            </div>
+            </div>}
             <div className="relative w-full sm:w-auto">
               <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder="Nombre o teléfono…" className="h-9 w-full pl-8 sm:w-80" aria-label="Buscar por nombre o teléfono" />

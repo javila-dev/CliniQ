@@ -48,6 +48,7 @@ from apps.notificaciones.services import (
     enviar_whatsapp,
     resolver_ruta_whatsapp,
 )
+from apps.users.authorization import ve_solo_su_actividad_comercial
 from apps.users.permissions import RequirePermission
 
 logger = logging.getLogger(__name__)
@@ -119,7 +120,7 @@ class CotizacionViewSet(ModelViewSet):
         # Un profesional solo ve en el listado las cotizaciones que creó,
         # no las de toda la clínica. El detalle sigue accesible por id para
         # los flujos que abren una cotización puntual (paciente, cartera…).
-        if self.action == "list" and user.rol == "profesional":
+        if self.action == "list" and ve_solo_su_actividad_comercial(user, self.request):
             queryset = queryset.filter(profesional=user)
         activo = self.request.query_params.get("activo")
         if activo is None:

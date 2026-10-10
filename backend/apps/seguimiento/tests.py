@@ -76,6 +76,11 @@ class SeguimientoTests(TestCase):
         response = self._crear_interesado(nombre="Otro", telefono="3105550000", sede=str(otra.id))
         self.assertEqual(response.status_code, 400)
 
+    def test_interesado_sin_sede_toma_la_de_la_clinica(self):
+        # Sin elegir sede y con una sola en la clínica: queda en esa (si no, lo verían todas).
+        response = self._crear_interesado()
+        self.assertEqual(response.json()["sede"], str(self.sede.id))
+
     def test_telefono_de_un_paciente_lo_vincula_y_no_duplica(self):
         # El paciente del setUp tiene 3010000000.
         response = self._crear_interesado(nombre="Kelly", telefono="+57 301 000 0000")

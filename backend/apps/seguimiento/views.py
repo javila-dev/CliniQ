@@ -23,7 +23,7 @@ from apps.seguimiento.serializers import (
     PerderSerializer,
     RegistrarGestionSerializer,
 )
-from apps.users.authorization import sede_ids_para_filtro
+from apps.users.authorization import sede_ids_para_filtro, ve_solo_su_actividad_comercial
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 PERM_VER = "seguimiento.oportunidades.ver"
@@ -77,6 +77,11 @@ class OportunidadViewSet(
         sede_ids = sede_ids_para_filtro(self.request.user, self.request.query_params.get("sede"))
         if sede_ids is not None:
             queryset = queryset.filter(Q(sede_id__in=sede_ids) | Q(sede__isnull=True))
+        # Quien atiende pacientes sin permiso de ver toda la sede: solo los suyos
+        # (los que registró, tiene asignados o salen de una venta suya).
+        user = self.request.user
+        if ve_solo_su_actividad_comercial(user, self.request):
+            queryset = queryset.filter(Q(responsable=user) | Q(creada_por=user) | Q(cotizacion__profesional=user))
         return queryset
 
     def get_queryset(self):

@@ -47,6 +47,31 @@ function getSafeNextPath() {
   return next
 }
 
+/**
+ * Mensaje de un login fallido según la causa real. Solo un 400/401 es un
+ * problema de credenciales: si el servidor falla o no hay conexión, decirlo así
+ * evita que la persona crea que olvidó su contraseña.
+ */
+function mensajeErrorLogin(err: any, credencialesIncorrectas: string): string {
+  const respuesta = err?.response
+  if (!respuesta) {
+    return 'No pudimos conectar con CliniQ. Revisa tu conexión a internet e inténtalo de nuevo.'
+  }
+  const { status, data } = respuesta
+  const detalle = typeof data === 'object' && data ? (data.error || data.detail) : null
+  if (status >= 500) {
+    return 'CliniQ tiene un problema en este momento. Inténtalo de nuevo en unos minutos.'
+  }
+  if (status === 429) {
+    return 'Hiciste muchos intentos seguidos. Espera un momento antes de volver a intentar.'
+  }
+  if (status === 400 || status === 401) {
+    return data?.code === 'INVALID_CREDENTIALS' ? credencialesIncorrectas : detalle || credencialesIncorrectas
+  }
+  // 403 y otros: el backend explica el motivo (usuario inactivo, clínica suspendida…).
+  return detalle || 'No pudimos iniciar sesión. Inténtalo de nuevo en unos minutos.'
+}
+
 function getPostLoginRoute(user: AuthUser) {
   return getSafeNextPath() ?? defaultRoute(user)
 }
@@ -90,11 +115,7 @@ export default function LoginPage() {
       setIsNavigating(true)
       router.replace(freshUser ? getPostLoginRoute(freshUser) : getSafeNextPath() ?? '/agenda')
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.detail ||
-        err?.response?.data?.error ||
-        'Credenciales incorrectas. Verifica e intenta de nuevo.'
-      setServerError(msg)
+      setServerError(mensajeErrorLogin(err, 'Correo o contraseña incorrectos. Verifica e intenta de nuevo.'))
     }
   }
 
@@ -107,11 +128,7 @@ export default function LoginPage() {
         setIsNavigating(true)
         router.replace(freshUser ? getPostLoginRoute(freshUser) : getSafeNextPath() ?? '/agenda')
       } catch (err: any) {
-        const msg =
-          err?.response?.data?.error ||
-          err?.response?.data?.detail ||
-          'No pudimos iniciar sesión con Google. Intenta con tu correo y contraseña.'
-        setServerError(msg)
+        setServerError(mensajeErrorLogin(err, 'No pudimos iniciar sesión con Google. Intenta con tu correo y contraseña.'))
       }
     },
     [loginWithGoogle, router],

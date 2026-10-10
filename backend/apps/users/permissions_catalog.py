@@ -39,6 +39,7 @@ PERMISSION_CATALOG = [
     ("cotizaciones.ver", "cotizaciones", "ver", "Ver cotizaciones", True),
     ("seguimiento.oportunidades.gestionar", "seguimiento", "oportunidades.gestionar", "Registrar interesados y gestionar el seguimiento (llamadas, etapas, cierres)", True),
     ("seguimiento.oportunidades.ver", "seguimiento", "oportunidades.ver", "Ver la bandeja de seguimiento y el embudo", True),
+    ("comercial.ver_sede", "comercial", "ver_sede", "Ver la actividad comercial de toda la sede (cotizaciones, ventas y seguimiento)", True),
     ("colaboradores.gestionar", "colaboradores", "gestionar", "Gestionar colaboradores", False),
     ("colaboradores.horarios.gestionar", "colaboradores", "horarios.gestionar", "Gestionar horarios", False),
     ("colaboradores.horarios.ver", "colaboradores", "horarios.ver", "Ver horarios", True),
@@ -319,6 +320,15 @@ CAPABILITY_CATALOG = [
                 "titulo": "Cambiar precios bloqueados en cotizaciones",
                 "descripcion": "Modificar items cuyo precio esta bloqueado.",
                 "permisos": ["cotizaciones.cambiar_precio"],
+            },
+            {
+                "clave": "comercial.ver_sede",
+                "titulo": "Ver la actividad comercial de toda la sede",
+                "descripcion": (
+                    "Para quien atiende pacientes: ver las cotizaciones, ventas y seguimientos de "
+                    "todos en sus sedes, no solo los propios. Quien no atiende pacientes ya los ve."
+                ),
+                "permisos": ["comercial.ver_sede"],
             },
             {
                 "clave": "seguimiento.ver",
@@ -688,6 +698,7 @@ ROLE_PERMISSION_DEFAULTS = {
         "cobros.ver",
         "cartera.registrar_pago",
         "cartera.ver",
+        "comercial.ver_sede",
         "cotizaciones.ver",
         "colaboradores.horarios.ver",
         "consentimientos.generar",

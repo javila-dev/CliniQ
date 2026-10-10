@@ -281,3 +281,51 @@ class EmbudoComercialTests(TestCase):
         self.assertEqual(data["pacientes_en_mora"], 1)
         self.assertEqual(data["por_vencer_30"], {"valor": "100000.00", "cuotas": 1})
         self.assertEqual(data["cobrado_pct"], "0.0")
+
+
+@override_settings(DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage", MEDIA_ROOT=tempfile.gettempdir())
+class ActividadComercialSedeTests(TestCase):
+    """Permiso comercial.ver_sede: quien atiende pacientes sin él solo ve lo suyo."""
+
+    setUp = cotizaciones_tests.CotizacionFlowTests.setUp
+
+    def _usuario(self, permisos, es_profesional=True):
+        import uuid
+
+        from apps.users.models import Permiso, Rol, RolPermiso, User
+
+        rol = Rol.objects.create(clinica=self.clinica, slug=f"rol-{uuid.uuid4().hex[:6]}", nombre="Esteticista")
+        for clave in permisos:
+            RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave=clave))
+        return User.objects.create_user(
+            email=f"u-{uuid.uuid4().hex[:8]}@test.com", password="Secret123!", first_name="Ana", last_name="Paz",
+            rol=User.Role.RECEPCION, clinica=self.clinica, rol_dinamico=rol, es_profesional=es_profesional,
+        )
+
+    def _ids(self, usuario, url):
+        self.client.force_authenticate(usuario)
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        return {fila["id"] for fila in response.json()["results"]}
+
+    def test_atiende_pacientes_sin_permiso_solo_ve_lo_suyo(self):
+        from apps.seguimiento.models import Oportunidad
+
+        usuario = self._usuario(["cotizaciones.ver", "seguimiento.oportunidades.ver"])
+        propia = Cotizacion.objects.create(clinica=self.clinica, paciente=self.paciente, profesional=usuario)
+        ajena = Cotizacion.objects.create(clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin)
+        mia = Oportunidad.objects.create(clinica=self.clinica, contacto_nombre="Mía", responsable=usuario)
+        Oportunidad.objects.create(clinica=self.clinica, contacto_nombre="De otra", responsable=self.superadmin)
+
+        self.assertEqual(self._ids(usuario, "/api/v1/cotizaciones/"), {str(propia.id)})
+        self.assertEqual(self._ids(usuario, "/api/v1/seguimiento/oportunidades/"), {str(mia.id)})
+
+        # Con el permiso ve todo lo de sus sedes.
+        con_permiso = self._usuario(["cotizaciones.ver", "seguimiento.oportunidades.ver", "comercial.ver_sede"])
+        self.assertEqual(self._ids(con_permiso, "/api/v1/cotizaciones/"), {str(propia.id), str(ajena.id)})
+        self.assertEqual(len(self._ids(con_permiso, "/api/v1/seguimiento/oportunidades/")), 2)
+
+    def test_quien_no_atiende_pacientes_ve_todo_sin_el_permiso(self):
+        usuario = self._usuario(["cotizaciones.ver"], es_profesional=False)
+        Cotizacion.objects.create(clinica=self.clinica, paciente=self.paciente, profesional=self.superadmin)
+        self.assertEqual(len(self._ids(usuario, "/api/v1/cotizaciones/")), 1)

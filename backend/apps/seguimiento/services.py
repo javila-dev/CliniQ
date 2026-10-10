@@ -88,6 +88,16 @@ def _tipo_para_paciente(paciente) -> str:
     return Oportunidad.Tipo.RECOMPRA if compro else Oportunidad.Tipo.NUEVA
 
 
+def _sede_por_defecto(clinica, usuario):
+    """Sede de un interesado registrado sin elegirla: la principal de quien lo
+    registra o, si la clínica tiene una sola, esa. Sin sede lo verían todas."""
+    colaborador = getattr(usuario, "colaborador", None) if getattr(usuario, "is_authenticated", False) else None
+    if colaborador is not None and colaborador.sede_principal_id:
+        return colaborador.sede_principal
+    sedes = list(clinica.sedes.filter(activo=True)[:2])
+    return sedes[0] if len(sedes) == 1 else None
+
+
 # ── Acciones de la recepción ───────────────────────────────────────────────
 
 @transaction.atomic
@@ -111,7 +121,7 @@ def crear_interesado(*, clinica, usuario, nombre: str, telefono: str, interes: s
 
     oportunidad = Oportunidad.objects.create(
         clinica=clinica,
-        sede=sede,
+        sede=sede or _sede_por_defecto(clinica, usuario),
         paciente=paciente,
         contacto_nombre=(nombre or "").strip() or (paciente.nombre_completo if paciente else ""),
         contacto_telefono=(telefono or "").strip(),

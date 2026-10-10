@@ -1,36 +1,37 @@
 import { Send } from 'lucide-react'
-import { Badge } from '@/components/ui/badge'
+import { formatFechaDMY } from '@/lib/utils'
 import type { EstadoComercial } from '@/types/cotizaciones'
 
 // Recibe el estado comercial ("vencida" se deriva en el backend); también
 // acepta el `estado` guardado, que es un subconjunto.
-const CONFIG: Record<EstadoComercial, { label: string; className: string }> = {
-  borrador:   { label: 'Abierta',    className: 'bg-gray-100 text-gray-700 border-gray-200'  },
-  aceptada:   { label: 'Vendida',    className: 'bg-green-100 text-green-700 border-green-200' },
-  vencida:    { label: 'Vencida',    className: 'bg-amber-100 text-amber-700 border-amber-200' },
-  descartada: { label: 'Descartada', className: 'bg-red-100 text-red-700 border-red-200'      },
+const CONFIG: Record<EstadoComercial, { label: string; className: string; punto: string }> = {
+  borrador:   { label: 'Abierta',    className: 'bg-sky-50 text-sky-700 ring-sky-600/15',          punto: 'bg-sky-500' },
+  aceptada:   { label: 'Vendida',    className: 'bg-emerald-50 text-emerald-700 ring-emerald-600/15', punto: 'bg-emerald-500' },
+  vencida:    { label: 'Vencida',    className: 'bg-amber-50 text-amber-700 ring-amber-600/20',     punto: 'bg-amber-500' },
+  descartada: { label: 'Descartada', className: 'bg-gray-100 text-gray-600 ring-gray-500/15',       punto: 'bg-gray-400' },
 }
 
 export function CotizacionEstadoBadge({ estado }: { estado: EstadoComercial }) {
-  const { label, className } = CONFIG[estado] ?? CONFIG.borrador
+  const { label, className, punto } = CONFIG[estado] ?? CONFIG.borrador
   return (
-    <Badge variant="outline" className={`text-xs font-medium ${className}`}>
+    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset ${className}`}>
+      <span className={`h-1.5 w-1.5 rounded-full ${punto}`} aria-hidden />
       {label}
-    </Badge>
+    </span>
   )
 }
 
 /** Marca de "ya se envió al paciente": acompaña al estado, no lo reemplaza. */
 export function CotizacionEnviadaChip({ enviadaEn }: { enviadaEn?: string | null }) {
   if (!enviadaEn) return null
-  const fecha = new Date(enviadaEn).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+  const fecha = formatFechaDMY(enviadaEn)
   return (
     <span
-      className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 ring-1 ring-blue-200"
-      title={`Enviada al paciente el ${new Date(enviadaEn).toLocaleDateString('es-CO')}`}
+      className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-white px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-200"
+      title={`Enviada al paciente el ${fecha}`}
     >
-      <Send className="h-3 w-3" />
-      Enviada {fecha}
+      <Send className="h-3 w-3 text-gray-400" />
+      Enviada {fecha.slice(0, 5)}
     </span>
   )
 }

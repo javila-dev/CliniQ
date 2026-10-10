@@ -621,6 +621,18 @@ de un mes es igual a la suma de `/ventas` filtrada por ese mes, y a la de
 | POST | `/api/pacientes/{id}/enlace_preferencias/` | `pacientes.editar` | Obtener el link para `wa.me` o QR |
 | GET | `/api/reportes/comercial/` | `reportes.ver_financieros` | KPI nuevos (mismo permiso que `/reportes/cotizaciones/`) |
 
+**Alcance por usuario (decidido 2026-10-10).** Un solo permiso,
+`comercial.ver_sede` ("Ver la actividad comercial de toda la sede"), cubre
+cotizaciones, ventas y seguimiento. Quien atiende pacientes (check del usuario
+o rol de sistema Profesional) sin el permiso ve solo lo suyo: cotizaciones y
+ventas donde es el profesional, y seguimientos que registró, tiene asignados o
+salen de una venta suya. Con el permiso ve lo de sus sedes. Quien no atiende
+pacientes ve lo de sus sedes igual que antes y el admin todo. La migración
+`users 0023` se lo da a todos los roles existentes menos al de sistema
+Profesional, para que nadie cambie lo que ve. Reemplaza el `rol == "profesional"`
+fijo de cotizaciones y ventas. Un interesado registrado sin sede toma la
+principal de quien lo registra.
+
 Las oportunidades usan una sola API, la de `/api/seguimiento/` (gestiones,
 WhatsApp, link de agendamiento y detección están en el plan de seguimiento).
 

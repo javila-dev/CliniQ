@@ -62,6 +62,37 @@ export function todayISO(): string {
  * medianoche UTC y en zonas UTC-negativas (Colombia UTC-5) se renderiza como
  * el día anterior. Este helper construye la fecha en horario local.
  */
+function aFechaLocal(fecha: string): Date | null {
+  // "YYYY-MM-DD" (DateField) se arma en hora local; un ISO con hora se usa tal cual.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(fecha)) {
+    const [y, m, d] = fecha.split('-').map(Number)
+    return new Date(y, m - 1, d)
+  }
+  const d = new Date(fecha)
+  return Number.isNaN(d.getTime()) ? null : d
+}
+
+/** Fecha en formato dd/mm/aaaa (el de las tablas). */
+export function formatFechaDMY(fecha: string | null | undefined): string {
+  const d = fecha ? aFechaLocal(fecha) : null
+  if (!d) return '—'
+  return `${String(d.getDate()).padStart(2, '0')}/${String(d.getMonth() + 1).padStart(2, '0')}/${d.getFullYear()}`
+}
+
+/** "hoy", "ayer", "hace 3 días", "en 5 días": distancia en días calendario a hoy. */
+export function diasRelativos(fecha: string | null | undefined): string {
+  const d = fecha ? aFechaLocal(fecha) : null
+  if (!d) return ''
+  const hoy = new Date()
+  const a = Date.UTC(hoy.getFullYear(), hoy.getMonth(), hoy.getDate())
+  const b = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())
+  const dias = Math.round((a - b) / 86_400_000)
+  if (dias === 0) return 'hoy'
+  if (dias === 1) return 'ayer'
+  if (dias === -1) return 'mañana'
+  return dias > 0 ? `hace ${dias} días` : `en ${-dias} días`
+}
+
 export function formatFechaLocal(
   fecha: string | null | undefined,
   opts: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'short', day: 'numeric' },

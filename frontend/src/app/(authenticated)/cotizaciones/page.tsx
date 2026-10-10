@@ -3,18 +3,19 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Plus, FileText, Loader2, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { Plus, FileText, Loader2, X } from 'lucide-react'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { PuestaEnMarchaButton } from '@/components/shared/PuestaEnMarchaButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
-import { cn, formatFechaLocal } from '@/lib/utils'
+import {
+  CeldaFecha, CeldaPersona, Dinero, Encabezado, FilaClic, Paginacion, TablaContenedor, TablaVacia, Td, Th,
+} from '@/components/shared/TablaDatos'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
@@ -32,84 +33,6 @@ const ESTADO_TABS: { value: string; label: string }[] = [
 ]
 
 const PAGE_SIZE = 25
-
-function formatCOP(value: string | number): string {
-  return new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(value))
-}
-
-function formatFechaCorta(iso: string): string {
-  return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: '2-digit', year: 'numeric' })
-}
-
-// ─── Paginación ───────────────────────────────────────────────
-
-function Pagination({
-  page, total, pageSize, onPage,
-}: {
-  page: number; total: number; pageSize: number; onPage: (p: number) => void
-}) {
-  const totalPages = Math.max(1, Math.ceil(total / pageSize))
-
-  const pages: number[] = []
-  const addPage = (p: number) => {
-    if (p >= 1 && p <= totalPages && !pages.includes(p)) pages.push(p)
-  }
-  addPage(1)
-  for (let p = page - 2; p <= page + 2; p++) addPage(p)
-  addPage(totalPages)
-
-  const withGaps: (number | '…')[] = []
-  let prev = 0
-  for (const p of pages) {
-    if (prev && p - prev > 1) withGaps.push('…')
-    withGaps.push(p)
-    prev = p
-  }
-
-  return (
-    <div className="flex items-center justify-between px-1">
-      <p className="text-sm text-muted-foreground">
-        {total === 0 ? 'Sin resultados' : (
-          <>Mostrando <span className="font-medium text-foreground">{(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)}</span> de <span className="font-medium text-foreground">{total}</span></>
-        )}
-      </p>
-      <div className={cn('flex items-center gap-1', totalPages <= 1 && 'hidden')}>
-        <button
-          onClick={() => onPage(page - 1)}
-          disabled={page === 1}
-          className="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
-        >
-          <ChevronLeft className="h-4 w-4" />
-        </button>
-        {withGaps.map((p, i) =>
-          p === '…' ? (
-            <span key={`gap-${i}`} className="px-1 text-muted-foreground text-sm select-none">…</span>
-          ) : (
-            <button
-              key={p}
-              onClick={() => onPage(p)}
-              className={cn(
-                'flex items-center justify-center h-8 min-w-[2rem] px-1 rounded-lg text-sm font-medium transition-colors',
-                p === page
-                  ? 'bg-primary text-white shadow-sm'
-                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
-              )}
-            >
-              {p}
-            </button>
-          )
-        )}
-        <button
-          onClick={() => onPage(page + 1)}
-          disabled={page >= totalPages}
-          className="flex items-center justify-center h-8 w-8 rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30 disabled:pointer-events-none transition-colors"
-        >
-          <ChevronRight className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
-  )
-}
 
 export default function CotizacionesPage() {
   const router = useRouter()
@@ -306,84 +229,58 @@ export default function CotizacionesPage() {
       {isLoading ? (
         <LoadingState rows={4} />
       ) : !data?.results?.length ? (
-        <Card>
-          <CardContent className="py-16 text-center">
-            <FileText className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
-            <p className="text-muted-foreground">
-              {tabEstado === 'borrador' && !hayFiltros
-                ? 'No hay cotizaciones abiertas'
-                : tabEstado !== 'todas' || hayFiltros
-                  ? 'Sin cotizaciones para los filtros seleccionados'
-                  : 'Aún no hay cotizaciones creadas'}
-            </p>
-            {canGestionar && !hayFiltros && (tabEstado === 'todas' || tabEstado === 'borrador') && (
-              <Button variant="outline" size="sm" className="mt-4" onClick={abrirNueva}>
-                <Plus className="h-3.5 w-3.5 mr-1.5" />
-                Crear la primera
-              </Button>
-            )}
-          </CardContent>
-        </Card>
+        <TablaVacia
+          icono={<FileText className="h-5 w-5" />}
+          titulo={tabEstado === 'borrador' && !hayFiltros
+            ? 'No hay cotizaciones abiertas'
+            : tabEstado !== 'todas' || hayFiltros
+              ? 'Sin cotizaciones para estos filtros'
+              : 'Aún no hay cotizaciones creadas'}
+          accion={canGestionar && !hayFiltros && (tabEstado === 'todas' || tabEstado === 'borrador') ? (
+            <Button variant="outline" size="sm" onClick={abrirNueva}>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Crear la primera
+            </Button>
+          ) : undefined}
+        />
       ) : (
-        <>
-          <div className="rounded-lg border bg-white overflow-hidden">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b bg-muted/40">
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Paciente</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Estado</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground">Total</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden sm:table-cell">Vence</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Profesional</th>
-                  <th className="text-left px-4 py-2.5 text-xs font-medium text-muted-foreground hidden md:table-cell">Creada</th>
-                  <th className="px-4 py-2.5" />
-                </tr>
-              </thead>
-              <tbody>
-                {data.results.map((c) => (
-                  <tr
-                    key={c.id}
-                    className={`border-b last:border-0 hover:bg-muted/20 cursor-pointer transition-colors${loadingId === c.id ? ' opacity-60 pointer-events-none' : ''}`}
-                    onClick={() => abrirDetalle(c)}
-                  >
-                    <td className="px-4 py-3">
-                      <p className="font-medium">{c.paciente_nombre}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
-                        {c.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={c.enviada_en} />}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 font-semibold tabular-nums">
-                      {formatCOP(c.total)}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground tabular-nums hidden sm:table-cell">
-                      {c.estado === 'aceptada'
-                        ? <span className="text-green-700">Vendida</span>
-                        : c.estado === 'descartada' || !c.fecha_vencimiento
-                          ? '—'
-                          : <span className={c.estado_comercial === 'vencida' ? 'text-amber-700' : undefined}>{formatFechaLocal(c.fecha_vencimiento)}</span>}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      {c.profesional_nombre ?? '—'}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground hidden md:table-cell">
-                      {formatFechaCorta(c.created_at)}
-                    </td>
-                    <td className="px-4 py-3 w-8">
-                      {loadingId === c.id && (
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <Pagination page={page} total={total} pageSize={PAGE_SIZE} onPage={setPage} />
-        </>
+        <TablaContenedor pie={<Paginacion page={page} total={total} pageSize={PAGE_SIZE} onPage={setPage} />}>
+          <Encabezado>
+            <Th>Paciente</Th>
+            <Th>Estado</Th>
+            <Th className="hidden md:table-cell">Creada</Th>
+            <Th className="hidden sm:table-cell">Vence</Th>
+            <Th align="right">Total</Th>
+            <th className="w-10" />
+          </Encabezado>
+          <tbody>
+            {data.results.map((c) => (
+              <FilaClic key={c.id} onClick={() => abrirDetalle(c)} cargando={loadingId === c.id}>
+                <Td>
+                  <CeldaPersona
+                    nombre={c.paciente_nombre}
+                    detalle={[c.profesional_nombre, sedes.length > 1 ? c.sede_nombre : null].filter(Boolean).join(' · ') || undefined}
+                  />
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
+                    {c.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={c.enviada_en} />}
+                  </div>
+                </Td>
+                <Td className="hidden md:table-cell w-32"><CeldaFecha fecha={c.created_at} /></Td>
+                <Td className="hidden sm:table-cell w-32">
+                  {c.estado === 'aceptada'
+                    ? <CeldaFecha fecha={c.aceptada_en ?? null} nota="vendida" />
+                    : c.estado === 'descartada' || !c.fecha_vencimiento
+                      ? <span className="text-gray-400">—</span>
+                      : <CeldaFecha fecha={c.fecha_vencimiento} tono={c.estado_comercial === 'vencida' ? 'aviso' : undefined} />}
+                </Td>
+                <Td align="right"><Dinero valor={c.total} className="font-semibold text-gray-900" /></Td>
+              </FilaClic>
+            ))}
+          </tbody>
+        </TablaContenedor>
       )}
 
     </div>
