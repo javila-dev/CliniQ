@@ -92,7 +92,9 @@ class CotizacionViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
-                           "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos"}:
+                           "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos",
+                           # Quién puede firmar lo decide la vista (es_profesional).
+                           "firma_profesional", "firma_profesional_documento"}:
             return [RequirePermission("cotizaciones.ver")()]
         # Entregar un obsequio es una salida de inventario: mismos permisos que
         # registrar y eliminar un consumo de insumo en una atención.
@@ -362,6 +364,109 @@ class CotizacionViewSet(ModelViewSet):
         return Response(
             consentimientos_requeridos_cotizacion(cotizacion, incluir_archivos=True), status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["get", "post"], url_path="firma_profesional")
+    def firma_profesional(self, request, pk=None):
+        """Consentimientos de la venta que el paciente ya firmó y esperan la firma del profesional.
+
+        A diferencia de la cita, aquí firma cualquier profesional de la clínica (con su firma
+        y TP del perfil), y solo con la venta aprobada. GET: documentos y si el usuario puede
+        firmar. POST: los firma todos.
+        """
+        from apps.core.logging import get_client_ip
+        from apps.core.storage import get_public_url
+        from apps.historia_clinica.firma_profesional import (
+            MOTIVO_SIN_FIRMA,
+            FirmaNoDisponibleError,
+            consentimientos_pendientes_firma_profesional_cotizacion,
+            firmar_pendientes,
+            motivo_no_puede_firmar_cotizacion,
+            serializar_pendiente,
+        )
+
+        cotizacion = self.get_object()
+        user = request.user
+        pendientes = consentimientos_pendientes_firma_profesional_cotizacion(cotizacion)
+        motivo = motivo_no_puede_firmar_cotizacion(user, cotizacion, pendientes)
+
+        if request.method == "GET":
+            return Response(
+                {
+                    "documentos": [serializar_pendiente(c) for c in pendientes],
+                    "puede_firmar": motivo is None,
+                    "motivo": motivo,
+                    "profesional": {
+                        "nombre": user.nombre_completo,
+                        "registro_profesional": user.registro_profesional,
+                        "firma_url": get_public_url(user.firma_digital.name) if user.firma_digital else None,
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
+
+        if motivo is not None:
+            return Response(motivo, status=status.HTTP_400_BAD_REQUEST)
+
+        user_agent = request.META.get("HTTP_USER_AGENT", "")
+        try:
+            resultados = firmar_pendientes(
+                pendientes, user, ip=get_client_ip(request), user_agent=user_agent,
+                contexto=f"cotizacion_id={cotizacion.id}",
+            )
+        except FirmaNoDisponibleError as exc:
+            return Response({"code": MOTIVO_SIN_FIRMA, "error": str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        for resultado in resultados:
+            registrar_accion(
+                request,
+                "consentimiento.firma_profesional" if resultado["ok"] else "consentimiento.firma_profesional_fallida",
+                cotizacion,
+                {
+                    "consentimiento_id": resultado["id"],
+                    "documento": resultado["nombre"],
+                    "user_agent": user_agent,
+                    **({"error": resultado["error"]} if not resultado["ok"] else {}),
+                },
+            )
+
+        fallidos = [r for r in resultados if not r["ok"]]
+        cuerpo = {"resultados": resultados}
+        if fallidos:
+            cuerpo.update(
+                error="No se pudo firmar: " + ", ".join(r["nombre"] for r in fallidos) + ". Intenta de nuevo.",
+                code="FIRMA_PROFESIONAL_FALLIDA",
+            )
+            return Response(cuerpo, status=status.HTTP_502_BAD_GATEWAY)
+        return Response(cuerpo, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True, methods=["get"],
+        url_path=r"firma_profesional/documento/(?P<consentimiento_id>[0-9a-f-]+)",
+    )
+    def firma_profesional_documento(self, request, pk=None, consentimiento_id=None):
+        """PDF de un consentimiento de la venta pendiente del profesional, para leerlo antes de firmar."""
+        from apps.historia_clinica.firma_profesional import (
+            consentimientos_pendientes_firma_profesional_cotizacion,
+            pdf_para_firma_profesional,
+        )
+
+        cotizacion = self.get_object()
+        consentimiento = next(
+            (
+                c for c in consentimientos_pendientes_firma_profesional_cotizacion(cotizacion)
+                if str(c.id) == consentimiento_id
+            ),
+            None,
+        )
+        if consentimiento is None:
+            return Response({"error": "Documento no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+
+        pdf_bytes = pdf_para_firma_profesional(consentimiento)
+        if not pdf_bytes:
+            return Response({"error": "No se pudo obtener el documento."}, status=status.HTTP_502_BAD_GATEWAY)
+
+        response = HttpResponse(pdf_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="consentimiento-{consentimiento.id}.pdf"'
+        return response
 
     @action(detail=True, methods=["post"], url_path="nota_clinica")
     def nota_clinica(self, request, pk=None):

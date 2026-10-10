@@ -529,8 +529,10 @@ class CitaViewSet(ModelViewSet):
         """
         from django.http import HttpResponse
 
-        from apps.historia_clinica.firma_profesional import consentimientos_pendientes_firma_profesional
-        from apps.historia_clinica.services import descargar_pdf_documento_original
+        from apps.historia_clinica.firma_profesional import (
+            consentimientos_pendientes_firma_profesional,
+            pdf_para_firma_profesional,
+        )
 
         cita = self.get_object()
         consentimiento = next(
@@ -540,15 +542,7 @@ class CitaViewSet(ModelViewSet):
         if consentimiento is None:
             return Response({"error": "Documento no encontrado."}, status=status.HTTP_404_NOT_FOUND)
 
-        pdf_bytes = None
-        if consentimiento.plantilla_id and consentimiento.plantilla.pdf_file:
-            consentimiento.plantilla.pdf_file.open("rb")
-            try:
-                pdf_bytes = consentimiento.plantilla.pdf_file.read()
-            finally:
-                consentimiento.plantilla.pdf_file.close()
-        if not pdf_bytes and consentimiento.documenso_document_id:
-            pdf_bytes = descargar_pdf_documento_original(consentimiento.documenso_document_id)
+        pdf_bytes = pdf_para_firma_profesional(consentimiento)
         if not pdf_bytes:
             return Response({"error": "No se pudo obtener el documento."}, status=status.HTTP_502_BAD_GATEWAY)
 
