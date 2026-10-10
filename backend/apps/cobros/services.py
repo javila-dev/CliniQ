@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.db import transaction
 from django.utils import timezone
 
@@ -72,11 +74,37 @@ def agregar_item_cobro(cobro: Cobro, item_data: dict, user) -> ItemCobro:
 
 @transaction.atomic
 def registrar_pago(cobro: Cobro, pago_data: dict, user) -> PagoRecibido:
+    from rest_framework.exceptions import ValidationError
+
+    # Bloquear el cobro: dos pagos simultáneos (doble clic, dos pestañas) se
+    # validan uno después del otro contra el saldo real.
+    cobro = Cobro.objects.select_for_update().get(pk=cobro.pk)
     if cobro.estado == Cobro.Estado.ANULADO:
-        from rest_framework.exceptions import ValidationError
         raise ValidationError(
             {"error": "No se puede registrar un pago en un cobro anulado.", "code": "COBRO_ANULADO"}
         )
+    valor = Decimal(pago_data["valor"])
+    if valor <= 0:
+        raise ValidationError({"valor": ["El valor debe ser mayor a cero."], "code": "VALOR_INVALIDO"})
+
+    # El cobro de una cotización acumula los abonos de la cartera (su total es lo
+    # pagado): no tiene saldo propio contra el cual validar.
+    if cobro.origen != Cobro.Origen.COTIZACION:
+        tiene_pagos = cobro.pagos.exists()
+        saldo = cobro.saldo_pendiente
+        if tiene_pagos and saldo <= 0:
+            raise ValidationError(
+                {"error": "Este ingreso ya está pagado por completo.", "code": "COBRO_YA_PAGADO"}
+            )
+        # El primer pago puede superar el total (cobro de cita con "valor cobrado"
+        # mayor al costo, M6-14); los siguientes no pueden pasarse del saldo.
+        if tiene_pagos and valor > saldo:
+            raise ValidationError(
+                {
+                    "valor": [f"El valor supera el saldo pendiente (${saldo:,.0f}).".replace(",", ".")],
+                    "code": "PAGO_SUPERA_SALDO",
+                }
+            )
 
     pago = PagoRecibido.objects.create(
         cobro=cobro,
@@ -108,3 +136,33 @@ def _actualizar_estado_cobro(cobro: Cobro):
 
     Cobro.objects.filter(pk=cobro.pk).update(estado=nuevo_estado)
     cobro.estado = nuevo_estado
+
+
+@transaction.atomic
+def reversar_pago(cobro: Cobro, pago: PagoRecibido) -> Cobro:
+    """Elimina un pago mal registrado y recalcula el cobro (y la cuota, si era un abono).
+
+    Los cierres de caja ya hechos guardan sus totales, así que no cambian.
+    """
+    from rest_framework.exceptions import ValidationError
+
+    from apps.cartera.models import AbonoCuota, CuotaCartera
+
+    cobro = Cobro.objects.select_for_update().get(pk=cobro.pk)
+    if cobro.estado == Cobro.Estado.ANULADO:
+        raise ValidationError({"error": "El ingreso está anulado.", "code": "COBRO_ANULADO"})
+    if pago.es_migracion:
+        raise ValidationError(
+            {"error": "Los pagos cargados en la puesta en marcha se revierten desde allí.", "code": "PAGO_MIGRACION"}
+        )
+    for abono in AbonoCuota.objects.filter(pago=pago).select_related("cuota"):
+        cuota = CuotaCartera.objects.select_for_update().get(pk=abono.cuota_id)
+        cuota.valor_pagado = max(Decimal(cuota.valor_pagado or 0) - abono.valor, Decimal("0"))
+        cuota.pagada = cuota.saldo_pendiente <= 0
+        cuota.save(update_fields=["valor_pagado", "pagada", "updated_at"])
+        abono.delete()
+    pago.delete()
+    cobro.recalcular_totales()
+    cobro.refresh_from_db()
+    _actualizar_estado_cobro(cobro)
+    return cobro

@@ -72,7 +72,7 @@ class ItemCobroCreateSerializer(serializers.Serializer):
 
 class PagoCreateSerializer(serializers.Serializer):
     medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
-    valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0"))
+    valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     referencia = serializers.CharField(max_length=100, required=False, allow_blank=True)
     fecha = serializers.DateTimeField(required=False)
 

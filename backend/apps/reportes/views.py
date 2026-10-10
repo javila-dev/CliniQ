@@ -49,6 +49,36 @@ def _clinica_scope(user):
     return {"sede__clinica": user.clinica}
 
 
+def _pagos_del_periodo(cobro_qs, desde, hasta):
+    """Pagos recibidos entre `desde` y `hasta` (por la fecha del pago).
+
+    `cobro_qs` NO debe venir filtrado por la fecha del cobro: el cobro de una
+    cotización acumula todas las cuotas y su fecha es la del último abono, así que
+    filtrarlo por fecha sumaba también las cuotas de meses anteriores.
+    """
+    return PagoRecibido.objects.filter(
+        cobro__in=cobro_qs, fecha__date__gte=desde, fecha__date__lte=hasta,
+    ).exclude(es_migracion=True)
+
+
+def _facturado(cobro_qs, desde, hasta):
+    """Lo vendido en el periodo: cobros de cita o libres por su fecha, más los
+    abonos de cotización por la fecha de cada pago (ese cobro no tiene total
+    propio: es la suma de los abonos)."""
+    directos = (
+        cobro_qs.exclude(origen=Cobro.Origen.COTIZACION)
+        .filter(fecha__date__gte=desde, fecha__date__lte=hasta)
+        .aggregate(s=Sum("total"))["s"]
+        or Decimal("0")
+    )
+    abonos = (
+        _pagos_del_periodo(cobro_qs.filter(origen=Cobro.Origen.COTIZACION), desde, hasta)
+        .aggregate(s=Sum("valor"))["s"]
+        or Decimal("0")
+    )
+    return Decimal(directos) + Decimal(abonos)
+
+
 def _cita_clinica_scope(user):
     if user.rol == "superadmin":
         return {}
@@ -160,20 +190,19 @@ class DashboardView(APIView):
             if sede_ids is not None:
                 cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
-            if usar_rango:
-                cobros_hoy_qs = cobro_qs.filter(
-                    fecha__date__gte=rango_ini,
-                    fecha__date__lte=rango_fin,
-                ).exclude(estado="anulado")
-            else:
-                cobros_hoy_qs = cobro_qs.filter(fecha__date=fecha).exclude(estado="anulado")
+            cobro_qs = cobro_qs.exclude(estado="anulado")
+            desde, hasta = (rango_ini, rango_fin) if usar_rango else (fecha, fecha)
+            cobros_hoy_qs = cobro_qs.filter(fecha__date__gte=desde, fecha__date__lte=hasta)
             cobros_agg = cobros_hoy_qs.aggregate(
-                total_cop=Sum("total"),
                 pagados=Count("id", filter=Q(estado="pagado")),
                 pendientes=Count("id", filter=Q(estado__in=["pendiente", "pagado_parcial"])),
             )
+            # "Ingresos hoy" y el desglose por medio son el dinero recibido en el
+            # periodo (por la fecha del pago), así el total cuadra con sus filas.
+            pagos_periodo = _pagos_del_periodo(cobro_qs, desde, hasta)
+            total_recibido = pagos_periodo.aggregate(s=Sum("valor"))["s"] or Decimal("0")
             por_medio = (
-                PagoRecibido.objects.filter(cobro__in=cobros_hoy_qs)
+                pagos_periodo
                 .values("medio_pago__nombre")
                 .annotate(total=Sum("valor"))
                 .order_by("medio_pago__nombre")
@@ -181,11 +210,10 @@ class DashboardView(APIView):
 
             fecha_inicio_semana = fecha - timedelta(days=6)
             ingresos_semana_qs = (
-                cobro_qs.filter(fecha__date__gte=fecha_inicio_semana, fecha__date__lte=fecha)
-                .exclude(estado="anulado")
+                _pagos_del_periodo(cobro_qs, fecha_inicio_semana, fecha)
                 .annotate(dia=TruncDate("fecha"))
                 .values("dia")
-                .annotate(total=Sum("total"))
+                .annotate(total=Sum("valor"))
                 .order_by("dia")
             )
             totales_por_dia = {row["dia"]: row["total"] for row in ingresos_semana_qs}
@@ -195,7 +223,7 @@ class DashboardView(APIView):
                 ingresos_semana.append({"fecha": str(d), "total": str(totales_por_dia.get(d, "0.00"))})
 
             payload["cobros_hoy"] = {
-                "total_cop": str(cobros_agg["total_cop"] or "0.00"),
+                "total_cop": f"{Decimal(total_recibido):.2f}",
                 "pagados": cobros_agg["pagados"],
                 "pendientes": cobros_agg["pendientes"],
                 "por_medio_pago": [
@@ -222,21 +250,20 @@ class IngresosView(APIView):
         trunc_fn = {"semana": TruncWeek, "mes": TruncMonth}.get(agrupar_por, TruncDate)
         periodo_format = {"semana": "%G-W%V", "mes": "%Y-%m"}.get(agrupar_por)
 
-        cobro_qs = Cobro.objects.filter(
-            fecha__date__gte=fecha_inicio,
-            fecha__date__lte=fecha_fin,
-            **_clinica_scope(user),
-        ).exclude(estado="anulado").exclude(es_migracion=True)
-
+        cobro_qs = (
+            Cobro.objects.filter(**_clinica_scope(user)).exclude(estado="anulado").exclude(es_migracion=True)
+        )
         if sede_ids is not None:
             cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
-        cobros_por_periodo = (
-            cobro_qs.annotate(periodo=trunc_fn("fecha"))
+        # Dinero recibido por periodo (fecha del pago): comparable con los gastos.
+        cobros_map = {
+            row["periodo"]: row["total_cobros"]
+            for row in _pagos_del_periodo(cobro_qs, fecha_inicio, fecha_fin)
+            .annotate(periodo=trunc_fn("fecha"))
             .values("periodo")
-            .annotate(total_cobros=Sum("total"))
-            .order_by("periodo")
-        )
+            .annotate(total_cobros=Sum("valor"))
+        }
         gastos_map = {}
         if _table_exists(GastoCaja._meta.db_table):
             gasto_qs = GastoCaja.objects.filter(
@@ -264,11 +291,11 @@ class IngresosView(APIView):
 
         resultado = [
             {
-                "periodo": fmt_periodo(row["periodo"]),
-                "total_cobros": str(row["total_cobros"] or "0.00"),
-                "total_gastos": str(gastos_map.get(row["periodo"], "0.00")),
+                "periodo": fmt_periodo(periodo),
+                "total_cobros": str(total or "0.00"),
+                "total_gastos": str(gastos_map.get(periodo, "0.00")),
             }
-            for row in cobros_por_periodo
+            for periodo, total in sorted(cobros_map.items(), key=lambda kv: kv[0])
         ]
         return Response(resultado)
 
@@ -816,20 +843,14 @@ class EstadoFinancieroView(APIView):
     def _bloque(self, clinica, inicio, fin, sede_ids):
         scope = {"sede__clinica": clinica} if clinica else {}
 
-        cobro_qs = (
-            Cobro.objects.filter(fecha__date__gte=inicio, fecha__date__lte=fin, **scope)
-            .exclude(estado="anulado")
-            .exclude(es_migracion=True)
-        )
+        base_qs = Cobro.objects.filter(**scope).exclude(estado="anulado").exclude(es_migracion=True)
         if sede_ids is not None:
-            cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
+            base_qs = base_qs.filter(sede_id__in=sede_ids)
+        cobro_qs = base_qs.filter(fecha__date__gte=inicio, fecha__date__lte=fin)
 
-        ingresos_facturado = cobro_qs.aggregate(s=Sum("total"))["s"] or Decimal("0")
+        ingresos_facturado = _facturado(base_qs, inicio, fin)
         ingresos_recaudado = (
-            PagoRecibido.objects.filter(
-                cobro__in=cobro_qs, fecha__date__gte=inicio, fecha__date__lte=fin
-            ).aggregate(s=Sum("valor"))["s"]
-            or Decimal("0")
+            _pagos_del_periodo(base_qs, inicio, fin).aggregate(s=Sum("valor"))["s"] or Decimal("0")
         )
         costo_insumos = (
             ItemCobro.objects.filter(cobro__in=cobro_qs, tipo="insumo_consumo")

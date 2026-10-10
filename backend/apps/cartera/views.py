@@ -396,6 +396,10 @@ class CuotaCarteraViewSet(GenericViewSet):
     @transaction.atomic
     def registrar_pago(self, request, pk=None):
         cuota = self.get_object()
+        # Bloquear cartera y cuota: dos abonos simultáneos (doble clic, dos
+        # pestañas) validaban contra el mismo saldo y quedaban los dos.
+        Cartera.objects.select_for_update().filter(pk=cuota.cartera_id).first()
+        cuota = CuotaCartera.objects.select_for_update().get(pk=cuota.pk)
         if cuota.saldo_pendiente <= 0:
             raise ValidationError({"error": "La cuota ya fue cobrada por completo.", "code": "CUOTA_YA_PAGADA"})
         self._guard_acuerdo_pendiente(cuota)
@@ -453,7 +457,13 @@ class CuotaCarteraViewSet(GenericViewSet):
                 "medio_pago": serializer.validated_data["medio_pago"],
                 "valor": serializer.validated_data["valor_pagado"],
                 "referencia": serializer.validated_data.get("referencia", ""),
-                "fecha": timezone.make_aware(datetime.combine(serializer.validated_data["fecha_pago"], time.min)),
+                # Pago de hoy: hora real del registro (entra al arqueo de la caja
+                # abierta). Pago de otro día: ese día a medianoche.
+                "fecha": (
+                    timezone.now()
+                    if serializer.validated_data["fecha_pago"] == timezone.localdate()
+                    else timezone.make_aware(datetime.combine(serializer.validated_data["fecha_pago"], time.min))
+                ),
             },
             user=request.user,
         )

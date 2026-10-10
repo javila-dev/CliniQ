@@ -1,8 +1,45 @@
-# T — Problemas transversales y orden de corrección
+# T — Resumen general: problemas transversales, avance y lo que falta
 
-**Estado:** Revisado (10/10/2026)
+**Estado:** En corrección. Pasos 1 y 2 de 7 hechos.
 
-Este archivo junta los problemas que se repiten en varios módulos. Cada uno se arregla **una vez, en un solo lugar**, y eso resuelve hallazgos en muchas pantallas. Conviene corregirlos antes de entrar a cada módulo.
+Este es el **resumen de toda la verificación**. Tiene tres partes:
+1. El tablero de abajo: qué se hizo y qué falta.
+2. Los problemas que se repiten en varios módulos (T-01 a T-10). Cada uno se arregla una vez y resuelve hallazgos en muchas pantallas.
+3. El detalle del avance y el orden de corrección.
+
+El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado con ✅ cuando se corrige.
+
+## Tablero
+
+| Paso | Qué cubre | Estado | Commit |
+|---|---|---|---|
+| 1 | Bloqueos del día a día: paginación, sesión, editar pacientes, recordatorios, autorregistro, buscador de Ingresos, atención con roles personalizados, confirmar citas | ✅ Hecho | `c8e2a65` |
+| 2 | Dinero y stock: pagos y abonos dobles, stock, edición de cobros, reportes de ingresos, arqueo, "Por cobrar", reversar pagos | ✅ Hecho | ver git log (fix(dinero)) |
+| 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | Pendiente | — |
+| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | Pendiente (requiere decisiones tuyas) | — |
+| 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | Pendiente | — |
+| 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | Pendiente | — |
+| 7 | Todo lo demás, por módulo y severidad | Pendiente | — |
+
+**Hallazgos:** 22 de 227 corregidos.
+
+| Módulo | Corregidos | Pendientes | Críticos pendientes |
+|---|---|---|---|
+| M0 Acceso y roles | 2 | 28 | 0 |
+| M1 Configuración y catálogo | 3 | 28 | 0 |
+| M2 Pacientes | 2 | 24 | 0 |
+| M3 Agenda | 2 | 28 | 0 |
+| M4 Atención clínica | 2 | 26 | 1 (M4-01) |
+| M5 Comercial | 0 | 30 | 0 |
+| M6 Dinero | 9 | 18 | 0 |
+| M7 Inventario y plataforma | 2 | 23 | 0 |
+
+**Decisiones pendientes de tu parte** (bloquean el paso 4):
+- ¿Recepción debe poder crear y enviar cotizaciones?
+- ¿Revertir una carga de migración exige un permiso?
+- ¿La historia clínica se acota por sede?
+- ¿El Profesional por defecto ve reportes financieros?
+- ¿Quién entrega los obsequios de producto?
 
 ## Resumen en números
 
@@ -229,7 +266,7 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 
 ## Avance
 
-**Paso 1 — corregido el 10/10/2026, sin commit todavía**
+**Paso 1 — corregido el 10/10/2026 (commit c8e2a65)**
 
 | Ítem | Qué se hizo |
 |---|---|
@@ -248,6 +285,23 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
   - M3-02: los bloqueos necesitan además un filtro por rango de fechas.
   - M4-20: la pantalla de consentimientos no pide `page_size`.
   - M7-14: la consola no tiene paginador.
+
+**Paso 2 — dinero y stock (10/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M6-01 | `registrar_pago` bloquea el cobro (`select_for_update`) y valida `valor > 0`. En cobros que no son de cotización, rechaza el pago si el ingreso ya está pagado (`COBRO_YA_PAGADO`) y rechaza abonos mayores al saldo (`PAGO_SUPERA_SALDO`). El primer pago puede superar el total porque el cobro de cita permite "valor cobrado" mayor al costo; se revisa en M6-14. Frontend: el detalle del ingreso se pide al servidor y se actualiza con la respuesta del pago. Además, el valor sugerido es el saldo y se muestran los errores del backend. |
+| M6-02 | El abono de cuota bloquea la cartera y la cuota antes de validar el saldo. El modal se desactiva mientras valida (`isSubmitting`) y muestra el error de cada campo. |
+| M7-01 | `eliminar_consumo_insumo` bloquea el consumo y rechaza uno ya revertido. `destroy` solo encuentra consumos activos. |
+| M6-03 | `CobroViewSet` ya no acepta PUT ni PATCH; un ingreso cambia solo por sus acciones. |
+| M6-05 + M6-20 | Los reportes cuentan el dinero recibido por la **fecha de cada pago**, sin filtrar el cobro por su fecha. Aplica a: dashboard ("Ingresos hoy", desglose por medio y semana), `/reportes/ingresos/`, el P&L (facturado = cobros de cita y libres por su fecha + abonos de cotización por fecha del pago; recaudado = pagos del periodo) y "Total recaudado" en Ingresos. |
+| M6-08 | El arqueo mide la ventana por `created_at` del pago, es decir, cuándo entró al cajón. El abono de cuota con fecha de hoy guarda la hora real en lugar de las 00:00. |
+| M6-06 | "Por cobrar" usa dos agregados separados, sin el JOIN que repetía el total por cada pago. |
+| M6-09 | Nueva acción `POST /cobros/cobros/{id}/pagos/{pago}/reversar/` con `cobros.anular` y motivo obligatorio. Si el pago era un abono de cuota, devuelve el saldo a la cuota, y la acción queda en el log. Frontend: botón "Reversar" en cada pago, con diálogo de motivo, y "Anular ingreso" cuando no hay pagos. |
+
+**Pruebas del paso 2:**
+- `apps/core/tests/test_verificacion_paso2.py`: 10 casos.
+- `apps/cartera/tests.py::test_reversar_un_abono_devuelve_el_saldo_a_la_cuota`.
 
 ## Orden de corrección sugerido
 

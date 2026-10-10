@@ -15,13 +15,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { FinanzasTabs } from '@/components/finanzas/FinanzasTabs'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess } from '@/lib/permissions'
+import { canAccess, hasPermission, PERM } from '@/lib/permissions'
+import { useAuthStore } from '@/store/authStore'
+import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import type { Cobro, EstadoCobro, OrigenCobro } from '@/types/cobros'
 import { useFormasPago } from '@/hooks/useFormasPago'
@@ -57,6 +62,20 @@ function fmtFechaTabla(d: string) {
   return `${p(x.getMonth() + 1)}/${p(x.getDate())}/${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`
 }
 
+// Mensaje del backend: `error`, `detail` o el primer error de campo.
+function mensajeBackend(err: unknown, porDefecto: string): string {
+  const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data
+  if (!data || typeof data !== 'object') return porDefecto
+  if (typeof data.error === 'string') return data.error
+  if (typeof data.detail === 'string') return data.detail
+  for (const [campo, valor] of Object.entries(data)) {
+    if (campo === 'code') continue
+    if (Array.isArray(valor) && typeof valor[0] === 'string') return valor[0]
+    if (typeof valor === 'string') return valor
+  }
+  return porDefecto
+}
+
 // ─── Registrar pago sheet ─────────────────────────────────────
 
 const pagoSchema = z.object({
@@ -68,7 +87,7 @@ const pagoSchema = z.object({
 function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; open: boolean; onClose: () => void }) {
   const qc = useQueryClient()
   const { formasPago } = useFormasPago({ soloMedioReal: true })
-  const { register, handleSubmit, reset, setValue, formState: { errors } } = useForm({
+  const { register, handleSubmit, reset, setValue, formState: { errors, isSubmitting } } = useForm({
     resolver: zodResolver(pagoSchema),
     defaultValues: { medio_pago: '' },
   })
@@ -77,12 +96,21 @@ function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; ope
     if (formasPago.length > 0) setValue('medio_pago', formasPago[0].id)
   }, [formasPago, setValue])
 
+  // Sugerir el saldo pendiente como valor del pago.
+  useEffect(() => {
+    if (open && cobro && Number(cobro.saldo_pendiente) > 0) {
+      setValue('valor', String(Math.round(Number(cobro.saldo_pendiente))))
+    }
+  }, [open, cobro, setValue])
+
   const mutation = useMutation({
     mutationFn: (data: { medio_pago: string; valor: string; referencia?: string }) =>
       cobrosApi.registrarPago(cobro!.id, data),
-    onSuccess: () => {
+    onSuccess: ({ cobro: actualizado }) => {
+      // El detalle muestra este cobro: se actualiza con la respuesta para que el
+      // saldo y el botón "Registrar pago" no queden con los datos viejos.
+      qc.setQueryData(['cobro', actualizado.id], actualizado)
       qc.invalidateQueries({ queryKey: ['ingresos'] })
-      qc.invalidateQueries({ queryKey: ['cobro', cobro?.id] })
       reset()
       onClose()
     },
@@ -133,11 +161,13 @@ function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; ope
             <Input placeholder="Ej. Caja 1, Recibo #..." {...register('referencia')} />
           </div>
 
-          {mutation.isError && <p className="text-sm text-red-500">Error al registrar pago.</p>}
+          {mutation.isError && (
+            <p className="text-sm text-red-500">{mensajeBackend(mutation.error, 'No se pudo registrar el pago. Intenta de nuevo.')}</p>
+          )}
 
           <div className="flex gap-2 pt-2">
             <Button type="button" variant="outline" className="flex-1" onClick={() => { reset(); onClose() }}>Cancelar</Button>
-            <Button type="submit" className="flex-1" disabled={mutation.isPending}>
+            <Button type="submit" className="flex-1" disabled={mutation.isPending || isSubmitting}>
               {mutation.isPending ? 'Guardando…' : 'Registrar pago'}
             </Button>
           </div>
@@ -149,8 +179,49 @@ function RegistrarPagoSheet({ cobro, open, onClose }: { cobro: Cobro | null; ope
 
 // ─── Ingreso detalle sheet ────────────────────────────────────
 
-function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; open: boolean; onClose: () => void }) {
+function IngresoDetalleSheet({ cobro: cobroFila, open, onClose }: { cobro: Cobro | null; open: boolean; onClose: () => void }) {
+  const qc = useQueryClient()
+  const { user } = useAuthStore()
   const [pagoOpen, setPagoOpen] = useState(false)
+  const [pagoAReversar, setPagoAReversar] = useState<{ id: string; valor: string } | null>(null)
+  const [motivo, setMotivo] = useState('')
+  const [anularOpen, setAnularOpen] = useState(false)
+  const puedeAnular = hasPermission(user, PERM.COBROS_ANULAR)
+
+  // La fila de la tabla es una foto: el detalle se pide al servidor para que,
+  // después de registrar o reversar un pago, muestre el saldo real.
+  const { data: cobroActual } = useQuery({
+    queryKey: ['cobro', cobroFila?.id],
+    queryFn: () => cobrosApi.get(cobroFila!.id),
+    enabled: !!cobroFila && open,
+    initialData: cobroFila ?? undefined,
+  })
+  const cobro = cobroActual ?? cobroFila
+
+  const reversar = useMutation({
+    mutationFn: () => cobrosApi.reversarPago(cobro!.id, pagoAReversar!.id, motivo.trim()),
+    onSuccess: (actualizado) => {
+      qc.setQueryData(['cobro', actualizado.id], actualizado)
+      qc.invalidateQueries({ queryKey: ['ingresos'] })
+      setPagoAReversar(null)
+      setMotivo('')
+      toast.success('Pago reversado', 'El saldo del ingreso se actualizó.')
+    },
+    onError: (err) => toast.error('No se pudo reversar el pago', mensajeBackend(err, 'Intenta de nuevo.')),
+  })
+
+  const anular = useMutation({
+    mutationFn: () => cobrosApi.anular(cobro!.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['ingresos'] })
+      qc.invalidateQueries({ queryKey: ['cobro', cobro?.id] })
+      setAnularOpen(false)
+      toast.success('Ingreso anulado')
+      onClose()
+    },
+    onError: (err) => toast.error('No se pudo anular el ingreso', mensajeBackend(err, 'Intenta de nuevo.')),
+  })
+
   if (!cobro) return null
 
   const cfg = ESTADO_CONFIG[cobro.estado]
@@ -253,7 +324,18 @@ function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; op
                         <p className="font-medium text-foreground">{pago.medio_pago_nombre ?? '—'}</p>
                         <p className="text-xs text-muted-foreground">{fmtDateTime(pago.fecha)}{pago.referencia && ` · ${pago.referencia}`}</p>
                       </div>
-                      <p className="font-semibold text-green-700">{COP.format(Number(pago.valor))}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-green-700">{COP.format(Number(pago.valor))}</p>
+                        {puedeAnular && cobro.estado !== 'anulado' && (
+                          <Button
+                            type="button" variant="ghost" size="sm"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-red-600"
+                            onClick={() => { setMotivo(''); setPagoAReversar({ id: pago.id, valor: pago.valor }) }}
+                          >
+                            Reversar
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -266,11 +348,57 @@ function IngresoDetalleSheet({ cobro, open, onClose }: { cobro: Cobro | null; op
                 Registrar pago
               </Button>
             )}
+            {puedeAnular && cobro.estado !== 'anulado' && cobro.pagos.length === 0 && (
+              <Button variant="outline" className="w-full text-red-600 hover:text-red-700" onClick={() => setAnularOpen(true)}>
+                Anular ingreso
+              </Button>
+            )}
           </div>
         </SheetContent>
       </Sheet>
 
       <RegistrarPagoSheet cobro={cobro} open={pagoOpen} onClose={() => setPagoOpen(false)} />
+
+      <Dialog open={!!pagoAReversar} onOpenChange={(v) => { if (!v) setPagoAReversar(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reversar pago de {pagoAReversar ? COP.format(Number(pagoAReversar.valor)) : ''}</DialogTitle>
+            <DialogDescription>
+              El pago se elimina y el saldo del ingreso vuelve a quedar pendiente. Queda registrado quién lo hizo y por qué.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="motivo-reversa">Motivo *</Label>
+            <Textarea
+              id="motivo-reversa" rows={3} value={motivo} onChange={(e) => setMotivo(e.target.value)}
+              placeholder="Ej. Se digitó $500.000 en vez de $50.000"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setPagoAReversar(null)} disabled={reversar.isPending}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive" className="flex-1"
+              disabled={!motivo.trim() || reversar.isPending}
+              onClick={() => reversar.mutate()}
+            >
+              {reversar.isPending ? 'Reversando…' : 'Reversar pago'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmDialog
+        open={anularOpen}
+        onOpenChange={setAnularOpen}
+        title="¿Anular este ingreso?"
+        description="El ingreso queda anulado y deja de sumar en los reportes. Esta acción no se puede deshacer."
+        confirmLabel="Anular ingreso"
+        variant="destructive"
+        loading={anular.isPending}
+        onConfirm={() => anular.mutate()}
+      />
     </>
   )
 }

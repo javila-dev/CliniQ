@@ -43,7 +43,7 @@ export function RegistrarPagoModal({
   const { formasPago } = useFormasPago({ soloMedioReal: true })
   const abonado = Number(cuota.valor_pagado ?? 0)
 
-  const { register, handleSubmit, reset, formState: { errors }, setValue } = useForm<PagoForm>({
+  const { register, handleSubmit, reset, formState: { errors, isSubmitting }, setValue } = useForm<PagoForm>({
     resolver: zodResolver(pagoSchema),
     defaultValues: {
       valor_pagado: saldoCuota(cuota) || undefined,
@@ -72,7 +72,10 @@ export function RegistrarPagoModal({
       const data = err?.response?.data
       if (data?.detail) { setServerError(String(data.detail)); return }
       if (data?.error) { setServerError(String(data.error)); return }
-      setServerError('Error al registrar el pago')
+      // Error de un campo (p. ej. fecha futura o valor mayor al saldo).
+      const campo = data && Object.entries(data).find(([k, v]) => k !== 'code' && Array.isArray(v))
+      if (campo) { setServerError(String((campo[1] as unknown[])[0])); return }
+      setServerError('No se pudo registrar el pago. Intenta de nuevo.')
     },
   })
 
@@ -160,7 +163,7 @@ export function RegistrarPagoModal({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={isPending}>
+            <Button type="submit" disabled={isPending || isSubmitting}>
               {isPending ? 'Guardando…' : 'Registrar pago'}
             </Button>
           </DialogFooter>

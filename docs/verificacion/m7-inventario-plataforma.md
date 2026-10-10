@@ -13,7 +13,7 @@
 
 ## Hallazgos
 
-**M7-01 · Alto · previsible** · confirmado
+**✅ M7-01 · Alto · previsible** · confirmado
 - **Dónde:** `backend/apps/historia_clinica/views.py:1108-1148`, `services.py:646`
 - **Qué ve el usuario:** borra un consumo de insumo con doble clic, al reintentar o desde dos pestañas, y **el stock sube dos veces**.
 - **Causa:** `destroy` encuentra consumos ya revertidos, y `eliminar_consumo_insumo` no revisa `activo` ni bloquea la fila. Los obsequios sí tienen esta protección.

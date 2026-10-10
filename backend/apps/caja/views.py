@@ -23,13 +23,18 @@ from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 def _ingresos_efectivo(sede, desde, hasta):
-    """Σ de pagos en efectivo de cobros no anulados de la sede, en la ventana."""
+    """Σ de pagos en efectivo de cobros no anulados de la sede, en la ventana.
+
+    La ventana se mide por cuándo se registró el pago (created_at), que es cuando
+    el efectivo entra al cajón. `fecha` es la fecha declarada del pago: un abono
+    de cuota anotado "con fecha de ayer" o a las 00:00 quedaba fuera del arqueo.
+    """
     return (
         PagoRecibido.objects.filter(
             cobro__sede=sede,
             medio_pago__tipo_base="efectivo",
-            fecha__gte=desde,
-            fecha__lte=hasta,
+            created_at__gte=desde,
+            created_at__lte=hasta,
         )
         .exclude(cobro__estado=Cobro.Estado.ANULADO)
         .exclude(es_migracion=True)  # los pagos previos no pasan por el cajón

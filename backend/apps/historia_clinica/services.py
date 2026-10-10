@@ -644,8 +644,21 @@ def registrar_consumo_insumo(*, nota, insumo, cantidad, user, notas: str = "", s
 
 @transaction.atomic
 def eliminar_consumo_insumo(consumo, user):
+    from rest_framework.exceptions import ValidationError
+
     from apps.clinicas.models import Sede
+    from apps.historia_clinica.models import ConsumoInsumo
     from apps.inventario.services import get_or_crear_stock
+
+    # Bloquear el consumo: un doble clic, un reintento o dos pestañas devolvían el
+    # stock dos veces. Un consumo ya revertido no se vuelve a revertir.
+    consumo = (
+        ConsumoInsumo.objects.select_for_update(of=("self",))
+        .select_related("insumo", "movimiento")
+        .get(pk=consumo.pk)
+    )
+    if not consumo.activo:
+        raise ValidationError({"error": "Este consumo ya fue eliminado.", "code": "CONSUMO_YA_ELIMINADO"})
 
     sede = consumo.movimiento.sede if consumo.movimiento_id else (
         Sede.objects.filter(clinica_id=consumo.insumo.clinica_id, activo=True).order_by("created_at").first()

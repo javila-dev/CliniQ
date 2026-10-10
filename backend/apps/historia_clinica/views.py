@@ -1129,6 +1129,9 @@ class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, Gene
             if not nota_id:
                 return queryset.none()
             queryset = queryset.filter(nota_id=nota_id, activo=True)
+        elif self.action == "destroy":
+            # Un consumo ya revertido responde 404 en vez de devolver el stock otra vez.
+            queryset = queryset.filter(activo=True)
         return queryset
 
     def create(self, request, *args, **kwargs):

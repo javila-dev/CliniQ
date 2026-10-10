@@ -437,6 +437,39 @@ class CarteraFlowTests(TestCase):
         self.assertEqual(excede.status_code, 400)
         self.assertIn("PAGO_EXCEDE_CUOTA", str(excede.json()))
 
+    def test_reversar_un_abono_devuelve_el_saldo_a_la_cuota(self):
+        # Verificación transversal M6-09: un abono mal digitado se reversa desde Ingresos.
+        self.client.post(
+            f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",
+            {"estado": "aceptada"},
+            format="json",
+        )
+        cartera = Cartera.objects.get(cotizacion=self.cotizacion)
+        cuota = cartera.cuotas.first()
+        pago = self.client.patch(
+            f"/api/v1/cartera/cuotas/{cuota.id}/registrar_pago/",
+            {
+                "valor_pagado": "300000.00",
+                "fecha_pago": timezone.localdate().isoformat(),
+                "medio_pago": str(self._forma("efectivo").id),
+            },
+            format="json",
+        ).json()
+        cobro = Cobro.objects.get(id=pago["cobro_id"])
+        pago_id = cobro.pagos.get().id
+        response = self.client.post(
+            f"/api/v1/cobros/cobros/{cobro.id}/pagos/{pago_id}/reversar/",
+            {"motivo": "Abono duplicado"},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        cuota.refresh_from_db()
+        self.assertEqual(cuota.valor_pagado, 0)
+        self.assertFalse(cuota.pagada)
+        self.assertFalse(cuota.abonos.exists())
+        cobro.refresh_from_db()
+        self.assertEqual(cobro.total, 0)
+
     def test_cita_puede_vincular_item_de_cotizacion_aceptada(self):
         self.client.post(
             f"/api/v1/cotizaciones/{self.cotizacion.id}/cambiar_estado/",

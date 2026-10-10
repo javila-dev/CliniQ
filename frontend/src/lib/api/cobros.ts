@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import type {
-  Cobro, CreateCobroRequest, AgregarItemRequest, RegistrarPagoRequest, ResumenIngresos,
+  Cobro, CreateCobroRequest, AgregarItemRequest, PagoRecibido, RegistrarPagoRequest, ResumenIngresos,
 } from '@/types/cobros'
 import type { Paginated } from '@/types/common'
 
@@ -33,11 +33,6 @@ export const cobrosApi = {
     return res.data
   },
 
-  update: async (id: string, data: Partial<CreateCobroRequest>): Promise<Cobro> => {
-    const res = await apiClient.patch<Cobro>(`/cobros/cobros/${id}/`, data)
-    return res.data
-  },
-
   anular: async (id: string): Promise<void> => {
     await apiClient.delete(`/cobros/cobros/${id}/`)
   },
@@ -52,8 +47,14 @@ export const cobrosApi = {
     return res.data
   },
 
-  registrarPago: async (id: string, data: RegistrarPagoRequest): Promise<Cobro> => {
-    const res = await apiClient.post<Cobro>(`/cobros/cobros/${id}/registrar_pago/`, data)
+  registrarPago: async (id: string, data: RegistrarPagoRequest): Promise<{ pago: PagoRecibido; cobro: Cobro }> => {
+    const res = await apiClient.post<{ pago: PagoRecibido; cobro: Cobro }>(`/cobros/cobros/${id}/registrar_pago/`, data)
+    return res.data
+  },
+
+  /** Elimina un pago mal registrado (queda en el log de acciones con el motivo). */
+  reversarPago: async (cobroId: string, pagoId: string, motivo: string): Promise<Cobro> => {
+    const res = await apiClient.post<Cobro>(`/cobros/cobros/${cobroId}/pagos/${pagoId}/reversar/`, { motivo })
     return res.data
   },
 

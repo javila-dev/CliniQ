@@ -20,7 +20,8 @@ from apps.cobros.serializers import (
     PagoCreateSerializer,
     PagoRecibidoSerializer,
 )
-from apps.cobros.services import agregar_item_cobro, registrar_pago
+from apps.cobros.services import agregar_item_cobro, registrar_pago, reversar_pago
+from apps.core.logging import registrar_accion
 from apps.inventario.models import Insumo
 from apps.users.authorization import user_sede_ids_acotadas
 from apps.users.permissions import RequirePermission, get_clinica_activa
@@ -37,6 +38,10 @@ class CobroViewSet(ModelViewSet):
     filterset_fields = ("estado", "sede", "paciente", "profesional", "origen", "cotizacion")
     ordering_fields = ("fecha", "total", "created_at")
     search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
+    # Sin PUT/PATCH: un ingreso se modifica con sus acciones (ítems, pagos, anular),
+    # que validan permisos y recalculan totales. Editarlo directo dejaba a quien solo
+    # puede ver cobros cambiar fecha, descuento o paciente sin recalcular nada.
+    http_method_names = ("get", "post", "delete", "head", "options")
 
     def get_serializer_class(self):
         if self.action == "create":
@@ -52,6 +57,8 @@ class CobroViewSet(ModelViewSet):
             return [RequirePermission("cobros.editar_items")()]
         if self.action == "registrar_pago_action":
             return [RequirePermission("cobros.registrar_pago")()]
+        if self.action == "reversar_pago":
+            return [RequirePermission("cobros.anular")()]
         return [RequirePermission("cobros.ver")()]
 
     def get_queryset(self):
@@ -207,6 +214,27 @@ class CobroViewSet(ModelViewSet):
             status=status.HTTP_201_CREATED,
         )
 
+    @action(detail=True, methods=["post"], url_path=r"pagos/(?P<pago_pk>[^/.]+)/reversar")
+    def reversar_pago(self, request, pk=None, pago_pk=None):
+        """Revierte un pago mal digitado. Pide el motivo y queda en el log de acciones."""
+        cobro = self.get_object()
+        pago = PagoRecibido.objects.filter(pk=pago_pk, cobro=cobro).select_related("medio_pago").first()
+        if pago is None:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+        motivo = str(request.data.get("motivo") or "").strip()
+        if not motivo:
+            raise ValidationError({"motivo": ["Indica por qué se reversa el pago."]})
+        detalle = {
+            "resumen": f"Pago de ${pago.valor:,.0f} reversado".replace(",", "."),
+            "valor": str(pago.valor),
+            "medio_pago": pago.medio_pago.nombre,
+            "fecha_pago": pago.fecha.isoformat(),
+            "motivo": motivo,
+        }
+        cobro = reversar_pago(cobro=cobro, pago=pago)
+        registrar_accion(request, "cobro.reversar_pago", cobro, detalle)
+        return Response(CobroSerializer(cobro, context={"request": request}).data)
+
     @action(detail=False, methods=["get"], url_path="resumen")
     def resumen(self, request):
         qs = self.get_queryset()
@@ -226,19 +254,30 @@ class CobroViewSet(ModelViewSet):
             qs = qs.filter(sede_id=sede)
         if search:
             qs = qs.filter(Q(paciente__nombres__icontains=search) | Q(paciente__apellidos__icontains=search))
+
+        # Recaudado = pagos recibidos en el periodo (por la fecha del pago). Un
+        # cobro de cotización acumula todas las cuotas: filtrar por la fecha del
+        # cobro sumaba también las cuotas de meses anteriores.
+        pagos = PagoRecibido.objects.filter(
+            cobro__in=qs.exclude(estado=Cobro.Estado.ANULADO)
+        ).exclude(es_migracion=True)
         if fecha_desde:
+            pagos = pagos.filter(fecha__date__gte=fecha_desde)
             qs = qs.filter(fecha__date__gte=fecha_desde)
         if fecha_hasta:
+            pagos = pagos.filter(fecha__date__lte=fecha_hasta)
             qs = qs.filter(fecha__date__lte=fecha_hasta)
+        total_recaudado = Decimal(pagos.aggregate(t=Sum("valor"))["t"] or 0)
 
+        # Pendiente = total de los cobros del periodo menos todo lo pagado sobre
+        # ellos. Dos agregados separados: un Sum con JOIN a pagos repetía el total
+        # del cobro una vez por cada pago (pago mixto).
         qs_activo = qs.exclude(estado=Cobro.Estado.ANULADO)
-        agg = qs_activo.aggregate(
-            total_recaudado=Sum("pagos__valor"),
-            total_cobrado=Sum("total"),
+        total_cobrado = Decimal(qs_activo.aggregate(t=Sum("total"))["t"] or 0)
+        pagado_cobros = Decimal(
+            PagoRecibido.objects.filter(cobro__in=qs_activo).aggregate(t=Sum("valor"))["t"] or 0
         )
-        total_recaudado = Decimal(agg["total_recaudado"] or 0)
-        total_cobrado   = Decimal(agg["total_cobrado"] or 0)
-        total_pendiente = max(total_cobrado - total_recaudado, Decimal(0))
+        total_pendiente = max(total_cobrado - pagado_cobros, Decimal(0))
         total_cobros   = qs.count()
         total_pagados  = qs.filter(estado=Cobro.Estado.PAGADO).count()
         total_pendientes = qs.filter(estado__in=[Cobro.Estado.PENDIENTE, Cobro.Estado.PAGADO_PARCIAL]).count()
