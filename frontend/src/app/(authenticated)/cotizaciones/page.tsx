@@ -21,13 +21,13 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { hasPermission, isProfesional, PERM } from '@/lib/permissions'
 import type { Cotizacion, EstadoComercial } from '@/types/cotizaciones'
 
-// Solo propuestas: las aceptadas son ventas y viven en /ventas ("Convertidas"
+// Solo propuestas: las aceptadas son ventas y viven en /ventas ("Vendidas"
 // queda para ver qué cotizaciones se cerraron).
 const ESTADO_TABS: { value: string; label: string }[] = [
   { value: 'borrador',   label: 'Abiertas'    },
   { value: 'vencida',    label: 'Vencidas'    },
   { value: 'descartada', label: 'Descartadas' },
-  { value: 'aceptada',   label: 'Convertidas' },
+  { value: 'aceptada',   label: 'Vendidas'    },
   { value: 'todas',      label: 'Todas'       },
 ]
 
@@ -291,7 +291,7 @@ export default function CotizacionesPage() {
         )}
 
         {/* Filtro de estado — en la misma fila, alineado a la derecha */}
-        <Tabs value={tabEstado} onValueChange={cambiarTab} className="ml-auto">
+        <Tabs value={tabEstado} onValueChange={cambiarTab} className="ml-auto max-w-full overflow-x-auto">
           <TabsList className="h-9">
             {ESTADO_TABS.map((t) => (
               <TabsTrigger key={t.value} value={t.value} className="text-xs">

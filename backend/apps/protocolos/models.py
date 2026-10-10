@@ -2,6 +2,7 @@ import os
 from datetime import date, timedelta
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils import timezone
 
@@ -128,6 +129,11 @@ class SesionProcedimiento(BaseModel):
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)
     fecha = models.DateField(null=True, blank=True)
     hora = models.TimeField(null=True, blank=True)
+    # Ritmo vendido: días desde la sesión anterior, copiados al aceptar la
+    # cotización (ítem > bloque > procedimiento > semanas del protocolo).
+    cada_dias = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(730)],
+    )
     profesional = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

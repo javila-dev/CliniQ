@@ -38,6 +38,7 @@ export interface ItemCotizacion {
   num_citas: number
   duracion_estimada: string
   periodicidad: string
+  cada_dias?: number | null      // ritmo para este paciente (días entre sesiones)
   valor_unitario: string        // Decimal como string (DRF)
   descuento_porcentaje: string  // Decimal como string (DRF)
   subtotal: string              // Calculado por el backend
@@ -89,6 +90,20 @@ export interface ItemSesiones {
   es_obsequio?: boolean         // sesión obsequio con cupo propio (procedimiento del catálogo)
   sesiones_obsequio?: number    // en un tratamiento: sesiones regaladas que suman a su cupo
   citas: CitaSesion[]
+  ritmo?: RitmoPaquete | null   // cuándo debería ser la siguiente sesión (solo vendidas)
+}
+
+// Ritmo de un paquete vendido (backend: seguimiento/ritmo.py).
+export interface RitmoPaquete {
+  estado: 'completo' | 'pausado' | 'agendada' | 'a_tiempo' | 'pronto' | 'atrasada'
+  proxima_esperada: string | null   // YYYY-MM-DD
+  dias_atraso: number
+  cada_dias: number | null
+  sin_ritmo: boolean                // se usó el valor genérico de la clínica
+  total: number
+  realizadas: number
+  ultima_realizada?: string | null
+  no_asistio?: boolean
 }
 
 export interface SesionesCotizacion {

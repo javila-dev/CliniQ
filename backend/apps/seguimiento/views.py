@@ -8,6 +8,7 @@ from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet
 
@@ -53,6 +54,8 @@ class OportunidadViewSet(
     filter_backends = ()
 
     def get_permissions(self):
+        if self.action == "detectar":
+            return [AllowAny()]  # se valida el secreto de n8n dentro de la acción
         if self.action in {"list", "retrieve", "embudo"} or (
             self.action == "gestiones" and self.request.method == "GET"
         ):
@@ -89,6 +92,12 @@ class OportunidadViewSet(
 
         params = self.request.query_params
         hoy = timezone.localdate()
+        # La detección de paquetes atrasados corre una vez al día por clínica.
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            from apps.seguimiento.deteccion import detectar_si_toca
+
+            detectar_si_toca(clinica)
         estado = params.get("estado", Oportunidad.Estado.ABIERTA)
         if estado != "todas":
             queryset = queryset.filter(estado=estado)
@@ -180,9 +189,28 @@ class OportunidadViewSet(
         from apps.pacientes.models import Paciente
 
         oportunidad = self._oportunidad(pk)
-        paciente = get_object_or_404(Paciente, pk=request.data.get("paciente"), clinica_id=oportunidad.clinica_id)
+        paciente = get_object_or_404(
+            Paciente, pk=request.data.get("paciente"), clinica_id=oportunidad.clinica_id, activo=True,
+        )
         services.vincular_paciente(oportunidad, paciente)
         return self._respuesta(oportunidad)
+
+    @action(detail=False, methods=["post"], url_path="detectar", permission_classes=[AllowAny], authentication_classes=[])
+    def detectar(self, request):
+        """Detección diaria para todas las clínicas activas (llamado por n8n con X-N8N-Secret)."""
+        from apps.agenda.views import _n8n_secret_ok
+        from apps.clinicas.models import Clinica
+        from apps.seguimiento.deteccion import detectar_paquetes
+
+        if not _n8n_secret_ok(request):
+            return Response({"error": "No autorizado."}, status=status.HTTP_403_FORBIDDEN)
+        resultado = {}
+        for clinica in Clinica.objects.filter(activo=True):
+            try:
+                resultado[str(clinica.id)] = detectar_paquetes(clinica)
+            except Exception as exc:  # una clínica con error no frena a las demás
+                resultado[str(clinica.id)] = {"error": str(exc)}
+        return Response(resultado)
 
     # ── Embudo ─────────────────────────────────────────────────────────────
 

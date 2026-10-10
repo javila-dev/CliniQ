@@ -113,7 +113,7 @@ export default function VentasPage() {
   if (sede !== TODAS) params.sede = sede
   if (vendedor !== TODAS) params.vendedor = vendedor
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['ventas', params],
     queryFn: () => ventasApi.list(params),
   })
@@ -156,7 +156,8 @@ export default function VentasPage() {
         if (!res.next) break
       }
       const filas = ventas.map((v) => ({
-        Fecha: formatFecha(v.aceptada_en),
+        // Fecha real (no texto) para poder ordenar y filtrar en Excel.
+        Fecha: v.aceptada_en ? new Date(new Date(v.aceptada_en).toLocaleDateString('en-CA') + 'T00:00:00') : '',
         Paciente: v.paciente_nombre,
         Sede: v.sede_nombre ?? '',
         Profesional: v.vendedor_nombre ?? '',
@@ -166,11 +167,11 @@ export default function VentasPage() {
         'En mora': v.en_mora ? 'Sí' : 'No',
         Sesiones: v.sesiones ? `${v.sesiones.completadas}/${v.sesiones.total}` : '',
       }))
-      const ws = XLSX.utils.json_to_sheet(filas)
+      const ws = XLSX.utils.json_to_sheet(filas, { cellDates: true, dateNF: 'dd/mm/yyyy' })
       ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 9 }, { wch: 10 }]
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Ventas')
-      XLSX.writeFile(wb, `ventas_${new Date().toISOString().slice(0, 10)}.xlsx`)
+      XLSX.writeFile(wb, `ventas_${new Date().toLocaleDateString('en-CA')}.xlsx`)
     } catch {
       toast.error('No se pudo exportar', 'Vuelve a intentarlo en un momento.')
     } finally {
@@ -197,13 +198,13 @@ export default function VentasPage() {
       />
 
       <div className="flex items-end gap-3 flex-wrap">
-        <div className="space-y-1">
+        <div className="space-y-1 w-full sm:w-auto">
           <label className="text-xs font-medium text-muted-foreground">Buscar</label>
           <Input
             placeholder="Paciente…"
             value={busqueda}
             onChange={(e) => conReinicio(setBusqueda)(e.target.value)}
-            className="w-56 h-9"
+            className="w-full sm:w-56 h-9"
           />
         </div>
         <div className="space-y-1">
@@ -260,6 +261,14 @@ export default function VentasPage() {
 
       {isLoading ? (
         <LoadingState rows={4} />
+      ) : isError ? (
+        <Card>
+          <CardContent className="py-16 text-center">
+            <p className="font-medium">No pudimos cargar las ventas</p>
+            <p className="text-sm text-muted-foreground mt-1">Revisa tu conexión e inténtalo de nuevo.</p>
+            <Button variant="outline" size="sm" className="mt-4" onClick={() => refetch()}>Reintentar</Button>
+          </CardContent>
+        </Card>
       ) : !data?.results?.length ? (
         <Card>
           <CardContent className="py-16 text-center">

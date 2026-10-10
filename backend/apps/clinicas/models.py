@@ -1,7 +1,7 @@
 import os
 import secrets
 
-from django.core.validators import MinValueValidator
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F
 from django.db.models.functions import Lower, Trim
@@ -374,6 +374,10 @@ class Servicio(BaseModel):
     )
     vigencia_meses = models.PositiveIntegerField(default=12)
     tiene_protocolo = models.BooleanField(default=False)
+    # Ritmo: días que deben pasar desde la sesión anterior (ver seguimiento/ritmo.py).
+    cada_dias = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(730)],
+    )
     consentimientos_requeridos = models.ManyToManyField(
         "configuracion.DocumensoConsentimientoTemplate",
         through="ServicioConsentimiento",
@@ -513,6 +517,10 @@ class TipoSesion(BaseModel):
     orden = models.PositiveIntegerField(default=1)
     es_compromiso = models.BooleanField(default=True)
     duracion_min = models.PositiveIntegerField(default=0)
+    # Ritmo: días que deben pasar desde la sesión anterior (ver seguimiento/ritmo.py).
+    cada_dias = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(730)],
+    )
 
     class Meta:
         db_table = "clinicas_tipo_sesion"

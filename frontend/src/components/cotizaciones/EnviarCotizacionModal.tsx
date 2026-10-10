@@ -140,6 +140,7 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
       qc.invalidateQueries({ queryKey: ['cotizacion', cotizacionId] })
       qc.invalidateQueries({ queryKey: ['cotizacion-envios', cotizacionId] })
       qc.invalidateQueries({ queryKey: ['cotizaciones'] })
+      qc.invalidateQueries({ queryKey: ['seguimiento'] })
 
     } catch {
       const msgs: Record<CanalModal, string> = {

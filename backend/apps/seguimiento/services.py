@@ -20,16 +20,17 @@ from apps.seguimiento.models import GestionOportunidad, Oportunidad
 
 logger = logging.getLogger(__name__)
 
-# Días hasta el próximo contacto según cómo terminó la gestión. None = sale de
-# "Para hoy" (agendó, número errado, no le interesa: la recepción decide).
+# Días hasta el próximo contacto según cómo terminó la gestión. Una oportunidad
+# abierta siempre conserva fecha: sin ella saldría de "Para hoy" sin cerrarse y
+# nadie la volvería a ver. Para sacarla de la lista está ``perder``.
 DIAS_SEGUN_RESULTADO = {
     GestionOportunidad.Resultado.SIN_RESPUESTA: 1,
     GestionOportunidad.Resultado.ENVIADO: 2,
     GestionOportunidad.Resultado.INTERESADO: 2,
     GestionOportunidad.Resultado.OTRO: 2,
-    GestionOportunidad.Resultado.AGENDO: None,
-    GestionOportunidad.Resultado.NUMERO_ERRADO: None,
-    GestionOportunidad.Resultado.NO_INTERESADO: None,
+    GestionOportunidad.Resultado.AGENDO: 1,
+    GestionOportunidad.Resultado.NUMERO_ERRADO: 1,
+    GestionOportunidad.Resultado.NO_INTERESADO: 1,
 }
 # Tras enviar una cotización, volver a llamar en estos días si no responde.
 DIAS_TRAS_COTIZAR = 3
@@ -130,20 +131,23 @@ def crear_interesado(*, clinica, usuario, nombre: str, telefono: str, interes: s
 
 @transaction.atomic
 def registrar_gestion(oportunidad, *, usuario, canal: str, resultado: str, nota: str = "",
-                      proximo_contacto=None, sin_fecha: bool = False) -> GestionOportunidad:
-    """Guarda el contacto y mueve la fecha del próximo: la sugerida según el
-    resultado, o la que elija la recepción (``sin_fecha`` la quita)."""
+                      proximo_contacto=None) -> GestionOportunidad:
+    """Guarda el contacto y mueve la fecha del próximo: la que elija la
+    recepción o la sugerida según el resultado. Nunca la deja sin fecha."""
     gestion = GestionOportunidad.objects.create(
         oportunidad=oportunidad, usuario=usuario, canal=canal, resultado=resultado, nota=nota or "",
     )
     if oportunidad.estado == Oportunidad.Estado.ABIERTA:
-        if sin_fecha:
-            oportunidad.proximo_contacto = None
-        elif proximo_contacto is not None:
+        if proximo_contacto is not None:
             oportunidad.proximo_contacto = proximo_contacto
         else:
-            dias = DIAS_SEGUN_RESULTADO.get(resultado, 2)
-            oportunidad.proximo_contacto = None if dias is None else timezone.localdate() + timedelta(days=dias)
+            hoy = timezone.localdate()
+            fecha_cita = timezone.localdate(oportunidad.cita.fecha_inicio) if oportunidad.cita_id else None
+            if resultado == GestionOportunidad.Resultado.AGENDO and fecha_cita and fecha_cita >= hoy:
+                # Ya tiene la cita: volver a llamar el día siguiente, como al agendar.
+                oportunidad.proximo_contacto = fecha_cita + timedelta(days=1)
+            else:
+                oportunidad.proximo_contacto = hoy + timedelta(days=DIAS_SEGUN_RESULTADO.get(resultado, 2))
         oportunidad.save(update_fields=["proximo_contacto", "updated_at"])
     return gestion
 
@@ -192,9 +196,45 @@ def vincular_paciente(oportunidad, paciente) -> Oportunidad:
 # ── Avance automático (ganchos) ────────────────────────────────────────────
 
 @_sin_romper
+def al_crear_paciente(paciente):
+    """Una ficha nueva con el teléfono de un interesado sin ficha queda vinculada a él.
+
+    Así, aunque recepción cree al paciente y su cita desde la agenda (sin pasar
+    por Seguimiento), el interesado avanza solo a Valoración al agendarse.
+    Si coinciden varios interesados, se toma el más reciente.
+    """
+    if getattr(paciente, "es_migracion", False) or abiertas_de_venta(paciente).exists():
+        return
+    clave = digitos_telefono(paciente.telefono)
+    if len(clave) < 7:
+        return
+    candidatos = Oportunidad.objects.filter(
+        clinica_id=paciente.clinica_id, paciente__isnull=True, activo=True,
+        estado=Oportunidad.Estado.ABIERTA, tipo__in=Oportunidad.TIPOS_VENTA,
+        contacto_telefono__contains=clave[-4:],
+    ).order_by("-created_at")
+    for oportunidad in candidatos:
+        if digitos_telefono(oportunidad.contacto_telefono) == clave:
+            vincular_paciente(oportunidad, paciente)
+            return
+
+
+@_sin_romper
 def al_crear_cita(cita):
-    """Una cita para un interesado en etapa Nuevo es su valoración."""
+    """Una cita para un interesado en etapa Nuevo es su valoración; una cita de
+    un paquete atrasado lo da por recuperado."""
     if getattr(cita, "es_migracion", False) or cita.paciente_id is None:
+        return
+    if cita.item_cotizacion_id:
+        from apps.seguimiento.deteccion import cerrar_paquete
+
+        for oportunidad in Oportunidad.objects.filter(
+            item_cotizacion_id=cita.item_cotizacion_id,
+            estado=Oportunidad.Estado.ABIERTA,
+            motivo=Oportunidad.Motivo.SESIONES_PENDIENTES,
+        ):
+            cerrar_paquete(oportunidad, cita=cita)
+        # La sesión de un paquete ya comprado no es la valoración de una venta nueva.
         return
     fecha_cita = timezone.localdate(cita.fecha_inicio)
     for oportunidad in abiertas_de_venta(cita.paciente).filter(etapa=Oportunidad.Etapa.NUEVO):

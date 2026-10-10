@@ -13,7 +13,7 @@ import { Button } from '@/components/ui/button'
 import { NuevaCitaModal } from '@/components/agenda/NuevaCitaModal'
 import { SesionTimeline } from './SesionTimeline'
 import { formatDateTime } from '@/lib/utils'
-import type { HistorialSesion, TipoItemCotizacion } from '@/types/cotizaciones'
+import type { HistorialSesion, RitmoPaquete, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { BusquedaPaciente } from '@/types/pacientes'
 import type { GrupoSesiones, SesionEjecutada } from '@/types/protocolos'
 
@@ -56,6 +56,45 @@ interface SesionFila {
   sesionEjecutadaId?: string | null
   // Sesión extra regalada en la cotización
   obsequio?: boolean
+}
+
+function fechaCorta(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })
+}
+
+/** Cuándo le toca la siguiente sesión, según el ritmo vendido. */
+function RitmoLinea({ ritmo }: { ritmo: RitmoPaquete }) {
+  if (!ritmo.proxima_esperada || ritmo.estado === 'completo' || ritmo.estado === 'pausado') return null
+  const fecha = fechaCorta(ritmo.proxima_esperada)
+  const ayuda = ritmo.sin_ritmo
+    ? 'Este tratamiento no tiene frecuencia definida: se usa la general de la clínica. Puedes definirla en el catálogo (tratamiento o procedimiento).'
+    : !ritmo.cada_dias ? undefined
+    : ritmo.ultima_realizada ? `Cada ${ritmo.cada_dias} días desde la última sesión realizada.`
+    : 'Primera sesión: se cuenta desde la fecha de la venta.'
+  const dias = (n: number) => `${n} día${n !== 1 ? 's' : ''}`
+  const config = {
+    agendada: { texto: `Próxima sesión agendada: ${fecha}`, clase: 'text-green-700', punto: 'bg-green-500' },
+    a_tiempo: { texto: `Próxima sesión: alrededor del ${fecha}`, clase: 'text-muted-foreground', punto: 'bg-gray-300' },
+    pronto: {
+      texto: ritmo.dias_atraso > 0
+        ? `La sesión era para el ${fecha} · aún sin cita`
+        : ritmo.proxima_esperada === new Date().toLocaleDateString('en-CA') ? 'La próxima sesión es para hoy · aún sin cita' : `Próxima sesión: ${fecha} · aún sin cita`,
+      clase: 'text-amber-700', punto: 'bg-amber-500',
+    },
+    atrasada: {
+      texto: `Atrasada ${dias(ritmo.dias_atraso)} · la sesión era para el ${fecha}`,
+      clase: 'text-red-700', punto: 'bg-red-500',
+    },
+  }[ritmo.estado as 'agendada' | 'a_tiempo' | 'pronto' | 'atrasada']
+  if (!config) return null
+  return (
+    <p className={`flex flex-wrap items-center gap-x-1.5 text-xs ${config.clase}`} title={ayuda}>
+      <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${config.punto}`} />
+      {config.texto}
+      {ritmo.no_asistio && ritmo.estado !== 'agendada' && <span className="text-muted-foreground">· no asistió a la última</span>}
+      {ritmo.sin_ritmo && ritmo.estado !== 'agendada' && <span className="text-muted-foreground">· fecha aproximada</span>}
+    </p>
+  )
 }
 
 function ObsequioBadge() {
@@ -364,6 +403,8 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
                   </div>
                 </div>
 
+                {item.ritmo && <RitmoLinea ritmo={item.ritmo} />}
+
                 {/* Próxima sesión por agendar: visible sin desplegar la lista */}
                 {proxima ? (
                   <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/20 bg-gradient-to-r from-primary/[0.08] via-primary/[0.04] to-transparent px-4 py-3">
@@ -376,8 +417,8 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
                         <p className="text-xs text-muted-foreground">
                           {proxima.detalle ? `${proxima.detalle} · ` : ''}
                           {porAgendar.length === 1
-                            ? 'Es la última sin cita'
-                            : `Próxima por agendar · ${porAgendar.length} sin cita`}
+                            ? 'Es la última sesión sin cita'
+                            : `Siguiente sesión sin cita · quedan ${porAgendar.length}`}
                         </p>
                       </div>
                     </div>

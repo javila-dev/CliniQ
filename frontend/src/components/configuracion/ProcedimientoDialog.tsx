@@ -37,6 +37,7 @@ const schema = z.object({
   documenso_template_nombre: z.string().nullable().optional(),
   consentimiento_cada_vez: z.boolean(),
   vigencia_meses: z.number().int().min(1).max(120),
+  cada_dias: z.number().int().min(1).max(730).nullable().optional(),
   profesionales: z.array(z.string()).optional(),
   grupos: z.array(z.string()).optional(),
   activo: z.boolean().optional(),
@@ -48,7 +49,7 @@ const DEFAULT_VALUES: FormValues = {
   precio_base: null, descuento_maximo_pct: 0,
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, consentimiento_cada_vez: false,
-  vigencia_meses: 12, profesionales: [], grupos: [], activo: true,
+  vigencia_meses: 12, cada_dias: null, profesionales: [], grupos: [], activo: true,
 }
 
 const ETIQUETAS_DE_ERROR: Record<string, string> = {
@@ -209,6 +210,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       documenso_template_nombre: primerConsentimiento?.template_nombre ?? null,
       consentimiento_cada_vez: primerConsentimiento?.requiere_firma_cada_vez ?? false,
       vigencia_meses: fullTarget.vigencia_meses ?? 12,
+      cada_dias: fullTarget.cada_dias ?? null,
       profesionales: fullTarget.profesionales_detalle?.map((p) => p.id) ?? [],
       grupos: fullTarget.grupos ?? [],
       activo: fullTarget.activo ?? true,
@@ -243,6 +245,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
         precio_referencia: data.precio_base ?? null,
         descuento_maximo_pct: data.descuento_maximo_pct ?? 0,
         vigencia_meses: data.requiere_consentimiento ? data.vigencia_meses : undefined,
+        cada_dias: data.cada_dias ?? null,
         profesionales: data.profesionales ?? [],
         grupos: data.grupos ?? [],
       }
@@ -415,6 +418,22 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
             </div>
           )} />
         </div>
+      </div>
+
+      <div className="flex items-center justify-between gap-3">
+        <LabelConAyuda ayuda="Si el paciente vuelve cada mes, escribe 30. Con esto la app avisa cuando un paciente ya debió agendar su siguiente sesión. Déjalo vacío si es de una sola sesión.">
+          Frecuencia entre sesiones
+        </LabelConAyuda>
+        <Controller name="cada_dias" control={control} render={({ field }) => (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            cada
+            <Input inputMode="numeric" className="h-8 w-20 text-right" placeholder="Ej: 30"
+              value={field.value ?? ''}
+              onChange={(e) => { const raw = e.target.value.replace(/\D/g, '').slice(0, 3); field.onChange(raw ? Math.min(730, Number(raw)) || null : null) }}
+            />
+            días
+          </div>
+        )} />
       </div>
 
       {campoProfesionales}

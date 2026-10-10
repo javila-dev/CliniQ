@@ -616,13 +616,17 @@ def crear_tratamiento_desde_cotizacion(cotizacion_item):
             sesiones = []
             for tipo in tipos:
                 principal = tipo.procedimientos.filter(activo=True).select_related("procedimiento").first()
+                procedimiento_principal = principal.procedimiento if principal else None
+                # En tratamientos manda el ritmo del bloque; si no tiene, el del procedimiento.
+                cada_dias = tipo.cada_dias or (procedimiento_principal.cada_dias if procedimiento_principal else None)
                 for numero in range(1, tipo.cantidad + 1):
                     sesiones.append(
                         SesionProcedimiento(
                             tratamiento=tratamiento,
                             tipo_sesion=tipo,
                             numero=numero,
-                            procedimiento=principal.procedimiento if principal else None,
+                            procedimiento=procedimiento_principal,
+                            cada_dias=cada_dias,
                         )
                     )
             SesionProcedimiento.objects.bulk_create(sesiones)
@@ -643,7 +647,22 @@ def crear_tratamiento_desde_cotizacion(cotizacion_item):
             cotizacion_item=cotizacion_item,
             fecha_inicio=date.today(),
         )
-        SesionProcedimiento.objects.bulk_create(
-            [SesionProcedimiento(tratamiento=tratamiento, paso=paso, procedimiento=procedimiento) for paso in pasos]
-        )
+        # Ritmo del protocolo: semanas entre un paso y el anterior; si faltan, el
+        # del ítem o el del procedimiento. Si en la cotización se cambió el ritmo
+        # para este paciente (distinto al del catálogo), ese manda en todos los pasos.
+        respaldo = cotizacion_item.cada_dias or procedimiento.cada_dias
+        ritmo_del_paciente = bool(cotizacion_item.cada_dias) and cotizacion_item.cada_dias != procedimiento.cada_dias
+        sesiones = []
+        semana_anterior = None
+        for paso in pasos:
+            cada_dias = respaldo
+            if (not ritmo_del_paciente and paso.semana is not None and semana_anterior is not None
+                    and paso.semana >= semana_anterior):
+                cada_dias = (paso.semana - semana_anterior) * 7
+            if paso.semana is not None:
+                semana_anterior = paso.semana
+            sesiones.append(SesionProcedimiento(
+                tratamiento=tratamiento, paso=paso, procedimiento=procedimiento, cada_dias=cada_dias,
+            ))
+        SesionProcedimiento.objects.bulk_create(sesiones)
         return tratamiento

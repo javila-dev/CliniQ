@@ -1252,12 +1252,12 @@ function DashboardContent() {
       <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
         {canVerFinanzas && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <div className="flex items-center justify-between gap-3 px-5 py-3 border-b">
+            <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-5 py-3 border-b">
               <div className="flex items-center gap-2 min-w-0">
                 <ShoppingBag className="h-4 w-4 text-primary shrink-0" />
                 <h2 className="font-semibold text-sm truncate">Comercial {periodoSufijo}</h2>
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-3">
                 <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
                 <Link href="/cotizaciones" className="text-xs text-primary hover:underline">Cotizaciones</Link>
                 <Link href="/ventas" className="text-xs text-primary hover:underline flex items-center gap-1">

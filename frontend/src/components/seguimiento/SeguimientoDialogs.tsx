@@ -45,6 +45,7 @@ export function Chips<T extends string>({
         <button
           key={o.value}
           type="button"
+          aria-pressed={valor === o.value}
           onClick={() => onChange(valor === o.value ? null : o.value)}
           className={cn(
             'rounded-full border transition-colors',
@@ -102,7 +103,7 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
   const [fecha, setFecha] = useState(isoEnDias(0))
   // Sedes del usuario (/me); con una sola se asigna sola y no se muestra.
   const { sedes, defaultSedeId } = useUserSedes()
-  const sedeInicial = defaultSedeId ?? sedes[0]?.id ?? ''
+  const sedeInicial = sedes.length > 1 ? (defaultSedeId ?? '') : (sedes[0]?.id ?? '')
   const [sede, setSede] = useState(sedeInicial)
 
   useEffect(() => {
@@ -128,8 +129,8 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
 
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>Nombre</Label>
-            <Input value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Laura Pérez" autoFocus />
+            <Label htmlFor="interesado-nombre">Nombre</Label>
+            <Input id="interesado-nombre" value={nombre} onChange={(e) => setNombre(e.target.value)} placeholder="Ej. Laura Pérez" autoFocus />
           </div>
           <div className="space-y-1.5">
             <Label>Teléfono</Label>
@@ -147,8 +148,8 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
             </div>
           )}
           <div className="space-y-1.5">
-            <Label>¿Qué le interesa?</Label>
-            <Input value={interes} onChange={(e) => setInteres(e.target.value)} placeholder="Ej. depilación axilas, bótox" />
+            <Label htmlFor="interesado-interes">¿Qué le interesa?</Label>
+            <Input id="interesado-interes" value={interes} onChange={(e) => setInteres(e.target.value)} placeholder="Ej. depilación axilas, bótox" />
           </div>
           <div className="space-y-1.5">
             <Label>¿Cómo llegó? <span className="font-normal text-muted-foreground">(opcional)</span></Label>
@@ -158,12 +159,12 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
           {mas ? (
             <div className="grid grid-cols-2 gap-3 rounded-lg bg-muted/40 p-3">
               <div className="space-y-1.5">
-                <Label className="text-xs">Valor estimado</Label>
-                <Input value={valor} onChange={(e) => setValor(e.target.value.replace(/[^\d]/g, ''))} placeholder="$" inputMode="numeric" />
+                <Label htmlFor="interesado-valor" className="text-xs">Valor estimado</Label>
+                <Input id="interesado-valor" value={valor ? `$ ${Number(valor).toLocaleString('es-CO')}` : ''} onChange={(e) => setValor(e.target.value.replace(/[^\d]/g, '').slice(0, 12))} placeholder="Ej. $ 1.500.000" inputMode="numeric" />
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs">Llamar el</Label>
-                <Input type="date" value={fecha} min={isoEnDias(0)} onChange={(e) => setFecha(e.target.value)} />
+                <Label htmlFor="interesado-fecha" className="text-xs">Contactar el</Label>
+                <Input id="interesado-fecha" type="date" value={fecha} min={isoEnDias(0)} onChange={(e) => setFecha(e.target.value)} />
               </div>
             </div>
           ) : (
@@ -195,7 +196,7 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
   )
 }
 
-// ── Ya lo llamé (registrar gestión) ───────────────────────────────────────
+// ── Anotar resultado (registrar gestión) ──────────────────────────────────
 
 const CANALES: { value: CanalGestion; label: string }[] = [
   { value: 'llamada', label: 'Llamada' },
@@ -204,7 +205,7 @@ const CANALES: { value: CanalGestion; label: string }[] = [
   { value: 'nota', label: 'Solo una nota' },
 ]
 
-export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llamada', resultadoInicial = null, loading, onConfirm, onPerder }: {
+export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llamada', resultadoInicial = null, loading, onConfirm, onPerder, onAgendar }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   nombre: string
@@ -212,8 +213,10 @@ export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llam
   resultadoInicial?: ResultadoGestion | null
   loading?: boolean
   onConfirm: (data: RegistrarGestionRequest) => void
-  /** "No le interesa": ofrece cerrar como perdida en vez de solo anotar. */
+  /** "No le interesa" / "Número errado": la saca de la lista en vez de solo anotar. */
   onPerder: () => void
+  /** "Agendó": abre la agenda para crear la cita (si aplica). */
+  onAgendar?: () => void
 }) {
   const [canal, setCanal] = useState<CanalGestion>(canalInicial)
   const [resultado, setResultado] = useState<ResultadoGestion | null>(resultadoInicial)
@@ -223,22 +226,27 @@ export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llam
   useEffect(() => {
     if (open) {
       setCanal(canalInicial); setResultado(resultadoInicial); setNota('')
-      const dias = RESULTADOS_GESTION.find((r) => r.value === resultadoInicial)?.dias
-      setFecha(dias == null ? '' : isoEnDias(dias))
+      setFecha(isoEnDias(diasSegun(resultadoInicial)))
     }
   }, [open, canalInicial, resultadoInicial])
 
+  // Siempre queda una fecha para volver a contactar: así nadie se pierde de la
+  // lista sin cerrarse. Para sacarla de la lista está "Ya no le interesa".
+  function diasSegun(r: ResultadoGestion | null): number {
+    return RESULTADOS_GESTION.find((x) => x.value === r)?.dias ?? 1
+  }
   function elegirResultado(r: ResultadoGestion | null) {
     setResultado(r)
-    const dias = RESULTADOS_GESTION.find((x) => x.value === r)?.dias
-    setFecha(dias == null ? '' : isoEnDias(dias))
+    setFecha(isoEnDias(diasSegun(r)))
   }
+  const sacaDeLaLista = resultado === 'no_interesado' || resultado === 'numero_errado'
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!loading) onOpenChange(v) }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>¿Cómo te fue con {nombre.split(' ')[0]}?</DialogTitle>
+          <DialogDescription>Anota qué pasó y cuándo volver a contactar.</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -251,25 +259,32 @@ export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llam
             <Chips<ResultadoGestion> opciones={RESULTADOS_GESTION} valor={resultado} onChange={elegirResultado} />
           </div>
 
-          {resultado === 'no_interesado' ? (
+          {sacaDeLaLista ? (
             <div className="rounded-lg bg-muted/50 p-3 text-sm">
-              <p>Si ya no le interesa, ciérrala como perdida para que no vuelva a aparecer.</p>
-              <Button variant="outline" size="sm" className="mt-2" onClick={onPerder}>Cerrar como perdida</Button>
+              <p>
+                {resultado === 'numero_errado'
+                  ? 'Si no hay otro número para contactarle, sácalo de la lista.'
+                  : 'Si ya no le interesa, sácalo de la lista para que no vuelva a aparecer.'}
+              </p>
+              <Button variant="outline" size="sm" className="mt-2" onClick={onPerder}>Sacar de la lista…</Button>
             </div>
           ) : (
-            <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Volver a contactar</Label>
-              <div className="flex items-center gap-2">
-                <Input type="date" value={fecha} min={isoEnDias(0)} onChange={(e) => setFecha(e.target.value)} className="w-44" />
-                {fecha ? (
-                  <button type="button" className="text-xs text-muted-foreground hover:underline" onClick={() => setFecha('')}>
-                    Sin fecha
-                  </button>
-                ) : (
-                  <span className="text-xs text-muted-foreground">Sin fecha: sale de &quot;Para hoy&quot;</span>
-                )}
-              </div>
-            </div>
+            <>
+              {resultado === 'agendo' && onAgendar && (
+                <div className="rounded-lg bg-primary/5 p-3 text-sm">
+                  <p>Si la cita aún no está en la agenda, créala ahora para que quede registrada.</p>
+                  <Button size="sm" className="mt-2" onClick={onAgendar}>Agendar ahora</Button>
+                </div>
+              )}
+              {resultado === 'agendo' ? (
+                <p className="text-xs text-muted-foreground">Volverá a aparecer el día después de su cita (o mañana, si aún no la tiene en la agenda).</p>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="gestion-fecha" className="text-xs text-muted-foreground">Volver a contactar el</Label>
+                  <Input id="gestion-fecha" type="date" value={fecha} min={isoEnDias(0)} onChange={(e) => setFecha(e.target.value)} className="w-44" />
+                </div>
+              )}
+            </>
           )}
 
           <Textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (opcional)" rows={2} />
@@ -279,12 +294,13 @@ export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llam
           onCancel={() => onOpenChange(false)}
           okLabel="Guardar"
           loading={loading}
-          disabled={!resultado && canal !== 'nota'}
+          disabled={(!resultado && canal !== 'nota') || sacaDeLaLista || (!fecha && resultado !== 'agendo')}
           onOk={() => onConfirm({
             canal,
             resultado: resultado ?? 'otro',
             nota: nota.trim(),
-            ...(fecha ? { proximo_contacto: fecha } : { sin_fecha: true }),
+            // "Agendó": el backend la programa para el día después de la cita.
+            ...(resultado === 'agendo' ? {} : { proximo_contacto: fecha }),
           })}
         />
       </DialogContent>
@@ -312,7 +328,7 @@ export function PosponerDialog({ open, onOpenChange, loading, onConfirm }: {
     <Dialog open={open} onOpenChange={(v) => { if (!loading) onOpenChange(v) }}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
-          <DialogTitle>Volver a contactar el…</DialogTitle>
+          <DialogTitle>¿Cuándo volver a contactar?</DialogTitle>
         </DialogHeader>
         <div className="flex flex-wrap gap-2">
           {rapidas.map((r) => (
@@ -322,7 +338,7 @@ export function PosponerDialog({ open, onOpenChange, loading, onConfirm }: {
           ))}
         </div>
         <Input type="date" value={fecha} min={isoEnDias(0)} onChange={(e) => setFecha(e.target.value)} />
-        <Botones onCancel={() => onOpenChange(false)} okLabel="Posponer" loading={loading} disabled={!fecha} onOk={() => onConfirm(fecha)} />
+        <Botones onCancel={() => onOpenChange(false)} okLabel="Guardar fecha" loading={loading} disabled={!fecha} onOk={() => onConfirm(fecha)} />
       </DialogContent>
     </Dialog>
   )
@@ -344,15 +360,15 @@ export function PerderDialog({ open, onOpenChange, nombre, loading, onConfirm }:
     <Dialog open={open} onOpenChange={(v) => { if (!loading) onOpenChange(v) }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Cerrar como perdida</DialogTitle>
-          <DialogDescription>¿Por qué {nombre.split(' ')[0]} no siguió? Ayuda a ver dónde se pierden las ventas.</DialogDescription>
+          <DialogTitle>Sacar de la lista</DialogTitle>
+          <DialogDescription>¿Por qué {nombre.split(' ')[0]} no siguió? (opcional) Sirve para ver por qué se pierden ventas.</DialogDescription>
         </DialogHeader>
         <Chips<MotivoPerdida> opciones={MOTIVOS_PERDIDA} valor={motivo} onChange={setMotivo} />
         <Textarea value={nota} onChange={(e) => setNota(e.target.value)} placeholder="Nota (opcional)" rows={2} />
-        <p className="text-xs text-muted-foreground">Si lo va a pensar, mejor posponla: vuelve a aparecer el día que elijas.</p>
+        <p className="text-xs text-muted-foreground">Si lo va a pensar, mejor cambia la fecha de contacto: vuelve a aparecer el día que elijas.</p>
         <Botones
           onCancel={() => onOpenChange(false)}
-          okLabel="Cerrar como perdida"
+          okLabel="Sacar de la lista"
           destructive
           loading={loading}
           onOk={() => onConfirm({ motivo: motivo ?? undefined, nota: nota.trim() || undefined })}

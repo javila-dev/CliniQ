@@ -264,8 +264,9 @@ enviar ni aceptar una cotización.**
 
 | Evento | Dónde | Efecto |
 |---|---|---|
-| Gestión registrada | `GestionOportunidad` | Mueve `proximo_contacto` según el resultado (sin respuesta → mañana; interesado → en 2 días; agendó → se cierra sola con la cita). La recepción puede cambiar la fecha en el mismo diálogo |
-| Cita creada para el paciente de una oportunidad abierta de venta | servicio de creación de cita | `→ valoracion` |
+| Gestión registrada | `GestionOportunidad` | Mueve `proximo_contacto` según el resultado (sin respuesta → mañana; interesado → en 2 días; agendó → día siguiente a la cita, o mañana si no la tiene). Nunca queda sin fecha: para sacarla de la lista está "Ya no le interesa" |
+| Paciente creado (desde cualquier pantalla) | señal `post_save` de `Paciente` | Si su teléfono coincide con un interesado abierto sin ficha, se vinculan (el más reciente si hay varios). Así la cita creada desde la agenda también lo avanza |
+| Cita creada para el paciente de una oportunidad abierta de venta (no la sesión de un paquete ya comprado) | señal `post_save` de `Cita` | `→ valoracion`, próximo contacto el día siguiente a la cita |
 | `CotizacionEnvio` creado | servicio de envío | `→ cotizada`; si la cotización no tenía oportunidad y el paciente tiene una abierta, se vinculan |
 | Cotización aceptada | `aceptar_cotizacion`, `aceptar_cotizacion_por_firma_compromiso` | `estado = ganada` |
 | Cotización descartada | `cambiar_estado` | Si es la única cotización abierta de la oportunidad: pregunta en el front si cerrar la oportunidad como perdida (con el mismo motivo) |

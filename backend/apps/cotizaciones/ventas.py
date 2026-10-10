@@ -6,6 +6,7 @@ cotizaciones (``/cotizaciones/{id}/``) y sus acciones. Ver
 docs/plan-funnel-comercial.md.
 """
 
+import uuid
 from datetime import date
 from decimal import Decimal
 
@@ -19,7 +20,8 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.viewsets import ReadOnlyModelViewSet
 
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
-from apps.users.permissions import RequirePermission
+from apps.users.authorization import sede_ids_para_filtro
+from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 _DINERO = DecimalField(max_digits=14, decimal_places=2)
@@ -44,6 +46,17 @@ def ventas_queryset(clinica=None):
     if clinica is not None:
         queryset = queryset.filter(clinica=clinica)
     return queryset
+
+
+def _uuid_param(params, nombre):
+    """Valor UUID de un parámetro de la URL; 400 (no 500) si viene mal formado."""
+    valor = params.get(nombre)
+    if not valor:
+        return None
+    try:
+        return uuid.UUID(str(valor))
+    except ValueError:
+        raise ValidationError({"error": f"El filtro '{nombre}' no es valido.", "code": "FILTRO_INVALIDO"})
 
 
 class VentaListSerializer(serializers.ModelSerializer):
@@ -125,7 +138,7 @@ class VentaViewSet(ReadOnlyModelViewSet):
         from apps.cobros.models import Cobro, PagoRecibido
 
         user = self.request.user
-        queryset = ventas_queryset(None if user.rol == "superadmin" else user.clinica)
+        queryset = ventas_queryset(get_clinica_activa(self.request))
         # Igual que el listado de cotizaciones: un profesional solo ve lo que vendió.
         if user.rol == "profesional":
             queryset = queryset.filter(profesional=user)
@@ -139,12 +152,15 @@ class VentaViewSet(ReadOnlyModelViewSet):
                 queryset = queryset.filter(aceptada_en__date__lte=date.fromisoformat(hasta))
         except ValueError:
             raise ValidationError({"error": "Rango de fechas invalido.", "code": "FECHA_INVALIDA"})
-        if params.get("sede"):
-            queryset = queryset.filter(sede_id=params["sede"])
-        if params.get("vendedor"):
-            queryset = queryset.filter(profesional_id=params["vendedor"])
-        if params.get("paciente"):
-            queryset = queryset.filter(paciente_id=params["paciente"])
+        # Mismo alcance por sede que los KPIs del dashboard: un usuario limitado a
+        # unas sedes solo ve sus ventas, y no puede pedir las de otra sede.
+        sede_ids = sede_ids_para_filtro(user, _uuid_param(params, "sede"))
+        if sede_ids is not None:
+            queryset = queryset.filter(sede_id__in=sede_ids)
+        if vendedor := _uuid_param(params, "vendedor"):
+            queryset = queryset.filter(profesional_id=vendedor)
+        if paciente := _uuid_param(params, "paciente"):
+            queryset = queryset.filter(paciente_id=paciente)
 
         cuota_vencida = (
             CuotaCartera.objects.filter(
@@ -186,9 +202,12 @@ class VentaViewSet(ReadOnlyModelViewSet):
         from apps.users.models import User
 
         user = request.user
-        ventas = ventas_queryset(None if user.rol == "superadmin" else user.clinica)
+        ventas = ventas_queryset(get_clinica_activa(request))
         if user.rol == "profesional":
             ventas = ventas.filter(profesional=user)
+        sede_ids = sede_ids_para_filtro(user)
+        if sede_ids is not None:
+            ventas = ventas.filter(sede_id__in=sede_ids)
         usuarios = User.objects.filter(pk__in=ventas.exclude(profesional=None).values("profesional_id"))
         vendedores = [{"id": str(u.id), "nombre": u.nombre_completo} for u in usuarios]
         vendedores.sort(key=lambda v: v["nombre"].lower())

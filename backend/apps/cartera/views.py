@@ -273,10 +273,12 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         hoy = timezone.localdate()
         tramos = [("1_30", 1, 30), ("31_60", 31, 60), ("61_90", 61, 90), ("90_mas", 91, None)]
         mora = {clave: {"valor": Decimal("0"), "cuotas": 0} for clave, _, _ in tramos}
-        carteras_en_mora = set()
-        for fecha, pendiente, cartera_id in cuotas_vencidas_qs.values_list("fecha_esperada", "pendiente", "cartera_id"):
+        pacientes_en_mora = set()
+        for fecha, pendiente, paciente_id in cuotas_vencidas_qs.values_list(
+            "fecha_esperada", "pendiente", "cartera__paciente_id"
+        ):
             dias = (hoy - fecha).days
-            carteras_en_mora.add(cartera_id)
+            pacientes_en_mora.add(paciente_id)
             for clave, desde_dias, hasta_dias in tramos:
                 if dias >= desde_dias and (hasta_dias is None or dias <= hasta_dias):
                     mora[clave]["valor"] += pendiente
@@ -305,7 +307,7 @@ class CarteraViewSet(ReadOnlyModelViewSet):
                 "cuotas_vencidas": cuotas_vencidas,
                 "cuotas_vencidas_valor": self._money(cuotas_vencidas_valor),
                 "cobrado_pct": f"{cobrado_pct:.1f}",
-                "pacientes_en_mora": len(carteras_en_mora),
+                "pacientes_en_mora": len(pacientes_en_mora),
                 "mora_por_antiguedad": [
                     {"tramo": clave, "valor": self._money(mora[clave]["valor"]), "cuotas": mora[clave]["cuotas"]}
                     for clave, _, _ in tramos

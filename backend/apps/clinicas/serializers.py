@@ -370,6 +370,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "precio_base",
             "descuento_maximo_pct",
             "vigencia_meses",
+            "cada_dias",
             "tiene_protocolo",
             "pasos_protocolo",
             "consentimientos_requeridos",
@@ -523,6 +524,7 @@ class ProcedimientoSerializer(ServicioSerializer):
             "precio_base",
             "descuento_maximo_pct",
             "vigencia_meses",
+            "cada_dias",
             "tiene_protocolo",
             "pasos_protocolo",
             "consentimientos_requeridos",
@@ -725,6 +727,7 @@ class TipoSesionSerializer(serializers.ModelSerializer):
             "orden",
             "es_compromiso",
             "duracion_min",
+            "cada_dias",
             "procedimientos",
         )
 

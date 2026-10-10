@@ -42,10 +42,12 @@ interface Fila {
   procs: ProcRef[]
   /** Las sesiones nuevas siempre se agendan; las que ya existían conservan su valor. */
   agenda: boolean
+  /** Ritmo: días desde la sesión anterior (vacío = el del procedimiento o ninguno). */
+  cadaDias: number | null
 }
 
 const nuevaClave = () => `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
-const filaVacia = (): Fila => ({ key: nuevaClave(), descripcion: '', cantidad: 1, duracionManual: 0, procs: [], agenda: true })
+const filaVacia = (): Fila => ({ key: nuevaClave(), descripcion: '', cantidad: 1, duracionManual: 0, procs: [], agenda: true, cadaDias: null })
 const nombreDeProcs = (f: Fila) => f.procs.map((p) => p.nombre).join(' + ')
 const nombreDeFila = (f: Fila) => f.descripcion.trim() || nombreDeProcs(f)
 const duracionDeFila = (f: Fila) =>
@@ -66,6 +68,7 @@ function filaDesdeTipo(t: TratamientoCatalogo['tipos_sesion'][number], conservar
     cantidad: t.cantidad,
     duracionManual: t.duracion_min ?? 0,
     agenda: t.es_compromiso,
+    cadaDias: t.cada_dias ?? null,
     procs: t.procedimientos.map((p) => ({
       id: p.procedimiento,
       nombre: p.nombre,
@@ -173,7 +176,7 @@ function ElegirProcedimiento({
 // Inline para no depender de que Tailwind genere la clase arbitraria:
 // flechas · # · procedimientos · nombre · veces · duración · quitar.
 const COLUMNAS: React.CSSProperties = {
-  gridTemplateColumns: '1rem 2.25rem minmax(0, 1.3fr) minmax(0, 1fr) 3.5rem 4.75rem 1.75rem',
+  gridTemplateColumns: '1rem 2.25rem minmax(0, 1.3fr) minmax(0, 1fr) 3.5rem 4.75rem 4.25rem 1.75rem',
 }
 
 function FilaDeSesion({
@@ -274,6 +277,21 @@ function FilaDeSesion({
           <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">min</span>
         </div>
       )}
+
+      <div className="relative" title="Días desde la sesión anterior. Sirve para avisar cuándo el paciente ya debió agendar.">
+        <Input
+          inputMode="numeric"
+          value={fila.cadaDias ?? ''}
+          placeholder="—"
+          onChange={(e) => {
+            const raw = e.target.value.replace(/\D/g, '').slice(0, 3)
+            onChange({ ...fila, cadaDias: raw ? Math.min(730, Number(raw)) || null : null })
+          }}
+          className="h-7 pl-2 pr-8 text-xs"
+          aria-label="Días desde la sesión anterior"
+        />
+        <span className="absolute right-1.5 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">días</span>
+      </div>
 
       <Button
         type="button" variant="ghost" size="icon" className="h-7 w-7 hover:text-destructive"
@@ -510,6 +528,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
         orden: i + 1,
         es_compromiso: f.agenda,
         duracion_min: duracionDeFila(f),
+        cada_dias: f.cadaDias,
         procedimientos: f.procs.map((p, j) => ({
           ...(p.tipoProcId ? { id: p.tipoProcId } : {}),
           procedimiento: p.id,
@@ -619,6 +638,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
                   <span>Nombre de la sesión</span>
                   <span className="text-center">Nº de veces</span>
                   <span>Duración</span>
+                  <span title="Días desde la sesión anterior">Cada</span>
                   <span />
                 </div>
                 {filas.map((f, i) => (

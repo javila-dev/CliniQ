@@ -63,7 +63,7 @@ class OportunidadSerializer(serializers.ModelSerializer):
             "tipo", "tipo_nombre", "motivo", "etapa", "etapa_nombre", "estado", "es_venta",
             "proximo_contacto", "origen", "origen_nombre", "origen_detalle",
             "responsable", "responsable_nombre", "interes", "valor_estimado", "sede",
-            "cotizacion", "cotizacion_estado", "cita", "cita_fecha",
+            "cotizacion", "cotizacion_estado", "cita", "cita_fecha", "item_cotizacion", "detalle",
             "motivo_perdida", "motivo_perdida_nombre", "nota_perdida", "cerrada_en",
             "frase", "ultima_gestion", "dias_sin_movimiento", "created_at",
         )
@@ -131,14 +131,23 @@ class ActualizarOportunidadSerializer(serializers.ModelSerializer):
         return etapa
 
     def validate_responsable(self, responsable):
-        if responsable and responsable.clinica_id != self.instance.clinica_id:
-            raise serializers.ValidationError("El usuario no es de esta clínica.")
+        if responsable and (responsable.clinica_id != self.instance.clinica_id or not responsable.is_active):
+            raise serializers.ValidationError("El usuario no es de esta clínica o está inactivo.")
         return responsable
 
     def validate_sede(self, sede):
         if sede and sede.clinica_id != self.instance.clinica_id:
             raise serializers.ValidationError("La sede no es de esta clínica.")
+        request = self.context.get("request")
+        if sede and request is not None and sede_ids_para_filtro(request.user, str(sede.id)) == []:
+            raise serializers.ValidationError("No tienes acceso a esa sede.")
         return sede
+
+    def validate_proximo_contacto(self, fecha):
+        # Abierta y sin fecha saldría de "Para hoy" sin cerrarse: nadie la vería.
+        if fecha is None and self.instance.estado == Oportunidad.Estado.ABIERTA:
+            raise serializers.ValidationError("Elige una fecha para volver a contactar.")
+        return fecha
 
 
 class RegistrarGestionSerializer(serializers.Serializer):
@@ -147,7 +156,6 @@ class RegistrarGestionSerializer(serializers.Serializer):
     nota = serializers.CharField(required=False, allow_blank=True, max_length=2000)
     # Fecha elegida por la recepción; sin ella se usa la sugerida según el resultado.
     proximo_contacto = serializers.DateField(required=False, allow_null=True)
-    sin_fecha = serializers.BooleanField(required=False, default=False)
 
 
 class PerderSerializer(serializers.Serializer):

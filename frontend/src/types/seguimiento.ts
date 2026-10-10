@@ -52,6 +52,8 @@ export interface Oportunidad {
   cotizacion_estado: string | null
   cita: string | null
   cita_fecha: string | null
+  item_cotizacion: string | null   // paquete vendido (tipo "paquete")
+  detalle: { item_tipo?: string; sesion?: number; total?: number; dias_atraso?: number; proxima_esperada?: string; frase?: string }
   motivo_perdida: MotivoPerdida | ''
   motivo_perdida_nombre: string
   nota_perdida: string
@@ -77,7 +79,6 @@ export interface RegistrarGestionRequest {
   resultado: ResultadoGestion
   nota?: string
   proximo_contacto?: string | null
-  sin_fecha?: boolean
 }
 
 export interface EmbudoResumen {

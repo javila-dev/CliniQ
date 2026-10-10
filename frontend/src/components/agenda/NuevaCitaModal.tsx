@@ -222,6 +222,7 @@ export function NuevaCitaModal({
     mutationFn: agendaApi.citas.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
+      queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
       onCreated?.()
       handleClose()
     },

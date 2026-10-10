@@ -58,6 +58,7 @@ const itemSchema = z.object({
   num_citas: z.number().int().min(1),
   duracion_estimada: z.string(),
   periodicidad: z.string(),
+  cada_dias: z.number().int().min(1).max(730).nullable().optional(),
   valor_unitario: z.number().min(0),
   descuento_porcentaje: z.number().min(0).max(100),
   precio_bloqueado: z.boolean().optional(),
@@ -438,6 +439,10 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     0,
   )
 
+  // Valores con los que se cargó el formulario: permite saber si hay cambios sin
+  // guardar (setValue no marca isDirty en todos los campos).
+  const valoresCargadosRef = useRef<string | null>(null)
+
   useEffect(() => {
     if (cotizacion) {
       reset({
@@ -453,6 +458,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
           num_citas: i.num_citas,
           duracion_estimada: i.duracion_estimada,
           periodicidad: i.periodicidad ?? '',
+          cada_dias: i.cada_dias ?? null,
           valor_unitario: parseFloat(i.valor_unitario),
           descuento_porcentaje: parseFloat(i.descuento_porcentaje),
           precio_bloqueado: i.precio_bloqueado ?? false,
@@ -480,7 +486,9 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
           valor: parseFloat(p.valor),
         })),
       })
+      valoresCargadosRef.current = JSON.stringify(getValues())
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cotizacion, reset])
 
   // Al cargar los precios de campaña (o al cambiar de sede) re-sincroniza los
@@ -520,6 +528,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     setValue(`items.${idx}.procedimiento`, p.id)
     setValue(`items.${idx}.tratamiento`, null)
     setValue(`items.${idx}.descripcion`, p.nombre)
+    setValue(`items.${idx}.cada_dias`, p.cada_dias ?? null)
     const camp = preciosCampana?.procedimientos[p.id] ?? null
     setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
     setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
@@ -562,7 +571,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           descripcion: i.descripcion,
           num_citas: i.num_citas,
           duracion_estimada: i.duracion_estimada,
-          periodicidad: i.periodicidad,
+          // El texto del PDF sale del ritmo (solo si hay más de una sesión). Sin
+          // ritmo se conserva el texto escrito a mano en cotizaciones antiguas,
+          // pero no un "Cada N días" generado antes y ya borrado.
+          periodicidad: i.cada_dias && i.num_citas > 1
+            ? `Cada ${i.cada_dias} días`
+            : /^Cada \d+ días$/.test(i.periodicidad ?? '') ? '' : i.periodicidad,
+          cada_dias: i.cada_dias ?? null,
           valor_unitario: i.valor_unitario,
           descuento_porcentaje: i.descuento_porcentaje,
         }
@@ -690,6 +705,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       queryClient.invalidateQueries({ queryKey: ['ventas'] })
+      queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
       setDescartarOpen(false)
       setVencidaAlAceptar(null)
@@ -818,6 +834,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
   async function descargarPdf() {
     if (!cotizacion) return
+    // El PDF sale de lo guardado: si hay cambios en pantalla, se guardan antes
+    // para que el paciente reciba lo mismo que se ve (y no se pierdan al recargar).
+    const enBorrador = cotizacion.estado === 'borrador'
+    if (enBorrador && puedeEditarItems && JSON.stringify(getValues()) !== valoresCargadosRef.current) {
+      try {
+        await actualizarAsync(getValues())
+      } catch {
+        return
+      }
+    }
     const blob = await cotizacionesApi.descargarPdf(cotizacion.id)
     const url = URL.createObjectURL(blob)
     Object.assign(document.createElement('a'), {
@@ -828,12 +854,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     // Descargar el PDF de una propuesta cuenta como enviarla: se suele compartir
     // por el WhatsApp de la clínica. Queda en el historial de envíos y marca la
     // cotización como enviada. Sin bloquear la descarga si el registro falla.
-    if (cotizacion.estado === 'borrador') {
+    if (enBorrador) {
       cotizacionesApi.registrarEnvioPdf(cotizacion.id)
         .then(() => {
+          if (!cotizacion.enviada_en) toast.success('PDF descargado', 'La cotización quedó marcada como enviada.')
           queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
           queryClient.invalidateQueries({ queryKey: ['cotizacion-envios', cotizacion.id] })
           queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+          queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
         })
         .catch(() => null)
     }
@@ -964,6 +992,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               )}
             </div>
             {cotizacion && !esVenta && <CotizacionEstadoBadge estado={cotizacion.estado_comercial ?? cotizacion.estado} />}
+            {cotizacion && esVenta && (
+              <span className="hidden sm:inline-flex shrink-0 items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-200/60">
+                Venta en firme
+              </span>
+            )}
             {cotizacion?.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={cotizacion.enviada_en} />}
             {cotizacion?.es_migracion && (
               <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
@@ -1282,7 +1315,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   <span className="text-center">Citas</span>
                   <span className="text-right">Precio unit.</span>
                   <span className="text-right">Desc %</span>
-                  <span className="text-center">Periodicidad</span>
+                  <span className="text-center" title="Días entre sesiones para este paciente">Cada</span>
                   <span className="text-right">Subtotal</span>
                   <span />
                 </>
@@ -1293,7 +1326,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   <span className="text-center">Citas</span>
                   <span className="text-right">Precio unit.</span>
                   <span className="text-right">Desc %</span>
-                  <span className="text-center">Periodicidad</span>
+                  <span className="text-center" title="Días entre sesiones para este paciente">Cada</span>
                   <span className="text-right">Subtotal</span>
                   <span />
                 </>
@@ -1586,9 +1619,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           {precioField('Precio unit.')}
                           {descField}
                           <div>
-                            <p className="text-xs text-muted-foreground md:hidden mb-1">Periodicidad</p>
-                            <Input className="h-8 text-sm text-center" placeholder="Mensual…" disabled={soloLectura}
-                              {...register(`items.${idx}.periodicidad`)} />
+                            <p className="text-xs text-muted-foreground md:hidden mb-1">Repetir cada</p>
+                            <Controller control={control} name={`items.${idx}.cada_dias`} render={({ field }) => (
+                              <div className="relative">
+                                <Input inputMode="numeric" className="h-8 text-sm text-center pr-8" placeholder="—" disabled={soloLectura}
+                                  title="Días entre sesiones para este paciente. Sirve para avisar cuándo ya debió agendar."
+                                  value={field.value ?? ''}
+                                  onChange={(e) => { const raw = e.target.value.replace(/\D/g, '').slice(0, 3); field.onChange(raw ? Math.min(730, Number(raw)) || null : null) }} />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">días</span>
+                              </div>
+                            )} />
                           </div>
                           {subtotalField}
                           {deleteBtn}
@@ -1629,9 +1669,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           {precioField('Precio unit.')}
                           {descField}
                           <div>
-                            <p className="text-xs text-muted-foreground md:hidden mb-1">Periodicidad</p>
-                            <Input className="h-8 text-sm text-center" placeholder="Mensual…" disabled={soloLectura}
-                              {...register(`items.${idx}.periodicidad`)} />
+                            <p className="text-xs text-muted-foreground md:hidden mb-1">Repetir cada</p>
+                            <Controller control={control} name={`items.${idx}.cada_dias`} render={({ field }) => (
+                              <div className="relative">
+                                <Input inputMode="numeric" className="h-8 text-sm text-center pr-8" placeholder="—" disabled={soloLectura}
+                                  title="Días entre sesiones para este paciente. Sirve para avisar cuándo ya debió agendar."
+                                  value={field.value ?? ''}
+                                  onChange={(e) => { const raw = e.target.value.replace(/\D/g, '').slice(0, 3); field.onChange(raw ? Math.min(730, Number(raw)) || null : null) }} />
+                                <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground pointer-events-none">días</span>
+                              </div>
+                            )} />
                           </div>
                           {subtotalField}
                           {deleteBtn}
@@ -1883,9 +1930,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           <CotizacionVencidaDialog
             fechaVencimiento={vencidaAlAceptar}
             onOpenChange={(v) => { if (!v) setVencidaAlAceptar(null) }}
-            loading={cambiando || renovando}
+            loading={cambiando}
             onAceptarIgual={() => cambiarEstado('aceptada', { confirmar_vencida: true })}
-            onRenovar={() => renovar()}
           />
         </>
       )}

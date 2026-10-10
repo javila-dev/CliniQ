@@ -10,7 +10,16 @@ from django.dispatch import receiver
 
 from apps.agenda.models import Cita
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio
+from apps.pacientes.models import Paciente
 from apps.seguimiento import services
+
+
+@receiver(post_save, sender=Paciente, dispatch_uid="seguimiento_paciente_creado")
+def paciente_creado(sender, instance, created, **kwargs):
+    # Va antes que la cita: si ambos se crean en la misma transacción, el
+    # interesado queda vinculado cuando corre el gancho de la cita.
+    if created:
+        transaction.on_commit(lambda: services.al_crear_paciente(instance))
 
 
 @receiver(post_save, sender=Cita, dispatch_uid="seguimiento_cita_creada")

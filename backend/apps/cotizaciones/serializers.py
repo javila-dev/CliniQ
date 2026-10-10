@@ -117,6 +117,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             "num_citas",
             "duracion_estimada",
             "periodicidad",
+            "cada_dias",
             "valor_unitario",
             "descuento_porcentaje",
             "descuento_maximo_pct",

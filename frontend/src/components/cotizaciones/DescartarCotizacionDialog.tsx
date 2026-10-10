@@ -79,7 +79,10 @@ export function DescartarCotizacionDialog({
         {conSeguimiento && (
           <label className="flex items-start gap-2 text-sm">
             <Checkbox checked={cerrarSeguimiento} onChange={(e) => setCerrarSeguimiento(e.target.checked)} className="mt-0.5" />
-            <span>Cerrar también su seguimiento como perdido <span className="text-muted-foreground">(con el mismo motivo)</span></span>
+            <span>
+              Sacarlo también de la lista de Seguimiento
+              <span className="block text-xs text-muted-foreground">Si lo dejas, seguirá apareciendo para volver a contactarle.</span>
+            </span>
           </label>
         )}
 

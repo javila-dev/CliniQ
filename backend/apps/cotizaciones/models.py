@@ -3,6 +3,7 @@ from datetime import timedelta
 from decimal import Decimal
 
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import DateField, DateTimeField, DurationField, ExpressionWrapper, F, OuterRef, Subquery, Value
 from django.db.models.functions import Cast, Coalesce, TruncDate
@@ -213,6 +214,11 @@ class ItemCotizacion(BaseModel):
     num_citas = models.PositiveIntegerField(default=1)
     duracion_estimada = models.CharField(max_length=100, blank=True)
     periodicidad = models.CharField(max_length=100, blank=True)
+    # Ritmo para este paciente (procedimientos); precargado del catálogo. En
+    # tratamientos manda el ritmo de cada bloque. Se copia a las sesiones al aceptar.
+    cada_dias = models.PositiveIntegerField(
+        null=True, blank=True, validators=[MinValueValidator(1), MaxValueValidator(730)],
+    )
     valor_unitario = models.DecimalField(max_digits=12, decimal_places=2)
     descuento_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=0)
     precio_bloqueado = models.BooleanField(

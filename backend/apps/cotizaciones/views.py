@@ -79,7 +79,7 @@ def normalize_error_response(detail):
 class CotizacionViewSet(ModelViewSet):
     serializer_class = CotizacionSerializer
     queryset = Cotizacion.objects.select_related(
-        "clinica", "paciente", "profesional", "sede"
+        "clinica", "paciente", "profesional", "sede", "aceptada_por"
     ).prefetch_related(
         "items", "formas_pago", "envios__enviado_por"
     ).annotate(
@@ -308,6 +308,8 @@ class CotizacionViewSet(ModelViewSet):
 
         cotizacion = self.get_object()
         renovar_cotizacion(cotizacion)
+        # El compromiso pendiente cita la fecha de vigencia: se rehace con la nueva.
+        self._refrescar_compromiso_pendiente(cotizacion)
         registrar_accion(request, "cotizacion.renovar", cotizacion, {"vigente_desde": cotizacion.vigente_desde.isoformat()})
         return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
 
@@ -590,6 +592,11 @@ class CotizacionViewSet(ModelViewSet):
             "paciente_nombre": cotizacion.paciente.nombre_completo,
             "items": [],
         }
+        # Ritmo de cada paquete (cuándo debería ser la siguiente sesión).
+        from apps.seguimiento import ritmo
+        from apps.seguimiento.models import ConfigSeguimiento
+
+        config = ConfigSeguimiento.de(cotizacion.clinica) if cotizacion.estado == Cotizacion.Estado.ACEPTADA else None
         for item in items:
             # Obsequios informativos, productos y sesiones clonadas no tienen
             # cupo propio: las clonadas suman al ítem tratamiento de origen.
@@ -645,6 +652,7 @@ class CotizacionViewSet(ModelViewSet):
             }
             if sesiones_detalle is not None:
                 item_data["sesiones_detalle"] = sesiones_detalle
+            item_data["ritmo"] = ritmo.serializar(ritmo.calcular(item, config)) if config else None
 
             payload["items"].append(item_data)
         return Response(payload, status=status.HTTP_200_OK)

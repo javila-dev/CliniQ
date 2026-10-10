@@ -146,6 +146,22 @@ inactivos, a los que pidieron no ser contactados (D6) y las citas con
   52 días"*.
 - Valor en juego: saldo proporcional de las sesiones pendientes.
 
+**Ritmo del paquete (decidido e implementado el 2026-10-09).** "Cada cuántos
+días" se define en tres niveles que heredan: procedimiento del catálogo
+(`Servicio.cada_dias`) → bloque del tratamiento (`TipoSesion.cada_dias`) →
+ítem de la cotización (`ItemCotizacion.cada_dias`, precargado y editable para
+ese paciente; genera el texto de `periodicidad` del PDF). Los protocolos usan
+sus semanas. Al aceptar, el ritmo se copia a cada sesión vendida
+(`SesionProcedimiento.cada_dias`). La fecha esperada es **la última sesión
+realizada + días de la que sigue** (sin sesiones: compra + 7 días); entre
+sesiones queda atrasada tras **5 días** de tolerancia, y la primera sesión sin
+tolerancia (al día siguiente: día 8 tras la compra). Si se cancela la cita o no
+asiste, el paquete vuelve a "Para hoy". Todo en `ConfigSeguimiento` (por clínica) y
+`backend/apps/seguimiento/ritmo.py`. La detección (`deteccion.py`) corre una
+vez al día por clínica al abrir la bandeja, con el comando
+`detectar_seguimiento` o con `POST /api/v1/seguimiento/oportunidades/detectar/`
+(secreto de n8n), y cierra la oportunidad como recuperada al agendar.
+
 **M1 es el único motivo automático en la fase 1** (D9, confirmada). Al
 detectarse:
 

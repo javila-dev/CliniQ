@@ -185,3 +185,28 @@ class GestionOportunidad(models.Model):
     class Meta:
         db_table = "seguimiento_gestiones"
         ordering = ["-created_at"]
+
+
+class ConfigSeguimiento(models.Model):
+    """Reglas del seguimiento por clínica. Se crea con valores por defecto al leerse."""
+
+    clinica = models.OneToOneField("clinicas.Clinica", on_delete=models.CASCADE, related_name="config_seguimiento")
+    # Compró y no ha agendado ninguna sesión: avisar a los N días de la compra.
+    dias_tras_compra = models.PositiveIntegerField(default=7)
+    # Días de gracia después de la fecha esperada antes de marcarlo atrasado.
+    tolerancia_dias = models.PositiveIntegerField(default=5)
+    # Ritmo cuando ni el ítem, ni el bloque, ni el procedimiento tienen uno.
+    dias_sin_sesion = models.PositiveIntegerField(default=45)
+    # "Le toca pronto": cuántos días antes de la fecha esperada.
+    dias_aviso_previo = models.PositiveIntegerField(default=7)
+    # Última corrida de la detección diaria (una vez al día por clínica).
+    ultima_deteccion = models.DateField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "seguimiento_config"
+
+    @classmethod
+    def de(cls, clinica):
+        config, _ = cls.objects.get_or_create(clinica=clinica)
+        return config

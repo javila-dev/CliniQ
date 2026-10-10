@@ -159,6 +159,8 @@ export interface Servicio {
   documenso_template_token?: string | null // legacy
   documenso_template_nombre?: string | null // legacy
   vigencia_meses: number
+  /** Días entre sesiones (ritmo): sirve para avisar cuándo debería agendar. */
+  cada_dias?: number | null
   activo: boolean
   clinica: string
   tiene_protocolo?: boolean
@@ -195,6 +197,7 @@ export interface CreateProcedimientoRequest {
   precio_base?: number | null           // precio de lista para cotizaciones (bloquea el precio)
   descuento_maximo_pct?: number | null  // tope de descuento sobre precio_base (0 = sin descuento)
   vigencia_meses?: number
+  cada_dias?: number | null             // días entre sesiones (ritmo)
   profesionales?: string[]   // ids de Colaborador que realizan el procedimiento
   grupos?: string[]          // ids de GrupoAtencion asignados
 }
@@ -217,6 +220,7 @@ export interface TipoSesion {
   orden: number
   es_compromiso: boolean       // si genera sesión trackeable (default true)
   duracion_min: number
+  cada_dias?: number | null    // días desde la sesión anterior (ritmo del bloque)
   procedimientos: TipoSesionProcedimiento[]
 }
 
