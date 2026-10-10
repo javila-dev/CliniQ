@@ -555,6 +555,47 @@ class TipoSesionProcedimiento(BaseModel):
 Procedimiento = Servicio
 
 
+class PrecioSede(BaseModel):
+    """Precio de un procedimiento o tratamiento en una sede concreta.
+
+    Si una sede no tiene fila, usa el precio general (``Servicio.precio_base`` o
+    ``TratamientoCatalogo.precio_estimado``). El descuento máximo sigue siendo el
+    general y se aplica sobre el precio de la sede. Ver ``clinicas/precios.py``.
+    """
+
+    sede = models.ForeignKey(Sede, on_delete=models.CASCADE, related_name="precios")
+    procedimiento = models.ForeignKey(
+        Servicio, on_delete=models.CASCADE, null=True, blank=True, related_name="precios_sede",
+    )
+    tratamiento = models.ForeignKey(
+        TratamientoCatalogo, on_delete=models.CASCADE, null=True, blank=True, related_name="precios_sede",
+    )
+    precio = models.DecimalField(max_digits=12, decimal_places=2, validators=[MinValueValidator(0)])
+
+    class Meta:
+        db_table = "clinicas_precio_sede"
+        constraints = [
+            models.CheckConstraint(
+                check=(
+                    models.Q(procedimiento__isnull=False, tratamiento__isnull=True)
+                    | models.Q(procedimiento__isnull=True, tratamiento__isnull=False)
+                ),
+                name="precio_sede_un_destino",
+            ),
+            models.UniqueConstraint(
+                fields=["sede", "procedimiento"], condition=models.Q(procedimiento__isnull=False),
+                name="precio_sede_unico_procedimiento",
+            ),
+            models.UniqueConstraint(
+                fields=["sede", "tratamiento"], condition=models.Q(tratamiento__isnull=False),
+                name="precio_sede_unico_tratamiento",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.procedimiento or self.tratamiento} @ {self.sede}: {self.precio}"
+
+
 class Campana(BaseModel):
     clinica = models.ForeignKey(
         Clinica,
@@ -600,7 +641,14 @@ class CampanaItem(BaseModel):
         blank=True,
         related_name="campana_items",
     )
-    precio_campana = models.DecimalField(max_digits=12, decimal_places=2)
+    # Precio fijo de promoción, o un % de descuento sobre el precio de cada sede
+    # (uno de los dos). Con precios por sede, el % evita que la promoción quede
+    # por encima del precio normal de una sede más barata.
+    precio_campana = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    descuento_pct = models.DecimalField(
+        max_digits=5, decimal_places=2, null=True, blank=True,
+        validators=[MinValueValidator(0), MaxValueValidator(100)],
+    )
 
     class Meta:
         db_table = "campana_items"
@@ -611,7 +659,14 @@ class CampanaItem(BaseModel):
                     models.Q(procedimiento__isnull=False) | models.Q(tratamiento__isnull=False)
                 ),
                 name="campana_item_requires_target",
-            )
+            ),
+            models.CheckConstraint(
+                check=(
+                    models.Q(precio_campana__isnull=False, descuento_pct__isnull=True)
+                    | models.Q(precio_campana__isnull=True, descuento_pct__isnull=False)
+                ),
+                name="campana_item_precio_o_porcentaje",
+            ),
         ]
 
     def __str__(self) -> str:

@@ -21,6 +21,7 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatDateTime } from '@/lib/utils'
+import { precioEnSede, precioGeneralProcedimiento } from '@/lib/precios'
 import type { Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
 import type { Cotizacion, ItemCotizacion as ItemCotizacionApi } from '@/types/cotizaciones'
 import type { FormValues } from './CotizacionForm'
@@ -270,8 +271,8 @@ export function ObsequiosCotizacionSection({
   function elegirProcedimiento(idx: number, p: Procedimiento) {
     setValue(`items.${idx}.procedimiento`, p.id, { shouldDirty: true })
     setValue(`items.${idx}.descripcion`, p.nombre, { shouldDirty: true })
-    const precio = p.precio_base ?? p.precio_referencia
-    setValue(`items.${idx}.valor_referencia`, precio ? parseFloat(precio) : 0, { shouldDirty: true })
+    const precio = precioEnSede(p, precioGeneralProcedimiento(p), sedeId)
+    setValue(`items.${idx}.valor_referencia`, precio ?? 0, { shouldDirty: true })
   }
 
   function elegirClon(idx: number, valor: string) {
@@ -502,7 +503,7 @@ export function ObsequiosCotizacionSection({
                     opciones={procedimientos.map((p) => ({
                       id: p.id,
                       label: p.nombre,
-                      hint: (p.precio_base ?? p.precio_referencia) ? cop(parseFloat((p.precio_base ?? p.precio_referencia)!)) : undefined,
+                      hint: (() => { const precio = precioEnSede(p, precioGeneralProcedimiento(p), sedeId); return precio !== null ? cop(precio) : undefined })(),
                     }))}
                     onSelect={(id) => { const p = procedimientos.find((x) => x.id === id); if (p) elegirProcedimiento(idx, p) }}
                   />

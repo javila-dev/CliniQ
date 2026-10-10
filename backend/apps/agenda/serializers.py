@@ -322,16 +322,29 @@ class CitaSerializer(serializers.ModelSerializer):
 
         return deuda_bloqueante_info(obj.paciente, obj.sede.clinica)
 
+    def _precio_en_sede(self, obj):
+        """Precio del servicio en la sede de la cita (el propio o el general).
+
+        Se guarda por (servicio, sede) en el contexto: la agenda lista muchas citas.
+        """
+        from apps.clinicas.precios import precio_lista
+
+        cache = self.context.setdefault("_precio_servicio_sede", {})
+        clave = (obj.servicio_id, obj.sede_id)
+        if clave not in cache:
+            cache[clave] = precio_lista(obj.servicio, obj.sede_id)
+        return cache[clave]
+
     def get_servicio_precio(self, obj):
         if obj.servicio_id and obj.servicio:
-            return obj.servicio.precio
+            return self._precio_en_sede(obj)
         return None
 
     def get_servicio_precio_base(self, obj):
         if obj.item_cotizacion_id:
             return None
-        if obj.servicio_id and obj.servicio:
-            return obj.servicio.precio_base
+        if obj.servicio_id and obj.servicio and obj.servicio.precio_base is not None:
+            return self._precio_en_sede(obj)
         return None
 
     def get_sesion_ejecutada_id(self, obj):

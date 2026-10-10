@@ -56,7 +56,19 @@ function TratamientosTable({
               </td>
               <td className="px-4 py-3 text-right hidden md:table-cell">
                 {t.precio_estimado
-                  ? <span className="text-sm font-semibold tabular-nums">{COP.format(parseFloat(t.precio_estimado))}</span>
+                  ? (
+                    <div className="leading-tight">
+                      <span className="text-sm font-semibold tabular-nums">{COP.format(parseFloat(t.precio_estimado))}</span>
+                      {(t.precios_sede?.length ?? 0) > 0 && (
+                        <p
+                          className="text-[11px] text-primary"
+                          title={t.precios_sede!.map((p) => `${p.sede_nombre ?? 'Sede'}: ${COP.format(Number(p.precio))}`).join(' · ')}
+                        >
+                          {t.precios_sede!.length === 1 ? '1 sede con precio propio' : `${t.precios_sede!.length} sedes con precio propio`}
+                        </p>
+                      )}
+                    </div>
+                  )
                   : <span className="text-xs text-muted-foreground">—</span>}
               </td>
               <td className="px-4 py-3 text-center hidden sm:table-cell">

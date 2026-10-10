@@ -155,6 +155,8 @@ export interface Servicio {
   precio_referencia?: string | null    // H26: referencia interna, no comercial
   precio_base?: string | null          // H31: precio fijo del catálogo
   descuento_maximo_pct?: string | null // tope de descuento en cotizaciones sobre precio_base
+  /** Precio propio en algunas sedes; las demás usan el general. */
+  precios_sede?: PrecioSede[]
   requiere_consentimiento?: boolean        // legacy; derivar de consentimientos_requeridos
   documenso_template_token?: string | null // legacy
   documenso_template_nombre?: string | null // legacy
@@ -177,6 +179,19 @@ export interface Servicio {
 /** Alias semántico post-H26 */
 export type Procedimiento = Servicio
 
+/** Precio de un procedimiento o tratamiento en una sede (backend: clinicas.PrecioSede). */
+export interface PrecioSede {
+  sede: string
+  sede_nombre?: string
+  precio: string            // Decimal como string (DRF)
+}
+
+/** Lo que se envía al guardar: solo las sedes con precio propio. */
+export interface PrecioSedeInput {
+  sede: string
+  precio: number
+}
+
 export interface CreateServicioRequest {
   nombre: string
   descripcion?: string
@@ -198,6 +213,7 @@ export interface CreateProcedimientoRequest {
   descuento_maximo_pct?: number | null  // tope de descuento sobre precio_base (0 = sin descuento)
   vigencia_meses?: number
   cada_dias?: number | null             // días entre sesiones (ritmo)
+  precios_sede?: PrecioSedeInput[]      // reemplaza la lista completa
   profesionales?: string[]   // ids de Colaborador que realizan el procedimiento
   grupos?: string[]          // ids de GrupoAtencion asignados
 }
@@ -230,6 +246,7 @@ export interface TratamientoCatalogo {
   descripcion: string | null
   precio_estimado: string | null  // Decimal como string (DRF)
   descuento_maximo_pct?: string | null // tope de descuento en cotizaciones sobre precio_estimado
+  precios_sede?: PrecioSede[]     // precio propio en algunas sedes
   total_sesiones: number          // sum(tipo.cantidad) donde es_compromiso=true
   pacientes_con_tratamiento?: number  // pacientes que ya lo tienen; cambiar sus sesiones altera las que les quedan
   activo: boolean
@@ -260,6 +277,7 @@ export interface CreateTratamientoCatalogoRequest {
   descripcion?: string
   precio_estimado?: number | null
   descuento_maximo_pct?: number | null  // tope de descuento sobre precio_estimado (0 = sin descuento)
+  precios_sede?: PrecioSedeInput[]      // reemplaza la lista completa
   tipos_sesion: CreateTipoSesionRequest[]
 }
 

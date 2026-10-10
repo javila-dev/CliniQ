@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock, MessageCircle } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock, MessageCircle, MapPin } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -30,6 +30,7 @@ import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
 import { FirmaProfesionalModal } from '@/components/atenciones/FirmaProfesionalModal'
+import { precioEnSede, precioGeneralProcedimiento, precioPropioSede } from '@/lib/precios'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
 import { CotizacionVencidaDialog } from './CotizacionVencidaDialog'
@@ -45,7 +46,7 @@ import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
 import type { Cotizacion, EstadoCotizacion, MotivoDescarte, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
-import type { TratamientoCatalogo, Procedimiento } from '@/types/clinicas'
+import type { TratamientoCatalogo, Procedimiento, PrecioSede } from '@/types/clinicas'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
 // ── Schema ─────────────────────────────────────────────────────────────────────
@@ -144,11 +145,12 @@ export type FormValues = z.infer<typeof schema>
 // ── TratamientoSelector ────────────────────────────────────────────────────────
 
 function TratamientoSelector({
-  value, tratamientos, onSelect,
+  value, tratamientos, onSelect, sedeId,
 }: {
   value: string
   tratamientos: TratamientoCatalogo[]
   onSelect: (t: TratamientoCatalogo) => void
+  sedeId?: string | null
 }) {
   const selected = tratamientos.find((t) => t.id === value)
   return (
@@ -159,9 +161,12 @@ function TratamientoSelector({
       opciones={tratamientos.map((t) => ({
         id: t.id,
         label: t.nombre,
-        hint: t.precio_estimado
-          ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(t.precio_estimado))
-          : undefined,
+        hint: (() => {
+          const precio = precioEnSede(t, t.precio_estimado, sedeId)
+          return precio !== null
+            ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(precio)
+            : undefined
+        })(),
       }))}
       onSelect={(id) => {
         const t = tratamientos.find((x) => x.id === id)
@@ -175,11 +180,12 @@ function TratamientoSelector({
 // ── ProcedimientoSelector ──────────────────────────────────────────────────────
 
 function ProcedimientoSelector({
-  value, procedimientos, onSelect,
+  value, procedimientos, onSelect, sedeId,
 }: {
   value: string
   procedimientos: Procedimiento[]
   onSelect: (p: Procedimiento) => void
+  sedeId?: string | null
 }) {
   const selected = procedimientos.find((p) => p.id === value)
   return (
@@ -190,9 +196,12 @@ function ProcedimientoSelector({
       opciones={procedimientos.map((p) => ({
         id: p.id,
         label: p.nombre,
-        hint: p.precio_referencia
-          ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(parseFloat(p.precio_referencia))
-          : undefined,
+        hint: (() => {
+          const precio = precioEnSede(p, precioGeneralProcedimiento(p), sedeId)
+          return precio !== null
+            ? new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 }).format(precio)
+            : undefined
+        })(),
       }))}
       onSelect={(id) => {
         const p = procedimientos.find((x) => x.id === id)
@@ -202,6 +211,23 @@ function ProcedimientoSelector({
   )
 }
 
+
+/** "Precio de sede Norte": el ítem usa el precio propio de la sede de la cotización. */
+function MarcaPrecioSede({ catalogo, sedeId, sedeNombre, valor }: {
+  catalogo: { precios_sede?: PrecioSede[] | null } | undefined
+  sedeId: string | null | undefined
+  sedeNombre: string | undefined
+  valor: number | undefined
+}) {
+  const propio = precioPropioSede(catalogo, sedeId)
+  if (propio === null || valor !== propio) return null
+  return (
+    <p className="mt-1 inline-flex items-center gap-1 text-[11px] font-medium text-primary">
+      <MapPin className="h-3 w-3" />
+      Precio de {sedeNombre ?? 'esta sede'}
+    </p>
+  )
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -232,17 +258,17 @@ function getPrecioMinimoItem(
   precioCampana: string | null | undefined,
   procedimientos: Procedimiento[],
   tratamientos: TratamientoCatalogo[],
+  sedeId?: string | null,
 ): number | null {
   if (tipo === 'libre') return null
   if (precioCampana) return parseFloat(precioCampana)
   if (tipo === 'procedimiento' && procedimientoId) {
     const p = procedimientos.find((x) => x.id === procedimientoId)
-    const raw = p?.precio_base ?? p?.precio_referencia
-    return raw ? parseFloat(raw) : null
+    return p ? precioEnSede(p, precioGeneralProcedimiento(p), sedeId) : null
   }
   if (tipo === 'tratamiento' && tratamientoId) {
     const t = tratamientos.find((x) => x.id === tratamientoId)
-    return t?.precio_estimado ? parseFloat(t.precio_estimado) : null
+    return t ? precioEnSede(t, t.precio_estimado, sedeId) : null
   }
   return null
 }
@@ -262,15 +288,17 @@ function getDescMaxItem(
   tratamientoId: string | null | undefined,
   procedimientos: Procedimiento[],
   tratamientos: TratamientoCatalogo[],
+  sedeId?: string | null,
 ): { precioLista: number; descMaxPct: number } | null {
+  // El descuento máximo es el general y se aplica sobre el precio de la sede.
   if (tipo === 'procedimiento' && procedimientoId) {
     const p = procedimientos.find((x) => x.id === procedimientoId)
-    if (p?.precio_base) return { precioLista: parseFloat(p.precio_base), descMaxPct: parseFloat(p.descuento_maximo_pct ?? '0') }
+    if (p?.precio_base) return { precioLista: precioEnSede(p, p.precio_base, sedeId)!, descMaxPct: parseFloat(p.descuento_maximo_pct ?? '0') }
     return null
   }
   if (tipo === 'tratamiento' && tratamientoId) {
     const t = tratamientos.find((x) => x.id === tratamientoId)
-    if (t?.precio_estimado) return { precioLista: parseFloat(t.precio_estimado), descMaxPct: parseFloat(t.descuento_maximo_pct ?? '0') }
+    if (t?.precio_estimado) return { precioLista: precioEnSede(t, t.precio_estimado, sedeId)!, descMaxPct: parseFloat(t.descuento_maximo_pct ?? '0') }
     return null
   }
   return null
@@ -335,7 +363,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   // cotizaciones.cambiar_precio: puede subirlo, no bajarlo. Mismo criterio que el backend.
   const precioMinimoDe = (item: { tipo?: string; procedimiento?: string | null; tratamiento?: string | null; precio_campana_disponible?: string | null; precio_bloqueado?: boolean }) =>
     item.precio_bloqueado && !canEditPrice
-      ? getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [])
+      ? getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
       : null
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
@@ -518,6 +546,70 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [preciosCampana])
 
+  // Al cambiar la sede, los ítems de catálogo que seguían con el precio de la
+  // sede anterior pasan al de la nueva; los que se cambiaron a mano no se tocan.
+  // Solo cuando la persona elige otra sede (no al cargar la cotización).
+  const sedeAnteriorRef = useRef<string | null | undefined>(undefined)
+  const sedeCambiadaAMano = useRef(false)
+  useEffect(() => {
+    const anterior = sedeAnteriorRef.current
+    sedeAnteriorRef.current = sedeSeleccionada
+    const aMano = sedeCambiadaAMano.current
+    sedeCambiadaAMano.current = false
+    if (!aMano || anterior === undefined || anterior === sedeSeleccionada || !puedeEditarItems) return
+    let actualizados = 0
+    const conPromoAntes: number[] = []
+    getValues('items').forEach((it, idx) => {
+      if (it.es_obsequio) return
+      const catalogo = it.tipo === 'procedimiento'
+        ? procedimientos?.find((p) => p.id === it.procedimiento)
+        : it.tipo === 'tratamiento' ? tratamientos?.find((t) => t.id === it.tratamiento) : undefined
+      if (!catalogo) return
+      const general = it.tipo === 'procedimiento'
+        ? precioGeneralProcedimiento(catalogo as Procedimiento)
+        : (catalogo as TratamientoCatalogo).precio_estimado
+      const antes = precioEnSede(catalogo, general, anterior)
+      const ahora = precioEnSede(catalogo, general, sedeSeleccionada)
+      if (antes === null || ahora === null) return
+      // Con la promoción de la sede anterior aplicada: pasa al precio de la nueva
+      // y, si allá también hay promoción, se le aplica (abajo, al consultarla).
+      const conPromo = !!it.precio_campana_disponible && it.valor_unitario === parseFloat(it.precio_campana_disponible)
+      if (conPromo) {
+        conPromoAntes.push(idx)
+      } else if (antes === ahora || it.valor_unitario !== antes) {
+        return
+      }
+      setValue(`items.${idx}.valor_unitario`, ahora, { shouldDirty: true })
+      actualizados += 1
+    })
+    if (conPromoAntes.length > 0) {
+      queryClient
+        .fetchQuery({
+          queryKey: ['precios-campana', sedeSeleccionada ?? null],
+          queryFn: () => cotizacionesApi.preciosCampana(sedeSeleccionada),
+          staleTime: 5 * 60_000,
+        })
+        .then((precios) => {
+          for (const idx of conPromoAntes) {
+            const it = getValues(`items.${idx}`)
+            const camp = it?.tipo === 'tratamiento' && it.tratamiento
+              ? precios.tratamientos[it.tratamiento]
+              : it?.tipo === 'procedimiento' && it.procedimiento ? precios.procedimientos[it.procedimiento] : null
+            if (camp) setValue(`items.${idx}.valor_unitario`, parseFloat(camp.precio_campana), { shouldDirty: true })
+          }
+        })
+        .catch(() => null)
+    }
+    if (actualizados > 0) {
+      const nombre = sedes.find((x) => x.id === sedeSeleccionada)?.nombre ?? 'la nueva sede'
+      toast.success(
+        'Precios actualizados',
+        `${actualizados === 1 ? 'Un ítem quedó' : `${actualizados} ítems quedaron`} con el precio (o la promoción) de ${nombre}. Los que cambiaste a mano se mantienen.`,
+      )
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sedeSeleccionada])
+
   function onTratamientoChange(idx: number, t: TratamientoCatalogo) {
     setValue(`items.${idx}.tipo`, 'tratamiento')
     setValue(`items.${idx}.tratamiento`, t.id)
@@ -528,7 +620,8 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     const camp = preciosCampana?.tratamientos[t.id] ?? null
     setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
     setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
-    if (t.precio_estimado) setValue(`items.${idx}.valor_unitario`, parseFloat(t.precio_estimado))
+    const precioT = precioEnSede(t, t.precio_estimado, sedeSeleccionada)
+    if (precioT !== null) setValue(`items.${idx}.valor_unitario`, precioT)
     setValue(`items.${idx}.precio_bloqueado`, precioBloqueadoCatalogo(t.precio_estimado, t.descuento_maximo_pct))
   }
 
@@ -541,8 +634,8 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     const camp = preciosCampana?.procedimientos[p.id] ?? null
     setValue(`items.${idx}.precio_campana_disponible`, camp?.precio_campana ?? null)
     setValue(`items.${idx}.campana_nombre`, camp?.campana_nombre ?? null)
-    const precio = p.precio_base ?? p.precio_referencia
-    if (precio) setValue(`items.${idx}.valor_unitario`, parseFloat(precio))
+    const precio = precioEnSede(p, precioGeneralProcedimiento(p), sedeSeleccionada)
+    if (precio !== null) setValue(`items.${idx}.valor_unitario`, precio)
     setValue(`items.${idx}.precio_bloqueado`, precioBloqueadoCatalogo(p.precio_base, p.descuento_maximo_pct))
   }
 
@@ -788,7 +881,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
    * Guardar y Aprobar comparten la regla para que el aviso del campo y el bloqueo coincidan. */
   function avisarDescuentoExcedido(items: FormValues['items']): boolean {
     const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
-      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [])
+      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
       if (!info) return false
       const desc = item.descuento_porcentaje || 0
       const efectivo = (item.valor_unitario || 0) * (1 - desc / 100)
@@ -797,7 +890,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       return !campanaExacta && efectivo < piso - 1
     })
     if (!itemDescExcedido) return false
-    const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [])
+    const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
     toast.error(
       'Descuento sobre el máximo',
       info && info.descMaxPct > 0
@@ -1218,7 +1311,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     render={({ field }) => (
                       <Select
                         value={field.value ?? undefined}
-                        onValueChange={field.onChange}
+                        onValueChange={(v) => { sedeCambiadaAMano.current = true; field.onChange(v) }}
                         disabled={soloLectura}
                       >
                         <SelectTrigger className="h-8 text-sm w-auto min-w-[11rem] max-w-[65%] gap-2">
@@ -1418,7 +1511,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     // no puede bajar de precioLista * (1 - descMaxPct/100).
                     const descMaxInfo = soloLectura ? null : getDescMaxItem(
                       items[idx]?.tipo, items[idx]?.procedimiento, items[idx]?.tratamiento,
-                      procedimientos ?? [], tratamientos ?? [],
+                      procedimientos ?? [], tratamientos ?? [], sedeSeleccionada,
                     )
                     const precioEfectivo = val * (1 - desc / 100)
                     const pisoDescuento = descMaxInfo ? descMaxInfo.precioLista * (1 - descMaxInfo.descMaxPct / 100) : null
@@ -1576,10 +1669,17 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                                 value={items[idx]?.tratamiento ?? ''}
                                 tratamientos={tratamientos ?? []}
                                 onSelect={(t) => onTratamientoChange(idx, t)}
+                                sedeId={sedeSeleccionada}
                               />
                             ) : (
                               <span className="text-xs">{items[idx]?.descripcion ?? '—'}</span>
                             )}
+                            <MarcaPrecioSede
+                              catalogo={tratamientos?.find((x) => x.id === items[idx]?.tratamiento)}
+                              sedeId={sedeSeleccionada}
+                              sedeNombre={sedes.find((x) => x.id === sedeSeleccionada)?.nombre}
+                              valor={items[idx]?.valor_unitario}
+                            />
                           </div>
                           <div className="text-center">
                             <p className="text-xs text-muted-foreground md:hidden mb-1">Sesiones</p>
@@ -1618,10 +1718,17 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                                 value={items[idx]?.procedimiento ?? ''}
                                 procedimientos={procedimientos ?? []}
                                 onSelect={(p) => onProcedimientoChange(idx, p)}
+                                sedeId={sedeSeleccionada}
                               />
                             ) : (
                               <span className="text-xs">{items[idx]?.descripcion ?? '—'}</span>
                             )}
+                            <MarcaPrecioSede
+                              catalogo={procedimientos?.find((x) => x.id === items[idx]?.procedimiento)}
+                              sedeId={sedeSeleccionada}
+                              sedeNombre={sedes.find((x) => x.id === sedeSeleccionada)?.nombre}
+                              valor={items[idx]?.valor_unitario}
+                            />
                           </div>
                           <div>
                             <p className="text-xs text-muted-foreground md:hidden mb-1">Citas</p>

@@ -10,7 +10,8 @@ export interface CampanaItem {
   procedimiento_nombre: string | null
   tratamiento:          string | null
   tratamiento_nombre:   string | null
-  precio_campana:       string
+  precio_campana:       string | null   // precio fijo, o
+  descuento_pct:        string | null   // % de descuento sobre el precio de cada sede
 }
 
 export interface Campana {
@@ -39,5 +40,6 @@ export interface CreateCampanaRequest {
 export interface CreateCampanaItemRequest {
   procedimiento?: string | null
   tratamiento?:   string | null
-  precio_campana: number
+  precio_campana?: number | null
+  descuento_pct?:  number | null
 }

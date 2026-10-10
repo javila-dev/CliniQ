@@ -18,6 +18,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 import type { CreateTratamientoCatalogoRequest, Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
+import { PreciosPorSedeEditor, preciosSedeAForm, preciosSedeAPayload, type PreciosSedeForm } from './PreciosPorSedeEditor'
 
 // ─── Modelo del formulario ────────────────────────────────────
 // Cada fila es una sesión (internamente un TipoSesion): una descripción propia, cuántas veces
@@ -332,6 +333,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
   const [nombre, setNombre] = useState('')
   const [precio, setPrecio] = useState<number | null>(null)
   const [descuento, setDescuento] = useState(0)
+  const [preciosSede, setPreciosSede] = useState<PreciosSedeForm>({})
   const [descripcion, setDescripcion] = useState('')
   const [activo, setActivo] = useState(true)
   const [filas, setFilas] = useState<Fila[]>([filaVacia()])
@@ -359,6 +361,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
       setNombre(duplicar ? `${tratamiento.nombre} (copia)` : tratamiento.nombre)
       setPrecio(tratamiento.precio_estimado ? parseFloat(tratamiento.precio_estimado) : null)
       setDescuento(tratamiento.descuento_maximo_pct != null ? parseFloat(tratamiento.descuento_maximo_pct) : 0)
+      setPreciosSede(preciosSedeAForm(tratamiento.precios_sede))
       setDescripcion(tratamiento.descripcion ?? '')
       setActivo(duplicar ? true : tratamiento.activo)
       const cargadas = tratamiento.tipos_sesion.map((t) => filaDesdeTipo(t, !duplicar))
@@ -372,6 +375,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
       setNombre(borrador?.nombre ?? '')
       setPrecio(borrador?.precio ?? null)
       setDescuento(borrador?.descuento ?? 0)
+      setPreciosSede({})
       setDescripcion(borrador?.descripcion ?? '')
       setActivo(true)
       setFilas(borrador?.filas?.length ? borrador.filas : [filaVacia()])
@@ -520,6 +524,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
       descripcion: descripcion.trim(),
       precio_estimado: precio,
       descuento_maximo_pct: descuento,
+      precios_sede: preciosSedeAPayload(preciosSede),
       ...(esEdicion ? { activo } : {}),
       tipos_sesion: filasUtiles.map((f, i) => ({
         ...(f.id ? { id: f.id } : {}),
@@ -545,7 +550,7 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
 
   const empezarDeCero = () => {
     try { window.localStorage.removeItem(claveBorrador) } catch { /* nada que limpiar */ }
-    setNombre(''); setPrecio(null); setDescuento(0); setDescripcion('')
+    setNombre(''); setPrecio(null); setDescuento(0); setPreciosSede({}); setDescripcion('')
     setFilas([filaVacia()]); setRecuperado(false); setErrores([]); setIntentado(false)
   }
 
@@ -619,6 +624,9 @@ export function TratamientoDialog({ open, onOpenChange, tratamiento, duplicar = 
                   />
                   <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
                 </div>
+              </div>
+              <div className="sm:col-span-2">
+                <PreciosPorSedeEditor value={preciosSede} onChange={setPreciosSede} precioGeneral={precio} />
               </div>
             </div>
 

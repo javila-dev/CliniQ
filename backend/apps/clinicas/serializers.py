@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from django.apps import apps
 from rest_framework import serializers
 
@@ -342,7 +344,47 @@ class SedeSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ServicioSerializer(serializers.ModelSerializer):
+class PrecioSedeEntradaSerializer(serializers.Serializer):
+    """Un precio propio de sede: ``{"sede": id, "precio": "320000"}``."""
+
+    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.filter(activo=True))
+    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
+    precio = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("1"))
+
+
+class PreciosSedeMixin:
+    """Lee y guarda los precios por sede (``PrecioSede``) de un procedimiento o
+    tratamiento. Una sede que no aparece usa el precio general. Ver clinicas/precios.py."""
+
+    def validate_precios_sede(self, entradas):
+        vistas = set()
+        for entrada in entradas:
+            if entrada["sede"].id in vistas:
+                raise serializers.ValidationError("Hay una sede repetida.")
+            vistas.add(entrada["sede"].id)
+        return entradas
+
+    def _guardar_precios_sede(self, objeto, entradas):
+        if entradas is None:
+            return
+        from apps.clinicas.models import PrecioSede
+
+        campo = "tratamiento" if isinstance(objeto, TratamientoCatalogo) else "procedimiento"
+        por_sede = {}
+        for entrada in entradas:
+            sede = entrada["sede"]
+            if sede.clinica_id != objeto.clinica_id:
+                raise serializers.ValidationError({"precios_sede": "Alguna sede no pertenece a la clínica."})
+            por_sede[sede.id] = entrada["precio"]
+        PrecioSede.objects.filter(**{campo: objeto}).exclude(sede_id__in=por_sede).delete()
+        for sede_id, precio in por_sede.items():
+            PrecioSede.objects.update_or_create(**{campo: objeto, "sede_id": sede_id}, defaults={"precio": precio, "activo": True})
+        # La respuesta debe mostrar lo recién guardado, no lo precargado antes.
+        getattr(objeto, "_prefetched_objects_cache", {}).pop("precios_sede", None)
+
+
+class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
+    precios_sede = PrecioSedeEntradaSerializer(many=True, required=False)
     precio_referencia = serializers.DecimalField(
         source="precio",
         max_digits=12,
@@ -369,6 +411,7 @@ class ServicioSerializer(serializers.ModelSerializer):
             "precio_referencia",
             "precio_base",
             "descuento_maximo_pct",
+            "precios_sede",
             "vigencia_meses",
             "cada_dias",
             "tiene_protocolo",
@@ -434,6 +477,20 @@ class ServicioSerializer(serializers.ModelSerializer):
         attrs["precio_base"] = unico
         attrs["precio"] = unico
         return attrs
+
+    @transaction.atomic
+    def create(self, validated_data):
+        precios_sede = validated_data.pop("precios_sede", None)
+        objeto = super().create(validated_data)
+        self._guardar_precios_sede(objeto, precios_sede)
+        return objeto
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        precios_sede = validated_data.pop("precios_sede", None)
+        objeto = super().update(instance, validated_data)
+        self._guardar_precios_sede(objeto, precios_sede)
+        return objeto
 
     def validate_duracion_min(self, value):
         if value < 15 or value > 480:
@@ -523,6 +580,7 @@ class ProcedimientoSerializer(ServicioSerializer):
             "precio_referencia",
             "precio_base",
             "descuento_maximo_pct",
+            "precios_sede",
             "vigencia_meses",
             "cada_dias",
             "tiene_protocolo",
@@ -780,7 +838,8 @@ class TipoSesionSerializer(serializers.ModelSerializer):
                 item.save(update_fields=["activo", "updated_at"])
 
 
-class TratamientoCatalogoSerializer(serializers.ModelSerializer):
+class TratamientoCatalogoSerializer(PreciosSedeMixin, serializers.ModelSerializer):
+    precios_sede = PrecioSedeEntradaSerializer(many=True, required=False)
     nombre_clinica = serializers.CharField(source="clinica.nombre", read_only=True)
     total_sesiones = serializers.IntegerField(read_only=True)
     tipos_sesion = TipoSesionSerializer(many=True)
@@ -796,6 +855,7 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
             "descripcion",
             "precio_estimado",
             "descuento_maximo_pct",
+            "precios_sede",
             "activo",
             "total_sesiones",
             "pacientes_con_tratamiento",
@@ -870,18 +930,22 @@ class TratamientoCatalogoSerializer(serializers.ModelSerializer):
     @transaction.atomic
     def create(self, validated_data):
         tipos_sesion_data = validated_data.pop("tipos_sesion", [])
+        precios_sede = validated_data.pop("precios_sede", None)
         tratamiento = TratamientoCatalogo.objects.create(**validated_data)
         self._sync_tipos_sesion(tratamiento, tipos_sesion_data)
+        self._guardar_precios_sede(tratamiento, precios_sede)
         return tratamiento
 
     @transaction.atomic
     def update(self, instance, validated_data):
         tipos_sesion_data = validated_data.pop("tipos_sesion", None)
+        precios_sede = validated_data.pop("precios_sede", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
         if tipos_sesion_data is not None:
             self._sync_tipos_sesion(instance, tipos_sesion_data)
+        self._guardar_precios_sede(instance, precios_sede)
         return instance
 
     def _sync_tipos_sesion(self, tratamiento, tipos_sesion_data):
@@ -1133,6 +1197,7 @@ class CampanaItemSerializer(serializers.ModelSerializer):
             "tratamiento",
             "tratamiento_nombre",
             "precio_campana",
+            "descuento_pct",
             "activo",
             "created_at",
             "updated_at",
@@ -1146,10 +1211,21 @@ class CampanaItemSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Se debe especificar al menos procedimiento o tratamiento.")
         if procedimiento and tratamiento:
             raise serializers.ValidationError("Solo se puede especificar procedimiento o tratamiento, no ambos.")
+        # Precio fijo o % de descuento sobre el precio de cada sede: uno de los dos.
+        precio = attrs.get("precio_campana", getattr(self.instance, "precio_campana", None))
+        pct = attrs.get("descuento_pct", getattr(self.instance, "descuento_pct", None))
+        if "precio_campana" in attrs and attrs["precio_campana"] is not None:
+            pct = attrs["descuento_pct"] = None
+        elif "descuento_pct" in attrs and attrs["descuento_pct"] is not None:
+            precio = attrs["precio_campana"] = None
+        if (precio is None) == (pct is None):
+            raise serializers.ValidationError("Indica un precio de promoción o un porcentaje de descuento.")
+        if pct is not None and not (0 < pct < 100):
+            raise serializers.ValidationError({"descuento_pct": "El descuento debe estar entre 1% y 99%."})
         return attrs
 
     def validate_precio_campana(self, value):
-        if value < 0:
+        if value is not None and value < 0:
             raise serializers.ValidationError("El precio de campaña no puede ser negativo.")
         return value
 

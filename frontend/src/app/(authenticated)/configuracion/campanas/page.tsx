@@ -8,7 +8,7 @@ import { z } from 'zod'
 import {
   Plus, MoreHorizontal, Pencil, Trash2, Loader2, Zap,
   ChevronRight, ChevronDown, X, Package2, Stethoscope,
-  BarChart2, TrendingUp, ShoppingBag, CalendarRange, MapPin,
+  BarChart2, TrendingUp, ShoppingBag, CalendarRange, MapPin, AlertTriangle,
 } from 'lucide-react'
 import { campanasApi } from '@/lib/api/campanas'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { precioEnSede, precioGeneralProcedimiento } from '@/lib/precios'
 import type { Campana, CampanaItem, CreateCampanaRequest, CreateCampanaItemRequest } from '@/types/campanas'
 import type { Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
 
@@ -61,14 +62,31 @@ type CampanaFormValues = z.infer<typeof campanaSchema>
 
 // ─── Item draft (local state before saving) ───────────────────
 
+type ModoPromo = 'precio' | 'pct'
+
 interface ItemDraft {
-  key:            string
-  id?:            string    // backend UUID (present for existing items)
-  tipo:           'procedimiento' | 'tratamiento'
-  targetId:       string
-  targetNombre:   string
-  precio_campana: number
-  precio_regular: number | null
+  key:          string
+  id?:          string    // backend UUID (present for existing items)
+  tipo:         'procedimiento' | 'tratamiento'
+  targetId:     string
+  targetNombre: string
+  modo:         ModoPromo // precio fijo o % de descuento sobre el precio de cada sede
+  valor:        number
+  cambiado?:    boolean   // ítem existente al que se le cambió el precio
+}
+
+/** Texto corto de la promoción de un ítem guardado: "$280.000" o "−10%". */
+function textoPromo(item: CampanaItem): string {
+  if (item.descuento_pct != null) return `−${Number(item.descuento_pct)}%`
+  return item.precio_campana != null ? COP.format(parseFloat(item.precio_campana)) : '—'
+}
+
+/** "$300.000" o "$300.000 – $350.000" si cambia entre sedes. */
+function rango(valores: number[]): string {
+  if (valores.length === 0) return '—'
+  const min = Math.min(...valores)
+  const max = Math.max(...valores)
+  return min === max ? COP.format(min) : `${COP.format(min)} – ${COP.format(max)}`
 }
 
 // ─── PromociónDialog ────────────────────────────────────────────
@@ -89,7 +107,8 @@ function CampanaDialog({
   const [itemsDraft, setItemsDraft] = useState<ItemDraft[]>([])
   const [itemTipo, setItemTipo] = useState<'procedimiento' | 'tratamiento'>('procedimiento')
   const [itemTargetId, setItemTargetId] = useState('')
-  const [itemPrecio, setItemPrecio] = useState('')
+  const [itemModo, setItemModo] = useState<ModoPromo>('precio')
+  const [itemValor, setItemValor] = useState('')
   const [itemsError, setItemsError] = useState(false)
 
   const { register, control, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<CampanaFormValues>({
@@ -98,6 +117,10 @@ function CampanaDialog({
   })
 
   const selectedSedes = watch('sedes') ?? []
+  // Sin sedes elegidas, la promoción aplica en todas.
+  const sedesAplicables = selectedSedes.length
+    ? sedesDisponibles.filter((s) => selectedSedes.includes(s.id))
+    : sedesDisponibles
 
   // Sync form + items when dialog opens
   useEffect(() => {
@@ -113,24 +136,15 @@ function CampanaDialog({
       })
       setItemsDraft((editing.items ?? []).map((item) => {
         const esProcedimiento = !!item.procedimiento
-        const targetId = (item.procedimiento ?? item.tratamiento)!
-        let precio_regular: number | null = null
-        if (esProcedimiento) {
-          const p = procedimientos.find((x) => x.id === targetId)
-          const raw = p?.precio_referencia ?? p?.precio_base ?? p?.precio
-          precio_regular = raw ? parseFloat(raw) : null
-        } else {
-          const t = tratamientos.find((x) => x.id === targetId)
-          precio_regular = t?.precio_estimado ? parseFloat(t.precio_estimado) : null
-        }
+        const esPct = item.descuento_pct != null
         return {
-          key:            item.id,
-          id:             item.id,
-          tipo:           esProcedimiento ? 'procedimiento' : 'tratamiento',
-          targetId,
-          targetNombre:   (item.procedimiento_nombre ?? item.tratamiento_nombre)!,
-          precio_campana: parseFloat(item.precio_campana),
-          precio_regular,
+          key:          item.id,
+          id:           item.id,
+          tipo:         esProcedimiento ? 'procedimiento' : 'tratamiento',
+          targetId:     (item.procedimiento ?? item.tratamiento)!,
+          targetNombre: (item.procedimiento_nombre ?? item.tratamiento_nombre)!,
+          modo:         esPct ? 'pct' : 'precio',
+          valor:        esPct ? Number(item.descuento_pct) : parseFloat(item.precio_campana ?? '0'),
         }
       }))
     } else {
@@ -139,21 +153,22 @@ function CampanaDialog({
     }
     setItemTipo('procedimiento')
     setItemTargetId('')
-    setItemPrecio('')
+    setItemModo('precio')
+    setItemValor('')
   }, [open, editing]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const payloadItem = (d: ItemDraft): CreateCampanaItemRequest => ({
+    procedimiento:  d.tipo === 'procedimiento' ? d.targetId : null,
+    tratamiento:    d.tipo === 'tratamiento'   ? d.targetId : null,
+    precio_campana: d.modo === 'precio' ? d.valor : null,
+    descuento_pct:  d.modo === 'pct' ? d.valor : null,
+  })
 
   const createMutation = useMutation({
     mutationFn: async (values: CampanaFormValues) => {
       const payload: CreateCampanaRequest = { ...values, descripcion: values.descripcion ?? '' }
       const campana = await campanasApi.create(payload)
-      for (const item of itemsDraft) {
-        const itemPayload: CreateCampanaItemRequest = {
-          procedimiento:  item.tipo === 'procedimiento' ? item.targetId : null,
-          tratamiento:    item.tipo === 'tratamiento'   ? item.targetId : null,
-          precio_campana: item.precio_campana,
-        }
-        await campanasApi.addItem(campana.id, itemPayload)
-      }
+      for (const item of itemsDraft) await campanasApi.addItem(campana.id, payloadItem(item))
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
@@ -170,18 +185,15 @@ function CampanaDialog({
       const existingIds = new Set(editing!.items.map((i) => i.id))
       const draftIds    = new Set(itemsDraft.map((d) => d.id).filter(Boolean) as string[])
 
-      // Remove deleted items
       for (const item of editing!.items) {
         if (!draftIds.has(item.id)) await campanasApi.removeItem(editing!.id, item.id)
       }
-      // Add new items
       for (const draft of itemsDraft) {
         if (!draft.id || !existingIds.has(draft.id)) {
-          await campanasApi.addItem(editing!.id, {
-            procedimiento:  draft.tipo === 'procedimiento' ? draft.targetId : null,
-            tratamiento:    draft.tipo === 'tratamiento'   ? draft.targetId : null,
-            precio_campana: draft.precio_campana,
-          })
+          await campanasApi.addItem(editing!.id, payloadItem(draft))
+        } else if (draft.cambiado) {
+          const { precio_campana, descuento_pct } = payloadItem(draft)
+          await campanasApi.updateItem(editing!.id, draft.id, { precio_campana, descuento_pct })
         }
       }
     },
@@ -195,36 +207,73 @@ function CampanaDialog({
 
   const isPending = createMutation.isPending || updateMutation.isPending
 
-  function getPrecioRegular(tipo: 'procedimiento' | 'tratamiento', targetId: string): number | null {
+  // ── Precios del catálogo por sede ──
+
+  function catalogo(tipo: 'procedimiento' | 'tratamiento', targetId: string) {
     if (tipo === 'procedimiento') {
       const p = procedimientos.find((x) => x.id === targetId)
-      const raw = p?.precio_referencia ?? p?.precio_base ?? p?.precio
-      return raw ? parseFloat(raw) : null
+      return p ? { item: p, general: precioGeneralProcedimiento(p) } : null
     }
     const t = tratamientos.find((x) => x.id === targetId)
-    return t?.precio_estimado ? parseFloat(t.precio_estimado) : null
+    return t ? { item: t, general: t.precio_estimado } : null
+  }
+
+  /** Precio regular en cada sede donde aplica la promoción. */
+  function preciosRegulares(tipo: 'procedimiento' | 'tratamiento', targetId: string) {
+    const c = catalogo(tipo, targetId)
+    if (!c) return []
+    const sedes = sedesAplicables.length ? sedesAplicables : [{ id: '', nombre: 'General' }]
+    return sedes
+      .map((s) => ({ sede: s, precio: precioEnSede(c.item, c.general, s.id || null) }))
+      .filter((x): x is { sede: { id: string; nombre: string }; precio: number } => x.precio !== null)
+  }
+
+  /** Precio de promoción en una sede (fijo, o el % sobre el precio de esa sede). */
+  const precioPromo = (modo: ModoPromo, valor: number, regular: number) =>
+    modo === 'pct' ? Math.round(regular * (1 - valor / 100)) : valor
+
+  /** Sedes donde la promoción fija no mejora el precio normal: ahí no se ofrecería. */
+  function sedesSinMejora(d: Pick<ItemDraft, 'tipo' | 'targetId' | 'modo' | 'valor'>) {
+    if (d.modo === 'pct') return []
+    return preciosRegulares(d.tipo, d.targetId).filter((r) => r.sede.id && d.valor >= r.precio)
+  }
+
+  function quitarSedes(ids: string[]) {
+    const base = selectedSedes.length ? selectedSedes : sedesDisponibles.map((s) => s.id)
+    setValue('sedes', base.filter((id) => !ids.includes(id)), { shouldDirty: true })
+  }
+
+  function pasarAPorcentaje(d: ItemDraft) {
+    const c = catalogo(d.tipo, d.targetId)
+    const general = c?.general != null ? Number(c.general) : null
+    if (!general) return
+    const pct = Math.max(1, Math.min(99, Math.round((1 - d.valor / general) * 100)))
+    setItemsDraft((prev) => prev.map((x) => (x.key === d.key ? { ...x, modo: 'pct', valor: pct, cambiado: true } : x)))
   }
 
   const itemYaAgregado = !!itemTargetId && itemsDraft.some(
     (d) => d.tipo === itemTipo && d.targetId === itemTargetId
   )
 
+  const valorNuevo = itemValor ? Number(itemValor) : null
+  const valorValido = valorNuevo !== null && (itemModo === 'precio' ? valorNuevo > 0 : valorNuevo >= 1 && valorNuevo <= 99)
+
   function addItemToDraft() {
-    if (!itemTargetId || !itemPrecio || itemYaAgregado || itemBloqueadoPorOtraCampana) return
+    if (!itemTargetId || !valorValido || itemYaAgregado || itemBloqueadoPorOtraCampana) return
     const nombre = itemTipo === 'procedimiento'
       ? procedimientos.find((p) => p.id === itemTargetId)?.nombre ?? itemTargetId
       : tratamientos.find((t) => t.id === itemTargetId)?.nombre ?? itemTargetId
     setItemsDraft((prev) => [...prev, {
-      key:            crypto.randomUUID(),
-      tipo:           itemTipo,
-      targetId:       itemTargetId,
-      targetNombre:   nombre,
-      precio_campana: parseFloat(itemPrecio.replace(/\D/g, '')),
-      precio_regular: getPrecioRegular(itemTipo, itemTargetId),
+      key:          crypto.randomUUID(),
+      tipo:         itemTipo,
+      targetId:     itemTargetId,
+      targetNombre: nombre,
+      modo:         itemModo,
+      valor:        valorNuevo!,
     }])
     setItemsError(false)
     setItemTargetId('')
-    setItemPrecio('')
+    setItemValor('')
   }
 
   function handleSubmit_withItemsCheck(values: CampanaFormValues) {
@@ -237,7 +286,10 @@ function CampanaDialog({
     else createMutation.mutate(values)
   }
 
-  const precioRegularActual = itemTargetId ? getPrecioRegular(itemTipo, itemTargetId) : undefined
+  const regularesActual = itemTargetId ? preciosRegulares(itemTipo, itemTargetId) : []
+  const previaNuevo = itemTargetId && valorValido
+    ? regularesActual.map((r) => ({ ...r, promo: precioPromo(itemModo, valorNuevo!, r.precio) }))
+    : []
 
   // IDs de procedimientos/tratamientos ya usados en OTRAS promociones activas hoy
   const hoy = todayStr()
@@ -366,39 +418,77 @@ function CampanaDialog({
                     <tr className="border-b bg-muted/40">
                       <th className="px-4 py-2.5 text-left font-medium text-muted-foreground text-xs">Nombre</th>
                       <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">P. regular</th>
-                      <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">P. promoción</th>
+                      <th className="px-4 py-2.5 text-right font-medium text-muted-foreground text-xs">Promoción</th>
                       <th className="w-10" />
                     </tr>
                   </thead>
-                  <tbody className="divide-y">
-                    {itemsDraft.map((item) => (
-                      <tr key={item.key} className="hover:bg-muted/20 transition-colors">
-                        <td className="px-4 py-2.5">
-                          <div className="flex items-center gap-2">
-                            {item.tipo === 'procedimiento'
-                              ? <Stethoscope className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                              : <Package2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                            }
-                            <span className="truncate max-w-[220px]">{item.targetNombre}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground text-xs">
-                          {item.precio_regular != null ? COP.format(item.precio_regular) : '—'}
-                        </td>
-                        <td className="px-4 py-2.5 text-right tabular-nums font-semibold text-emerald-700">
-                          {COP.format(item.precio_campana)}
-                        </td>
-                        <td className="px-3 py-2.5 text-center">
-                          <button
-                            type="button"
-                            onClick={() => setItemsDraft((prev) => prev.filter((d) => d.key !== item.key))}
-                            className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                  <tbody>
+                    {itemsDraft.map((item) => {
+                      const regulares = preciosRegulares(item.tipo, item.targetId)
+                      const promos = regulares.map((r) => precioPromo(item.modo, item.valor, r.precio))
+                      const sinMejora = sedesSinMejora(item)
+                      return (
+                        <Fragment key={item.key}>
+                          <tr className="border-t first:border-t-0 hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-2.5">
+                              <div className="flex items-center gap-2">
+                                {item.tipo === 'procedimiento'
+                                  ? <Stethoscope className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                  : <Package2 className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                }
+                                <span className="truncate max-w-[220px]">{item.targetNombre}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground text-xs">
+                              {rango(regulares.map((r) => r.precio))}
+                            </td>
+                            <td className="px-4 py-2.5 text-right">
+                              <p className="tabular-nums font-semibold text-emerald-700">
+                                {item.modo === 'pct' ? `−${item.valor}%` : COP.format(item.valor)}
+                              </p>
+                              {item.modo === 'pct' && promos.length > 0 && (
+                                <p className="text-[11px] tabular-nums text-muted-foreground">{rango(promos)}</p>
+                              )}
+                            </td>
+                            <td className="px-3 py-2.5 text-center">
+                              <button
+                                type="button"
+                                onClick={() => setItemsDraft((prev) => prev.filter((d) => d.key !== item.key))}
+                                className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                                aria-label={`Quitar ${item.targetNombre}`}
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </td>
+                          </tr>
+                          {sinMejora.length > 0 && (
+                            <tr>
+                              <td colSpan={4} className="px-4 pb-3 pt-0">
+                                <div className="flex flex-col gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 sm:flex-row sm:items-center sm:justify-between">
+                                  <span className="flex items-start gap-1.5">
+                                    <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+                                    <span>
+                                      En {sinMejora.map((r) => `${r.sede.nombre} (${COP.format(r.precio)})`).join(', ')} el precio normal ya es
+                                      igual o menor que la promoción: ahí no se ofrecerá.
+                                    </span>
+                                  </span>
+                                  <span className="flex shrink-0 gap-2">
+                                    <button type="button" onClick={() => quitarSedes(sinMejora.map((r) => r.sede.id))}
+                                      className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium hover:bg-amber-100">
+                                      Quitar {sinMejora.length === 1 ? sinMejora[0].sede.nombre : 'esas sedes'}
+                                    </button>
+                                    <button type="button" onClick={() => pasarAPorcentaje(item)}
+                                      className="rounded-md border border-amber-300 bg-white px-2 py-1 font-medium hover:bg-amber-100">
+                                      Usar % de descuento
+                                    </button>
+                                  </span>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -426,9 +516,9 @@ function CampanaDialog({
                 ))}
               </div>
 
-              {/* Selector + precio + botón en una fila */}
-              <div className="flex gap-2 items-start">
-                <div className="flex-1 min-w-0">
+              {/* Selector + promoción + botón en una fila */}
+              <div className="flex flex-wrap gap-2 items-start">
+                <div className="flex-1 min-w-[12rem]">
                   <Select value={itemTargetId} onValueChange={setItemTargetId}>
                     <SelectTrigger className="bg-background">
                       <SelectValue placeholder={itemTipo === 'procedimiento' ? 'Seleccionar procedimiento…' : 'Seleccionar tratamiento…'} />
@@ -454,32 +544,62 @@ function CampanaDialog({
                           ? <span className="text-destructive font-medium">
                               En promoción activa: {campanaQueBloquea?.nombre ?? '—'}
                             </span>
-                          : <>Precio referencia:{' '}
-                              {precioRegularActual != null
-                                ? <span className="font-medium text-foreground tabular-nums">{COP.format(precioRegularActual)}</span>
+                          : <>Precio regular:{' '}
+                              {regularesActual.length
+                                ? <span className="font-medium text-foreground tabular-nums">{rango(regularesActual.map((r) => r.precio))}</span>
                                 : <span className="italic">sin registrar</span>
                               }
+                              {new Set(regularesActual.map((r) => r.precio)).size > 1 && ' según sede'}
                             </>
                       }
                     </p>
                   )}
                 </div>
 
-                <div className="relative w-48 shrink-0">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>
-                  <Input
-                    inputMode="numeric"
-                    className="pl-7 bg-background tabular-nums"
-                    placeholder="0"
-                    value={itemPrecio ? Number(itemPrecio).toLocaleString('es-CO') : ''}
-                    onChange={(e) => setItemPrecio(e.target.value.replace(/\D/g, ''))}
-                  />
+                {/* Precio fijo o % */}
+                <div className="flex shrink-0 items-start gap-1.5">
+                  <div className="flex rounded-md border bg-background p-0.5" role="group" aria-label="Tipo de promoción">
+                    {([['precio', '$'], ['pct', '%']] as const).map(([m, simbolo]) => (
+                      <button
+                        key={m}
+                        type="button"
+                        aria-pressed={itemModo === m}
+                        title={m === 'precio' ? 'Precio fijo de promoción' : '% de descuento sobre el precio de cada sede'}
+                        onClick={() => { setItemModo(m); setItemValor('') }}
+                        className={cn(
+                          'h-8 w-8 rounded text-sm font-medium transition-colors',
+                          itemModo === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        {simbolo}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="relative w-36">
+                    {itemModo === 'precio' && (
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">$</span>
+                    )}
+                    <Input
+                      inputMode="numeric"
+                      aria-label={itemModo === 'precio' ? 'Precio de promoción' : 'Porcentaje de descuento'}
+                      className={cn('bg-background tabular-nums', itemModo === 'precio' ? 'pl-7' : 'pr-7 text-right')}
+                      placeholder={itemModo === 'precio' ? '0' : 'Ej: 15'}
+                      value={itemValor ? (itemModo === 'precio' ? Number(itemValor).toLocaleString('es-CO') : itemValor) : ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/\D/g, '')
+                        setItemValor(itemModo === 'pct' ? raw.slice(0, 2) : raw.slice(0, 9))
+                      }}
+                    />
+                    {itemModo === 'pct' && (
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground pointer-events-none">%</span>
+                    )}
+                  </div>
                 </div>
 
                 <Button
                   type="button"
                   variant="default"
-                  disabled={!itemTargetId || !itemPrecio || itemYaAgregado || !!itemBloqueadoPorOtraCampana}
+                  disabled={!itemTargetId || !valorValido || itemYaAgregado || !!itemBloqueadoPorOtraCampana}
                   onClick={addItemToDraft}
                   className="shrink-0"
                 >
@@ -487,6 +607,28 @@ function CampanaDialog({
                   Agregar
                 </Button>
               </div>
+
+              {/* Cómo queda en cada sede */}
+              {previaNuevo.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {previaNuevo.map((p) => {
+                    const mejora = p.promo < p.precio
+                    return (
+                      <span
+                        key={p.sede.id || 'general'}
+                        className={cn(
+                          'inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums',
+                          mejora ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-800',
+                        )}
+                        title={mejora ? undefined : 'El precio normal de esta sede ya es igual o menor: ahí no se ofrecerá'}
+                      >
+                        {p.sede.nombre}: {COP.format(p.promo)}
+                        {!mejora && <AlertTriangle className="h-3 w-3" />}
+                      </span>
+                    )
+                  })}
+                </div>
+              )}
             </div>
 
             {itemsDraft.length === 0 && !itemsError && (
@@ -525,7 +667,7 @@ function CampanaItems({ campana }: { campana: Campana }) {
             }
             <span className="uppercase">{item.procedimiento_nombre ?? item.tratamiento_nombre}</span>
           </div>
-          <span className="font-medium tabular-nums text-emerald-700">{COP.format(parseFloat(item.precio_campana))}</span>
+          <span className="font-medium tabular-nums text-emerald-700">{textoPromo(item)}</span>
         </div>
       ))}
     </div>
@@ -646,7 +788,7 @@ function CampanaStatsModal({ campana, open, onClose }: { campana: Campana | null
                           </div>
                         </td>
                         <td className="px-3 py-2 text-right tabular-nums font-semibold text-emerald-700">
-                          {COP.format(parseFloat(item.precio_campana))}
+                          {textoPromo(item)}
                         </td>
                       </tr>
                     ))}

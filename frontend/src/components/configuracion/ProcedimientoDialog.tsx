@@ -13,6 +13,7 @@ import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/hooks/use-toast'
 import { DiagramasProcedimiento } from './DiagramasProcedimiento'
 import { GruposAtencionSelect } from '@/components/colaboradores/GruposAtencionSelect'
+import { PreciosPorSedeEditor, preciosSedeAForm, preciosSedeAPayload } from './PreciosPorSedeEditor'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -32,6 +33,7 @@ const schema = z.object({
   duracion_min: z.number().int().min(1, 'Duración requerida'),
   precio_base: z.number().min(0).nullable().optional(),
   descuento_maximo_pct: z.number().min(0).max(100).nullable().optional(),
+  precios_sede: z.record(z.string(), z.number().min(0).nullable()).optional(),
   requiere_consentimiento: z.boolean(),
   documenso_template_id: z.string().nullable().optional(),
   documenso_template_nombre: z.string().nullable().optional(),
@@ -46,7 +48,7 @@ type FormValues = z.infer<typeof schema>
 
 const DEFAULT_VALUES: FormValues = {
   nombre: '', descripcion: '', duracion_min: 30,
-  precio_base: null, descuento_maximo_pct: 0,
+  precio_base: null, descuento_maximo_pct: 0, precios_sede: {},
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, consentimiento_cada_vez: false,
   vigencia_meses: 12, cada_dias: null, profesionales: [], grupos: [], activo: true,
@@ -205,6 +207,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       duracion_min: fullTarget.duracion_min,
       precio_base: getPrecio(fullTarget),
       descuento_maximo_pct: fullTarget.descuento_maximo_pct != null ? parseFloat(fullTarget.descuento_maximo_pct) : 0,
+      precios_sede: preciosSedeAForm(fullTarget.precios_sede),
       requiere_consentimiento: (fullTarget.consentimientos_requeridos?.length ?? 0) > 0,
       documenso_template_id: primerConsentimiento?.template_id ?? null,
       documenso_template_nombre: primerConsentimiento?.template_nombre ?? null,
@@ -218,6 +221,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
   }, [open, target?.id, fullTarget])
 
   const requiereConsentimiento = useWatch({ control, name: 'requiere_consentimiento' })
+  const precioGeneral = useWatch({ control, name: 'precio_base' })
   const consentimientoCadaVez = useWatch({ control, name: 'consentimiento_cada_vez' })
 
   const { data: templates } = useQuery({
@@ -244,6 +248,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
         precio_base: data.precio_base ?? null,
         precio_referencia: data.precio_base ?? null,
         descuento_maximo_pct: data.descuento_maximo_pct ?? 0,
+        precios_sede: preciosSedeAPayload(data.precios_sede),
         vigencia_meses: data.requiere_consentimiento ? data.vigencia_meses : undefined,
         cada_dias: data.cada_dias ?? null,
         profesionales: data.profesionales ?? [],
@@ -419,6 +424,14 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
           )} />
         </div>
       </div>
+
+      <Controller name="precios_sede" control={control} render={({ field }) => (
+        <PreciosPorSedeEditor
+          value={field.value ?? {}}
+          onChange={field.onChange}
+          precioGeneral={precioGeneral ?? null}
+        />
+      )} />
 
       <div className="flex items-center justify-between gap-3">
         <LabelConAyuda ayuda="Si el paciente vuelve cada mes, escribe 30. Con esto la app avisa cuando un paciente ya debió agendar su siguiente sesión. Déjalo vacío si es de una sola sesión.">

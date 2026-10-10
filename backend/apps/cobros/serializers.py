@@ -169,7 +169,10 @@ class CobroCreateSerializer(serializers.ModelSerializer):
             and cita.servicio_id
             and getattr(cita.servicio, "precio_base", None) is not None
         ):
-            precio_base = cita.servicio.precio_base
+            from apps.clinicas.precios import precio_lista
+
+            # Precio fijo del servicio en la sede de la cita (el propio o el general).
+            precio_base = precio_lista(cita.servicio, cita.sede_id)
             items = attrs.get("items") or []
             precio_diferente = any(
                 item.get("precio_unitario") != precio_base

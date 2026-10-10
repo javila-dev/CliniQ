@@ -80,7 +80,19 @@ function ProcedimientosTable({
               </td>
               <td className="px-4 py-2 text-right hidden md:table-cell">
                 {s.precio
-                  ? <span className="text-sm font-medium tabular-nums">{new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(parseFloat(s.precio))}</span>
+                  ? (
+                    <div className="leading-tight">
+                      <span className="text-sm font-medium tabular-nums">{new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(parseFloat(s.precio))}</span>
+                      {(s.precios_sede?.length ?? 0) > 0 && (
+                        <p
+                          className="text-[11px] text-primary"
+                          title={s.precios_sede!.map((p) => `${p.sede_nombre ?? 'Sede'}: ${new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', minimumFractionDigits: 0 }).format(Number(p.precio))}`).join(' · ')}
+                        >
+                          {s.precios_sede!.length === 1 ? '1 sede con precio propio' : `${s.precios_sede!.length} sedes con precio propio`}
+                        </p>
+                      )}
+                    </div>
+                  )
                   : <span className="text-xs text-muted-foreground">—</span>}
               </td>
               <td className="px-4 py-2 text-center hidden sm:table-cell">

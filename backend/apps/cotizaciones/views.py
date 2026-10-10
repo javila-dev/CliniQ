@@ -899,17 +899,24 @@ class CotizacionViewSet(ModelViewSet):
             except (Sede.DoesNotExist, ValueError, TypeError):
                 sede = None
 
+        from apps.clinicas.precios import precio_promocion
+
+        # Precio fijo o % sobre el precio de la sede; si varias promociones aplican
+        # gana la más barata, y no se ofrece la que no mejora el precio de la sede.
         tratamientos, procedimientos = {}, {}
-        for item in campana_items_vigentes(clinica=clinica, sede=sede):
-            entry = {
-                "precio_campana": str(item.precio_campana),
-                "campana_id": str(item.campana_id),
-                "campana_nombre": item.campana.nombre,
-            }
-            if item.tratamiento_id:
-                tratamientos.setdefault(str(item.tratamiento_id), entry)
-            if item.procedimiento_id:
-                procedimientos.setdefault(str(item.procedimiento_id), entry)
+        for item in campana_items_vigentes(clinica=clinica, sede=sede).select_related("procedimiento", "tratamiento"):
+            precio = precio_promocion(item, sede)
+            if precio is None:
+                continue
+            destino = tratamientos if item.tratamiento_id else procedimientos
+            clave = str(item.tratamiento_id or item.procedimiento_id)
+            actual = destino.get(clave)
+            if actual is None or precio < Decimal(actual["precio_campana"]):
+                destino[clave] = {
+                    "precio_campana": str(precio),
+                    "campana_id": str(item.campana_id),
+                    "campana_nombre": item.campana.nombre,
+                }
 
         return Response(
             {"tratamientos": tratamientos, "procedimientos": procedimientos},

@@ -944,7 +944,7 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="activos", pagination_class=None)
     def activos(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset().filter(activo=True))
+        queryset = self.filter_queryset(self.get_queryset().filter(activo=True)).prefetch_related("precios_sede__sede")
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -1239,7 +1239,7 @@ class ProcedimientoViewSet(ServicioViewSet):
     serializer_class = ProcedimientoSerializer
 
     def get_queryset(self):
-        return super().get_queryset().prefetch_related("colaboradores__user", "grupos_atencion")
+        return super().get_queryset().prefetch_related("colaboradores__user", "grupos_atencion", "precios_sede__sede")
 
 
 class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
@@ -1247,6 +1247,7 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
     search_fields = ("nombre", "descripcion")
     ordering_fields = ("nombre", "precio_estimado", "created_at")
     queryset = TratamientoCatalogo.objects.select_related("clinica").prefetch_related(
+        "precios_sede__sede",
         Prefetch(
             "tipos_sesion",
             queryset=TipoSesion.objects.filter(activo=True).prefetch_related(
@@ -1347,12 +1348,19 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
 
     @action(detail=False, methods=["get"], url_path="activos", pagination_class=None)
     def activos(self, request, *args, **kwargs):
-        queryset = self.filter_queryset(self.get_queryset().filter(activo=True))
+        queryset = self.filter_queryset(self.get_queryset().filter(activo=True)).prefetch_related("precios_sede__sede")
         payload = [
             {
                 "id": str(tratamiento.id),
                 "nombre": tratamiento.nombre,
                 "precio_estimado": tratamiento.precio_estimado,
+                "descuento_maximo_pct": tratamiento.descuento_maximo_pct,
+                # Precio propio por sede (si una sede no aparece, usa el general).
+                "precios_sede": [
+                    {"sede": str(p.sede_id), "sede_nombre": p.sede.nombre, "precio": p.precio}
+                    for p in tratamiento.precios_sede.all()
+                    if p.activo
+                ],
                 "total_sesiones": tratamiento.total_sesiones,
                 # Detalle de bloques (ya prefetcheado): la cotización lo muestra
                 # en el modal "ver sesiones" del tratamiento.
