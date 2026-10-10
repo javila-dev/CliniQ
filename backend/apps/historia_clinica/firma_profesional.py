@@ -1,8 +1,10 @@
-"""Firma del profesional en los consentimientos de una cita, al iniciar la primera atención.
+"""Firma del profesional en los consentimientos que el paciente ya firmó.
 
-El profesional firma con la imagen guardada en su perfil, su nombre y su tarjeta
-profesional (TP). La firma se hace dentro del mismo sobre de Documenso que ya firmó
-el paciente (ver ``documenso_firmantes``).
+Se firma al iniciar la primera atención de una cita (solo el profesional de la cita)
+o desde la venta aprobada (cualquier profesional de la clínica). El profesional firma
+con la imagen guardada en su perfil, su nombre y su tarjeta profesional (TP). La
+firma se hace dentro del mismo sobre de Documenso que ya firmó el paciente (ver
+``documenso_firmantes``).
 """
 import logging
 
@@ -18,14 +20,11 @@ logger = logging.getLogger(__name__)
 MOTIVO_OTRO_PROFESIONAL = "PROFESIONAL_NO_ASIGNADO"
 MOTIVO_SIN_FIRMA = "SIN_FIRMA"
 MOTIVO_SIN_TP = "SIN_TP"
+MOTIVO_NO_ES_PROFESIONAL = "NO_ES_PROFESIONAL"
+MOTIVO_VENTA_NO_APROBADA = "VENTA_NO_APROBADA"
 
 
-def consentimientos_pendientes_firma_profesional(cita) -> list[ConsentimientoInformado]:
-    """Consentimientos de la cita que el paciente ya firmó y esperan la firma del profesional."""
-    from apps.agenda.serializers import build_consentimiento_info
-
-    info = build_consentimiento_info(cita)
-    ids = [item["consentimiento_id"] for item in info["consentimientos"] if item.get("consentimiento_id")]
+def _pendientes_por_ids(ids) -> list[ConsentimientoInformado]:
     if not ids:
         return []
     return list(
@@ -36,6 +35,40 @@ def consentimientos_pendientes_firma_profesional(cita) -> list[ConsentimientoInf
             fecha_firma_profesional__isnull=True,
         ).order_by("documenso_template_nombre")
     )
+
+
+def consentimientos_pendientes_firma_profesional(cita) -> list[ConsentimientoInformado]:
+    """Consentimientos de la cita que el paciente ya firmó y esperan la firma del profesional."""
+    from apps.agenda.serializers import build_consentimiento_info
+
+    info = build_consentimiento_info(cita)
+    return _pendientes_por_ids(
+        [item["consentimiento_id"] for item in info["consentimientos"] if item.get("consentimiento_id")]
+    )
+
+
+def consentimientos_pendientes_firma_profesional_cotizacion(cotizacion) -> list[ConsentimientoInformado]:
+    """Consentimientos que exige la cotización, ya firmados por el paciente, que esperan al profesional."""
+    from apps.protocolos.services import consentimientos_requeridos_cotizacion
+
+    return _pendientes_por_ids(
+        [
+            c["consentimiento_id"]
+            for c in consentimientos_requeridos_cotizacion(cotizacion)
+            if c["pendiente_firma_profesional"] and c["consentimiento_id"]
+        ]
+    )
+
+
+def _motivo_firma_y_tp(user, pendientes) -> dict | None:
+    if not user.firma_digital:
+        return {"code": MOTIVO_SIN_FIRMA, "error": "No has cargado tu firma."}
+    if any(c.requiere_tp_profesional for c in pendientes) and not (user.registro_profesional or "").strip():
+        return {
+            "code": MOTIVO_SIN_TP,
+            "error": "Este consentimiento requiere tarjeta profesional y no la has registrado.",
+        }
+    return None
 
 
 def motivo_no_puede_firmar(user, cita, pendientes=None) -> dict | None:
@@ -49,16 +82,27 @@ def motivo_no_puede_firmar(user, cita, pendientes=None) -> dict | None:
             "code": MOTIVO_OTRO_PROFESIONAL,
             "error": f"Esta cita está asignada a {nombre}. Solo ese profesional puede firmar.",
         }
-    if not user.firma_digital:
-        return {"code": MOTIVO_SIN_FIRMA, "error": "No has cargado tu firma."}
     if pendientes is None:
         pendientes = consentimientos_pendientes_firma_profesional(cita)
-    if any(c.requiere_tp_profesional for c in pendientes) and not (user.registro_profesional or "").strip():
+    return _motivo_firma_y_tp(user, pendientes)
+
+
+def motivo_no_puede_firmar_cotizacion(user, cotizacion, pendientes) -> dict | None:
+    """Desde la venta firma cualquier profesional de la clínica (no hay cita que lo asigne),
+    pero solo cuando la venta ya está aprobada."""
+    from apps.cotizaciones.models import Cotizacion
+
+    if cotizacion.estado != Cotizacion.Estado.ACEPTADA:
         return {
-            "code": MOTIVO_SIN_TP,
-            "error": "Este consentimiento requiere tarjeta profesional y no la has registrado.",
+            "code": MOTIVO_VENTA_NO_APROBADA,
+            "error": "La venta debe estar aprobada para firmar sus consentimientos.",
         }
-    return None
+    if not user.es_profesional:
+        return {
+            "code": MOTIVO_NO_ES_PROFESIONAL,
+            "error": "Solo un profesional de la clínica puede firmar estos consentimientos.",
+        }
+    return _motivo_firma_y_tp(user, pendientes)
 
 
 class FirmaNoDisponibleError(Exception):
@@ -88,13 +132,38 @@ def serializar_pendiente(consentimiento) -> dict:
     }
 
 
+def pdf_para_firma_profesional(consentimiento) -> bytes | None:
+    """PDF para leer antes de firmar. Mientras falta el profesional Documenso no entrega el
+    PDF con la firma del paciente: se muestra el documento de la plantilla (su contenido completo)."""
+    from apps.historia_clinica.services import descargar_pdf_documento_original
+
+    if consentimiento.plantilla_id and consentimiento.plantilla.pdf_file:
+        consentimiento.plantilla.pdf_file.open("rb")
+        try:
+            pdf_bytes = consentimiento.plantilla.pdf_file.read()
+        finally:
+            consentimiento.plantilla.pdf_file.close()
+        if pdf_bytes:
+            return pdf_bytes
+    if consentimiento.documenso_document_id:
+        return descargar_pdf_documento_original(consentimiento.documenso_document_id)
+    return None
+
+
 def firmar_consentimientos_profesional(cita, user, *, ip: str | None, user_agent: str | None) -> list[dict]:
-    """Firma como ``user`` todos los consentimientos pendientes de la cita.
+    """Firma como ``user`` todos los consentimientos pendientes de la cita."""
+    return firmar_pendientes(
+        consentimientos_pendientes_firma_profesional(cita), user, ip=ip, user_agent=user_agent,
+        contexto=f"cita_id={cita.id}",
+    )
+
+
+def firmar_pendientes(pendientes, user, *, ip: str | None, user_agent: str | None, contexto: str = "") -> list[dict]:
+    """Firma como ``user`` los consentimientos ``pendientes``.
 
     Cada documento se firma por separado: si uno falla, los anteriores quedan firmados y
     el resultado indica cuál falló. Devuelve ``[{id, nombre, ok, error}]``.
     """
-    pendientes = consentimientos_pendientes_firma_profesional(cita)
     if not pendientes:
         return []
 
@@ -117,7 +186,7 @@ def firmar_consentimientos_profesional(cita, user, *, ip: str | None, user_agent
             )
         except DocumensoIntegrationError as exc:
             logger.exception(
-                "Firma del profesional fallida | consentimiento_id=%s | cita_id=%s", consentimiento.id, cita.id,
+                "Firma del profesional fallida | consentimiento_id=%s | %s", consentimiento.id, contexto,
             )
             resultado.update(ok=False, error=str(exc))
             resultados.append(resultado)

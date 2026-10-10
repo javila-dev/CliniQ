@@ -29,6 +29,7 @@ import { DatosClinicosCotizacionModal } from './DatosClinicosCotizacionModal'
 import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
+import { FirmaProfesionalModal } from '@/components/atenciones/FirmaProfesionalModal'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
 import { CotizacionVencidaDialog } from './CotizacionVencidaDialog'
@@ -432,6 +433,14 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   const formasPagoForm = useWatch({ control, name: 'formas_pago' })
   const sumaPagosForm = formasPagoForm.reduce((a, p) => a + (p.valor || 0), 0)
   const pagosCuadran = formasPagoForm.length > 0 && Math.abs(sumaPagosForm - total) <= 1
+  // El error guarda la suma del momento en que se validó: se muestra con la suma actual
+  // (al agregar o borrar filas) y desaparece en cuanto los pagos cuadran.
+  const errorPagos = errors.formas_pago?.root?.message ?? (errors.formas_pago as any)?.message
+  const mensajeErrorPagos = !errorPagos || pagosCuadran
+    ? null
+    : formasPagoForm.length === 0
+      ? errorPagos
+      : `La suma de las formas de pago (${cop(sumaPagosForm)}) no coincide con el total (${cop(total)}).`
   const tieneItemsCobrables = items.some((i) => !i.es_obsequio)
   // Valor de lista de lo obsequiado (informativo: nunca entra al total).
   const valorObsequios = items.reduce(
@@ -634,6 +643,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
   const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
+  const [firmaProfesionalOpen, setFirmaProfesionalOpen] = useState(false)
 
   const { data: consentimientosRequeridos } = useQuery({
     queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion?.id],
@@ -1271,6 +1281,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   consentimientos={consentimientosRequeridos}
                   canFirmar={canFirmarConsentimientos}
                   onFirmar={() => setConsentimientosWizardOpen(true)}
+                  canFirmarProfesional={!!user?.es_profesional}
+                  onFirmarProfesional={() => setFirmaProfesionalOpen(true)}
                 />
               )}
             </div>
@@ -1753,7 +1765,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 variant="ghost"
                 size="sm"
                 className="h-7 text-xs text-primary"
-                onClick={() => addPago({ fecha: hoy(), tipo: formasPago[0]?.id ?? '', descripcion: '', valor: total })}
+                // La nueva fila trae lo que falta por cubrir, no el total completo.
+                onClick={() => addPago({
+                  fecha: hoy(), tipo: formasPago[0]?.id ?? '', descripcion: '',
+                  valor: Math.max(0, Math.round(total - sumaPagosForm)),
+                })}
               >
                 <Plus className="h-3.5 w-3.5 mr-1" />
                 Agregar
@@ -1761,10 +1777,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             )}
           </div>
 
-          {(errors.formas_pago?.root?.message || (errors.formas_pago as any)?.message) && (
-            <p className="text-xs text-destructive -mt-1">
-              {errors.formas_pago?.root?.message ?? (errors.formas_pago as any)?.message}
-            </p>
+          {mensajeErrorPagos && (
+            <p className="text-xs text-destructive -mt-1">{mensajeErrorPagos}</p>
           )}
 
           {pagoFields.length === 0 ? (
@@ -1984,6 +1998,23 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           cotizacionId={cotizacion.id}
           pacienteId={cotizacion.paciente}
           pacienteNombre={cotizacion.paciente_nombre}
+        />
+      )}
+
+      {cotizacion && (
+        <FirmaProfesionalModal
+          citaId={null}
+          cotizacionId={firmaProfesionalOpen ? cotizacion.id : null}
+          pacienteNombre={cotizacion.paciente_nombre}
+          // También al cerrar: si la firma falló a medias, algunos documentos sí quedaron firmados.
+          onClose={() => {
+            setFirmaProfesionalOpen(false)
+            queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion.id] })
+          }}
+          onFirmado={() => {
+            setFirmaProfesionalOpen(false)
+            queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion.id] })
+          }}
         />
       )}
 

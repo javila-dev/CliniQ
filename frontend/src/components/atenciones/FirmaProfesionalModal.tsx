@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Eye, FileSignature, Loader2, PenLine, ShieldAlert, UserX } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
@@ -26,16 +26,18 @@ export function esErrorFirmaProfesional(err: unknown): boolean {
 }
 
 interface FirmaProfesionalModalProps {
-  /** Cita a firmar; null = cerrado. */
+  /** Cita a firmar (solo su profesional); null = cerrado. */
   citaId: string | null
+  /** Venta a firmar (cualquier profesional), en lugar de una cita. */
+  cotizacionId?: string | null
   pacienteNombre?: string
   onClose: () => void
-  /** Todos los documentos quedaron firmados: continuar con el inicio de la atención. */
+  /** Todos los documentos quedaron firmados: en la cita, continuar con el inicio de la atención. */
   onFirmado: () => void
 }
 
-function VisorDocumento({ citaId, documento, onClose }: {
-  citaId: string
+function VisorDocumento({ cargar, documento, onClose }: {
+  cargar: (consentimientoId: string) => Promise<Blob>
   documento: { id: string; nombre: string } | null
   onClose: () => void
 }) {
@@ -47,11 +49,11 @@ function VisorDocumento({ citaId, documento, onClose }: {
     let objectUrl: string | null = null
     setUrl(null)
     setError(false)
-    firmaProfesionalApi.documentoPendiente(citaId, documento.id)
+    cargar(documento.id)
       .then(blob => { objectUrl = URL.createObjectURL(blob); setUrl(objectUrl) })
       .catch(() => setError(true))
     return () => { if (objectUrl) URL.revokeObjectURL(objectUrl) }
-  }, [citaId, documento])
+  }, [cargar, documento])
 
   return (
     <Dialog open={!!documento} onOpenChange={open => { if (!open) onClose() }}>
@@ -76,22 +78,35 @@ function VisorDocumento({ citaId, documento, onClose }: {
   )
 }
 
-export function FirmaProfesionalModal({ citaId, pacienteNombre, onClose, onFirmado }: FirmaProfesionalModalProps) {
+export function FirmaProfesionalModal({ citaId, cotizacionId, pacienteNombre, onClose, onFirmado }: FirmaProfesionalModalProps) {
   const qc = useQueryClient()
   const setUser = useAuthStore(s => s.setUser)
   const [cargandoFirma, setCargandoFirma] = useState(false)
   const [tp, setTp] = useState('')
   const [documentoAbierto, setDocumentoAbierto] = useState<{ id: string; nombre: string } | null>(null)
 
+  const desdeVenta = !citaId && !!cotizacionId
+  const objetivoId = citaId ?? cotizacionId ?? null
+  const queryKey = ['firma-profesional', desdeVenta ? 'cotizacion' : 'cita', objetivoId]
+
   const { data, isLoading, refetch } = useQuery({
-    queryKey: ['firma-profesional', citaId],
-    queryFn: () => firmaProfesionalApi.pendientesCita(citaId!),
-    enabled: !!citaId,
+    queryKey,
+    queryFn: () => desdeVenta
+      ? firmaProfesionalApi.pendientesCotizacion(objetivoId!)
+      : firmaProfesionalApi.pendientesCita(objetivoId!),
+    enabled: !!objetivoId,
   })
 
+  const cargarDocumento = useCallback(
+    (consentimientoId: string) => desdeVenta
+      ? firmaProfesionalApi.documentoPendienteCotizacion(objetivoId!, consentimientoId)
+      : firmaProfesionalApi.documentoPendiente(objetivoId!, consentimientoId),
+    [desdeVenta, objetivoId],
+  )
+
   useEffect(() => {
-    if (!citaId) { setCargandoFirma(false); setTp('') }
-  }, [citaId])
+    if (!objetivoId) { setCargandoFirma(false); setTp('') }
+  }, [objetivoId])
 
   const guardarTp = useMutation({
     mutationFn: () => authApi.updateMeProfesional({ registro_profesional: tp.trim() }),
@@ -99,10 +114,12 @@ export function FirmaProfesionalModal({ citaId, pacienteNombre, onClose, onFirma
   })
 
   const firmar = useMutation({
-    mutationFn: () => firmaProfesionalApi.firmarCita(citaId!),
+    mutationFn: () => desdeVenta
+      ? firmaProfesionalApi.firmarCotizacion(objetivoId!)
+      : firmaProfesionalApi.firmarCita(objetivoId!),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['citas'] })
-      qc.invalidateQueries({ queryKey: ['firma-profesional', citaId] })
+      qc.invalidateQueries({ queryKey })
       onFirmado()
     },
     onError: () => {
@@ -118,7 +135,7 @@ export function FirmaProfesionalModal({ citaId, pacienteNombre, onClose, onFirma
   const documentos = data?.documentos ?? []
 
   return (
-      <Dialog open={!!citaId} onOpenChange={open => { if (!open && !firmar.isPending) onClose() }}>
+      <Dialog open={!!objetivoId} onOpenChange={open => { if (!open && !firmar.isPending) onClose() }}>
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <div className="flex items-center gap-3">
@@ -165,7 +182,7 @@ export function FirmaProfesionalModal({ citaId, pacienteNombre, onClose, onFirma
               {motivo && (
                 <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-3 space-y-3">
                   <p className="flex items-start gap-2 text-sm font-medium text-red-800">
-                    {motivo.code === 'PROFESIONAL_NO_ASIGNADO'
+                    {motivo.code === 'PROFESIONAL_NO_ASIGNADO' || motivo.code === 'NO_ES_PROFESIONAL'
                       ? <UserX className="h-4 w-4 mt-0.5 shrink-0" />
                       : <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />}
                     {motivo.error}
@@ -232,17 +249,17 @@ export function FirmaProfesionalModal({ citaId, pacienteNombre, onClose, onFirma
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="ghost" onClick={onClose} disabled={firmar.isPending}>Cancelar</Button>
             {data && documentos.length === 0 ? (
-              <Button onClick={onFirmado}>Comenzar atención</Button>
+              <Button onClick={desdeVenta ? onClose : onFirmado}>{desdeVenta ? 'Cerrar' : 'Comenzar atención'}</Button>
             ) : (
               <Button onClick={() => firmar.mutate()} disabled={!data || !!motivo || firmar.isPending}>
                 {firmar.isPending && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                Firmar y comenzar atención
+                {desdeVenta ? 'Firmar' : 'Firmar y comenzar atención'}
               </Button>
             )}
           </DialogFooter>
 
-          {citaId && (
-            <VisorDocumento citaId={citaId} documento={documentoAbierto} onClose={() => setDocumentoAbierto(null)} />
+          {objetivoId && (
+            <VisorDocumento cargar={cargarDocumento} documento={documentoAbierto} onClose={() => setDocumentoAbierto(null)} />
           )}
         </DialogContent>
       </Dialog>
