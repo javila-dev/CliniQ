@@ -77,9 +77,18 @@ const CAMPOS_REQUERIDOS = {
   salud: ['eps', 'tipo_afiliado', 'regimen', 'grupo_sanguineo'],
 } as const satisfies Record<'personal' | 'salud', readonly (keyof FormValues)[]>
 
-function crearSchema(tabsRequeridos?: TabsRequeridos) {
-  return baseSchema.superRefine((data, ctx) => {
-    if (DOCS_NUMERICOS.includes(data.tipo_documento) && !/^\d+$/.test(data.numero_documento)) {
+// Sin permiso de datos sensibles llegan enmascarados (••••5678, •••na@gmail.com):
+// no se validan porque no se pueden editar ni se reenvían al guardar.
+const camposSensiblesSinValidar = baseSchema.extend({
+  numero_documento: z.string().optional(),
+  telefono: z.string().optional(),
+  email: z.string().optional(),
+})
+
+function crearSchema(tabsRequeridos?: TabsRequeridos, lockSensitive = false) {
+  const schema = (lockSensitive ? camposSensiblesSinValidar : baseSchema) as typeof baseSchema
+  return schema.superRefine((data, ctx) => {
+    if (!lockSensitive && DOCS_NUMERICOS.includes(data.tipo_documento) && !/^\d+$/.test(data.numero_documento)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: 'Solo números para este tipo de documento', path: ['numero_documento'] })
     }
     for (const tab of ['personal', 'salud'] as const) {
@@ -166,7 +175,7 @@ export function PacienteForm({
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
 
   const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(crearSchema(tabsRequeridos)),
+    resolver: zodResolver(crearSchema(tabsRequeridos, lockSensitive)),
     defaultValues: defaultValues ? {
       nombres: defaultValues.nombres, apellidos: defaultValues.apellidos,
       tipo_documento: defaultValues.tipo_documento, numero_documento: defaultValues.numero_documento,

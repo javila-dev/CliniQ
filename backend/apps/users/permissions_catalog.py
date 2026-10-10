@@ -4,7 +4,6 @@ PERMISSION_CATALOG = [
     ("agenda.bloqueos.ver", "agenda", "bloqueos.ver", "Ver bloqueos de agenda", True),
     ("agenda.crear_bloqueo", "agenda", "crear_bloqueo", "Crear bloqueos de agenda", True),
     ("agenda.citas.cambiar_estado", "agenda", "citas.cambiar_estado", "Cambiar estado de citas", True),
-    ("agenda.citas.confirmar_manual", "agenda", "citas.confirmar_manual", "Confirmar citas manualmente", False),
     ("agenda.citas.crear", "agenda", "citas.crear", "Crear citas", True),
     ("agenda.citas.editar", "agenda", "citas.editar", "Editar citas", True),
     ("agenda.citas.eliminar", "agenda", "citas.eliminar", "Eliminar citas", False),
@@ -131,7 +130,6 @@ CAPABILITY_CATALOG = [
                     "agenda.citas.crear",
                     "agenda.citas.editar",
                     "agenda.citas.cambiar_estado",
-                    "agenda.citas.confirmar_manual",
                 ],
             },
             {
@@ -673,7 +671,14 @@ PERMISOS_SOLO_CHECK_ATIENDE = frozenset({
     "inventario.consumo.registrar",
     "historia.fotos.subir",
 })
-PERMISOS_ATIENDE_PACIENTES = PERMISOS_SOLO_CHECK_ATIENDE | {"historia.consentimientos.gestionar"}
+# Quien atiende necesita leer la historia y los antecedentes para documentar la
+# atención: sin `historia.ver` las pestañas de la atención quedan en blanco
+# (rol personalizado o recepción con el check "atiende pacientes").
+PERMISOS_ATIENDE_PACIENTES = PERMISOS_SOLO_CHECK_ATIENDE | {
+    "historia.consentimientos.gestionar",
+    "historia.ver",
+    "pacientes.antecedentes.ver",
+}
 
 
 def role_is_professional_from_keys(permission_keys) -> bool:

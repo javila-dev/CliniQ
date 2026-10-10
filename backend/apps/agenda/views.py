@@ -39,6 +39,7 @@ from apps.agenda.serializers import (
 )
 from apps.clinicas.models import Clinica, Sede, Servicio
 from apps.core.logging import registrar_accion
+from apps.core.pagination import PaginacionAgenda
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     NumeroPropioNoDisponibleError,
@@ -52,7 +53,12 @@ from apps.notificaciones.services import (
 from apps.pacientes.serializers import enmascarar_cola
 from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
 from apps.users.models import User
-from apps.users.permissions import CanChangeAppointmentState, RequirePermission, get_clinica_activa
+from apps.users.permissions import (
+    CanChangeAppointmentState,
+    RequireAnyPermission,
+    RequirePermission,
+    get_clinica_activa,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -115,6 +121,7 @@ def normalize_error_response(detail):
 
 class CitaViewSet(ModelViewSet):
     serializer_class = CitaSerializer
+    pagination_class = PaginacionAgenda
     queryset = Cita.objects.select_related(
         "paciente",
         "sede",
@@ -147,7 +154,9 @@ class CitaViewSet(ModelViewSet):
         elif self.action == "destroy":
             permission_classes = (RequirePermission("agenda.citas.eliminar"),)
         elif self.action in {"confirmar_manual", "no_confirmo"}:
-            permission_classes = (RequirePermission("agenda.citas.confirmar_manual"),)
+            # Registrar la llamada de confirmación es parte de gestionar la agenda:
+            # quien puede crear o editar citas puede confirmarlas.
+            permission_classes = (RequireAnyPermission("agenda.citas.crear", "agenda.citas.editar"),)
         elif self.action in {"solicitar_recordatorio", "enviar_recordatorio_inmediato"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action in {"iniciar_checkin", "verificar_otp", "checkin_foto"}:

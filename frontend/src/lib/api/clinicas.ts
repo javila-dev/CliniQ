@@ -120,6 +120,11 @@ export interface ProcedimientosSinProfesional {
   total_profesionales: number
 }
 
+export interface RegistroPublicoConfig {
+  tab_personal_requerido: boolean
+  tab_salud_requerido: boolean
+}
+
 export const clinicasApi = {
   /** Resumen previo a activar el filtro por procedimiento. */
   procedimientosSinProfesional: async (): Promise<ProcedimientosSinProfesional> => {
@@ -429,6 +434,18 @@ export const clinicasApi = {
     },
   },
 
+  // Pestañas que la clínica exige completar en el autorregistro del paciente.
+  registroPublicoConfig: {
+    get: async (): Promise<RegistroPublicoConfig> => {
+      const res = await apiClient.get<RegistroPublicoConfig>('/configuracion/registro-publico/')
+      return res.data
+    },
+    update: async (data: Partial<RegistroPublicoConfig>): Promise<RegistroPublicoConfig> => {
+      const res = await apiClient.patch<RegistroPublicoConfig>('/configuracion/registro-publico/', data)
+      return res.data
+    },
+  },
+
   facialConfig: {
     get: async (): Promise<ConfiguracionFacial> => {
       const res = await apiClient.get<ConfiguracionFacial>('/configuracion/facial/')
@@ -442,11 +459,11 @@ export const clinicasApi = {
 
   recordatorioConfig: {
     get: async (clinicaId: string): Promise<RecordatorioConfig> => {
-      const res = await apiClient.get<RecordatorioConfig>(`/clinicas/${clinicaId}/recordatorio_config/`)
+      const res = await apiClient.get<RecordatorioConfig>(`/clinicas/clinicas/${clinicaId}/recordatorio_config/`)
       return res.data
     },
     update: async (clinicaId: string, data: UpdateRecordatorioConfigRequest): Promise<RecordatorioConfig> => {
-      const res = await apiClient.patch<RecordatorioConfig>(`/clinicas/${clinicaId}/recordatorio_config/`, data)
+      const res = await apiClient.patch<RecordatorioConfig>(`/clinicas/clinicas/${clinicaId}/recordatorio_config/`, data)
       return res.data
     },
   },

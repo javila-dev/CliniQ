@@ -69,7 +69,11 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
       const data = err?.response?.data
-      setError(data?.error ?? data?.nota?.[0] ?? 'No se pudo guardar. Intenta de nuevo.')
+      if (err?.response?.status === 403) {
+        setError('Tu rol no tiene permiso para gestionar citas. Pídeselo al administrador.')
+        return
+      }
+      setError(data?.error ?? data?.detail ?? data?.nota?.[0] ?? 'No se pudo guardar. Intenta de nuevo.')
     },
   })
 

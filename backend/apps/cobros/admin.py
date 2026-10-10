@@ -19,6 +19,6 @@ class PagoRecibidoInline(admin.TabularInline):
 class CobroAdmin(admin.ModelAdmin):
     list_display = ("id", "paciente", "sede", "total", "estado", "fecha")
     list_filter = ("estado", "sede")
-    search_fields = ("paciente__primer_nombre", "paciente__primer_apellido")
+    search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
     readonly_fields = ("subtotal", "total", "created_at", "updated_at")
     inlines = [ItemCobroInline, PagoRecibidoInline]

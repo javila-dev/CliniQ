@@ -103,6 +103,19 @@ def RequirePermission(permission_key):
     return DynamicPermission
 
 
+def RequireAnyPermission(*permission_keys):
+    """Pasa si el usuario tiene al menos una de las claves."""
+
+    class DynamicAnyPermission(BasePermission):
+        message = "No tienes permiso para realizar esta accion."
+
+        def has_permission(self, request, view):
+            return any(user_has_permission(request.user, key, request=request) for key in permission_keys)
+
+    DynamicAnyPermission.__name__ = "RequireAnyPermission_" + "_".join(k.replace(".", "_") for k in permission_keys)
+    return DynamicAnyPermission
+
+
 class IsSameClinica(BasePermission):
     message = "No tienes acceso a recursos de otra clinica."
 

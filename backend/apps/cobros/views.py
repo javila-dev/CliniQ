@@ -36,7 +36,7 @@ class CobroViewSet(ModelViewSet):
     ).prefetch_related("items", "pagos").all()
     filterset_fields = ("estado", "sede", "paciente", "profesional", "origen", "cotizacion")
     ordering_fields = ("fecha", "total", "created_at")
-    search_fields = ("paciente__primer_nombre", "paciente__primer_apellido")
+    search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
 
     def get_serializer_class(self):
         if self.action == "create":

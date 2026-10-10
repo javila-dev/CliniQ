@@ -86,11 +86,15 @@ apiClient.interceptors.response.use(
       const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
       if (!refresh) throw new Error('No refresh token')
 
-      const { data } = await axios.post<{ access: string }>(`${BASE_URL}/auth/refresh/`, {
+      const { data } = await axios.post<{ access: string; refresh?: string }>(`${BASE_URL}/auth/refresh/`, {
         refresh,
       })
 
       localStorage.setItem('access_token', data.access)
+      // El backend rota el refresh (ROTATE_REFRESH_TOKENS) y pone el viejo en la
+      // lista negra: si no se guarda el nuevo, el siguiente refresh falla y la
+      // sesión se cierra sola.
+      if (data.refresh) localStorage.setItem('refresh_token', data.refresh)
       processQueue(null, data.access)
       original.headers.Authorization = `Bearer ${data.access}`
       return apiClient(original)

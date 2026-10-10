@@ -135,7 +135,7 @@ REST_FRAMEWORK = {
         "rest_framework.filters.SearchFilter",
         "rest_framework.filters.OrderingFilter",
     ),
-    "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
+    "DEFAULT_PAGINATION_CLASS": "apps.core.pagination.PaginacionEstandar",
     "PAGE_SIZE": 25,
     # Cuantos reverse proxies de confianza hay delante de Django (Traefik = 1).
     # Sin esto, SimpleRateThrottle usa el X-Forwarded-For completo tal como lo

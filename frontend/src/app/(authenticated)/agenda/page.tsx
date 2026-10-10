@@ -787,7 +787,7 @@ function DayView({
     queryKey: ['citas', 'dia', fecha, filterSede, filterProfesional.join(','), filterPaciente],
     queryFn: () => agendaApi.citas.list({
       fecha_inicio__date: fecha,
-      page_size: 100,
+      page_size: 500,
       ...(filterSede && { sede: filterSede }),
       ...(filterProfesional.length > 0 && { profesional__in: filterProfesional.join(',') }),
       ...(filterPaciente && { paciente: filterPaciente }),
@@ -1103,7 +1103,7 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
       queryKey: ['citas', 'dia', d, filterSede, filterProfesional.join(','), filterPaciente],
       queryFn: () => agendaApi.citas.list({
         fecha_inicio__date: d,
-        page_size: 100,
+        page_size: 500,
         ...(filterSede && { sede: filterSede }),
         ...(filterProfesional.length > 0 && { profesional__in: filterProfesional.join(',') }),
         ...(filterPaciente && { paciente: filterPaciente }),
@@ -1238,7 +1238,7 @@ function MonthView({ monthDate, onSelectDay, onSelectCita, selectedId, filterSed
     queryFn: () => agendaApi.citas.list({
       fecha_inicio__date__gte: monthStart,
       fecha_inicio__date__lte: monthEnd,
-      page_size: 300,
+      page_size: 2000,
       ...(filterSede && { sede: filterSede }),
       ...(filterProfesional.length > 0 && { profesional__in: filterProfesional.join(',') }),
       ...(filterPaciente && { paciente: filterPaciente }),

@@ -16,6 +16,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { clinicasApi } from '@/lib/api/clinicas'
+import { toast } from '@/hooks/use-toast'
 import type { ConfiguracionFacial } from '@/types/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FiltroProfesionalesPorProcedimiento } from '@/components/configuracion/FiltroProfesionalesPorProcedimiento'
@@ -220,7 +221,7 @@ export function ClinicaConfig({
   const isIntervalDirty = clinica?.slot_interval_min !== selectedInterval
 
   // ── Recordatorios ────────────────────────────────────────────────────────
-  const { data: recordatorioConfig, isLoading: loadingRecordatorio } = useQuery({
+  const { data: recordatorioConfig, isLoading: loadingRecordatorio, isError: errorRecordatorio, refetch: recargarRecordatorio } = useQuery({
     queryKey: ['recordatorio_config', clinicaId],
     queryFn: () => clinicasApi.recordatorioConfig.get(clinicaId!),
     enabled: !!clinicaId,
@@ -236,9 +237,10 @@ export function ClinicaConfig({
     }
   }, [recordatorioConfig])
 
-  const isRecordatorioDirty =
-    recordatorioConfig?.recordatorios_automaticos !== recordatoriosActivos ||
-    recordatorioConfig?.intervalo_recordatorio_horas !== recordatorioIntervalo
+  const isRecordatorioDirty = !!recordatorioConfig && (
+    recordatorioConfig.recordatorios_automaticos !== recordatoriosActivos ||
+    recordatorioConfig.intervalo_recordatorio_horas !== recordatorioIntervalo
+  )
 
   const recordatorioMutation = useMutation({
     mutationFn: () => clinicasApi.recordatorioConfig.update(clinicaId!, {
@@ -278,17 +280,29 @@ export function ClinicaConfig({
   const [tabPersonalReq, setTabPersonalReq] = useState(false)
   const [tabSaludReq, setTabSaludReq] = useState(false)
 
+  const { data: registroConfig } = useQuery({
+    queryKey: ['registro-publico-config', clinicaId],
+    queryFn: () => clinicasApi.registroPublicoConfig.get(),
+    enabled: !!clinicaId,
+  })
+
   useEffect(() => {
-    if (miClinica) {
-      setTabPersonalReq(miClinica.tab_personal_requerido ?? false)
-      setTabSaludReq(miClinica.tab_salud_requerido ?? false)
+    if (registroConfig) {
+      setTabPersonalReq(registroConfig.tab_personal_requerido)
+      setTabSaludReq(registroConfig.tab_salud_requerido)
     }
-  }, [miClinica])
+  }, [registroConfig])
 
   const tabsRegMutation = useMutation({
     mutationFn: (data: { tab_personal_requerido?: boolean; tab_salud_requerido?: boolean }) =>
-      clinicasApi.miClinicaUpdate(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['mi-clinica', clinicaId] }),
+      clinicasApi.registroPublicoConfig.update(data),
+    onSuccess: (data) => qc.setQueryData(['registro-publico-config', clinicaId], data),
+    onError: () => {
+      // El cambio se mostró antes de guardar: volver al valor guardado.
+      setTabPersonalReq(registroConfig?.tab_personal_requerido ?? false)
+      setTabSaludReq(registroConfig?.tab_salud_requerido ?? false)
+      toast.error('No se pudo guardar', 'Intenta de nuevo.')
+    },
   })
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -460,6 +474,11 @@ export function ClinicaConfig({
                   <div className="space-y-3">
                     <div className="h-5 w-64 rounded bg-gray-100 animate-pulse" />
                     <div className="h-4 w-80 rounded bg-gray-100 animate-pulse" />
+                  </div>
+                ) : errorRecordatorio ? (
+                  <div className="flex items-center gap-3 text-sm text-red-600">
+                    No se pudo cargar la configuración de recordatorios.
+                    <Button type="button" variant="outline" size="sm" onClick={() => recargarRecordatorio()}>Reintentar</Button>
                   </div>
                 ) : (
                   <div className="space-y-5">
