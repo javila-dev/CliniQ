@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { CheckCircle2, Clock, FileText, ShieldCheck } from 'lucide-react'
+import { CheckCircle2, Clock, FileSignature, FileText, ShieldCheck } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn, formatFechaLocal } from '@/lib/utils'
@@ -11,10 +11,15 @@ interface Props {
   consentimientos: ConsentimientoRequeridoCotizacion[]
   canFirmar: boolean
   onFirmar: () => void
+  /** El usuario es profesional: puede firmar los que esperan al profesional. */
+  canFirmarProfesional?: boolean
+  onFirmarProfesional?: () => void
   className?: string
 }
 
-export function ConsentimientosCotizacionPanel({ consentimientos, canFirmar, onFirmar, className }: Props) {
+export function ConsentimientosCotizacionPanel({
+  consentimientos, canFirmar, onFirmar, canFirmarProfesional = false, onFirmarProfesional, className,
+}: Props) {
   const [listadoOpen, setListadoOpen] = useState(false)
 
   const firmados = consentimientos.filter((c) => c.estado === 'firmado')
@@ -56,6 +61,12 @@ export function ConsentimientosCotizacionPanel({ consentimientos, canFirmar, onF
             {!todosFirmados && canFirmar && (
               <Button variant="outline" size="sm" onClick={onFirmar}>
                 Firmar ahora
+              </Button>
+            )}
+            {esperanProfesional > 0 && canFirmarProfesional && onFirmarProfesional && (
+              <Button variant="outline" size="sm" onClick={onFirmarProfesional}>
+                <FileSignature className="h-3.5 w-3.5 mr-1.5" />
+                Firmar como profesional
               </Button>
             )}
             {firmados.length > 0 && (
@@ -127,10 +138,23 @@ export function ConsentimientosCotizacionPanel({ consentimientos, canFirmar, onF
             </p>
           )}
           {esperanProfesional > 0 && (
-            <p className="text-xs text-muted-foreground">
-              El profesional firma desde la atención de la cita del paciente. Al completar su firma, el PDF
-              queda disponible aquí.
-            </p>
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs text-muted-foreground">
+                {canFirmarProfesional
+                  ? 'Al completar la firma del profesional, el PDF queda disponible aquí.'
+                  : 'Debe firmarlos un profesional, desde esta venta o al iniciar la atención de la cita.'}
+              </p>
+              {canFirmarProfesional && onFirmarProfesional && (
+                <Button
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => { setListadoOpen(false); onFirmarProfesional() }}
+                >
+                  <FileSignature className="h-3.5 w-3.5 mr-1.5" />
+                  Firmar como profesional
+                </Button>
+              )}
+            </div>
           )}
         </DialogContent>
       </Dialog>

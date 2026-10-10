@@ -10,7 +10,8 @@ export interface CapturaFirma {
   ruta: string
 }
 
-export type MotivoNoPuedeFirmar = 'PROFESIONAL_NO_ASIGNADO' | 'SIN_FIRMA' | 'SIN_TP'
+export type MotivoNoPuedeFirmar =
+  | 'PROFESIONAL_NO_ASIGNADO' | 'NO_ES_PROFESIONAL' | 'VENTA_NO_APROBADA' | 'SIN_FIRMA' | 'SIN_TP'
 
 export interface DocumentoPendienteFirma {
   id: string
@@ -33,7 +34,8 @@ export interface FirmaProfesionalCita {
 
 export interface ResultadoFirmaProfesional {
   resultados: (DocumentoPendienteFirma & { ok: boolean; error: string | null })[]
-  consentimiento_info: ConsentimientoInfo
+  /** Solo al firmar desde una cita. */
+  consentimiento_info?: ConsentimientoInfo
   error?: string
   code?: string
 }
@@ -76,6 +78,25 @@ export const firmaProfesionalApi = {
 
   firmarCita: async (citaId: string): Promise<ResultadoFirmaProfesional> => {
     const res = await apiClient.post<ResultadoFirmaProfesional>(`/agenda/citas/${citaId}/firma_profesional/`)
+    return res.data
+  },
+
+  /** Consentimientos de la venta pendientes del profesional: firma cualquier profesional de la clínica. */
+  pendientesCotizacion: async (cotizacionId: string): Promise<FirmaProfesionalCita> => {
+    const res = await apiClient.get<FirmaProfesionalCita>(`/cotizaciones/${cotizacionId}/firma_profesional/`)
+    return res.data
+  },
+
+  documentoPendienteCotizacion: async (cotizacionId: string, consentimientoId: string): Promise<Blob> => {
+    const res = await apiClient.get(
+      `/cotizaciones/${cotizacionId}/firma_profesional/documento/${consentimientoId}/`,
+      { responseType: 'blob' },
+    )
+    return res.data
+  },
+
+  firmarCotizacion: async (cotizacionId: string): Promise<ResultadoFirmaProfesional> => {
+    const res = await apiClient.post<ResultadoFirmaProfesional>(`/cotizaciones/${cotizacionId}/firma_profesional/`)
     return res.data
   },
 }

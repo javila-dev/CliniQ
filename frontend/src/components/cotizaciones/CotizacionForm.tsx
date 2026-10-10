@@ -29,6 +29,7 @@ import { DatosClinicosCotizacionModal } from './DatosClinicosCotizacionModal'
 import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
+import { FirmaProfesionalModal } from '@/components/atenciones/FirmaProfesionalModal'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { BuscadorPopover } from '@/components/ui/buscador-popover'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
@@ -611,6 +612,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
   const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
+  const [firmaProfesionalOpen, setFirmaProfesionalOpen] = useState(false)
 
   const { data: consentimientosRequeridos } = useQuery({
     queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion?.id],
@@ -1154,6 +1156,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   consentimientos={consentimientosRequeridos}
                   canFirmar={canFirmarConsentimientos}
                   onFirmar={() => setConsentimientosWizardOpen(true)}
+                  canFirmarProfesional={!!user?.es_profesional}
+                  onFirmarProfesional={() => setFirmaProfesionalOpen(true)}
                 />
               )}
             </div>
@@ -1834,6 +1838,23 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           cotizacionId={cotizacion.id}
           pacienteId={cotizacion.paciente}
           pacienteNombre={cotizacion.paciente_nombre}
+        />
+      )}
+
+      {cotizacion && (
+        <FirmaProfesionalModal
+          citaId={null}
+          cotizacionId={firmaProfesionalOpen ? cotizacion.id : null}
+          pacienteNombre={cotizacion.paciente_nombre}
+          // También al cerrar: si la firma falló a medias, algunos documentos sí quedaron firmados.
+          onClose={() => {
+            setFirmaProfesionalOpen(false)
+            queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion.id] })
+          }}
+          onFirmado={() => {
+            setFirmaProfesionalOpen(false)
+            queryClient.invalidateQueries({ queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion.id] })
+          }}
         />
       )}
 
