@@ -21,6 +21,7 @@ import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { EtiquetaSeguimientoPaciente } from '@/components/seguimiento/EtiquetaSeguimientoPaciente'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
@@ -265,6 +266,7 @@ export default function PacienteDetailPage({ params }: Props) {
               <Badge variant={p.activo ? 'success' : 'secondary'} className="shrink-0">
                 {p.activo ? 'Activo' : 'Inactivo'}
               </Badge>
+              <EtiquetaSeguimientoPaciente pacienteId={id} />
             </div>
             <p className="text-sm text-muted-foreground">
               {p.tipo_documento} {p.numero_documento}

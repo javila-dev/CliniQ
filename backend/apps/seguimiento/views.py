@@ -10,6 +10,7 @@ from rest_framework.exceptions import ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from apps.core.logging import registrar_accion
@@ -17,6 +18,7 @@ from apps.seguimiento import services
 from apps.seguimiento.models import GestionOportunidad, Oportunidad
 from apps.seguimiento.serializers import (
     ActualizarOportunidadSerializer,
+    ConfigSeguimientoSerializer,
     CrearInteresadoSerializer,
     GestionOportunidadSerializer,
     OportunidadSerializer,
@@ -275,3 +277,34 @@ class OportunidadViewSet(
             # Todas las de "Para hoy" (venta y retención), para el contador.
             "para_hoy": self._base().filter(estado=Oportunidad.Estado.ABIERTA, proximo_contacto__lte=hoy).count(),
         })
+
+
+class ConfigSeguimientoView(APIView):
+    """GET/PATCH /seguimiento/config/: reglas del seguimiento de la clínica activa.
+
+    Leer: quien ve el seguimiento. Cambiar: quien edita los datos de la clínica.
+    Al cambiarlas, la detección diaria vuelve a correr con las reglas nuevas.
+    """
+
+    def get_permissions(self):
+        if self.request.method == "GET":
+            return [RequirePermission(PERM_VER)()]
+        return [RequirePermission("clinicas.editar")()]
+
+    def _config(self, request):
+        from apps.seguimiento.models import ConfigSeguimiento
+
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            raise ValidationError({"error": "Elige una clínica.", "code": "SIN_CLINICA"})
+        return ConfigSeguimiento.de(clinica)
+
+    def get(self, request):
+        return Response(ConfigSeguimientoSerializer(self._config(request)).data)
+
+    def patch(self, request):
+        config = self._config(request)
+        serializer = ConfigSeguimientoSerializer(config, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(ultima_deteccion=None)
+        return Response(ConfigSeguimientoSerializer(config).data)

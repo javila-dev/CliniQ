@@ -269,10 +269,27 @@ def _oportunidad_de_cotizacion(cotizacion):
 
 @_sin_romper
 def al_crear_cotizacion(cotizacion):
-    """Liga la cotización a la oportunidad abierta del paciente, si la hay."""
+    """Liga la cotización a la oportunidad abierta del paciente, si la hay.
+
+    Si seguía en Nuevo pasa a Valoración: la valoración no siempre es una cita
+    en la agenda (puede ser en el mostrador, por WhatsApp o con fotos), y armar
+    la cotización indica que ya se hizo. Al enviarla pasa a Cotizado.
+    """
     if getattr(cotizacion, "es_migracion", False):
         return
-    _oportunidad_de_cotizacion(cotizacion)
+    oportunidad = _oportunidad_de_cotizacion(cotizacion)
+    if (
+        oportunidad is not None
+        and oportunidad.estado == Oportunidad.Estado.ABIERTA
+        and oportunidad.etapa == Oportunidad.Etapa.NUEVO
+    ):
+        oportunidad.etapa = Oportunidad.Etapa.VALORACION
+        oportunidad.cotizacion = cotizacion
+        campos = ["etapa", "cotizacion", "updated_at"]
+        if oportunidad.sede_id is None and cotizacion.sede_id:
+            oportunidad.sede_id = cotizacion.sede_id
+            campos.append("sede")
+        oportunidad.save(update_fields=campos)
 
 
 @_sin_romper

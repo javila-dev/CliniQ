@@ -20,9 +20,9 @@ import type { CanalGestion, Oportunidad } from '@/types/seguimiento'
 
 // ── Grupos: la lista se lee como "qué hay que hacer hoy", no como una tabla ──
 
-type GrupoClave = 'paquete' | 'nuevo' | 'valoracion' | 'cotizado' | 'otro'
+export type GrupoClave = 'paquete' | 'nuevo' | 'valoracion' | 'cotizado' | 'otro'
 
-const GRUPOS: { clave: GrupoClave; titulo: string; ayuda: string; icono: LucideIcon; tono: string }[] = [
+export const GRUPOS: { clave: GrupoClave; titulo: string; ayuda: string; icono: LucideIcon; tono: string }[] = [
   {
     clave: 'paquete', titulo: 'Sesiones por retomar', icono: Repeat,
     ayuda: 'Compraron un paquete y ya les tocaba su siguiente sesión.',
@@ -50,7 +50,7 @@ const GRUPOS: { clave: GrupoClave; titulo: string; ayuda: string; icono: LucideI
   },
 ]
 
-function grupoDe(op: Oportunidad): GrupoClave {
+export function grupoDe(op: Oportunidad): GrupoClave {
   if (op.tipo === 'paquete') return 'paquete'
   if (op.es_venta && op.etapa) return op.etapa
   return 'otro'

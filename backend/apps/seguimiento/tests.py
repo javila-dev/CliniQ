@@ -199,6 +199,22 @@ class SeguimientoTests(TestCase):
         oportunidad.refresh_from_db()
         self.assertEqual(oportunidad.etapa, "valoracion")
 
+    def test_ajustes_del_seguimiento(self):
+        data = self.client.get("/api/v1/seguimiento/config/").json()
+        self.assertEqual((data["dias_tras_compra"], data["tolerancia_dias"], data["dias_sin_sesion"]), (7, 5, 45))
+        response = self.client.patch("/api/v1/seguimiento/config/", {"tolerancia_dias": 3}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["tolerancia_dias"], 3)
+        self.assertEqual(self.client.patch("/api/v1/seguimiento/config/", {"tolerancia_dias": 99}, format="json").status_code, 400)
+
+    def test_crear_cotizacion_sin_cita_pasa_a_valoracion(self):
+        # Valoración en el mostrador: no hubo cita en la agenda, pero ya se cotizó.
+        oportunidad_id = self._crear_interesado(telefono="3010000000").json()["id"]
+        cotizacion = self._cotizacion()
+        oportunidad = Oportunidad.objects.get(pk=oportunidad_id)
+        self.assertEqual(oportunidad.etapa, "valoracion")
+        self.assertEqual(oportunidad.cotizacion_id, cotizacion.id)
+
     def test_un_error_del_seguimiento_no_impide_aceptar(self):
         self._crear_interesado(telefono="3010000000")
         cotizacion = self._cotizacion()

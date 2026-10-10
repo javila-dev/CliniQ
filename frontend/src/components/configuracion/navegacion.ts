@@ -1,5 +1,5 @@
 import {
-  Building2, CalendarClock, Workflow, Stethoscope, FileSignature, Wallet, ShieldCheck, MessageCircle,
+  Building2, CalendarClock, Workflow, Stethoscope, FileSignature, Wallet, ShieldCheck, MessageCircle, PhoneCall,
 } from 'lucide-react'
 import type { AuthUser } from '@/types/auth'
 import { hasPermission, PERM } from '@/lib/permissions'
@@ -95,6 +95,21 @@ export const CATEGORIAS: CategoriaConfig[] = [
         label: 'Registro de pacientes',
         description: 'Formulario y link para que los pacientes se registren solos.',
         keywords: 'autoregistro formulario link qr publico datos personales salud eps',
+        perm: PERM.CLINICAS_EDITAR,
+      },
+    ],
+  },
+  {
+    id: 'comercial',
+    label: 'Comercial',
+    description: 'Seguimiento a interesados y paquetes',
+    icon: PhoneCall,
+    ajustes: [
+      {
+        href: '/configuracion/seguimiento',
+        label: 'Seguimiento',
+        description: 'Cuándo avisar que un paciente ya debió agendar su sesión.',
+        keywords: 'seguimiento para hoy paquetes atrasados sesiones tolerancia dias compra frecuencia ritmo aviso',
         perm: PERM.CLINICAS_EDITAR,
       },
     ],

@@ -4,7 +4,7 @@ from rest_framework import serializers
 from apps.clinicas.models import Sede
 from apps.pacientes.serializers import enmascarar_cola, usuario_ve_datos_sensibles
 from apps.users.authorization import sede_ids_para_filtro
-from apps.seguimiento.models import GestionOportunidad, Oportunidad
+from apps.seguimiento.models import ConfigSeguimiento, GestionOportunidad, Oportunidad
 
 
 class GestionOportunidadSerializer(serializers.ModelSerializer):
@@ -161,3 +161,18 @@ class RegistrarGestionSerializer(serializers.Serializer):
 class PerderSerializer(serializers.Serializer):
     motivo = serializers.ChoiceField(choices=Oportunidad.MotivoPerdida.choices, required=False, allow_blank=True)
     nota = serializers.CharField(required=False, allow_blank=True, max_length=2000)
+
+
+class ConfigSeguimientoSerializer(serializers.ModelSerializer):
+    """Reglas del seguimiento que cada clínica puede ajustar."""
+
+    class Meta:
+        model = ConfigSeguimiento
+        fields = ("dias_tras_compra", "tolerancia_dias", "dias_sin_sesion", "dias_aviso_previo", "updated_at")
+        read_only_fields = ("updated_at",)
+        extra_kwargs = {
+            "dias_tras_compra": {"min_value": 1, "max_value": 90},
+            "tolerancia_dias": {"min_value": 0, "max_value": 30},
+            "dias_sin_sesion": {"min_value": 7, "max_value": 365},
+            "dias_aviso_previo": {"min_value": 0, "max_value": 30},
+        }

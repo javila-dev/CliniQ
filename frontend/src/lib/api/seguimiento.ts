@@ -1,6 +1,7 @@
 import { apiClient } from './client'
 import type { Paginated } from '@/types/common'
 import type {
+  ConfigSeguimiento,
   CrearInteresadoRequest,
   EmbudoResumen,
   GestionOportunidad,
@@ -12,6 +13,14 @@ import type {
 const BASE = '/seguimiento/oportunidades/'
 
 export const seguimientoApi = {
+  config: async (): Promise<ConfigSeguimiento> => {
+    const res = await apiClient.get<ConfigSeguimiento>('/seguimiento/config/')
+    return res.data
+  },
+  guardarConfig: async (data: Partial<ConfigSeguimiento>): Promise<ConfigSeguimiento> => {
+    const res = await apiClient.patch<ConfigSeguimiento>('/seguimiento/config/', data)
+    return res.data
+  },
   list: async (params?: {
     para_hoy?: '1'
     estado?: string

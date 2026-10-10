@@ -81,6 +81,15 @@ export interface RegistrarGestionRequest {
   proximo_contacto?: string | null
 }
 
+/** Reglas del seguimiento de la clínica (backend: ConfigSeguimiento). */
+export interface ConfigSeguimiento {
+  dias_tras_compra: number    // compró y no agendó: aparece al día siguiente de estos días
+  tolerancia_dias: number     // días de gracia entre sesiones antes de marcarlo atrasado
+  dias_sin_sesion: number     // frecuencia general cuando el procedimiento no tiene una
+  dias_aviso_previo: number   // "le toca pronto": cuántos días antes
+  updated_at?: string
+}
+
 export interface EmbudoResumen {
   desde: string
   etapas: { etapa: EtapaOportunidad; nombre: string; cantidad: number; valor: string }[]

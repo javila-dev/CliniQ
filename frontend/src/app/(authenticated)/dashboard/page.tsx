@@ -19,6 +19,7 @@ import { agendaApi } from '@/lib/api/agenda'
 import { notificacionesFallidasApi } from '@/lib/api/notificaciones'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useAuthStore } from '@/store/authStore'
+import { ParaHoyResumen } from '@/components/seguimiento/ParaHoyResumen'
 import { AvisoDatosProfesionales } from '@/components/shared/AvisoDatosProfesionales'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -825,6 +826,7 @@ function DashboardContent() {
 
   const sinReagendar = pacientesSinReagendar ?? []
   const canVerSinReagendar = hasPermission(user, PERM.REPORTES_VER)
+  const canVerSeguimiento = hasPermission(user, PERM.SEGUIMIENTO_VER)
   // 4 o 5 tarjetas según permisos (Ingresos y Sin reagendar son opcionales).
   const nKpis = 3 + (canVerFinanzas ? 1 : 0) + (canVerSinReagendar ? 1 : 0)
 
@@ -1202,6 +1204,7 @@ function DashboardContent() {
         </div>
 
         <div className="space-y-4">
+          {canVerSeguimiento && <ParaHoyResumen sede={sede} />}
           <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
             <div className="space-y-2">
