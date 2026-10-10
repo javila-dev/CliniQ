@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.clinicas.models import FormaDePago
 from apps.cobros.models import Cobro, ItemCobro, PagoRecibido
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
 class PagoRecibidoSerializer(serializers.ModelSerializer):
@@ -70,7 +71,7 @@ class ItemCobroCreateSerializer(serializers.Serializer):
         return attrs
 
 
-class PagoCreateSerializer(serializers.Serializer):
+class PagoCreateSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     valor = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("0.01"))
     referencia = serializers.CharField(max_length=100, required=False, allow_blank=True)
@@ -134,7 +135,7 @@ class CobroSerializer(serializers.ModelSerializer):
         return f"COT-{str(obj.cotizacion_id)[:8].upper()}"
 
 
-class CobroCreateSerializer(serializers.ModelSerializer):
+class CobroCreateSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     items = ItemCobroCreateSerializer(many=True, required=False)
 
     class Meta:

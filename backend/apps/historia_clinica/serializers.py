@@ -19,6 +19,7 @@ from apps.historia_clinica.models import (
     PlantillaOrden,
     ResultadoExamen,
 )
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
 def generar_url_firmada_storage(field_file, expires_in=3600):
@@ -27,7 +28,7 @@ def generar_url_firmada_storage(field_file, expires_in=3600):
     return get_signed_url(field_file.name, expires_in=expires_in)
 
 
-class FotoClinicaSerializer(serializers.ModelSerializer):
+class FotoClinicaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     url_firmada = serializers.SerializerMethodField()
 
     class Meta:
@@ -279,9 +280,16 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+        # firmado / fecha_firma / archivo solo los cambian Documenso (webhook,
+        # verificar_firma, completar_firma verificado): por PATCH se podía marcar un
+        # consentimiento como firmado sin firma, cambiar el PDF firmado o
+        # "desfirmarlo" para borrarlo.
         read_only_fields = (
             "id",
             "tipo",
+            "firmado",
+            "fecha_firma",
+            "archivo",
             "archivo_url",
             "url_firmada",
             "documenso_document_id",
@@ -296,6 +304,12 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
         extra_kwargs = {
             "cita": {"required": False, "allow_null": True},
         }
+
+    def update(self, instance, validated_data):
+        # El paciente y la cita del consentimiento no se cambian después de crearlo.
+        validated_data.pop("paciente", None)
+        validated_data.pop("cita", None)
+        return super().update(instance, validated_data)
 
     def get_archivo_url(self, obj):
         return generar_url_firmada_storage(obj.archivo)
@@ -540,7 +554,7 @@ class ConsumoInsumoSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-class RegistrarConsumoInsumoSerializer(serializers.Serializer):
+class RegistrarConsumoInsumoSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     nota = serializers.PrimaryKeyRelatedField(queryset=NotaClinica.objects.all())
     insumo = serializers.PrimaryKeyRelatedField(queryset=Insumo.objects.all())
     cantidad = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0.001"))

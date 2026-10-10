@@ -297,7 +297,12 @@ class IdsDocumensoTests(TestCase):
             email="ids@example.com", password="x", rol=User.Role.ADMIN, clinica=self.clinica,
         )
 
-    def test_completar_firma_desde_el_embed_conserva_el_id_del_sobre(self):
+    @patch(
+        "apps.historia_clinica.services._fetch_documenso_json",
+        return_value={"recipients": [{"id": 11, "signingStatus": "SIGNED"}, {"id": 12, "signingStatus": "NOT_SIGNED"}]},
+    )
+    def test_completar_firma_desde_el_embed_conserva_el_id_del_sobre(self, _fetch):
+        # completar_firma confirma con Documenso (verificación transversal M4-05).
         client = APIClient()
         client.force_authenticate(self.user)
 

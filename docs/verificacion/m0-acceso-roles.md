@@ -29,7 +29,7 @@
 - **Causa:** `ROTATE_REFRESH_TOKENS` y `BLACKLIST_AFTER_ROTATION` están activos. El interceptor guarda solo `data.access` y no el nuevo `refresh`, así que el segundo refresh falla.
 - **Arreglo:** guardar también `data.refresh`.
 
-**M0-02 · Alto · permisos** · confirmado
+**✅ M0-02 · Alto · permisos** · confirmado
 - **Dónde:** `backend/apps/users/views.py:1017,1040`.
 - **Qué ve el usuario:** un usuario desactivado desde la consola **sigue pudiendo entrar**. Al revés, uno reactivado desde Colaborador puede quedar sin acceso.
 - **Causa:** `desactivar` y `activar` cambian `activo`, pero el login mira `is_active`.
@@ -53,7 +53,7 @@
 - **Causa:** `IsAdminOrRecepcion` acepta el rol oculto `"recepcion"`.
 - **Arreglo:** usar una clave de permiso concreta.
 
-**M0-06 · Alto · permisos (escalada)** · confirmado
+**✅ M0-06 · Alto · permisos (escalada)** · confirmado
 - **Dónde:** `backend/apps/users/serializers.py:16-17,62-96`; `users/views.py:676-772`.
 - **Qué ve el usuario:** con "Crear y editar usuarios" puede **ponerse a sí mismo de Administrador**. Con "Gestionar roles" puede darse todos los permisos editando su propio rol.
 - **Arreglo:** que solo un admin pueda asignar el rol admin, y prohibir editar el usuario propio y el rol propio.

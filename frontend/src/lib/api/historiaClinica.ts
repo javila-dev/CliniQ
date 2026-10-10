@@ -176,13 +176,6 @@ export const historiaClinicaApi = {
       const res = await apiClient.post<ConsentimientoInformado>(`/historia-clinica/consentimientos/`, data)
       return res.data
     },
-    update: async (id: string, data: FormData | Record<string, unknown>): Promise<ConsentimientoInformado> => {
-      const isFormData = data instanceof FormData
-      const res = await apiClient.patch<ConsentimientoInformado>(`/historia-clinica/consentimientos/${id}/`, data, {
-        headers: isFormData ? { 'Content-Type': 'multipart/form-data' } : {},
-      })
-      return res.data
-    },
     iniciarFirma: async (id: string): Promise<{ signing_token: string; documenso_document_id: string }> => {
       const res = await apiClient.post<{ signing_token: string; documenso_document_id: string }>(
         `/historia-clinica/consentimientos/${id}/iniciar_firma/`,

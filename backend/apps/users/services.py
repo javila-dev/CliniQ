@@ -20,6 +20,15 @@ User = get_user_model()
 PASSWORD_POLICY_ERROR = "La contraseña debe tener al menos 8 caracteres, una mayúscula, una minúscula y un símbolo."
 
 
+def aplicar_estado_activo(user, activo: bool) -> None:
+    """`activo` (lo que se gestiona en pantalla) e `is_active` (lo que mira el login)
+    van juntos: desactivar un usuario le impide entrar. Al reactivar, el login solo
+    se habilita si ya creó su contraseña (con la invitación pendiente sigue sin poder
+    entrar hasta completarla). No guarda: el llamador hace save()."""
+    user.activo = activo
+    user.is_active = bool(activo and user.has_usable_password())
+
+
 def validate_password_strength(password: str) -> None:
     has_min_length = len(password) >= 8
     has_upper = any(char.isupper() for char in password)

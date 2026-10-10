@@ -4,7 +4,7 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.core.models import ConfiguracionGlobal
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file, read_public_file
-from apps.users.authorization import get_user_permission_keys, user_sede_ids_acotadas
+from apps.users.authorization import get_user_permission_keys, user_is_tenant_admin, user_sede_ids_acotadas
 from apps.users.models import Permiso, Rol
 from apps.users.permissions_catalog import PERMISOS_SOLO_CHECK_ATIENDE
 from apps.users.services import validate_password_strength
@@ -93,7 +93,32 @@ def resolve_role(request, *, role_id=None, rol_slug=None, disallowed_slugs=None)
         raise serializers.ValidationError(
             {"rol": "No se puede asignar este rol desde gestion de usuarios."}
         )
+    # Quien gestiona usuarios sin ser administrador no puede crear ni nombrar
+    # administradores (se podía dar el rol a sí mismo y quedar con todo).
+    if role.slug == "admin" and not user_is_tenant_admin(request.user):
+        raise serializers.ValidationError(
+            {"rol": "Solo un administrador puede asignar el rol Administrador."}
+        )
     return role
+
+
+def validar_cambio_sobre_usuario(request, objetivo, *, cambia_rol: bool) -> None:
+    """Límites para quien gestiona usuarios sin ser administrador.
+
+    - No modifica a un administrador.
+    - No cambia su propio rol.
+    """
+    actor = request.user
+    if user_is_tenant_admin(actor) or objetivo is None:
+        return
+    if user_is_tenant_admin(objetivo):
+        raise serializers.ValidationError(
+            {"error": "Solo un administrador puede modificar a otro administrador.", "code": "SOLO_ADMIN"}
+        )
+    if cambia_rol and objetivo.pk == actor.pk:
+        raise serializers.ValidationError(
+            {"error": "No puedes cambiar tu propio rol. Pídeselo a un administrador.", "code": "ROL_PROPIO"}
+        )
 
 
 class UserAdminSerializer(serializers.ModelSerializer):
@@ -209,6 +234,9 @@ class UserUpdateSerializer(serializers.ModelSerializer):
         attrs = super().validate(attrs)
         if self.instance and self.instance.rol == "superadmin" and ("role_id" in attrs or "rol" in attrs):
             raise serializers.ValidationError({"rol": "No se puede cambiar el rol de un superadmin."})
+        validar_cambio_sobre_usuario(
+            self.context["request"], self.instance, cambia_rol="role_id" in attrs or "rol" in attrs,
+        )
         if "role_id" in attrs or "rol" in attrs:
             attrs["_rol_dinamico"] = resolve_role(
                 self.context["request"],
@@ -230,6 +258,10 @@ class UserUpdateSerializer(serializers.ModelSerializer):
             from apps.colaboradores.grupos import al_dejar_de_atender_pacientes
 
             al_dejar_de_atender_pacientes(instance)
+        if "activo" in validated_data:
+            from apps.users.services import aplicar_estado_activo
+
+            aplicar_estado_activo(instance, validated_data.pop("activo"))
         return super().update(instance, validated_data)
 
 

@@ -39,8 +39,9 @@ export default function FirmarConsentimientoPage({ params }: Props) {
       setFirmado(true)
       setPdfUrl(data.pdf_url)
     },
-    onError: () => {
-      setErrorMsg('No se pudo registrar la firma. Intenta de nuevo o contacta a la clínica.')
+    onError: (err: unknown) => {
+      const mensaje = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
+      setErrorMsg(mensaje ?? 'No se pudo registrar la firma. Intenta de nuevo o contacta a la clínica.')
     },
   })
 

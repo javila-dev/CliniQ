@@ -11,6 +11,7 @@ from apps.core.storage import get_public_url
 from apps.users.serializers import (
     legacy_storage_role,
     resolve_role,
+    validar_cambio_sobre_usuario,
     user_role_id,
     user_role_name,
     user_role_slug,
@@ -296,6 +297,10 @@ class ColaboradorSerializer(serializers.ModelSerializer):
         role_id = attrs.get("role_id")
         rol_slug = attrs.get("rol")
 
+        if self.instance is not None:
+            validar_cambio_sobre_usuario(
+                self.context["request"], getattr(self.instance, "user", None), cambia_rol=bool(role_id or rol_slug),
+            )
         if role_id or rol_slug:
             attrs["_rol_dinamico"] = resolve_role(
                 self.context["request"],

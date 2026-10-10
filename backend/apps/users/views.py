@@ -23,6 +23,7 @@ from apps.clinicas.models import Clinica
 from apps.core.logging import registrar_accion
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
+from apps.users.authorization import user_is_tenant_admin
 from apps.users.permissions import IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
@@ -46,6 +47,7 @@ from apps.users.serializers import (
     UserSerializer,
     UserUpdateSerializer,
     issue_login_tokens,
+    validar_cambio_sobre_usuario,
 )
 
 User = get_user_model()
@@ -673,6 +675,16 @@ class RolViewSet(GenericViewSet):
         )
         return Response(self.get_serializer(rol).data, status=status.HTTP_201_CREATED)
 
+    def _rechazar_rol_propio(self, request, rol):
+        """Quien gestiona roles sin ser administrador no edita su propio rol: podía
+        darse todos los permisos."""
+        if not user_is_tenant_admin(request.user) and getattr(request.user, "rol_dinamico_id", None) == rol.id:
+            return Response(
+                {"error": "No puedes modificar tu propio rol. Pídeselo a un administrador.", "code": "ROL_PROPIO"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
     def partial_update(self, request, pk=None):
         rol = self.get_object()
         if rol.slug == "admin" or not rol.editable:
@@ -680,6 +692,8 @@ class RolViewSet(GenericViewSet):
                 {"error": "Este rol no se puede editar.", "code": "ROLE_NOT_EDITABLE"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if (rechazo := self._rechazar_rol_propio(request, rol)) is not None:
+            return rechazo
         antes = RolSerializer(rol, context=self.get_serializer_context()).data
         serializer = self.get_serializer(rol, data=request.data, partial=True)
         serializer.is_valid(raise_exception=True)
@@ -734,6 +748,8 @@ class RolViewSet(GenericViewSet):
                 {"error": "Los permisos de este rol no se pueden modificar.", "code": "ROLE_PERMISSIONS_LOCKED"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if (rechazo := self._rechazar_rol_propio(request, rol)) is not None:
+            return rechazo
         serializer = RolPermisosUpdateSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         keys = serializer.validated_data["permission_keys"]
@@ -903,6 +919,7 @@ class UserViewSet(GenericViewSet):
 
     def destroy(self, request, pk=None):
         user = self.get_object()
+        validar_cambio_sobre_usuario(request, user, cambia_rol=False)
         if user == request.user:
             return Response(
                 {"error": "No puedes eliminarte a ti mismo.", "code": "SELF_DELETE"},
@@ -1014,8 +1031,9 @@ class UserViewSet(GenericViewSet):
                 if limit_error:
                     message, code = limit_error
                     return error_response(message, code, status.HTTP_403_FORBIDDEN)
-        user.activo = True
-        user.save(update_fields=["activo"])
+        validar_cambio_sobre_usuario(request, user, cambia_rol=False)
+        services.aplicar_estado_activo(user, True)
+        user.save(update_fields=["activo", "is_active"])
         registrar_accion(
             request, "usuario.activar", user,
             {"resumen": f"Usuario {user.email} activado", "usuario_email": user.email},
@@ -1037,8 +1055,9 @@ class UserViewSet(GenericViewSet):
                 "LAST_ACTIVE_ADMIN",
                 status.HTTP_400_BAD_REQUEST,
             )
-        user.activo = False
-        user.save(update_fields=["activo"])
+        validar_cambio_sobre_usuario(request, user, cambia_rol=False)
+        services.aplicar_estado_activo(user, False)
+        user.save(update_fields=["activo", "is_active"])
         registrar_accion(
             request, "usuario.desactivar", user,
             {"resumen": f"Usuario {user.email} desactivado", "usuario_email": user.email},

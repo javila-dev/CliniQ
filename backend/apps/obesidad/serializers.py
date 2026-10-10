@@ -10,9 +10,10 @@ from .models import (
     ResultadoLaboratorio,
     TratamientoFarmacologico,
 )
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
-class AntecedentesObesidadSerializer(serializers.ModelSerializer):
+class AntecedentesObesidadSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     class Meta:
         model = AntecedentesObesidad
         fields = (
@@ -39,7 +40,7 @@ class AntecedentesObesidadSerializer(serializers.ModelSerializer):
         return value
 
 
-class ObjetivoObesidadSerializer(serializers.ModelSerializer):
+class ObjetivoObesidadSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     por_perder_kg = serializers.SerializerMethodField()
 
     class Meta:
@@ -78,7 +79,7 @@ class ObjetivoObesidadSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class MedicionAntropometricaSerializer(serializers.ModelSerializer):
+class MedicionAntropometricaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     tomado_por_nombre = serializers.CharField(
         source="tomado_por.get_full_name", read_only=True
     )
@@ -143,7 +144,7 @@ class MedicionAntropometricaSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class ResultadoLaboratorioSerializer(serializers.ModelSerializer):
+class ResultadoLaboratorioSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     archivo_url = serializers.SerializerMethodField()
 
     class Meta:
@@ -177,7 +178,7 @@ class ResultadoLaboratorioSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class TratamientoFarmacologicoSerializer(serializers.ModelSerializer):
+class TratamientoFarmacologicoSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     indicado_por_nombre = serializers.CharField(
         source="indicado_por.get_full_name", read_only=True
     )

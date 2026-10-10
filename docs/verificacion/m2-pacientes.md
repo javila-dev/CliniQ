@@ -42,7 +42,7 @@
 - **Causa:** el paginador global no tiene `page_size_query_param`.
 - **Arreglo:** ver T-01.
 
-**M2-05 · Alto · permisos (multiclínica)** · confirmado
+**✅ M2-05 · Alto · permisos (multiclínica)** · confirmado
 - **Dónde:** `backend/apps/pacientes/serializers.py:58`; `views.py:79`
 - **Qué ve el usuario:** nada en pantalla. Pero por API se puede crear un paciente en otra clínica, o moverlo con `PATCH {clinica}`.
 - **Causa:** `clinica` es escribible y `perform_create` la respeta.

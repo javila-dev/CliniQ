@@ -195,6 +195,7 @@ class FirmarConsentimientoPublicoView(APIView):
                 token=token,
                 ip=request.META.get("REMOTE_ADDR"),
                 user_agent=request.META.get("HTTP_USER_AGENT", ""),
+                firma=request.data.get("firma", ""),
             )
         except Consentimiento.DoesNotExist:
             return Response({"ok": False, "error": "Token de firma inválido."}, status=status.HTTP_404_NOT_FOUND)

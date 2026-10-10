@@ -12,7 +12,7 @@
 
 ## Hallazgos
 
-**M4-01 · Crítico · permisos (legal)** · confirmado
+**✅ M4-01 · Crítico · permisos (legal)** · confirmado
 - **Dónde:** `backend/apps/historia_clinica/serializers.py:282`; `views.py:655`.
 - **Qué ve el usuario:** nada en pantalla. Pero por API, quien tiene `historia.consentimientos.gestionar` (Recepción lo tiene por defecto) puede:
   - hacer `PATCH {"firmado": true}` y **marcar el consentimiento como firmado sin firma**;
@@ -32,13 +32,13 @@
 - **Causa:** el frontend no envía `motivo_revocacion`, el backend responde 400 y no hay `onError`.
 - **Arreglo:** pedir el motivo en un diálogo y mostrar el error si falla.
 
-**M4-04 · Alto · faltante (legal)** · confirmado
+**✅ M4-04 · Alto · faltante (legal)** · confirmado
 - **Dónde:** `firmar-consentimiento/[token]/page.tsx`; `consentimientos/views.py:194`; `services.py:531`.
 - **Qué ve el usuario:** el paciente dibuja su firma y ve "firma registrada", pero **el PDF no tiene la firma**.
 - **Causa:** el backend ignora el campo `firma`.
 - **Arreglo:** guardar la firma, validarla e incrustarla en el PDF.
 
-**M4-05 · Alto · permisos** · confirmado
+**✅ M4-05 · Alto · permisos** · confirmado
 - **Dónde:** `historia_clinica/views.py:797` (`completar_firma`).
 - **Qué ve el usuario:** nada. El consentimiento queda "firmado" porque así lo dice el navegador.
 - **Causa:** no se consulta a Documenso antes de marcarlo.
@@ -69,7 +69,7 @@
 - **Qué ve el usuario:** un consentimiento firmado cuyo PDF falló aparece sin enlace, sin aviso y sin forma de reintentar.
 - **Arreglo:** mostrar "PDF pendiente · Reintentar".
 
-**M4-10 · Alto · permisos (multiclínica)** · confirmado
+**✅ M4-10 · Alto · permisos (multiclínica)** · confirmado
 - **Dónde:** `backend/apps/obesidad/views.py:103`; `obesidad/serializers.py`.
 - **Qué ve el usuario:** cualquier usuario autenticado, incluida Recepción sin permisos clínicos, puede crear, editar y borrar signos vitales y mediciones. Además puede hacerlo **sobre pacientes de otra clínica**.
 - **Arreglo:** exigir `historia.notas.crear` y `historia.ver`, validar la clínica y dejar `tomado_por` e `indicado_por` como solo lectura.

@@ -16,6 +16,17 @@ from apps.historia_clinica.services import (
 )
 from apps.protocolos.models import SesionProcedimiento
 from apps.users.models import User
+from apps.core.clinica_scope import AcotadoAClinicaMixin
+from apps.users.authorization import sede_ids_para_filtro
+from rest_framework.exceptions import PermissionDenied
+
+
+def validar_sede_del_usuario(request, sede) -> None:
+    """Un usuario acotado a ciertas sedes no agenda ni bloquea en otra."""
+    if request is None or sede is None or not getattr(request.user, "is_authenticated", False):
+        return
+    if not sede_ids_para_filtro(request.user, sede.id):
+        raise PermissionDenied("No tienes acceso a esa sede.")
 
 logger = logging.getLogger(__name__)
 
@@ -180,7 +191,7 @@ def procedimientos_de_la_cita(*, servicio=None, item_cotizacion=None, sesion=Non
     return ids
 
 
-class CitaSerializer(serializers.ModelSerializer):
+class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     servicio_nombre = serializers.SerializerMethodField()
@@ -391,6 +402,7 @@ class CitaSerializer(serializers.ModelSerializer):
         return value
 
     def validate(self, attrs):
+        validar_sede_del_usuario(self.context.get("request"), attrs.get("sede"))
         paciente = attrs.get("paciente", getattr(self.instance, "paciente", None))
         sede = attrs.get("sede", getattr(self.instance, "sede", None))
         servicio = attrs.get("servicio", getattr(self.instance, "servicio", None))
@@ -497,7 +509,7 @@ class CitaSerializer(serializers.ModelSerializer):
             )
 
 
-class BloqueoAgendaSerializer(serializers.ModelSerializer):
+class BloqueoAgendaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(
         source="profesional.nombre_completo", read_only=True, allow_null=True
     )
@@ -547,6 +559,7 @@ class BloqueoAgendaSerializer(serializers.ModelSerializer):
         }
 
     def validate(self, attrs):
+        validar_sede_del_usuario(self.context.get("request"), attrs.get("sede"))
         profesional = attrs.get("profesional", getattr(self.instance, "profesional", None))
         sede = attrs.get("sede", getattr(self.instance, "sede", None))
         fecha_inicio = attrs.get("fecha_inicio", getattr(self.instance, "fecha_inicio", None))

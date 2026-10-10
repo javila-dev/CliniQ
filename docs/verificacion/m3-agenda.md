@@ -49,7 +49,7 @@
 - **Qué ve el usuario:** nada en pantalla. Pero por API, Recepción puede hacer `PATCH {"estado":"completada"}` y saltarse consentimientos, mora y tiempos.
 - **Arreglo:** dejar `estado` y `motivo_cancelacion` como solo lectura, y rechazar la edición de citas cerradas.
 
-**M3-07 · Alto · permisos (aislamiento)** · confirmado en código
+**✅ M3-07 · Alto · permisos (aislamiento)** · confirmado en código
 - **Dónde:** `serializers.py:183-285`; `services.py:371-401`; `views.py:1202-1219`
 - **Qué ve el usuario:** nada en pantalla. Pero por API se pueden crear citas o bloqueos en la sede o con el profesional **de otra clínica**. Un usuario de la sede A también puede mover citas a la sede B.
 - **Arreglo:** acotar los querysets a la clínica activa y validar que la sede esté entre las acotadas del usuario.

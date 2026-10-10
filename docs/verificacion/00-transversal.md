@@ -1,6 +1,6 @@
 # T — Resumen general: problemas transversales, avance y lo que falta
 
-**Estado:** En corrección. Pasos 1 y 2 de 7 hechos.
+**Estado:** En corrección. Pasos 1 a 3 de 7 hechos.
 
 Este es el **resumen de toda la verificación**. Tiene tres partes:
 1. El tablero de abajo: qué se hizo y qué falta.
@@ -14,32 +14,35 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | Paso | Qué cubre | Estado | Commit |
 |---|---|---|---|
 | 1 | Bloqueos del día a día: paginación, sesión, editar pacientes, recordatorios, autorregistro, buscador de Ingresos, atención con roles personalizados, confirmar citas | ✅ Hecho | `c8e2a65` |
-| 2 | Dinero y stock: pagos y abonos dobles, stock, edición de cobros, reportes de ingresos, arqueo, "Por cobrar", reversar pagos | ✅ Hecho | ver git log (fix(dinero)) |
-| 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | Pendiente | — |
-| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | Pendiente (requiere decisiones tuyas) | — |
+| 2 | Dinero y stock: pagos y abonos dobles, stock, edición de cobros, reportes de ingresos, arqueo, "Por cobrar", reversar pagos | ✅ Hecho | `28db7ce` |
+| 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | ✅ Hecho | ver git log (fix(seguridad)) |
+| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | Pendiente (decisiones ya tomadas) | — |
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | Pendiente | — |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | Pendiente | — |
 | 7 | Todo lo demás, por módulo y severidad | Pendiente | — |
 
-**Hallazgos:** 22 de 227 corregidos.
+**Hallazgos:** 34 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
-| M0 Acceso y roles | 2 | 28 | 0 |
+| M0 Acceso y roles | 4 | 26 | 0 |
 | M1 Configuración y catálogo | 3 | 28 | 0 |
-| M2 Pacientes | 2 | 24 | 0 |
-| M3 Agenda | 2 | 28 | 0 |
-| M4 Atención clínica | 2 | 26 | 1 (M4-01) |
+| M2 Pacientes | 3 | 23 | 0 |
+| M3 Agenda | 3 | 27 | 0 |
+| M4 Atención clínica | 6 | 22 | 0 |
 | M5 Comercial | 0 | 30 | 0 |
-| M6 Dinero | 9 | 18 | 0 |
-| M7 Inventario y plataforma | 2 | 23 | 0 |
+| M6 Dinero | 10 | 17 | 0 |
+| M7 Inventario y plataforma | 5 | 20 | 0 |
 
-**Decisiones pendientes de tu parte** (bloquean el paso 4):
-- ¿Recepción debe poder crear y enviar cotizaciones?
-- ¿Revertir una carga de migración exige un permiso?
-- ¿La historia clínica se acota por sede?
-- ¿El Profesional por defecto ve reportes financieros?
-- ¿Quién entrega los obsequios de producto?
+**Decisiones del usuario (10/10/2026)**
+
+| Pregunta | Decisión | Efecto |
+|---|---|---|
+| ¿Recepción crea y envía cotizaciones? | **No, por defecto no.** | M5-15 (primera parte) es intencional. No se cambian los defaults; el admin lo activa por rol si quiere. |
+| ¿Revertir una carga de migración exige un permiso? | **Sí.** | M1-21 y M2-14: exigir `migracion.gestionar` para revertir (paso 4). |
+| ¿La historia clínica se acota por sede? | **No.** La historia es del paciente, no de la sede. | Se mantiene el alcance por clínica (nota de M4). |
+| ¿El Profesional ve reportes financieros por defecto? | **No el rol de sistema Profesional. El Admin sí.** | M6-12 y M0-21: quitar `reportes.ver_financieros` del default del Profesional, migrar los roles de sistema existentes y que la pestaña Resumen/P&L se rija por ese permiso (paso 4). |
+| ¿Quién entrega los obsequios de producto? | **Quien atiende pacientes.** | M5-15 (segunda parte): ya funciona así, porque la entrega exige `inventario.consumo.registrar`, que da el check "atiende pacientes". Solo falta que la pantalla lo explique a quien no puede (paso 5). |
 
 ## Resumen en números
 
@@ -302,6 +305,23 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 **Pruebas del paso 2:**
 - `apps/core/tests/test_verificacion_paso2.py`: 10 casos.
 - `apps/cartera/tests.py::test_reversar_un_abono_devuelve_el_saldo_a_la_cuota`.
+
+**Paso 3 — legal y seguridad (10/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M4-01 | `firmado`, `fecha_firma` y `archivo` del consentimiento informado son de solo lectura; `paciente` y `cita` no cambian después de crearlo. Ya no se puede marcar como firmado ni "desfirmar" para borrarlo. Se quitó del frontend la función de PATCH, que no se usaba. |
+| M4-05 | `completar_firma` confirma con Documenso (3 intentos, 1 s entre cada uno) antes de marcar la firma. Si Documenso aún no la refleja, responde 409 y la pantalla ofrece "Reintentar sincronización". |
+| M4-04 | La firma dibujada en el enlace público es obligatoria, se valida (PNG en base64, máximo 500 KB) y queda en el PDF. La pantalla muestra el motivo del rechazo. Hoy ninguna pantalla genera ese enlace, porque el flujo real es Documenso. |
+| M7-04 | Se eliminaron `POST /notificaciones/emails/enviar/`, su serializer y los helpers muertos del frontend, que armaban HTML con la contraseña en texto plano. El permiso `notificaciones.email.enviar` queda huérfano y se resuelve en el paso 4. |
+| M0-06 | Quien no es administrador no puede asignar el rol Administrador, ni modificar, activar, desactivar o borrar a un administrador, ni cambiar su propio rol o editar los permisos del rol que tiene. Aplica en usuarios, colaboradores y roles. |
+| M0-02 | Activar y desactivar (y el PATCH de `activo`) mantienen `is_active` alineado: un usuario desactivado ya no entra. Al reactivar a alguien con la invitación pendiente, sigue sin poder entrar hasta crear su contraseña. |
+| M7-11 | El registro público de clínicas tiene un límite de 5 intentos por hora por IP y ya no devuelve el error interno. |
+| T-05 | Nuevo `apps/core/clinica_scope.py` con `AcotadoAClinicaMixin`, que limita a la clínica activa cada relación por id del serializer. Se aplicó en citas y bloqueos, cobros y pagos, acuerdos y abonos de cartera, gastos de caja, insumos y ajuste de stock, fotos y consumo de insumos, y obesidad. Además, la clínica del paciente sale siempre de la request (M2-05), los procedimientos e insumos de un ingreso se buscan en su clínica, y citas y bloqueos validan las sedes del usuario (M3-07). Cubre M2-05, M3-07, M4-10, M4-11 (la nota; falta el límite de tamaño de la foto), M6-18 y M7-09. |
+| M4-10 | Las mediciones de obesidad exigen `historia.ver` para leer y ser quien atiende para escribir; antes bastaba con estar logueado. |
+
+- **Pruebas:** `apps/core/tests/test_verificacion_paso3.py`, con 15 casos.
+- **Pendiente de este grupo:** M4-11 (límite de tamaño y tipo de la foto), M4-25 (datos de más en el GET público del consentimiento) y el reenvío de la invitación del registro (M7-12) pasan al paso 7.
 
 ## Orden de corrección sugerido
 

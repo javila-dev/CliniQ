@@ -33,7 +33,7 @@
 - **Causa:** son dos llamadas que no forman una sola operación (crear y recibir). Si falla la segunda, por ejemplo por falta del permiso `ordenes.recibir`, el formulario no se entera de que la compra ya existe.
 - **Arreglo:** un endpoint que haga las dos cosas de forma atómica, u ocultar el botón a quien no tenga el permiso de recibir.
 
-**M7-04 · Alto · permisos/seguridad** · confirmado
+**✅ M7-04 · Alto · permisos/seguridad** · confirmado
 - **Dónde:** `backend/apps/notificaciones/views.py:149-176`, `serializers.py:38-61`, `permissions_catalog.py:709`
 - **Qué ve el usuario:** nada en pantalla. Pero **cualquier recepcionista puede, por API, enviar correos a cualquier persona**, con HTML y con el remitente (`from_email`) que quiera, desde la cuenta de la plataforma.
 - **Contexto:** no se usa en ninguna pantalla. Los helpers de bienvenida que lo llaman son código muerto y arman HTML con la contraseña en texto plano.
@@ -65,7 +65,7 @@
   - Un ítem con costo $0 pasa en el formulario y falla al guardar.
 - **Arreglo:** un helper común para los mensajes (ver T-02) y la misma regla de costo en el frontend y en el backend.
 
-**M7-09 · Medio · permisos (multiclínica)** · confirmado
+**✅ M7-09 · Medio · permisos (multiclínica)** · confirmado
 - **Dónde:** `inventario/serializers.py:24,101-104`; `views.py:121-130`; `historia_clinica/serializers.py:549`
 - **Qué ve el usuario:** nada. Por API se puede ajustar stock en la sede de otra clínica, asignar una categoría ajena o registrar un consumo en una sede ajena.
 - **Arreglo:** validar que la sede y la categoría sean de la misma clínica que el insumo.
@@ -75,7 +75,7 @@
 - **Qué ve el usuario:** cualquier usuario ve en el Dashboard los "envíos fallidos" **con el teléfono completo del paciente**, y puede marcarlos como resueltos.
 - **Arreglo:** exigir un permiso y enmascarar el teléfono.
 
-**M7-11 · Medio · endpoint público** · confirmado
+**✅ M7-11 · Medio · endpoint público** · confirmado
 - **Dónde:** `clinicas/views.py:1530-1561`; `serializers.py:1327-1336`
 - **Qué pasa:**
   - El registro de clínicas no tiene límite de intentos ni captcha, así que sirve para enviar correo masivo.

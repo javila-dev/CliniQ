@@ -12,6 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 from rest_framework.viewsets import ModelViewSet
 
@@ -1527,9 +1528,20 @@ class PlantillaAsistenciaViewSet(HasClinicamente, ModelViewSet):
         serializer.save(clinica=get_clinica_activa(self.request))
 
 
+class RegistroClinicaThrottle(SimpleRateThrottle):
+    """Registro público de clínicas: cada intento manda un correo. Sin límite servía
+    para bombardear un correo ajeno o probar qué emails y NIT ya existen."""
+
+    rate = "5/hour"
+
+    def get_cache_key(self, request, view):
+        return f"registro_clinica_{self.get_ident(request)}"
+
+
 class RegistroClinicaView(APIView):
     authentication_classes = []
     permission_classes = []
+    throttle_classes = (RegistroClinicaThrottle,)
 
     def post(self, request):
         from apps.clinicas.serializers import RegistroClinicaSerializer
@@ -1548,9 +1560,13 @@ class RegistroClinicaView(APIView):
                 email=d["email"],
                 telefono=d["telefono"],
             )
-        except Exception as exc:
+        except Exception:
+            logger.exception("Registro de clinica fallido | email=%s", d["email"])
             return Response(
-                {"error": str(exc), "code": "REGISTRO_FALLIDO"},
+                {
+                    "error": "No pudimos completar el registro en este momento. Intenta de nuevo en unos minutos.",
+                    "code": "REGISTRO_FALLIDO",
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 

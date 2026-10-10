@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.caja.models import Caja, CategoriaGasto, GastoCaja, SesionCaja
 from apps.users.permissions import get_clinica_activa
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
 class CategoriaGastoSerializer(serializers.ModelSerializer):
@@ -34,7 +35,7 @@ class CategoriaGastoSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class GastoCajaSerializer(serializers.ModelSerializer):
+class GastoCajaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     registrado_por_nombre = serializers.SerializerMethodField()
     categoria_nombre = serializers.CharField(source="categoria.nombre", read_only=True)
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)

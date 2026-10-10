@@ -1,10 +1,9 @@
 from django.db import models as django_models
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 
-from apps.users.permissions import IsAdminOrProfesional
+from apps.users.permissions import IsAdminOrProfesional, RequirePermission
 from .models import (
     AntecedentesObesidad,
     MedicionAntropometrica,
@@ -100,7 +99,11 @@ class MedicionAntropometricaViewSet(
     serializer_class = MedicionAntropometricaSerializer
 
     def get_permissions(self):
-        return [IsAuthenticated()]
+        # Leer exige ver la historia; registrar o editar, ser quien atiende (antes
+        # bastaba con estar logueado, incluso para borrar mediciones).
+        if self.action in {"list", "retrieve", "progreso"}:
+            return [RequirePermission("historia.ver")()]
+        return [IsAdminOrProfesional()]
 
     def get_queryset(self):
         qs = MedicionAntropometrica.objects.select_related(

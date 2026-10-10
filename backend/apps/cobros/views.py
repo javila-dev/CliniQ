@@ -119,12 +119,12 @@ class CobroViewSet(ModelViewSet):
         for item_data in items_data:
             if item_data.get("servicio"):
                 try:
-                    item_data["servicio"] = Servicio.objects.get(pk=item_data["servicio"])
+                    item_data["servicio"] = Servicio.objects.get(pk=item_data["servicio"], clinica_id=cobro.sede.clinica_id)
                 except Servicio.DoesNotExist:
                     raise ValidationError({"items": {"servicio": "Procedimiento no encontrado."}})
             if item_data.get("insumo"):
                 try:
-                    item_data["insumo"] = Insumo.objects.get(pk=item_data["insumo"])
+                    item_data["insumo"] = Insumo.objects.get(pk=item_data["insumo"], clinica_id=cobro.sede.clinica_id)
                 except Insumo.DoesNotExist:
                     raise ValidationError({"items": {"insumo": "Insumo no encontrado."}})
             agregar_item_cobro(cobro=cobro, item_data=item_data, user=request.user)
@@ -158,13 +158,13 @@ class CobroViewSet(ModelViewSet):
         # Resolver FKs desde UUIDs
         if data.get("servicio"):
             try:
-                data["servicio"] = Servicio.objects.get(pk=data["servicio"])
+                data["servicio"] = Servicio.objects.get(pk=data["servicio"], clinica_id=cobro.sede.clinica_id)
             except Servicio.DoesNotExist:
                 raise ValidationError({"servicio": "Procedimiento no encontrado."})
 
         if data.get("insumo"):
             try:
-                data["insumo"] = Insumo.objects.get(pk=data["insumo"])
+                data["insumo"] = Insumo.objects.get(pk=data["insumo"], clinica_id=cobro.sede.clinica_id)
             except Insumo.DoesNotExist:
                 raise ValidationError({"insumo": "Insumo no encontrado."})
 
@@ -201,7 +201,7 @@ class CobroViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="registrar_pago")
     def registrar_pago_action(self, request, pk=None):
         cobro = self.get_object()
-        serializer = PagoCreateSerializer(data=request.data)
+        serializer = PagoCreateSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
 
         pago = registrar_pago(cobro=cobro, pago_data=serializer.validated_data, user=request.user)

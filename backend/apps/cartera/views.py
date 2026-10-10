@@ -403,7 +403,7 @@ class CuotaCarteraViewSet(GenericViewSet):
         if cuota.saldo_pendiente <= 0:
             raise ValidationError({"error": "La cuota ya fue cobrada por completo.", "code": "CUOTA_YA_PAGADA"})
         self._guard_acuerdo_pendiente(cuota)
-        serializer = RegistrarPagoCuotaSerializer(data=request.data, context={"cuota": cuota})
+        serializer = RegistrarPagoCuotaSerializer(data=request.data, context={"cuota": cuota, "request": request})
         serializer.is_valid(raise_exception=True)
         # Los pagos se acumulan: un abono parcial no cierra la cuota, solo baja
         # su saldo. La cuota queda `pagada` cuando lo acumulado cubre lo esperado.

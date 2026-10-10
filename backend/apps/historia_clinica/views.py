@@ -1,5 +1,6 @@
 import base64
 import logging
+import time
 
 import requests
 from dateutil.relativedelta import relativedelta
@@ -598,6 +599,11 @@ class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, Gene
         serializer.save()
 
 
+# completar_firma: Documenso puede tardar un instante en reflejar la firma del embed.
+INTENTOS_CONFIRMAR_FIRMA = 3
+ESPERA_CONFIRMAR_FIRMA_SEG = 1
+
+
 class ConsentimientoInformadoViewSet(
     mixins.ListModelMixin,
     mixins.CreateModelMixin,
@@ -795,17 +801,28 @@ class ConsentimientoInformadoViewSet(
 
     @action(detail=True, methods=["patch"], url_path="completar_firma")
     def completar_firma(self, request, pk=None):
+        """Lo llama la pantalla cuando el embed de Documenso avisa que se firmó.
+
+        No se confía en el navegador: se confirma con Documenso (el sobre guardado
+        al iniciar la firma) antes de marcarlo firmado. Si Documenso todavía no lo
+        refleja, 409 y la pantalla ofrece "Reintentar sincronización".
+        """
         consentimiento = self.get_object()
-        documenso_document_id = request.data.get("documenso_document_id", "")
-
-        if consentimiento.firmado:
-            marcar_consentimiento_firmado(consentimiento, documenso_document_id=documenso_document_id or None)
-            return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
-
-        marcar_consentimiento_firmado(
-            consentimiento,
-            documenso_document_id=documenso_document_id or None,
-        )
+        if not consentimiento.firmado:
+            for intento in range(INTENTOS_CONFIRMAR_FIRMA):
+                if verificar_firma_consentimiento_en_documenso(consentimiento):
+                    break
+                if intento < INTENTOS_CONFIRMAR_FIRMA - 1:
+                    time.sleep(ESPERA_CONFIRMAR_FIRMA_SEG)
+            else:
+                return Response(
+                    {
+                        "error": "Documenso todavía no confirma la firma. Espera unos segundos y reintenta.",
+                        "code": "FIRMA_NO_CONFIRMADA",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+            consentimiento.refresh_from_db()
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="verificar_firma")

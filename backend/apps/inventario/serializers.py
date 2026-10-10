@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.clinicas.models import Sede
 from apps.inventario.models import CategoriaInsumo, Insumo, MovimientoInventario, StockInsumoSede
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
 class CategoriaInsumoSerializer(serializers.ModelSerializer):
@@ -21,7 +22,7 @@ class CategoriaInsumoSerializer(serializers.ModelSerializer):
         read_only_fields = ("id", "clinica", "created_at", "updated_at")
 
 
-class InsumoSerializer(serializers.ModelSerializer):
+class InsumoSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     """El insumo (catalogo) se comparte entre sedes; el stock no.
 
     `stock_actual`, `costo_promedio`, `stock_bajo` y `valor_stock` reflejan
@@ -98,7 +99,7 @@ class InsumoSerializer(serializers.ModelSerializer):
         return attrs
 
 
-class AjusteStockSerializer(serializers.Serializer):
+class AjusteStockSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.all())
     cantidad_nueva = serializers.DecimalField(max_digits=10, decimal_places=3, min_value=Decimal("0"))
     motivo = serializers.CharField(max_length=500)

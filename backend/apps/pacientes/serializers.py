@@ -225,6 +225,17 @@ class PacienteSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"autoriza_datos": "Debes autorizar el tratamiento de datos para registrar el paciente."})
 
         request = self.context.get("request")
+        # La clínica sale de la request, nunca del body: con un usuario logueado se
+        # podía crear un paciente en otra clínica o moverlo con PATCH {clinica}.
+        # (El registro público y la carga masiva la fijan del lado del servidor.)
+        if self.instance is not None:
+            attrs.pop("clinica", None)
+        elif request is not None and request.user.is_authenticated:
+            from apps.users.permissions import get_clinica_activa
+
+            activa = get_clinica_activa(request)
+            if activa is not None:
+                attrs["clinica"] = activa
         clinica = attrs.get("clinica")
         if clinica is None:
             if self.instance is not None:

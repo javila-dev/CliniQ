@@ -5,6 +5,7 @@ from rest_framework import serializers
 
 from apps.cartera.models import AbonoCuota, AcuerdoPago, Cartera, CuotaCartera
 from apps.clinicas.models import FormaDePago
+from apps.core.clinica_scope import AcotadoAClinicaMixin
 
 
 class AbonoCuotaSerializer(serializers.ModelSerializer):
@@ -240,14 +241,14 @@ class CarteraDetailSerializer(CarteraListSerializer):
         return AcuerdoPagoSerializer(pendiente).data if pendiente else None
 
 
-class CuotaPropuestaSerializer(serializers.Serializer):
+class CuotaPropuestaSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     tipo = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))
     descripcion = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
     valor_esperado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     fecha_esperada = serializers.DateField()
 
 
-class CrearAcuerdoPagoSerializer(serializers.Serializer):
+class CrearAcuerdoPagoSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     cartera = serializers.PrimaryKeyRelatedField(queryset=Cartera.objects.all())
     motivo = serializers.CharField(max_length=2000)
     cuotas = CuotaPropuestaSerializer(many=True, allow_empty=False)
@@ -267,7 +268,7 @@ class ModificarPlazoCuotaSerializer(serializers.Serializer):
         return attrs
 
 
-class RegistrarPagoCuotaSerializer(serializers.Serializer):
+class RegistrarPagoCuotaSerializer(AcotadoAClinicaMixin, serializers.Serializer):
     valor_pagado = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=Decimal("0.01"))
     fecha_pago = serializers.DateField()
     medio_pago = serializers.PrimaryKeyRelatedField(queryset=FormaDePago.objects.filter(activo=True))

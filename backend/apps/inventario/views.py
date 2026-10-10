@@ -121,7 +121,7 @@ class InsumoViewSet(HasClinicamente, ModelViewSet):
     @action(detail=True, methods=["post"], url_path="ajustar_stock")
     def ajustar_stock(self, request, pk=None):
         insumo = self.get_object()
-        serializer = AjusteStockSerializer(data=request.data)
+        serializer = AjusteStockSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
 
         if not sede_ids_para_filtro(request.user, serializer.validated_data["sede"].id):

@@ -231,14 +231,19 @@ def generar_acta_acuerdo_pago(acuerdo) -> Consentimiento:
     )
 
 
-def generar_pdf_consentimiento(consentimiento: Consentimiento) -> bytes:
+def generar_pdf_consentimiento(consentimiento: Consentimiento, firma_png_data_uri: str = "") -> bytes:
+    firma = (
+        f'<p><img src="{firma_png_data_uri}" style="max-height:90px;max-width:280px" alt="Firma del paciente"></p>'
+        if firma_png_data_uri
+        else ""
+    )
     pie = (
         f"<hr><small>Paciente: {consentimiento.paciente.nombre_completo} | "
         f"Documento: {consentimiento.paciente.tipo_documento} {consentimiento.paciente.numero_documento} | "
         f"Fecha firma: {consentimiento.firmado_en or ''} | IP: {consentimiento.firma_ip or ''} | "
         f"Hash: {consentimiento.hash_contenido}</small>"
     )
-    html = f"{consentimiento.contenido_snapshot}{pie}"
+    html = f"{consentimiento.contenido_snapshot}{firma}{pie}"
     return HTML(string=html).write_pdf()
 
 
@@ -528,18 +533,41 @@ def generar_consentimiento(cita=None, plantilla: PlantillaConsentimiento = None,
     )
 
 
-def firmar_consentimiento(token, ip, user_agent) -> Consentimiento:
+FIRMA_PNG_PREFIJO = "data:image/png;base64,"
+FIRMA_MAX_BYTES = 500_000
+
+
+def validar_firma_dibujada(firma: str) -> str:
+    """La firma dibujada en el enlace público: PNG en base64, no vacía y acotada."""
+    import base64
+    import binascii
+
+    firma = (firma or "").strip()
+    if not firma.startswith(FIRMA_PNG_PREFIJO):
+        raise ValueError("Dibuja tu firma antes de confirmar.")
+    try:
+        datos = base64.b64decode(firma[len(FIRMA_PNG_PREFIJO):], validate=True)
+    except (binascii.Error, ValueError):
+        raise ValueError("La firma no es válida. Vuelve a dibujarla.")
+    if len(datos) < 100 or len(datos) > FIRMA_MAX_BYTES or not datos.startswith(b"\x89PNG"):
+        raise ValueError("La firma no es válida. Vuelve a dibujarla.")
+    return firma
+
+
+def firmar_consentimiento(token, ip, user_agent, firma: str = "") -> Consentimiento:
     consentimiento = Consentimiento.objects.select_related("paciente", "cita", "plantilla").get(token=token)
     if consentimiento.estado != Consentimiento.Estado.PENDIENTE:
         raise ValueError("El consentimiento ya no está pendiente de firma.")
     if not consentimiento.token_vigente:
         raise ValueError("El token de firma ya expiró.")
 
+    firma = validar_firma_dibujada(firma)
+
     consentimiento.estado = Consentimiento.Estado.FIRMADO
     consentimiento.firmado_en = timezone.now()
     consentimiento.firma_ip = ip
     consentimiento.firma_user_agent = user_agent or ""
-    pdf_bytes = generar_pdf_consentimiento(consentimiento)
+    pdf_bytes = generar_pdf_consentimiento(consentimiento, firma_png_data_uri=firma)
     asegurar_bucket_consentimientos()
     filename = f"consentimiento-{consentimiento.id}.pdf"
     consentimiento.pdf_archivo.save(filename, ContentFile(pdf_bytes), save=False)
