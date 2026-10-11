@@ -9,6 +9,7 @@ import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog'
 import { Card, CardContent } from '@/components/ui/card'
@@ -29,6 +30,7 @@ import { canAccess } from '@/lib/permissions'
 import { useHistoriaConfig } from '@/hooks/usePestanasClinica'
 import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 
 const ALL_TABS: { value: string; label: string }[] = [
   { value: 'datos-generales', label: 'Datos Generales' },
@@ -105,19 +107,19 @@ function HistoriaContent({ params }: Props) {
     ] : []),
   ]
 
-  const { data: paciente, isLoading: loadingPaciente } = useQuery({
+  const { data: paciente, isLoading: loadingPaciente, error: errorPaciente, refetch: refetchPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
     queryFn: () => pacientesApi.get(pacienteId),
   })
 
-  const { data: historiasData, isLoading: loadingHistoria } = useQuery({
+  const { data: historiasData, isLoading: loadingHistoria, error: errorHistoria, refetch: refetchHistoria } = useQuery({
     queryKey: ['historias', pacienteId],
     queryFn: () => historiaClinicaApi.historias.list({ paciente: pacienteId }),
   })
 
   const historia = historiasData?.results.find((h) => h.paciente === pacienteId)
 
-  const { data: notas } = useQuery({
+  const { data: notas, isError: errorNotas, error: errNotas, refetch: refetchNotas } = useQuery({
     queryKey: ['historia', historia?.id, 'notas'],
     queryFn: () => historiaClinicaApi.historias.notas(historia!.id),
     enabled: Boolean(historia?.id),
@@ -138,6 +140,27 @@ function HistoriaContent({ params }: Props) {
   }
 
   if (loadingHistoria || loadingPaciente) return <LoadingState rows={4} />
+
+  // Un fallo (p. ej. sin permiso) no significa que el paciente no tenga historia.
+  const errorCarga = errorHistoria ?? errorPaciente
+  if (errorCarga) {
+    return (
+      <div>
+        <div className="flex items-center gap-3 mb-6">
+          <Button variant="ghost" size="sm" asChild>
+            <Link href={`/pacientes/${pacienteId}`}>
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Volver
+            </Link>
+          </Button>
+        </div>
+        <ErrorState
+          message={mensajeDeError(errorCarga, 'No se pudo cargar la historia clínica.')}
+          onRetry={() => { refetchHistoria(); refetchPaciente() }}
+        />
+      </div>
+    )
+  }
 
   if (!historia) {
     return (
@@ -285,6 +308,16 @@ function HistoriaContent({ params }: Props) {
 
         {/* Contenido — envuelto en área con padding uniforme */}
         <div className={cn('px-6 py-6 transition-opacity duration-150', isPending && 'opacity-50 pointer-events-none')}>
+          {errorNotas && (
+            <div className="mb-4 flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+              <p className="text-sm text-destructive">
+                {mensajeDeError(errNotas, 'No se pudieron cargar las notas de la historia.')}
+              </p>
+              <Button variant="outline" size="sm" className="ml-auto h-7 text-xs shrink-0" onClick={() => refetchNotas()}>
+                Reintentar
+              </Button>
+            </div>
+          )}
           <TabsContent value="datos-generales" className="mt-0">
             {paciente && (
               <TabDatosGenerales

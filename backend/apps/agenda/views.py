@@ -686,7 +686,7 @@ class CitaViewSet(ModelViewSet):
                 )
                 if item.tratamiento_id:
                     raise ValidationError(
-                        {"item_cotizacion_id": "Los tipos de sesión del tratamiento tienen duracion_min=0. Configurá la duración en el tratamiento.", "code": "MISSING_DURATION"}
+                        {"item_cotizacion_id": "Los tipos de sesión de este tratamiento no tienen duración. Configura la duración en Catálogo → Tratamientos.", "code": "MISSING_DURATION"}
                     )
                 raise ValidationError(
                     {"item_cotizacion_id": "El item no tiene duracion configurada.", "code": "MISSING_DURATION"}
@@ -1226,6 +1226,35 @@ class BloqueoAgendaViewSet(ModelViewSet):
             estado = BloqueoAgenda.Estado.PENDIENTE
 
         serializer.save(creado_por=user, clinica=clinica, estado=estado)
+
+    def _puede_modificar(self, bloqueo):
+        """Editar o borrar un bloqueo: quien gestiona bloqueos, o quien lo creó
+        mientras siga pendiente. Antes bastaba con "crear bloqueo" para cambiar o
+        borrar bloqueos aprobados de otros."""
+        from apps.users.authorization import user_has_permission
+
+        user = self.request.user
+        if user_has_permission(user, "agenda.bloqueos.gestionar", request=self.request):
+            return
+        if bloqueo.creado_por_id == user.id and bloqueo.estado == BloqueoAgenda.Estado.PENDIENTE:
+            return
+        raise PermissionDenied("Solo puedes modificar tus bloqueos pendientes de aprobación.")
+
+    def perform_update(self, serializer):
+        from apps.users.authorization import user_has_permission
+
+        self._puede_modificar(serializer.instance)
+        # Un bloqueo aprobado que edita alguien sin permiso de aprobar vuelve a revisión.
+        if serializer.instance.estado == BloqueoAgenda.Estado.APROBADO and not user_has_permission(
+            self.request.user, "agenda.aprobar_bloqueo", request=self.request
+        ):
+            serializer.save(estado=BloqueoAgenda.Estado.PENDIENTE, aprobado_por=None, aprobado_en=None)
+            return
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        self._puede_modificar(instance)
+        instance.delete()
 
     @action(detail=True, methods=["post"], url_path="aprobar")
     def aprobar(self, request, pk=None):

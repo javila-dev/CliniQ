@@ -50,6 +50,7 @@ export function NuevaNotaForm({ historiaId, cita, onSuccess, onCancel }: NuevaNo
   const tipo = watch('tipo')
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: historiaClinicaApi.notas.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['historia', historiaId, 'notas'] })

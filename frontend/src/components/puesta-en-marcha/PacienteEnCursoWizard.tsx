@@ -5,6 +5,7 @@ import { useQuery, useMutation, keepPreviousData } from '@tanstack/react-query'
 import {
   ArrowLeft, ArrowRight, Check, Search, Plus, Trash2, Pencil, Loader2, CheckCircle2,
 } from 'lucide-react'
+import { mensajeDeError } from '@/lib/errores'
 import { migracionApi } from '@/lib/api/migracion'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -211,9 +212,9 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
       onClose()
       onDone()
     },
-    onError: (e: any) => {
-      const d = e?.response?.data
-      toast.error('No se pudo cargar', typeof d === 'string' ? d : (d?.detail ?? JSON.stringify(d ?? {})))
+    onError: (e: unknown) => {
+      // Antes se mostraba el JSON crudo ({"plan_saldo":[…],"code":[…]}).
+      toast.error('No se pudo cargar', mensajeDeError(e, 'Revisa los datos e intenta de nuevo.'))
     },
   })
 

@@ -34,6 +34,7 @@ export function SubirFotosModal({ open, onOpenChange, notaId, historiaId }: Subi
   const [serverError, setServerError] = useState<string | null>(null)
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: (formData: FormData) => historiaClinicaApi.fotos.create(formData),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['historia', historiaId, 'notas'] })

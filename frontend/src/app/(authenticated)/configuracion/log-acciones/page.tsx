@@ -12,6 +12,7 @@ import { coreApi } from '@/lib/api/core'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -22,6 +23,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { LogAccion } from '@/types/core'
 
 const PAGE_SIZE = 50
@@ -237,7 +239,7 @@ export default function LogAccionesPage() {
   const [filterHasta, setFilterHasta]     = useState('')
   const [detalle, setDetalle]         = useState<LogAccion | null>(null)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['log-acciones', page, filterUsuario, filterDesde, filterHasta],
     queryFn: () => coreApi.logAcciones.list({
       page,
@@ -313,12 +315,15 @@ export default function LogAccionesPage() {
         {isLoading && (
           <div className="px-4 py-12 text-center text-sm text-muted-foreground">Cargando actividad…</div>
         )}
-        {!isLoading && logs.length === 0 && (
+        {!isLoading && isError && (
+          <ErrorState message={mensajeDeError(error, 'No se pudo cargar el registro de acciones.')} onRetry={() => refetch()} />
+        )}
+        {!isLoading && !isError && logs.length === 0 && (
           <div className="px-4 py-12 text-center text-sm text-muted-foreground">
             No hay registros con los filtros actuales.
           </div>
         )}
-        {!isLoading && logs.length > 0 && (
+        {!isLoading && !isError && logs.length > 0 && (
           <ul className="divide-y">
             {logs.map((log) => {
               const meta = getAccionMeta(log.accion)
@@ -364,7 +369,7 @@ export default function LogAccionesPage() {
           </ul>
         )}
 
-        <PaginacionBar page={page} total={total} pageSize={PAGE_SIZE} onPage={setPage} />
+        {!isError && <PaginacionBar page={page} total={total} pageSize={PAGE_SIZE} onPage={setPage} />}
       </div>
 
       {detalle && <DetalleDialog log={detalle} onClose={() => setDetalle(null)} />}

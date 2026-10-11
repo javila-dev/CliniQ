@@ -23,8 +23,8 @@ from apps.clinicas.models import Clinica
 from apps.core.logging import registrar_accion
 from apps.users import services
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
-from apps.users.authorization import user_is_tenant_admin
-from apps.users.permissions import IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
+from apps.users.authorization import user_has_permission, user_is_tenant_admin
+from apps.users.permissions import IsAdmin, IsSuperAdmin, RequireAnyPermission, RequirePermission, get_clinica_activa
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
     CAPABILITY_PERMISSIONS,
@@ -629,6 +629,12 @@ class RolViewSet(GenericViewSet):
             "destroy": "roles.eliminar",
             "permisos": "roles.asignar_permisos",
         }
+        if self.action == "list":
+            # Selector de rol al crear o editar un usuario o colaborador: no exige
+            # poder gestionar roles (con "Gestionar colaboradores" salía vacío).
+            return [RequireAnyPermission(
+                "roles.ver", "usuarios.crear", "usuarios.editar", "colaboradores.gestionar",
+            )()]
         permission_key = permission_map.get(self.action, "roles.ver")
         return [RequirePermission(permission_key)()]
 
@@ -806,8 +812,10 @@ class UserViewSet(GenericViewSet):
         }
         if self.action == "cambiar_password":
             return [IsAuthenticated()]
-        if self.action in {"limite", "reenviar_invitacion"}:
+        if self.action == "limite":
             return [IsAdmin()]
+        if self.action == "reenviar_invitacion":
+            return [RequirePermission("usuarios.editar")()]
         return [RequirePermission(permission_map.get(self.action, "usuarios.ver"))()]
 
     def get_queryset(self):
@@ -975,12 +983,27 @@ class UserViewSet(GenericViewSet):
     @action(detail=True, methods=["post"], url_path="cambiar_password")
     def cambiar_password(self, request, pk=None):
         user = self.get_object()
-        if request.user != user and not request.user.es_admin:
-            return Response({"error": "Sin permiso.", "code": "FORBIDDEN"}, status=status.HTTP_403_FORBIDDEN)
+        propia = request.user == user
+        if propia:
+            # La propia: se confirma con la actual (una sesión abierta en un equipo
+            # ajeno no basta para cambiarla).
+            if not user.check_password(request.data.get("password_actual", "")):
+                return Response(
+                    {"error": "La contraseña actual no es correcta.", "code": "PASSWORD_ACTUAL_INVALIDA"},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        else:
+            # La de otro: quien puede editar usuarios (no solo el rol admin), sin
+            # tocar a un administrador si no lo es.
+            if not user_has_permission(request.user, "usuarios.editar", request=request):
+                return Response({"error": "Sin permiso.", "code": "FORBIDDEN"}, status=status.HTTP_403_FORBIDDEN)
+            validar_cambio_sobre_usuario(request, user, cambia_rol=False)
         nueva = request.data.get("nueva_password", "")
-        if len(nueva) < 8:
+        try:
+            services.validate_password_strength(nueva)
+        except ValidationError:
             return Response(
-                {"error": "La contraseña debe tener al menos 8 caracteres.", "code": "PASSWORD_TOO_SHORT"},
+                {"error": services.PASSWORD_POLICY_ERROR, "code": "PASSWORD_DEBIL"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         user.set_password(nueva)

@@ -17,10 +17,12 @@ import { ResumenCarteraPanel } from '@/components/cartera/detalle/ResumenCartera
 import { estadoCartera, saldoCuota, type EstadoCarteraUI } from '@/components/cartera/detalle/utils'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { cn, formatDate } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { CuotaCartera } from '@/types/cartera'
 
 const ESTADO_CARTERA: Record<EstadoCarteraUI, { label: string; className: string }> = {
@@ -38,13 +40,22 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
   const [showNuevoAcuerdo, setShowNuevoAcuerdo] = useState(false)
   const [showFirmaAcuerdo, setShowFirmaAcuerdo] = useState(false)
 
-  const { data: cartera, isLoading } = useQuery({
+  const { data: cartera, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['cartera', id],
     queryFn: () => carteraApi.get(id),
   })
 
   if (isLoading) return <div className="p-8"><LoadingState rows={8} /></div>
-  if (!cartera) return null
+  if (isError || !cartera) {
+    return (
+      <div className="p-8 flex flex-col items-center">
+        <ErrorState message={mensajeDeError(error, 'No se pudo cargar la cartera.')} onRetry={() => refetch()} />
+        <Button variant="ghost" size="sm" asChild>
+          <Link href="/cartera">Volver a cartera</Link>
+        </Button>
+      </div>
+    )
+  }
 
   const acuerdoPendiente = cartera.acuerdo_pendiente ?? null
   const cuotas = cartera.cuotas ?? []

@@ -8,6 +8,7 @@ import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,6 +19,7 @@ import {
 } from '@/components/ui/dialog'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { SesionCaja } from '@/types/caja'
 import { useResultadosSede } from '../context'
 
@@ -37,6 +39,15 @@ export default function CajaPage() {
   )
 }
 
+function ErrorEnLinea({ error, porDefecto, onRetry }: { error: unknown; porDefecto: string; onRetry: () => void }) {
+  return (
+    <div className="px-5 py-6 text-center space-y-2">
+      <p className="text-sm text-destructive">{mensajeDeError(error, porDefecto)}</p>
+      <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onRetry}>Reintentar</Button>
+    </div>
+  )
+}
+
 function CajaContent() {
   const qc = useQueryClient()
   const { user } = useAuthStore()
@@ -50,7 +61,7 @@ function CajaContent() {
   const [abrirOpen, setAbrirOpen] = useState(false)
   const [cerrarOpen, setCerrarOpen] = useState(false)
 
-  const { data: estado, isLoading } = useQuery({
+  const { data: estado, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['caja-actual', sede],
     queryFn: () => cajaApi.sesiones.actual(sede!),
     enabled: !!sede,
@@ -60,19 +71,19 @@ function CajaContent() {
   const caja = estado?.caja ?? null
   const sesion = estado?.sesion ?? null
 
-  const { data: historialData } = useQuery({
+  const historialQ = useQuery({
     queryKey: ['caja-sesiones', caja?.id],
     queryFn: () => cajaApi.sesiones.list({ caja: caja!.id, ordering: '-abierta_en' }),
     enabled: !!caja?.id,
   })
-  const historial = historialData?.results ?? []
+  const historial = historialQ.data?.results ?? []
 
-  const { data: movsData } = useQuery({
+  const movsQ = useQuery({
     queryKey: ['caja-movs', sesion?.id],
     queryFn: () => cajaApi.gastos.list({ sesion: sesion!.id, ordering: '-created_at', page_size: 100 }),
     enabled: !!sesion?.id,
   })
-  const movimientos = movsData?.results ?? []
+  const movimientos = movsQ.data?.results ?? []
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['caja-actual'] })
@@ -84,6 +95,10 @@ function CajaContent() {
     return <p className="py-10 text-center text-sm text-muted-foreground">No hay sedes disponibles.</p>
   }
   if (isLoading && !estado) return <LoadingState rows={5} />
+  // Un fallo de carga no es lo mismo que una sede sin caja.
+  if (isError) {
+    return <ErrorState message={mensajeDeError(error, 'No se pudo cargar la caja.')} onRetry={() => refetch()} />
+  }
 
   if (!caja) {
     return (
@@ -149,7 +164,9 @@ function CajaContent() {
             <div className="px-5 py-2.5 bg-muted/60 border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
               Egresos de la sesión
             </div>
-            {!movimientos.length ? (
+            {movsQ.isError ? (
+              <ErrorEnLinea error={movsQ.error} porDefecto="No se pudieron cargar los egresos." onRetry={() => movsQ.refetch()} />
+            ) : !movimientos.length ? (
               <p className="px-5 py-8 text-center text-sm text-muted-foreground">Sin egresos en esta sesión</p>
             ) : (
               <table className="w-full text-sm">
@@ -200,7 +217,9 @@ function CajaContent() {
         <div className="px-5 py-2.5 bg-muted/60 border-b text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">
           Sesiones anteriores
         </div>
-        {!historial.length ? (
+        {historialQ.isError ? (
+          <ErrorEnLinea error={historialQ.error} porDefecto="No se pudieron cargar las sesiones anteriores." onRetry={() => historialQ.refetch()} />
+        ) : !historial.length ? (
           <p className="px-5 py-8 text-center text-sm text-muted-foreground">Sin sesiones registradas</p>
         ) : (
           <div className="overflow-x-auto">

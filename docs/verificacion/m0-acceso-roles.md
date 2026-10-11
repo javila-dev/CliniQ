@@ -35,19 +35,19 @@
 - **Causa:** `desactivar` y `activar` cambian `activo`, pero el login mira `is_active`.
 - **Arreglo:** sincronizar los dos campos, como ya hace `_sync_user_activo`.
 
-**M0-03 · Alto · roles personalizados** · confirmado
+**✅ M0-03 · Alto · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/pacientes/views.py:46-48,106-111`.
 - **Qué ve el usuario:** quien atiende con un rol personalizado (o es Recepción con el check "atiende pacientes") no puede ver los Antecedentes ni de sus propios pacientes. Es el mismo problema que M2-07.
 - **Causa:** se exige el rol oculto admin o profesional, y el check da `antecedentes.editar` pero no `antecedentes.ver`.
 - **Arreglo:** chequear por permisos y agregar `.ver` a `PERMISOS_ATIENDE_PACIENTES`.
 
-**M0-04 · Alto · roles personalizados** · confirmado
+**✅ M0-04 · Alto · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/configuracion/views.py:135,184,257,292,327,365`; `clinicas/views.py:121`.
 - **Qué ve el usuario:** con "Editar datos de la clínica" ve Pasos de recepción, Biometría, Otros documentos, Registro de pacientes, Signos vitales y Plantillas, pero **al guardar falla**. Es el mismo problema que M1-07.
 - **Causa:** el PATCH usa `IsAdmin`.
 - **Arreglo:** `RequirePermission("clinicas.editar")`.
 
-**M0-05 · Alto · roles personalizados** · confirmado
+**✅ M0-05 · Alto · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/protocolos/views.py:51`; `users/permissions.py:81-92`.
 - **Qué ve el usuario:** cualquier rol personalizado, aunque solo vea la agenda, puede crear y editar protocolos de tratamiento.
 - **Causa:** `IsAdminOrRecepcion` acepta el rol oculto `"recepcion"`.
@@ -58,7 +58,7 @@
 - **Qué ve el usuario:** con "Crear y editar usuarios" puede **ponerse a sí mismo de Administrador**. Con "Gestionar roles" puede darse todos los permisos editando su propio rol.
 - **Arreglo:** que solo un admin pueda asignar el rol admin, y prohibir editar el usuario propio y el rol propio.
 
-**M0-07 · Alto · permisos** · confirmado
+**✅ M0-07 · Alto · permisos** · confirmado
 - **Dónde:** `equipo/personal/page.tsx:231-259,325,395,428`; `EquipoShell.tsx:8`; `users/views.py:793`.
 - **Qué ve el usuario:**
   - con "Ver usuarios": "Error al cargar colaboradores";
@@ -67,18 +67,18 @@
 - **Causa:** la guarda usa `usuarios.ver`, pero los datos exigen `colaboradores.ver`; reenviar exige `IsAdmin`; el frontend no lee `detail`.
 - **Arreglo:** alinear las claves y leer `detail`.
 
-**M0-08 · Alto · roles personalizados** · confirmado
+**✅ M0-08 · Alto · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/colaboradores/views.py:318-327`.
 - **Qué ve el usuario:** Recepción, o un rol con "Gestionar horarios", ve vacío el horario de un profesional ("Igual a la sede"). Al cambiar un día que ya existe le sale un error de duplicado.
 - **Causa:** sin rol admin, solo se listan los horarios propios.
 - **Arreglo:** filtrar según el permiso.
 
-**M0-09 · Alto · permisos** · confirmado
+**✅ M0-09 · Alto · permisos** · confirmado
 - **Dónde:** `configuracion/layout.tsx:9`; `AppShell.tsx:71`.
 - **Qué ve el usuario:** con solo "Gestionar campañas" ve "Promociones" en el menú, pero al entrar **vuelve al Dashboard sin explicación**. Lo mismo pasa en Cajas, Plantillas y Formas de pago. Es el mismo problema que M1-06.
 - **Arreglo:** que la guarda deje entrar si hay al menos una categoría visible (`categoriasVisibles(user).length > 0`).
 
-**M0-10 · Medio · roles personalizados** · confirmado
+**✅ M0-10 · Medio · roles personalizados** · confirmado
 - **Dónde:** `navegacion.ts:201`; `permissions_catalog.py:640-644`.
 - **Qué ve el usuario:** con "Gestionar formas de pago" nunca ve esa pantalla.
 - **Causa:** el menú pide `configuracion.formas_pago.ver`, que ninguna capacidad otorga.
@@ -105,12 +105,12 @@
 - **Causa:** el payload del login no trae `telefono`, `firma_digital_url`, `registro_profesional` ni `created_at`.
 - **Arreglo:** que el login devuelva lo mismo que `/auth/me/`, o llamar a `loadUser()` después del login.
 
-**M0-14 · Medio · errores** · confirmado
+**✅ M0-14 · Medio · errores** · confirmado
 - **Dónde:** `frontend/src/store/authStore.ts:84-90`.
 - **Qué ve el usuario:** si recarga la página con mala conexión, se cierra la sesión.
 - **Arreglo:** cerrar sesión solo ante un 401 o 403.
 
-**M0-15 · Medio · errores** · confirmado
+**✅ M0-15 · Medio · errores** · confirmado
 - **Dónde:** `components/shared/QueryProvider.tsx:9-16`.
 - **Qué ve el usuario:** los errores se ven distintos en cada pantalla, o no se ven.
 - **Arreglo:** ver T-02.
@@ -123,11 +123,11 @@
   - si falla la asignación de permisos, el rol queda creado vacío.
 - **Arreglo:** generar el slug en el backend, mostrar el error en el campo Nombre y hacerlo en una sola llamada.
 
-**M0-17 · Medio · carga** · confirmado
+**✅ M0-17 · Medio · carga** · confirmado
 - **Dónde:** `configuracion/roles/page.tsx:397-398,537-547,603-606`.
 - **Qué ve el usuario:** "Cargando capacidades…" infinito, o "Sin roles configurados" cuando en realidad hubo un error.
 
-**M0-18 · Medio · permisos** · confirmado
+**✅ M0-18 · Medio · permisos** · confirmado
 - **Dónde:** `backend/apps/users/views.py:958-976`; `perfil/page.tsx:104-112,232`.
 - **Qué ve el usuario:**
   - cambia la contraseña **sin que le pida la actual**;
@@ -145,24 +145,24 @@
 - **Qué ve el usuario:** un rol sin reportes entra a un Dashboard que muestra **"0 citas hoy"**.
 - **Arreglo:** decidir la pantalla de aterrizaje según los permisos y condicionar los indicadores.
 
-**M0-21 · Bajo · roles personalizados** · confirmado
+**✅ M0-21 · Bajo · roles personalizados** · confirmado
 - **Dónde:** `lib/permissions.ts:224-225`.
 - **Qué ve el usuario:** tener `reportes.ver_financieros` no muestra el Resumen/P&L. Es el mismo problema que M6-12.
 
-**M0-22 · Medio · roles personalizados** · confirmado
+**✅ M0-22 · Medio · roles personalizados** · confirmado
 - **Dónde:** `historia_clinica/serializers.py:147`; `views.py:596`.
 - **Qué ve el usuario:** quien atiende con un rol personalizado puede escribir en citas ajenas, y el Profesional de sistema no. Es el mismo problema que M4-12.
 
-**M0-23 · Medio · roles personalizados** · confirmado
+**✅ M0-23 · Medio · roles personalizados** · confirmado
 - **Dónde:** `historia_clinica/views.py:78-82,951`.
 - **Qué ve el usuario:** solo el admin, o un rol con el slug exacto "coordinador", puede crear plantillas de órdenes. Es el mismo problema que M1-08.
 
-**M0-24 · Medio · roles personalizados** · confirmado
+**✅ M0-24 · Medio · roles personalizados** · confirmado
 - **Dónde:** `caja/views.py:302`.
 - **Qué ve el usuario:** un rol con "Editar gastos" solo puede editar los gastos que él mismo registró.
 - **Causa:** usa `user.es_admin`.
 
-**M0-25 · Medio · roles personalizados** · confirmado
+**✅ M0-25 · Medio · roles personalizados** · confirmado
 - **Dónde:** `components/colaboradores/ColaboradorDialog.tsx:492-505,603-614`.
 - **Qué ve el usuario:** con "Gestionar colaboradores" pero sin "Gestionar roles", el selector de Rol sale vacío y no puede crear colaboradores.
 - **Además:** quedan `console.log` con los payloads.
@@ -177,7 +177,7 @@
 - **Qué ve el usuario:** el rol aparece como "prueba-sede-unica" en lugar del nombre.
 - **Arreglo:** usar `role_nombre`.
 
-**M0-28 · Bajo · errores** · confirmado
+**✅ M0-28 · Bajo · errores** · confirmado
 - **Dónde:** `components/shared/AuthGuard.tsx:36-39`.
 - **Qué ve el usuario:** cuando vence la sesión aparece el login sin ninguna explicación.
 - **Arreglo:** toast "Tu sesión venció".
@@ -186,7 +186,7 @@
 - **Dónde:** `backend/apps/users/views.py:181-184`.
 - **Qué ve el usuario:** intentar entrar a una clínica inactiva cierra la sesión abierta en otro equipo.
 
-**M0-30 · Bajo · permisos** · confirmado
+**✅ M0-30 · Bajo · permisos** · confirmado
 - **Dónde:** `navegacion.ts:226-231`.
 - **Qué ve el usuario:** con "Ver usuarios" ve Grupos de atención, pero al guardar falla, porque guardar exige `colaboradores.gestionar`.
 

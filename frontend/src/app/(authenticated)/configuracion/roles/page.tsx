@@ -14,6 +14,7 @@ import { useAuthStore } from '@/store/authStore'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -21,6 +22,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse } from '@/types/usuarios'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
@@ -267,12 +269,14 @@ function PermisosTecnicosEditor({
 // ── Modal Crear/Editar rol ──────────────────────────────────────────────────────
 
 function RolDialog({
-  rol, open, onClose, capacidades,
+  rol, open, onClose, capacidades, errorCapacidades, onReintentarCapacidades,
 }: {
   rol: Rol | null  // null = modo creación
   open: boolean
   onClose: () => void
   capacidades: CapacidadesResponse | undefined
+  errorCapacidades: unknown
+  onReintentarCapacidades: () => void
 }) {
   const qc = useQueryClient()
   const isEditing = Boolean(rol)
@@ -394,7 +398,16 @@ function RolDialog({
               )}
             </div>
 
-            {areas.length === 0 ? (
+            {errorCapacidades ? (
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-destructive">
+                  {mensajeDeError(errorCapacidades, 'No se pudieron cargar las capacidades.')}
+                </p>
+                <Button type="button" variant="outline" size="sm" className="h-7 text-xs shrink-0" onClick={onReintentarCapacidades}>
+                  Reintentar
+                </Button>
+              </div>
+            ) : areas.length === 0 ? (
               <p className="text-sm text-muted-foreground">Cargando capacidades…</p>
             ) : (
               <CapacidadesEditor
@@ -534,13 +547,13 @@ function RolesContent() {
   const [eliminando, setEliminando] = useState<Rol | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
-  const { data: roles = [], isLoading } = useQuery({
+  const { data: roles = [], isLoading, isError, error, refetch } = useQuery({
     queryKey: ['roles'],
     queryFn: () => rolesApi.list(),
     staleTime: 5 * 60 * 1000,
   })
 
-  const { data: capacidades } = useQuery({
+  const { data: capacidades, error: errorCapacidades, refetch: refetchCapacidades } = useQuery({
     queryKey: ['capacidades-catalogo'],
     queryFn: () => rolesApi.listarCapacidades(),
     staleTime: 60 * 60 * 1000, // 1 hora — el catálogo cambia poco
@@ -600,6 +613,8 @@ function RolesContent() {
               </div>
             </div>
           ))
+        ) : isError ? (
+          <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los roles.')} onRetry={() => refetch()} />
         ) : roles.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-16 text-center">
             <Shield className="h-10 w-10 text-muted-foreground/20 mb-3" />
@@ -623,6 +638,8 @@ function RolesContent() {
         open={rolSheet.open}
         onClose={() => setRolSheet({ open: false, rol: null })}
         capacidades={capacidades}
+        errorCapacidades={errorCapacidades}
+        onReintentarCapacidades={() => refetchCapacidades()}
       />
 
       <Dialog open={!!eliminando} onOpenChange={v => { if (!v) { setEliminando(null); setDeleteError(null) } }}>

@@ -87,6 +87,8 @@ export const PERM = {
 
   // Sedes
   SEDES_VER:                 'sedes.ver',
+  COLABORADORES_VER:         'colaboradores.ver',
+  COLABORADORES_GESTIONAR:   'colaboradores.gestionar',
   SEDES_GESTIONAR:           'sedes.gestionar',
 
   // Campañas
@@ -112,7 +114,6 @@ export const PERM = {
   CAJA_GASTOS_VER:           'caja.gastos.ver',
   CAJA_GASTOS_REGISTRAR:     'caja.gastos.registrar',
   CAJA_GASTOS_EDITAR:        'caja.gastos.editar',
-  CAJA_GASTOS_APROBAR:       'caja.gastos.aprobar',
   CAJA_CAJAS_GESTIONAR:      'caja.cajas.gestionar',
   CAJA_CIERRE_VER:           'caja.cierre.ver',
   CAJA_CIERRE_REALIZAR:      'caja.cierre.realizar',
@@ -221,8 +222,10 @@ export const canAccess = {
     || hasPermission(u, PERM.CAJA_CIERRE_VER),
 
   // Pestaña Resumen (P&L consolidado): solo admin/superadmin.
+  // Mismo permiso que exige el backend (/reportes/pyl/): un rol de gerencia
+  // personalizado lo ve; el Profesional de sistema ya no lo trae por defecto.
   resultadosPyL: (u: AuthUser | null | undefined) =>
-    isAdminOrSuperAdmin(u),
+    isAdminOrSuperAdmin(u) || hasPermission(u, PERM.REPORTES_VER_FINANCIEROS),
 
   egresos: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.CAJA_GASTOS_VER),
@@ -245,8 +248,10 @@ export const canAccess = {
   compras: (u: AuthUser | null | undefined) =>
     hasPermission(u, PERM.PROVEEDORES_ORDENES_VER),
 
+  // La pantalla lista colaboradores: entra quien ve colaboradores o usuarios
+  // (el backend acepta los dos para el listado).
   equipo: (u: AuthUser | null | undefined) =>
-    hasPermission(u, PERM.USUARIOS_VER),
+    hasAnyPermission(u, [PERM.COLABORADORES_VER, PERM.USUARIOS_VER]),
 
   configuracion: (u: AuthUser | null | undefined) =>
     hasAnyPermission(u, [

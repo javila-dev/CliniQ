@@ -16,13 +16,11 @@ from apps.core.logging import registrar_accion
 from apps.notificaciones import numero_propio
 from apps.notificaciones.models import NotificacionFallida, NumeroWhatsapp
 from apps.notificaciones.serializers import (
-    EmailConfigSerializer,
     NotificacionFallidaCallbackSerializer,
     NotificacionFallidaSerializer,
     WhatsappConectarSerializer,
     WhatsappPropioConfigSerializer,
 )
-from apps.notificaciones.services import email_provider_config
 from apps.users.permissions import IsSuperAdmin, RequirePermission, get_clinica_activa
 
 
@@ -135,14 +133,6 @@ class NotificacionFallidaResolverView(APIView):
         notificacion.resuelta_por = request.user
         notificacion.save(update_fields=["resuelta", "resuelta_en", "resuelta_por"])
         return Response(NotificacionFallidaSerializer(notificacion).data, status=status.HTTP_200_OK)
-
-
-class EmailConfigView(APIView):
-    permission_classes = (RequirePermission("notificaciones.email.ver_config"),)
-
-    def get(self, request, *args, **kwargs):
-        serializer = EmailConfigSerializer(email_provider_config())
-        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class _NumeroPropioBaseView(APIView):

@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
 import { Save, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { historiaClinicaApi } from '@/lib/api/historiaClinica'
+import { useBorradorNota } from './useBorradorNota'
+import { EstadoGuardado } from './EstadoGuardado'
 import { formatDate } from '@/lib/utils'
 import type { HistoriaClinica, NotaClinica } from '@/types/historia'
 
@@ -21,20 +20,10 @@ export function TabMotivoConsulta({ historia, notas, notaId }: TabMotivoConsulta
 
   // ── Modo atención: textarea que guarda en la nota en progreso ────────────
   const notaActual = notas.find((n) => n.id === notaId)
-  const [texto, setTexto] = useState(notaActual?.motivo_consulta ?? '')
-  const [guardado, setGuardado] = useState(false)
-
-  useEffect(() => {
-    if (notaActual?.motivo_consulta) setTexto(notaActual.motivo_consulta)
-  }, [notaActual?.motivo_consulta])
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: (value: string) => historiaClinicaApi.notas.patch(notaId!, { motivo_consulta: value }),
-    onSuccess: () => {
-      setGuardado(true)
-      setTimeout(() => setGuardado(false), 2000)
-    },
-  })
+  // Autoguardado: lo escrito no se pierde al cambiar de pestaña.
+  const { texto, setTexto, estado, hayCambios, guardarAhora } = useBorradorNota(
+    notaId, 'motivo_consulta', notaActual?.motivo_consulta ?? '', historia.id,
+  )
 
   // ── Modo historia: timeline de notas completadas (solo lectura) ──────────
   // Las mini-atenciones generadas desde una cotización no tienen un paso de
@@ -54,16 +43,13 @@ export function TabMotivoConsulta({ historia, notas, notaId }: TabMotivoConsulta
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
         />
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            onClick={() => mutate(texto)}
-            disabled={isPending || texto === (notaActual?.motivo_consulta ?? '')}
-          >
-            {isPending
+        <div className="flex items-center justify-end gap-3">
+          <EstadoGuardado estado={estado} />
+          <Button size="sm" variant="outline" onClick={guardarAhora} disabled={!hayCambios || estado === 'guardando'}>
+            {estado === 'guardando'
               ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
               : <Save className="h-3.5 w-3.5 mr-1.5" />}
-            {guardado ? '¡Guardado!' : 'Guardar'}
+            Guardar
           </Button>
         </div>
       </div>

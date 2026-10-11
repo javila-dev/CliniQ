@@ -10,6 +10,7 @@ from apps.migracion.serializers import LoteMigracionSerializer, PacienteEnCursoS
 from apps.migracion.services import cargar_paciente_en_curso, revertir_lote
 from apps.pacientes.models import Paciente
 from apps.clinicas.models import Sede
+from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
 
@@ -67,6 +68,10 @@ class MigracionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
 
     def revertir(self, request, pk=None):
         _guard(request)
+        # Revertir borra cobros, pagos, citas y cartera del lote: exige el permiso
+        # de puesta en marcha (cargar sigue abierto a la clínica mientras dure).
+        if not user_has_permission(request.user, "migracion.gestionar", request=request):
+            raise PermissionDenied("Tu rol no tiene permiso para revertir cargas de la puesta en marcha.")
         lote = self.get_object()
         revertir_lote(lote, actor=request.user)
         return Response(LoteMigracionSerializer(lote).data)

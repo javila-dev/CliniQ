@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { mensajeDeError } from '@/lib/errores'
 import { inventarioApi } from '@/lib/api/inventario'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -97,7 +98,7 @@ export function AjusteStockSheet({
           </div>
 
           {mutation.isError && (
-            <p className="text-sm text-red-500">Error al ajustar stock. Intenta de nuevo.</p>
+            <p className="text-sm text-red-500">{mensajeDeError(mutation.error, 'No se pudo ajustar el stock. Intenta de nuevo.')}</p>
           )}
 
           <div className="flex gap-2 pt-2">

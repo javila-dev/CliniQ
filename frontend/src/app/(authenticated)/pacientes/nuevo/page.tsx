@@ -36,6 +36,7 @@ export default function NuevoPacientePage() {
   const fotoControlObligatoria = wizardConfig?.foto_control_obligatoria ?? false
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: pacientesApi.create,
     onSuccess: (paciente) => {
       queryClient.invalidateQueries({ queryKey: ['pacientes'] })
@@ -50,15 +51,7 @@ export default function NuevoPacientePage() {
 
   const handleSubmit = async (data: CreatePacienteRequest) => {
     setServerError(null)
-    try {
-      await mutateAsync(data)
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.error ||
-        Object.values(err?.response?.data ?? {})[0] ||
-        'Error al crear el paciente. Verifica los datos.'
-      setServerError(String(msg))
-    }
+    await mutateAsync(data) // PacienteForm muestra el error en el campo y junto al botón
   }
 
   function handleEnrollmentDone() {

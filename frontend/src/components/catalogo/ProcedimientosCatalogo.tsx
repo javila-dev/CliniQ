@@ -11,10 +11,12 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { useAuthStore } from '@/store/authStore'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useToast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import { hasPermission, PERM } from '@/lib/permissions'
 import type { Servicio } from '@/types/clinicas'
 
@@ -173,7 +175,7 @@ export function ProcedimientosCatalogo() {
     page,
   }
 
-  const { data, isLoading, isFetching, isError } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['procedimientos', 'all', params],
     queryFn: () => clinicasApi.procedimientos.list(params),
     placeholderData: keepPreviousData,
@@ -278,7 +280,11 @@ export function ProcedimientosCatalogo() {
         </div>
       )}
 
-      {!isLoading && servicios.length === 0 && !hayFiltros && (
+      {!isLoading && isError && (
+        <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los procedimientos.')} onRetry={() => refetch()} />
+      )}
+
+      {!isLoading && !isError && servicios.length === 0 && !hayFiltros && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <FileText className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">No hay procedimientos configurados</p>
@@ -293,7 +299,7 @@ export function ProcedimientosCatalogo() {
         </div>
       )}
 
-      {!isLoading && servicios.length === 0 && hayFiltros && (
+      {!isLoading && !isError && servicios.length === 0 && hayFiltros && (
         <div className="flex flex-col items-center justify-center py-16 text-center">
           <SearchX className="h-10 w-10 text-muted-foreground/40 mb-3" />
           <p className="text-sm font-medium text-muted-foreground">Ningún procedimiento coincide con los filtros</p>
@@ -301,7 +307,7 @@ export function ProcedimientosCatalogo() {
         </div>
       )}
 
-      {!isLoading && servicios.length > 0 && (
+      {!isLoading && !isError && servicios.length > 0 && (
         <ProcedimientosTable
           servicios={servicios}
           fetching={isFetching}
@@ -311,7 +317,7 @@ export function ProcedimientosCatalogo() {
         />
       )}
 
-      {!isLoading && total > 0 && (
+      {!isLoading && !isError && total > 0 && (
         <div className="flex items-center justify-between text-sm">
           <p className="text-muted-foreground">
             {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}

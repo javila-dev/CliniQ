@@ -24,9 +24,12 @@ export default function RegistroPublicoPage() {
     retry: false,
   })
 
+  const [enviando, setEnviando] = useState(false)
+
   async function handleSubmit(data: CreatePacienteRequest) {
     setServerError(null)
     setYaExiste(null)
+    setEnviando(true)
     try {
       const res = await registroPublicoApi.registrar({ ...data, token })
       setRegistrado(res)
@@ -41,10 +44,11 @@ export default function RegistroPublicoPage() {
         }
         setYaExiste(mensajes[campo] ?? 'Ya estás registrado en esta clínica.')
       } else {
-        setServerError(
-          err?.response?.data?.error ?? 'Ocurrió un error al registrarte. Inténtalo de nuevo.'
-        )
+        // El formulario muestra el error en su campo (p. ej. fecha de nacimiento).
+        throw err
       }
+    } finally {
+      setEnviando(false)
     }
   }
 
@@ -180,6 +184,7 @@ export default function RegistroPublicoPage() {
 
         <PacienteForm
           onSubmit={handleSubmit}
+          isLoading={enviando}
           submitLabel="Registrarme"
           tabsRequeridos={{
             personal: clinica.tab_personal_requerido ?? false,

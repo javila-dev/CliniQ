@@ -26,7 +26,7 @@ from apps.seguimiento.serializers import (
     RegistrarGestionSerializer,
 )
 from apps.users.authorization import sede_ids_para_filtro, ve_solo_su_actividad_comercial
-from apps.users.permissions import RequirePermission, get_clinica_activa
+from apps.users.permissions import RequireAnyPermission, RequirePermission, get_clinica_activa
 
 PERM_VER = "seguimiento.oportunidades.ver"
 PERM_GESTIONAR = "seguimiento.oportunidades.gestionar"
@@ -288,7 +288,7 @@ class ConfigSeguimientoView(APIView):
 
     def get_permissions(self):
         if self.request.method == "GET":
-            return [RequirePermission(PERM_VER)()]
+            return [RequireAnyPermission(PERM_VER, "clinicas.editar")()]
         return [RequirePermission("clinicas.editar")()]
 
     def _config(self, request):

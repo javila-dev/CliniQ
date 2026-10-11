@@ -67,8 +67,8 @@ export const consentimientosApi = {
       return res.data
     }, linkSinEnviar),
 
-  revocar: async (id: string): Promise<Consentimiento> => {
-    const res = await apiClient.post<Consentimiento>(`/consentimientos/${id}/revocar/`)
+  revocar: async (id: string, motivo_revocacion: string): Promise<Consentimiento> => {
+    const res = await apiClient.post<Consentimiento>(`/consentimientos/${id}/revocar/`, { motivo_revocacion })
     return res.data
   },
 

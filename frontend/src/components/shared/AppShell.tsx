@@ -42,6 +42,7 @@ import { TrialBanner } from './TrialBanner'
 import { ThemeApplier } from './ThemeApplier'
 import { ConfirmarNumeroCliniqDialog } from './ConfirmarNumeroCliniqDialog'
 import { hasPermission, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
+import { puedeEntrarAConfiguracion } from '@/components/configuracion/navegacion'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
 
@@ -78,7 +79,7 @@ const NAV = {
 function allow(user: AuthUser | null, item: typeof NAV[keyof typeof NAV]): boolean {
   if (item.href === '/dashboard')     return canAccess.dashboard(user)
   if (item.href === '/atenciones')    return canAccess.atenciones(user)
-  if (item.href === '/configuracion') return canAccess.configuracion(user)
+  if (item.href === '/configuracion') return puedeEntrarAConfiguracion(user)
   if (item.href === '/resultados')    return canAccess.finanzas(user)
   return hasPermission(user, item.perm)
 }

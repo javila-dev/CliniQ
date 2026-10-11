@@ -56,6 +56,7 @@ export function GenerarConsentimientoModal({ open, onOpenChange }: GenerarConsen
   })
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: consentimientosApi.generar,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['consentimientos'] })

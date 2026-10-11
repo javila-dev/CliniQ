@@ -26,7 +26,7 @@
 - **Causa:** `PERMISOS_ATIENDE_PACIENTES` no incluye `historia.ver`, y el error se silencia con `.catch(() => {})`.
 - **Arreglo:** agregar `historia.ver` y `pacientes.antecedentes.ver` a esos permisos, y mostrar un error en lugar de pestañas vacías.
 
-**M4-03 · Alto · parámetros** · confirmado
+**✅ M4-03 · Alto · parámetros** · confirmado
 - **Dónde:** `lib/api/consentimientos.ts:70-72`; `consentimientos/page.tsx:43`.
 - **Qué ve el usuario:** pulsa "Revocar", confirma, y **no pasa nada**.
 - **Causa:** el frontend no envía `motivo_revocacion`, el backend responde 400 y no hay `onError`.
@@ -44,7 +44,7 @@
 - **Causa:** no se consulta a Documenso antes de marcarlo.
 - **Arreglo:** marcarlo solo si `verificar_firma_consentimiento_en_documenso` lo confirma.
 
-**M4-06 · Alto · pérdida de datos** · confirmado
+**✅ M4-06 · Alto · pérdida de datos** · confirmado
 - **Dónde:** `components/historia/TabMotivoConsulta.tsx:32`; `TabPlanManejo.tsx:31`.
 - **Qué ve el usuario:**
   - escribe el motivo, cambia a la pestaña Fotos y al volver **el texto ya no está**;
@@ -53,7 +53,7 @@
 - **Causa:** las pestañas inactivas se desmontan, no hay autoguardado, falta `onError` y no se invalidan las notas.
 - **Arreglo:** autoguardado con debounce, o `forceMount`, o un aviso de cambios sin guardar; además `onError` e invalidar las notas.
 
-**M4-07 · Alto · previsible** · probable
+**✅ M4-07 · Alto · previsible** · probable
 - **Dónde:** `TabFotos.tsx:56`; `atenciones/[citaId]/page.tsx:137-139`.
 - **Qué ve el usuario:** en la primera entrada a una atención, las fotos **se guardan en la nota de la visita anterior**. Si solo se suben fotos, el sistema dice "Nota sin contenido".
 - **Causa:** se usa `notas[0]` en vez de `notaId`, y la caché no se refresca después de crear el borrador.
@@ -78,17 +78,17 @@
 - **Dónde:** `historia_clinica/serializers.py:30-49`; `views.py:546`.
 - **Problema:** se pueden subir fotos a la nota de otra clínica, y no hay límite de tamaño ni de tipo de archivo.
 
-**M4-12 · Medio · roles personalizados** · confirmado (igual que M0-22)
+**✅ M4-12 · Medio · roles personalizados** · confirmado (igual que M0-22)
 - **Dónde:** `historia_clinica/serializers.py:147`; `views.py:546`; `protocolos/views.py:115`.
 - **Problema:** la regla "solo el profesional de la cita" se aplica únicamente con `rol == "profesional"`.
 - **Arreglo:** basar la regla en `es_profesional` o en un permiso.
 
-**M4-13 · Medio · roles personalizados** · confirmado
+**✅ M4-13 · Medio · roles personalizados** · confirmado
 - **Dónde:** `protocolos/views.py:110-116`; `protocolos/services.py:496`.
 - **Qué ve el usuario:** si un admin o un rol personalizado completa una sesión de tratamiento, **la sesión queda sin profesional** y se borra el que tenía. Esto afecta reportes y comisiones.
 - **Arreglo:** usar `cita.profesional` como respaldo y no sobrescribir con `None`.
 
-**M4-14 · Medio · llamada sin resolver** · confirmado
+**✅ M4-14 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `atenciones/[citaId]/page.tsx:173,235`.
 - **Problema:**
   - si falla completar la nota, igual se cierra la cita y la nota queda en borrador;
@@ -114,7 +114,7 @@
 - **Causa:** se ignora `DOCUMENT_DECLINED` para el consentimiento informado.
 - **Arreglo:** guardar y mostrar el estado "rechazado".
 
-**M4-19 · Medio · carga** · confirmado
+**✅ M4-19 · Medio · carga** · confirmado
 - **Dónde:** `FirmaProfesionalModal.tsx:156`.
 - **Qué ve el usuario:** si falla la carga, ve un spinner infinito. `guardarTp` no tiene `onError`.
 

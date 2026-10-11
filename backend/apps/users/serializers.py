@@ -273,6 +273,7 @@ class UserSerializer(serializers.ModelSerializer):
     role_id = serializers.SerializerMethodField()
     role_nombre = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    ve_solo_su_actividad_comercial = serializers.SerializerMethodField()
     clinica_id = serializers.UUIDField(read_only=True)
     sede_id = serializers.SerializerMethodField()
     sedes = serializers.SerializerMethodField()
@@ -297,6 +298,7 @@ class UserSerializer(serializers.ModelSerializer):
             "permissions",
             "es_profesional",
             "es_admin",
+            "ve_solo_su_actividad_comercial",
             "is_staff",
             "centro_ayuda_habilitado",
             "modo_puesta_en_marcha",
@@ -353,6 +355,13 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         return sorted(get_user_permission_keys(obj, request=self.context.get("request")))
+
+    def get_ve_solo_su_actividad_comercial(self, obj):
+        # La pantalla usa la misma regla que el backend (comercial.ver_sede), en vez
+        # de adivinarla con el rol.
+        from apps.users.authorization import ve_solo_su_actividad_comercial
+
+        return ve_solo_su_actividad_comercial(obj, request=self.context.get("request"))
 
     def get_sede_id(self, obj):
         return user_sede_id(obj)

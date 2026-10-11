@@ -47,7 +47,7 @@
 - **Causa:** el frontend nunca envía `sede`.
 - **Arreglo:** enviar la sede de la cita (o pedirla) y mostrar el error que devuelve el backend.
 
-**M7-06 · Medio · carga/errores** · confirmado
+**✅ M7-06 · Medio · carga/errores** · confirmado
 - **Dónde:** `inventario/page.tsx:304-334,416,454`
 - **Qué ve el usuario:**
   - Si fallan las alertas, aparece **"Todo en orden"**.
@@ -58,7 +58,7 @@
 - **Qué ve el usuario:** no puede editar ni desactivar insumos o proveedores, ni cancelar órdenes, ni quitar ítems de un borrador. No existe pantalla de categorías.
 - **Causa:** las funciones del API existen, pero no hay pantalla que las use.
 
-**M7-08 · Medio · errores/parámetros** · confirmado
+**✅ M7-08 · Medio · errores/parámetros** · confirmado
 - **Dónde:** `AjusteStockSheet.tsx:99-101`; `CompraForm.tsx:64,155,261,280`; `inventario/page.tsx:164-166`; `proveedores/serializers.py:68`
 - **Qué ve el usuario:**
   - Mensajes genéricos que ocultan la explicación del backend.

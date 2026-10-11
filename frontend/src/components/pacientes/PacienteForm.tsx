@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import { Loader2, Lock } from 'lucide-react'
 import { useForm, Controller, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -50,7 +51,7 @@ const baseSchema = z.object({
   tipo_documento:     z.enum(['CC', 'CE', 'PA', 'TI', 'NIT']),
   numero_documento:   z.string().min(4, 'Requerido'),
   sexo:               z.enum(['M', 'F', 'O']),
-  fecha_nacimiento:   z.string().optional(),
+  fecha_nacimiento:   z.string().min(1, 'La fecha de nacimiento es obligatoria'),
   telefono:           z.string().min(7, 'Teléfono inválido'),
   email:              z.string().email('Correo inválido').optional().or(z.literal('')),
   canal_confirmacion: z.enum(['whatsapp', 'sms', 'llamada']),
@@ -80,6 +81,7 @@ const CAMPOS_REQUERIDOS = {
 // Sin permiso de datos sensibles llegan enmascarados (••••5678, •••na@gmail.com):
 // no se validan porque no se pueden editar ni se reenvían al guardar.
 const camposSensiblesSinValidar = baseSchema.extend({
+  fecha_nacimiento: z.string().optional(),
   numero_documento: z.string().optional(),
   telefono: z.string().optional(),
   email: z.string().optional(),
@@ -174,7 +176,8 @@ export function PacienteForm({
       : null
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
 
-  const { register, handleSubmit, control, watch, formState: { errors } } = useForm<FormValues>({
+  const [errorServidor, setErrorServidor] = useState<string | null>(null)
+  const { register, handleSubmit, control, watch, setError, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(crearSchema(tabsRequeridos, lockSensitive)),
     defaultValues: defaultValues ? {
       nombres: defaultValues.nombres, apellidos: defaultValues.apellidos,
@@ -239,7 +242,23 @@ export function PacienteForm({
       }
     }
 
-    await onSubmit(payload)
+    setErrorServidor(null)
+    try {
+      await onSubmit(payload)
+    } catch (err) {
+      // Antes el error se perdía (crear paciente desde la agenda o la cotización)
+      // o salía sin decir qué campo: ahora va a su campo y se avisa abajo.
+      const campos = Object.keys(CAMPOS_TAB)
+      const enCampos = aplicarErroresDeCampo(err, setError, campos)
+      if (enCampos) {
+        const data = (err as { response?: { data?: Record<string, unknown> } })?.response?.data ?? {}
+        const primero = Object.keys(data).map((k) => CAMPOS_TAB[k as keyof FormValues]).find(Boolean)
+        if (primero) setTab(primero)
+      }
+      setErrorServidor(enCampos
+        ? 'Revisa los campos marcados.'
+        : mensajeDeError(err, 'No se pudo guardar el paciente. Intenta de nuevo.'))
+    }
   }
 
   // ── Bloque de campos básicos (reutilizado en compact y en tab 1) ──────────────
@@ -299,7 +318,7 @@ export function PacienteForm({
             {...register('numero_documento')}
           />
         </Field>
-        <Field label="Fecha de nacimiento">
+        <Field label="Fecha de nacimiento *" error={errors.fecha_nacimiento?.message}>
           <Input className="h-9" type="date" disabled={lockSensitive} {...register('fecha_nacimiento')} />
         </Field>
       </div>
@@ -383,7 +402,8 @@ export function PacienteForm({
       <form onSubmit={handleSubmit(handleFormSubmit, handleInvalid)} className="space-y-5">
         {BasicFields}
         {AuthBlock}
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          {errorServidor && <p className="text-sm text-destructive mr-auto" role="alert">{errorServidor}</p>}
           <Button type="submit" disabled={isLoading || !autorizaDatos}>
             {isLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             {isLoading ? 'Guardando...' : submitLabel}
@@ -539,6 +559,7 @@ export function PacienteForm({
       {AuthBlock}
 
       <div className="flex items-center justify-end gap-3">
+        {errorServidor && <p className="text-sm text-destructive mr-auto" role="alert">{errorServidor}</p>}
         {[...tabsConError].some((t) => t !== tab) && (
           <p className="text-xs text-destructive">
             Revisa los campos marcados en {[...tabsConError].filter((t) => t !== tab).map((t) => `«${TABS_LABEL[t]}»`).join(' y ')}.

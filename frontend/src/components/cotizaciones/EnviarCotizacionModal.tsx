@@ -5,6 +5,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import {
   MessageCircle, Mail, CheckCircle2, AlertCircle, Loader2,
 } from 'lucide-react'
+import { mensajeDeError } from '@/lib/errores'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -142,12 +143,12 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
       qc.invalidateQueries({ queryKey: ['cotizaciones'] })
       qc.invalidateQueries({ queryKey: ['seguimiento'] })
 
-    } catch {
-      const msgs: Record<CanalModal, string> = {
+    } catch (err) {
+      const porDefecto: Record<CanalModal, string> = {
         whatsapp: 'No se pudo enviar por WhatsApp. Verifica que el paciente tenga un teléfono registrado.',
         email: 'No se pudo enviar el correo. Revisa la configuración de email.',
       }
-      setFeedback({ type: 'error', message: msgs[canal] })
+      setFeedback({ type: 'error', message: mensajeDeError(err, porDefecto[canal]) })
     } finally {
       setLoading(false)
     }

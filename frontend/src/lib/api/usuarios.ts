@@ -31,8 +31,8 @@ export const usuariosApi = {
     return res.data
   },
 
-  cambiarPassword: async (id: string, nueva_password: string): Promise<void> => {
-    await apiClient.post(`/usuarios/${id}/cambiar_password/`, { nueva_password })
+  cambiarPassword: async (id: string, nueva_password: string, password_actual?: string): Promise<void> => {
+    await apiClient.post(`/usuarios/${id}/cambiar_password/`, { nueva_password, password_actual })
   },
 
   activar: async (id: string): Promise<UsuarioAdmin> => {

@@ -10,6 +10,7 @@ import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { useResultadosSede } from '../context'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -21,6 +22,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { useDebounce } from '@/hooks/useDebounce'
 import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { GastoCaja } from '@/types/caja'
 
 const PAGE_SIZE = 25
@@ -62,7 +64,7 @@ function EgresosContent() {
     page,
     page_size: PAGE_SIZE,
   }
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['caja-gastos', params],
     queryFn: () => cajaApi.gastos.list(params),
     placeholderData: keepPreviousData,
@@ -120,6 +122,10 @@ function EgresosContent() {
       {/* Tabla */}
       {isLoading ? (
         <LoadingState rows={5} />
+      ) : isError ? (
+        <Card><CardContent>
+          <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los gastos.')} onRetry={() => refetch()} />
+        </CardContent></Card>
       ) : !gastos.length ? (
         <Card><CardContent className="py-16 text-center">
           <TrendingDown className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -171,7 +177,7 @@ function EgresosContent() {
       )}
 
       {/* Paginación */}
-      {!isLoading && total > 0 && (
+      {!isLoading && !isError && total > 0 && (
         <div className="flex items-center justify-between text-sm">
           <p className="text-muted-foreground">{(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, total)} de {total}</p>
           <div className={cn('flex items-center gap-2', totalPages <= 1 && 'hidden')}>
@@ -213,13 +219,15 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
   const necesitaFoto = Number(valor || 0) > SOPORTE_MIN
 
   // ¿La caja de la sede elegida está abierta? Un gasto solo entra si hay sesión.
-  const { data: estadoCaja, isLoading: cargandoCaja } = useQuery({
+  const {
+    data: estadoCaja, isLoading: cargandoCaja, isError: errorCaja, error: errCaja, refetch: refetchCaja,
+  } = useQuery({
     queryKey: ['caja-actual', sedeSel],
     queryFn: () => cajaApi.sesiones.actual(sedeSel),
     enabled: open && !!sedeSel,
   })
   const cajaAbierta = !!estadoCaja?.sesion
-  const sinCaja = open && !!sedeSel && !cargandoCaja && !estadoCaja?.caja
+  const sinCaja = open && !!sedeSel && !cargandoCaja && !errorCaja && !estadoCaja?.caja
 
   const mut = useMutation({
     mutationFn: () => cajaApi.gastos.create({
@@ -245,7 +253,7 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
     mut.mutate()
   }
 
-  const bloqueado = sinCaja || (!cargandoCaja && !cajaAbierta && !!sedeSel)
+  const bloqueado = errorCaja || sinCaja || (!cargandoCaja && !cajaAbierta && !!sedeSel)
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -260,7 +268,14 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
             </Select>
           </div>
 
-          {bloqueado && (
+          {errorCaja ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive space-y-2">
+              <p>{mensajeDeError(errCaja, 'No se pudo consultar la caja de esta sede.')}</p>
+              <Button type="button" variant="outline" size="sm" className="h-7 text-xs" onClick={() => refetchCaja()}>
+                Reintentar
+              </Button>
+            </div>
+          ) : bloqueado && (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-800 flex gap-2">
               <Lock className="h-4 w-4 mt-0.5 shrink-0" />
               <div>

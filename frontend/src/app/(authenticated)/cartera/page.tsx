@@ -12,6 +12,7 @@ import * as XLSX from 'xlsx'
 import { carteraApi } from '@/lib/api/cartera'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -26,6 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn, formatDate } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { CarteraPaciente } from '@/types/cartera'
 
 // Columnas ordenables → clave `ordering` del listado por paciente.
@@ -70,7 +72,7 @@ function formatCOP(value: string | number): string {
 }
 
 function CuotasVencidasModal({ open, onClose, desde }: { open: boolean; onClose: () => void; desde?: string }) {
-  const { data: cuotas, isLoading } = useQuery({
+  const { data: cuotas, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['cuotas-vencidas', desde ?? 'todos'],
     queryFn: () => carteraApi.cuotasVencidas(desde),
     enabled: open,
@@ -120,6 +122,8 @@ function CuotasVencidasModal({ open, onClose, desde }: { open: boolean; onClose:
         <div className="overflow-y-auto flex-1">
           {isLoading ? (
             <div className="px-6 py-8"><LoadingState rows={4} /></div>
+          ) : isError ? (
+            <ErrorState message={mensajeDeError(error, 'No se pudieron cargar las cuotas vencidas.')} onRetry={() => refetch()} />
           ) : !cuotas?.length ? (
             <div className="px-6 py-16 text-center">
               <AlertTriangle className="h-8 w-8 text-muted-foreground/30 mx-auto mb-3" />
@@ -300,13 +304,13 @@ export default function CarteraPage() {
   const desde = desdeResumen(periodo)
   const ordering = sort ? (sort.dir === 'desc' ? '-' : '') + SORT_COLS[sort.col] : undefined
 
-  const { data: resumen, isLoading: cargandoResumen } = useQuery({
+  const { data: resumen, isLoading: cargandoResumen, isError: errorResumen, error: errResumen, refetch: refetchResumen } = useQuery({
     queryKey: ['cartera-resumen', periodo],
     queryFn: () => carteraApi.resumen({ desde }),
     placeholderData: keepPreviousData,
   })
 
-  const { data, isLoading, isFetching } = useQuery({
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
     queryKey: ['cartera', 'por-paciente', { search: debouncedSearch, page, ordering }],
     queryFn: () => carteraApi.porPaciente({ search: debouncedSearch || undefined, page, ordering, page_size: PAGE_SIZE }),
     placeholderData: keepPreviousData,
@@ -408,6 +412,13 @@ export default function CarteraPage() {
             onClick={() => setModalVencidas(true)}
           />
         </div>
+      ) : errorResumen ? (
+        <div className="flex items-center gap-3 rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3">
+          <p className="text-sm text-destructive">{mensajeDeError(errResumen, 'No se pudo cargar el resumen de cartera.')}</p>
+          <Button variant="outline" size="sm" className="ml-auto h-7 text-xs" onClick={() => refetchResumen()}>
+            Reintentar
+          </Button>
+        </div>
       ) : null}
 
       {/* Búsqueda */}
@@ -424,6 +435,12 @@ export default function CarteraPage() {
       {/* Tabla */}
       {isLoading ? (
         <LoadingState rows={5} />
+      ) : isError ? (
+        <Card>
+          <CardContent>
+            <ErrorState message={mensajeDeError(error, 'No se pudo cargar la cartera.')} onRetry={() => refetch()} />
+          </CardContent>
+        </Card>
       ) : !pacientes.length ? (
         <Card>
           <CardContent className="py-16 text-center">
@@ -547,7 +564,7 @@ export default function CarteraPage() {
       )}
 
       {/* Paginación */}
-      {!isLoading && total > 0 && (
+      {!isLoading && !isError && total > 0 && (
         <div className="flex items-center justify-between text-sm">
           <p className="text-muted-foreground">
             {total === 0

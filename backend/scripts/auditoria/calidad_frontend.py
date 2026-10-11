@@ -12,6 +12,10 @@ Escribe salida/calidad_frontend.txt con:
 - archivos con useMutation sin isPending/isLoading (botón sin estado de guardando:
   riesgo de doble envío).
 Es una heurística: cada archivo listado se revisa a mano.
+
+Desde el paso 5, QueryProvider tiene un MutationCache que avisa con un toast
+cuando una mutación sin onError falla: la primera lista ya no implica fallas
+silenciosas, solo mensajes genéricos (revisar si conviene un mensaje propio).
 """
 
 import re

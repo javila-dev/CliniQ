@@ -1,6 +1,6 @@
 # T — Resumen general: problemas transversales, avance y lo que falta
 
-**Estado:** En corrección. Pasos 1 a 3 de 7 hechos.
+**Estado:** En corrección. Pasos 1 a 5 de 7 hechos.
 
 Este es el **resumen de toda la verificación**. Tiene tres partes:
 1. El tablero de abajo: qué se hizo y qué falta.
@@ -15,24 +15,24 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 |---|---|---|---|
 | 1 | Bloqueos del día a día: paginación, sesión, editar pacientes, recordatorios, autorregistro, buscador de Ingresos, atención con roles personalizados, confirmar citas | ✅ Hecho | `c8e2a65` |
 | 2 | Dinero y stock: pagos y abonos dobles, stock, edición de cobros, reportes de ingresos, arqueo, "Por cobrar", reversar pagos | ✅ Hecho | `28db7ce` |
-| 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | ✅ Hecho | ver git log (fix(seguridad)) |
-| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | Pendiente (decisiones ya tomadas) | — |
-| 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | Pendiente | — |
+| 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | ✅ Hecho | `521456f` |
+| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | ✅ Hecho | ver git log (pasos 4 y 5) |
+| 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | ver git log (pasos 4 y 5) |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | Pendiente | — |
 | 7 | Todo lo demás, por módulo y severidad | Pendiente | — |
 
-**Hallazgos:** 34 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 94 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
-| M0 Acceso y roles | 4 | 26 | 0 |
-| M1 Configuración y catálogo | 3 | 28 | 0 |
-| M2 Pacientes | 3 | 23 | 0 |
-| M3 Agenda | 3 | 27 | 0 |
-| M4 Atención clínica | 6 | 22 | 0 |
-| M5 Comercial | 0 | 30 | 0 |
-| M6 Dinero | 10 | 17 | 0 |
-| M7 Inventario y plataforma | 5 | 20 | 0 |
+| M0 Acceso y roles | 22 | 8 | 0 |
+| M1 Configuración y catálogo | 11 | 20 | 0 |
+| M2 Pacientes | 9 | 17 | 0 |
+| M3 Agenda | 9 | 21 | 0 |
+| M4 Atención clínica | 13 | 15 | 0 |
+| M5 Comercial | 8 | 22 | 0 |
+| M6 Dinero | 15 | 12 | 0 |
+| M7 Inventario y plataforma | 7 | 18 | 0 |
 
 **Decisiones del usuario (10/10/2026)**
 
@@ -322,6 +322,45 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 
 - **Pruebas:** `apps/core/tests/test_verificacion_paso3.py`, con 15 casos.
 - **Pendiente de este grupo:** M4-11 (límite de tamaño y tipo de la foto), M4-25 (datos de más en el GET público del consentimiento) y el reenvío de la invitación del registro (M7-12) pasan al paso 7.
+
+**Paso 4 — roles personalizados y permisos (10/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| T-03 · configuración | Los PATCH de wizard, facial, cartera, registro público, signos vitales y plantillas Documenso exigen `clinicas.editar`, no el rol admin (M0-04, M1-07). El cupo del plan se consulta con ver clínica o sedes (M1-10, parte backend). |
+| T-03 · protocolos | Crear o editar un tratamiento exige agendar o atender (`RequireAnyPermission`); antes entraba cualquier rol personalizado (M0-05). |
+| T-03 · "solo lo propio" | Nueva función `atiende_solo_lo_propio(user)`, basada en `es_profesional` y no en el rol fijo, para notas, fotos y antecedentes (M0-22, M4-12, M0-03, M2-07). Las sesiones completadas por un admin conservan el profesional de la cita (M4-13). |
+| T-03 · otros | Plantillas de órdenes con `clinicas.editar`, no con el slug "coordinador" (M0-23, M1-08). Gastos: quien tiene `caja.gastos.editar` edita cualquiera (M0-24). Horarios: quien los ve, ve los de todos (M0-08). Reenviar invitación con `usuarios.editar` (M0-07). |
+| M0-18 | Cambiar la contraseña propia pide la actual y exige una clave fuerte. La de otro exige `usuarios.editar` y no se aplica a administradores. Perfil tiene el campo "Contraseña actual" y confirma el cambio. |
+| Decisión 2 | Revertir una carga de puesta en marcha exige `migracion.gestionar` (M1-21, M2-14). |
+| Decisión 4 | El rol de sistema Profesional ya no trae `reportes.ver_financieros` (default + migración). La pestaña Resumen/P&L se rige por ese permiso (M6-12, M0-21). |
+| T-06 · catálogo | Cada capacidad de "gestionar" incluye su "ver" (M1-19, M0-10). Se eliminaron `caja.gastos.aprobar` (M6-19) y los permisos de correo, junto con `EmailConfigView`. La migración `users 0025` agrega el "ver" a los roles que ya tenían el "gestionar", quita los financieros al Profesional de sistema y borra los permisos eliminados. |
+| M3-17 | Editar o borrar un bloqueo exige `agenda.bloqueos.gestionar`, o ser quien lo creó mientras esté pendiente. Un bloqueo aprobado editado sin permiso de aprobar vuelve a revisión. |
+| Selectores (regla del usuario) | Lista de roles con permiso de usuarios o colaboradores (M0-25); caja abierta con permiso de registrar o editar gastos (M6-07); ajustes de Seguimiento con `clinicas.editar` (M1-25); lista de colaboradores con ver usuarios (M0-07). |
+| Menús | Configuración se abre si hay algún ajuste gestionable (`puedeEntrarAConfiguracion`); Promociones se abre con `campanas.gestionar` (M0-09, M1-06). Equipo muestra Nuevo, Editar y Activar solo con `colaboradores.gestionar`, y Reenviar con `usuarios.editar` (M0-07). Grupos de atención usa `colaboradores.gestionar` (M0-30). |
+| M5-27 | `/auth/me/` devuelve `ve_solo_su_actividad_comercial`, y Seguimiento y Cotizaciones lo usan en lugar de deducirlo del rol. |
+
+- **Pruebas:** `apps/core/tests/test_verificacion_paso4.py`, con 13 casos.
+- **Revisan solo en el frontend, a propósito:** `caja.categorias.ver` y `configuracion.formas_pago.ver`. Controlan la pantalla, mientras que los selectores del backend quedan abiertos (regla del usuario).
+- **Quedan de este grupo para el paso 5 o el 7:** ocultar las acciones de Sedes y Consentimientos sin permiso (M1-10, M1-18), "Editar" en la agenda según el permiso (M3-23, M3-24, M3-25) y la pantalla de aterrizaje según permisos (M0-20).
+
+**Paso 5 — manejo de errores y carga (10/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| T-02 · helper | `lib/errores.ts`: `mensajeDeError(err, porDefecto)` lee `error`, `detail`, `non_field_errors` y el primer error de campo, y traduce la red caída, el 403 ("Tu rol no tiene permiso…"), el 404, el 429 y el 5xx. Incluye `aplicarErroresDeCampo` (400 por campo → `setError` de react-hook-form) y `esSinPermiso`. |
+| T-02 · red de seguridad | `QueryProvider` tiene un `MutationCache` que muestra un toast cuando falla una mutación sin `onError`: ya no hay guardados que fallen en silencio (M0-15, M3-08, M4-14, M4-17 y M3-17 en sus botones). Las mutaciones que manejan el error con `try/catch` llevan `meta.errorManejado`. |
+| T-02 · pantallas | `ErrorState` con "Reintentar" en lugar de "no hay datos" o carga infinita en: agenda (Día, Semana, Mes), cotizaciones (lista y detalle), venta, cartera (lista, detalle y vencidas), caja, egresos (y su panel de gasto), inventario (alertas, insumos y "crea una sede primero"), roles, historia del paciente, SlotPicker (mensaje real del backend), firma del profesional, ajustes de Seguimiento, catálogo de procedimientos y log de acciones (M3-09, M3-10, M5-05, M5-06, M6-16, M7-06, M0-17, M4-19, M1-23). |
+| Pacientes | `PacienteForm` muestra los errores del servidor en su campo y un aviso junto al botón; sirve en la página, la agenda, la cotización y el autorregistro (M2-03, M5-11, M3-22). La fecha de nacimiento es obligatoria y está marcada con `*` (M2-02). El autorregistro muestra "Guardando…" y evita el doble envío (M2-18). |
+| Atención | Motivo de consulta y Plan de manejo se guardan solos al dejar de escribir y al salir de la pestaña; indican "Guardando…", "Guardado" o "No se guardó", y al volver se recupera lo escrito (`useBorradorNota`, M4-06). Si la nota no se puede cerrar, la cita no se completa (M4-14). La nota de la atención se refresca al crearse, así las fotos no van a la visita anterior (M4-07), y si no se puede abrir la nota se avisa. |
+| Consentimientos | Revocar pide el motivo en un diálogo y muestra el error (M4-03). |
+| Cotización | Si falta algo, un toast dice qué falta y en qué ítem (M5-04). El mensaje de "sin ítems" está en español (M5-22). Una forma de pago sin fecha viaja como null (M5-23). El envío por WhatsApp o correo muestra el motivo real (M5-07). |
+| Mensajes reales | Bloqueos (M3-16), ajuste de stock y compras (M7-08), sedes (M1-09), cobro en la atención (M6-15) y carga de puesta en marcha (M2-15, que antes mostraba JSON crudo). |
+| Sesión | Recargar sin conexión ya no cierra la sesión: aparece "Sin conexión con el servidor · Reintentar" (M0-14). Cuando la sesión vence se avisa (M0-28). |
+| T-09 | Se corrigió el voseo en la puesta en marcha y en dos mensajes del backend (agenda y migración). |
+
+- **Siguen sin mensaje propio:** quedan 46 archivos de la lista de `calidad_frontend.txt`. Ya no fallan en silencio (los cubre el aviso global), pero muestran un texto genérico.
+- **Pendiente de este grupo para el paso 7:** M0-11 (filtro de usuario en el log), M2-10 (modales de la ficha del paciente), M4-17 (descargas de PDF) y M4-21 (mensajes de firma).
 
 ## Orden de corrección sugerido
 

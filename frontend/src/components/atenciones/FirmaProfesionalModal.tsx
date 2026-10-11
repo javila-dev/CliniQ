@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CapturaFirmaProfesional } from '@/components/firma/CapturaFirmaProfesional'
 import { formatDate } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { Cita } from '@/types/agenda'
 
 /** La cita tiene consentimientos que el paciente ya firmó y esperan la firma del profesional. */
@@ -89,7 +90,7 @@ export function FirmaProfesionalModal({ citaId, cotizacionId, pacienteNombre, on
   const objetivoId = citaId ?? cotizacionId ?? null
   const queryKey = ['firma-profesional', desdeVenta ? 'cotizacion' : 'cita', objetivoId]
 
-  const { data, isLoading, refetch } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () => desdeVenta
       ? firmaProfesionalApi.pendientesCotizacion(objetivoId!)
@@ -153,7 +154,14 @@ export function FirmaProfesionalModal({ citaId, cotizacionId, pacienteNombre, on
             </div>
           </DialogHeader>
 
-          {isLoading || !data ? (
+          {isError && !data ? (
+            <div className="py-6 text-center space-y-3">
+              <p className="text-sm text-destructive">
+                {mensajeDeError(error, 'No se pudieron cargar los documentos pendientes de firma.')}
+              </p>
+              <Button variant="outline" size="sm" onClick={() => refetch()}>Reintentar</Button>
+            </div>
+          ) : isLoading || !data ? (
             <div className="flex justify-center py-8"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
           ) : (
             <div className="space-y-4">

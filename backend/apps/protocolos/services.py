@@ -493,7 +493,9 @@ def marcar_sesion_completada(
     now = timezone.localtime()
     sesion.estado = SesionProcedimiento.Estado.COMPLETADO
     sesion.cita = cita
-    sesion.profesional = profesional
+    # Sin profesional explícito se conserva el que ya tenía (no se borra para
+    # reportes y comisiones).
+    sesion.profesional = profesional or sesion.profesional or (cita.profesional if cita else None)
     sesion.observaciones = observaciones or sesion.observaciones
     sesion.fecha = fecha or now.date()
     sesion.hora = hora or now.time().replace(microsecond=0)

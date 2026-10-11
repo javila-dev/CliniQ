@@ -8,6 +8,7 @@ import { z } from 'zod'
 import { Building2, CalendarDays, Check, IdCard, KeyRound, Mail, PenLine, Shield, UserRound, X } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
 import { usuariosApi } from '@/lib/api/usuarios'
+import { toast } from '@/hooks/use-toast'
 import { useAuthStore } from '@/store/authStore'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,6 +32,7 @@ const datosSchema = z.object({
 type Datos = z.infer<typeof datosSchema>
 
 const passwordSchema = z.object({
+  password_actual: z.string().min(1, 'Escribe tu contraseña actual'),
   nueva_password: z.string().min(8, 'Mínimo 8 caracteres'),
   confirmar: z.string(),
 }).refine(d => d.nueva_password === d.confirmar, {
@@ -103,11 +105,12 @@ export default function PerfilPage() {
 
   const passwordForm = useForm({ resolver: zodResolver(passwordSchema) })
   const passwordMut = useMutation({
-    mutationFn: ({ nueva_password }: { nueva_password: string }) =>
-      usuariosApi.cambiarPassword(user!.id, nueva_password),
+    mutationFn: ({ nueva_password, password_actual }: { nueva_password: string; password_actual: string }) =>
+      usuariosApi.cambiarPassword(user!.id, nueva_password, password_actual),
     onSuccess: () => {
       passwordForm.reset()
       setPasswordOpen(false)
+      toast.success('Contraseña actualizada')
     },
   })
 
@@ -222,6 +225,10 @@ export default function PerfilPage() {
 
             {passwordOpen && (
               <form onSubmit={passwordForm.handleSubmit(d => passwordMut.mutate(d))} className="mt-4 grid gap-4 sm:grid-cols-2">
+                <Campo label="Contraseña actual" error={passwordForm.formState.errors.password_actual?.message}>
+                  <Input type="password" autoComplete="current-password" {...passwordForm.register('password_actual')} />
+                </Campo>
+                <div className="hidden sm:block" />
                 <Campo label="Nueva contraseña" error={passwordForm.formState.errors.nueva_password?.message}>
                   <Input type="password" placeholder="Mínimo 8 caracteres" {...passwordForm.register('nueva_password')} />
                 </Campo>
@@ -229,7 +236,12 @@ export default function PerfilPage() {
                   <Input type="password" placeholder="Repetir contraseña" {...passwordForm.register('confirmar')} />
                 </Campo>
                 <div className="sm:col-span-2 flex items-center justify-end gap-3">
-                  {passwordMut.isError && <p className="text-xs text-red-600 mr-auto">No se pudo cambiar la contraseña.</p>}
+                  {passwordMut.isError && (
+                    <p className="text-xs text-red-600 mr-auto">
+                      {(passwordMut.error as { response?: { data?: { error?: string } } })?.response?.data?.error
+                        ?? 'No se pudo cambiar la contraseña.'}
+                    </p>
+                  )}
                   <Button type="submit" size="sm" disabled={passwordMut.isPending}>
                     {passwordMut.isPending ? 'Guardando…' : 'Cambiar contraseña'}
                   </Button>

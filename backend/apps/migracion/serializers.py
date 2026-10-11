@@ -133,7 +133,7 @@ class PacienteEnCursoSerializer(serializers.Serializer):
 
         if pagado > total:
             raise serializers.ValidationError(
-                {"pagos": "Lo pagado supera el total pactado. Corregí el monto o el total.",
+                {"pagos": "Lo pagado supera el total pactado. Corrige el monto o el total.",
                  "code": "PAGADO_MAYOR_QUE_TOTAL"}
             )
 

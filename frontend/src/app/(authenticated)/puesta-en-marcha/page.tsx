@@ -91,7 +91,7 @@ export default function PuestaEnMarchaPage() {
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-baseline gap-2.5">
             <h2 className="text-sm font-semibold text-gray-800">Cargas hechas</h2>
-            <span className="text-xs text-gray-400">Podés revertir una carga completa mientras revisás</span>
+            <span className="text-xs text-gray-400">Puedes revertir una carga completa mientras revisas</span>
           </div>
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -108,7 +108,7 @@ export default function PuestaEnMarchaPage() {
           <LoadingState rows={5} />
         ) : !lotes.length ? (
           <p className="rounded-lg border px-4 py-8 text-center text-sm text-muted-foreground">
-            {debouncedSearch ? 'Sin resultados para la búsqueda' : 'Todavía no cargaste ningún paciente en curso.'}
+            {debouncedSearch ? 'Sin resultados para la búsqueda' : 'Todavía no has cargado ningún paciente en curso.'}
           </p>
         ) : (
           <>

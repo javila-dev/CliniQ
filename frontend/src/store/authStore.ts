@@ -10,6 +10,8 @@ interface AuthState {
   hasCheckedAuth: boolean
   isAuthenticated: boolean
   isImpersonating: boolean
+  /** No se pudo verificar la sesión por falta de conexión (no es sesión inválida). */
+  errorConexion: boolean
 
   login: (email: string, password: string) => Promise<void>
   loginWithGoogle: (credential: string) => Promise<void>
@@ -26,6 +28,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   hasCheckedAuth: false,
   isAuthenticated: false,
   isImpersonating: false,
+  errorConexion: false,
 
   login: async (email, password) => {
     set({ isLoading: true })
@@ -75,17 +78,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       set({ isAuthenticated: false, isLoading: false, hasCheckedAuth: true })
       return
     }
-    set({ isLoading: true })
+    set({ isLoading: true, errorConexion: false })
     try {
       const user = await authApi.me()
       if (user.clinica_id) localStorage.setItem('clinica_id', user.clinica_id)
       const isImpersonating = !!localStorage.getItem('original_access_token')
       set({ user, isAuthenticated: true, isImpersonating, hasCheckedAuth: true })
-    } catch {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('clinica_id')
-      set({ user: null, isAuthenticated: false, hasCheckedAuth: true })
+    } catch (err) {
+      // Solo una sesión inválida cierra la sesión. Sin red o con el servidor caído
+      // se conservan los tokens: antes recargar con mala conexión te sacaba.
+      const status = (err as { response?: { status?: number } })?.response?.status
+      if (status === 401 || status === 403) {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        localStorage.removeItem('clinica_id')
+        set({ user: null, isAuthenticated: false, hasCheckedAuth: true })
+      } else {
+        set({ user: null, isAuthenticated: false, hasCheckedAuth: true, errorConexion: true })
+      }
     } finally {
       set({ isLoading: false })
     }

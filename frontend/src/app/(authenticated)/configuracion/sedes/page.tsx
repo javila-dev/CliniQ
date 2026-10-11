@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
+import { mensajeDeError } from '@/lib/errores'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -238,7 +239,7 @@ function SedeSheet({
           </div>
 
           {mutation.isError && (
-            <p className="text-sm text-red-500">Error al guardar la sede. Intenta de nuevo.</p>
+            <p className="text-sm text-red-500">{mensajeDeError(mutation.error, 'No se pudo guardar la sede. Intenta de nuevo.')}</p>
           )}
 
           <div className="flex gap-2 pt-2">

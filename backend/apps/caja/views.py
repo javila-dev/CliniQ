@@ -19,7 +19,7 @@ from apps.caja.serializers import (
 from apps.clinicas.models import Sede
 from apps.cobros.models import Cobro, PagoRecibido
 from apps.users.authorization import sede_ids_para_filtro
-from apps.users.permissions import RequirePermission, get_clinica_activa
+from apps.users.permissions import RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
 def _ingresos_efectivo(sede, desde, hasta):
@@ -121,6 +121,10 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
     def get_permissions(self):
         if self.action in ("abrir", "cerrar"):
             return [RequirePermission("caja.cierre.realizar")()]
+        if self.action == "actual":
+            # Registrar un gasto necesita saber si la caja está abierta: "ver
+            # cierres" no puede vaciar esa pantalla (Recepción veía "sin caja").
+            return [RequireAnyPermission("caja.cierre.ver", "caja.gastos.registrar", "caja.gastos.editar")()]
         return [RequirePermission("caja.cierre.ver")()]
 
     def get_queryset(self):
@@ -301,11 +305,11 @@ class GastoCajaViewSet(ModelViewSet):
         serializer.save(registrado_por=self.request.user, sesion=sesion)
 
     def _assert_editable(self, gasto):
-        user = self.request.user
         if gasto.sesion_id and gasto.sesion.estado == SesionCaja.Estado.CERRADA:
             raise ValidationError({"error": "La sesión de caja ya fue cerrada.", "code": "SESION_CERRADA"})
-        if not user.es_admin and gasto.registrado_por_id != user.id:
-            raise PermissionDenied("Solo puedes modificar gastos que registraste.")
+        # Editar o borrar exige "caja.gastos.editar" (get_permissions): con ese
+        # permiso se edita cualquier gasto de la sesión abierta, no solo los propios
+        # (antes dependía del rol fijo admin).
 
     def perform_update(self, serializer):
         self._assert_editable(serializer.instance)

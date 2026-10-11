@@ -219,6 +219,7 @@ export function NuevaCitaModal({
   }, [tratamientoDetalle])
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: agendaApi.citas.create,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })

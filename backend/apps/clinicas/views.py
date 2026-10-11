@@ -81,7 +81,14 @@ from apps.clinicas.preparacion import (
 )
 from apps.core.storage import delete_public_file, get_public_url, upload_public_file
 from apps.users.authorization import user_has_permission, user_sede_ids_acotadas
-from apps.users.permissions import HasClinicamente, IsAdmin, IsSuperAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions import (
+    HasClinicamente,
+    IsAdmin,
+    IsSuperAdmin,
+    RequireAnyPermission,
+    RequirePermission,
+    get_clinica_activa,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -119,7 +126,9 @@ class ClinicaViewSet(ModelViewSet):
         elif self.action == "asignar_plan":
             permission_classes = (IsSuperAdmin,)
         elif self.action == "plan_usage":
-            permission_classes = (IsAdmin,)
+            # Cupo del plan (sedes, usuarios): lo consultan Configuración → Plan y
+            # Sedes; no es solo del administrador.
+            permission_classes = (RequireAnyPermission("clinicas.ver", "clinicas.editar", "sedes.ver"),)
         elif self.action == "mi_clinica":
             # El GET trae nombre, logo y módulos habilitados que necesita toda la
             # app (agenda, atención, banner de prueba): no exige `clinicas.ver`.
@@ -1512,7 +1521,7 @@ class PlantillaAsistenciaViewSet(HasClinicamente, ModelViewSet):
     def get_permissions(self):
         if self.action in {"list", "retrieve"}:
             return [RequirePermission("clinicas.ver")()]
-        return [RequirePermission("clinicas.config.gestionar")()]
+        return [RequirePermission("clinicas.editar")()]
 
     def get_queryset(self):
         queryset = super().get_queryset()

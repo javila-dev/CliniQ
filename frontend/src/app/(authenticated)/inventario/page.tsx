@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   Plus, Search, AlertTriangle, Package, ChevronLeft, ChevronRight,
   TrendingDown, Layers,
@@ -23,6 +24,8 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { mensajeDeError } from '@/lib/errores'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
 import { cn } from '@/lib/utils'
@@ -301,10 +304,11 @@ function InventarioContent() {
   const [sede, setSede] = useState<string>('')
   const debouncedSearch = useDebounce(search, 400)
 
-  const { data: sedesData } = useQuery({
+  const sedesQ = useQuery({
     queryKey: ['sedes-select'],
     queryFn: () => clinicasApi.sedes.list({ activa: true }),
   })
+  const sedesData = sedesQ.data
   const sedes = sedesData?.results ?? []
 
   // Primera sede activa por defecto, una sola vez que carguen.
@@ -321,19 +325,23 @@ function InventarioContent() {
     page_size: 25,
   }
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['insumos', params],
     queryFn: () => inventarioApi.listInsumos(params),
     enabled: !!sede,
   })
 
-  const { data: alertas } = useQuery({
+  const alertasQ = useQuery({
     queryKey: ['alertas-stock', sede],
     queryFn: () => inventarioApi.alertasStock(sede),
     enabled: !!sede,
   })
+  const alertas = alertasQ.data
 
   const alertasCount = alertas?.length ?? 0
+  // Sin datos de alertas no se puede afirmar que el stock esté bien.
+  const alertasDesconocidas = alertasQ.isError || !alertas
+  const sinSedes = sedesQ.isSuccess && sedes.length === 0
   const total = data?.count ?? 0
 
   return (
@@ -355,12 +363,12 @@ function InventarioContent() {
 
       {/* KPI cards */}
       <div className="grid grid-cols-2 gap-3">
-        <ResumenCard icon={Layers} label="Total insumos" value={isLoading ? '—' : total} color="bg-slate-500" />
+        <ResumenCard icon={Layers} label="Total insumos" value={isLoading || isError ? '—' : total} color="bg-slate-500" />
         <ResumenCard
           icon={AlertTriangle}
           label="Stock bajo"
-          value={alertasCount}
-          color={alertasCount > 0 ? 'bg-red-500' : 'bg-emerald-500'}
+          value={alertasDesconocidas ? '—' : alertasCount}
+          color={alertasDesconocidas ? 'bg-slate-400' : alertasCount > 0 ? 'bg-red-500' : 'bg-emerald-500'}
         />
       </div>
 
@@ -413,8 +421,24 @@ function InventarioContent() {
           </div>
 
           {/* Table */}
-          {isLoading || !sede ? (
+          {sedesQ.isError ? (
+            <ErrorState message={mensajeDeError(sedesQ.error, 'No se pudieron cargar las sedes.')} onRetry={() => sedesQ.refetch()} />
+          ) : sinSedes ? (
+            <Card><CardContent className="py-16 text-center">
+              <Package className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
+              <p className="text-sm font-semibold">No hay sedes activas</p>
+              <p className="text-sm text-muted-foreground mt-1">
+                Crea una sede primero en{' '}
+                <Link href="/configuracion/sedes" className="text-primary underline-offset-2 hover:underline">
+                  Configuración → Sedes
+                </Link>
+                .
+              </p>
+            </CardContent></Card>
+          ) : isLoading || !sede ? (
             <LoadingState rows={6} />
+          ) : isError ? (
+            <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los insumos.')} onRetry={() => refetch()} />
           ) : data?.results.length === 0 ? (
             <Card><CardContent className="py-16 text-center">
               <Package className="h-10 w-10 text-muted-foreground/30 mx-auto mb-3" />
@@ -451,7 +475,13 @@ function InventarioContent() {
         </TabsContent>
 
         <TabsContent value="alertas" className="mt-4">
-          {!alertas || alertas.length === 0 ? (
+          {alertasQ.isError ? (
+            <ErrorState message={mensajeDeError(alertasQ.error, 'No se pudieron cargar las alertas de stock.')} onRetry={() => alertasQ.refetch()} />
+          ) : !alertas ? (
+            sedesQ.isError || sinSedes
+              ? <p className="py-10 text-center text-sm text-muted-foreground">No hay una sede seleccionada.</p>
+              : <LoadingState rows={4} />
+          ) : alertas.length === 0 ? (
             <Card><CardContent className="py-16 text-center">
               <div className="flex items-center justify-center h-12 w-12 rounded-full bg-green-100 mx-auto mb-3">
                 <Package className="h-6 w-6 text-green-600" />

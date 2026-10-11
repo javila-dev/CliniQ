@@ -1,7 +1,6 @@
 from django.urls import path
 
 from apps.notificaciones.views import (
-    EmailConfigView,
     LyvioWebhookView,
     NotificacionFallidaCallbackView,
     NotificacionFallidaListView,
@@ -14,7 +13,6 @@ from apps.notificaciones.views import (
 
 
 urlpatterns = [
-    path("emails/config/", EmailConfigView.as_view(), name="email-config"),
     path("fallidas/", NotificacionFallidaListView.as_view(), name="notificacion-fallida-list"),
     path("fallidas/<uuid:pk>/resolver/", NotificacionFallidaResolverView.as_view(), name="notificacion-fallida-resolver"),
     path("n8n-callback/", NotificacionFallidaCallbackView.as_view(), name="notificacion-n8n-callback"),

@@ -7,6 +7,7 @@ import { Plus, FileText, Loader2, X } from 'lucide-react'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { PuestaEnMarchaButton } from '@/components/shared/PuestaEnMarchaButton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +21,7 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { hasPermission, isProfesional, PERM } from '@/lib/permissions'
+import { mensajeDeError } from '@/lib/errores'
 import type { Cotizacion, EstadoComercial } from '@/types/cotizaciones'
 
 // Solo propuestas: las aceptadas son ventas y viven en /ventas ("Vendidas"
@@ -50,7 +52,7 @@ export default function CotizacionesPage() {
   const debouncedBusqueda = useDebounce(busqueda, 350)
   const { sedes } = useUserSedes()
   // Un profesional solo ve en el listado sus propias cotizaciones: el filtro no aplica.
-  const filtraPorProfesional = !isProfesional(user)
+  const filtraPorProfesional = !(user?.ve_solo_su_actividad_comercial ?? isProfesional(user))
   const { data: profesionales = [] } = useQuery({
     queryKey: ['cotizaciones', 'profesionales'],
     queryFn: () => cotizacionesApi.profesionales(),
@@ -74,7 +76,7 @@ export default function CotizacionesPage() {
   if (sede !== 'todas') params.sede = sede
   if (profesional !== 'todos') params.profesional = profesional
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['cotizaciones', params],
     queryFn: () => cotizacionesApi.list(params),
   })
@@ -228,6 +230,8 @@ export default function CotizacionesPage() {
       {/* Lista */}
       {isLoading ? (
         <LoadingState rows={4} />
+      ) : isError ? (
+        <ErrorState message={mensajeDeError(error, 'No se pudieron cargar las cotizaciones.')} onRetry={() => refetch()} />
       ) : !data?.results?.length ? (
         <TablaVacia
           icono={<FileText className="h-5 w-5" />}

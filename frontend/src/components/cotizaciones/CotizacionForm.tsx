@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { useForm, useFieldArray, Controller, useWatch } from 'react-hook-form'
+import { useForm, useFieldArray, Controller, useWatch, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -103,7 +103,7 @@ const schema = z.object({
   sede: z.string().nullable(),
   validez_dias: z.number().int().min(1),
   notas: z.string(),
-  items: z.array(itemSchema).min(1),
+  items: z.array(itemSchema).min(1, 'Agrega al menos un ítem a la cotización.'),
   formas_pago: z.array(pagoSchema),
 }).superRefine((data, ctx) => {
   // Reglas de obsequios (van antes del plan de pagos, que puede terminar la validación).
@@ -658,6 +658,36 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   }
 
   // Mutations
+  const avisarCamposInvalidos = (errs: FieldErrors<FormValues>) => {
+    if (errs.paciente) {
+      toast.error('Falta el cliente', 'Selecciona un cliente para continuar.')
+      return
+    }
+    const filas = Array.isArray(errs.items) ? errs.items : []
+    const i = filas.findIndex(Boolean)
+    if (i >= 0) {
+      const fila = filas[i] as Record<string, { message?: string } | undefined>
+      const detalle = fila.descripcion
+        ? 'Elige qué se cotiza en esa fila o escribe su descripción.'
+        : 'Revisa los valores de esa fila (cantidad, precio o descuento).'
+      toast.error(`Revisa el ítem ${i + 1}`, detalle)
+      return
+    }
+    if (errs.items?.message) {
+      toast.error('Faltan ítems', errs.items.message)
+      return
+    }
+    if (errs.validez_dias) {
+      toast.error('Revisa la validez', 'Escribe cuántos días es válida la cotización.')
+      return
+    }
+    if (errs.formas_pago) {
+      toast.error('Revisa el plan de pagos', 'Cada forma de pago necesita tipo y valor.')
+      return
+    }
+    toast.error('Faltan datos', 'Revisa los campos marcados en rojo.')
+  }
+
   const buildPayload = (values: FormValues) => {
     const payload = {
       paciente: values.paciente?.id ?? cotizacion!.paciente,
@@ -702,7 +732,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           cantidad_insumo: i.cantidad_insumo ?? null,
         }
       }),
-      formas_pago: values.formas_pago,
+      formas_pago: values.formas_pago.map((p) => ({ ...p, fecha: p.fecha || null })),
     }
     console.log('[PATCH payload]', JSON.stringify(payload, null, 2))
     return payload
@@ -1198,7 +1228,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                   }
                   if (avisarDescuentoExcedido(v.items)) return
                   esNueva ? crear(v) : actualizar(v)
-                })}
+                }, avisarCamposInvalidos)}
               >
                 {guardando
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />

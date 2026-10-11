@@ -30,22 +30,22 @@
 - **Causa:** el backend solo permite el precio exacto de la promoción, mientras el frontend acepta cualquier valor entre la promoción y la lista.
 - **Arreglo:** que el backend acepte cualquier valor mayor o igual al de la promoción.
 
-**M5-04 · Medio · errores** · confirmado
+**✅ M5-04 · Medio · errores** · confirmado
 - **Dónde:** `CotizacionForm.tsx:59,1186,1779`.
 - **Qué ve el usuario:** pulsa "Crear cotización" y no pasa nada. Ocurre con una fila de tratamiento sin elegir, o con Validez, Citas o Desc % vacíos.
 - **Causa:** no hay `onInvalid` y el error no se muestra en esas secciones.
 - **Arreglo:** un toast que diga qué falta, el error en cada fila y `z.coerce`.
 
-**M5-05 · Medio · llamada sin resolver** · confirmado
+**✅ M5-05 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `cotizaciones/[id]/page.tsx:31`; `ventas/[id]/page.tsx:31`.
 - **Qué ve el usuario:** pantalla en blanco si la cotización no existe o da 403.
 
-**M5-06 · Medio · llamada sin resolver** · confirmado
+**✅ M5-06 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `cotizaciones/page.tsx:77-80,229-238`.
 - **Qué ve el usuario:** si la carga falla, dice "No hay cotizaciones abiertas · Crear la primera".
 - **Arreglo:** el mismo bloque de error de la pantalla de ventas.
 
-**M5-07 · Medio · errores** · confirmado (igual que M7-16)
+**✅ M5-07 · Medio · errores** · confirmado (igual que M7-16)
 - **Dónde:** `EnviarCotizacionModal.tsx:145-151`.
 - **Qué ve el usuario:** con cualquier fallo de WhatsApp sale "Verifica que el paciente tenga teléfono", aunque el problema sea otro.
 - **Arreglo:** mostrar `response.data.error`.
@@ -65,7 +65,7 @@
 - **Qué ve el usuario:** "Para hoy 140", pero solo ve 100, sin aviso.
 - **Arreglo:** paginar, o "Mostrando 100 de N · Cargar más".
 
-**M5-11 · Medio · llamada sin resolver** · confirmado (igual que M2-03)
+**✅ M5-11 · Medio · llamada sin resolver** · confirmado (igual que M2-03)
 - **Dónde:** `CotizacionForm.tsx:642-658`.
 - **Qué ve el usuario:** crear un paciente desde la cotización con un documento duplicado no muestra ningún mensaje.
 
@@ -122,11 +122,11 @@
 - **Dónde:** `CotizacionForm.tsx:938-971`; `SesionesCotizacionPanel.tsx`.
 - **Qué ve el usuario:** si falla la descarga del PDF, no pasa nada. Además, el botón no muestra que está cargando y cada clic registra otro envío.
 
-**M5-22 · Bajo · errores** · confirmado
+**✅ M5-22 · Bajo · errores** · confirmado
 - **Dónde:** `CotizacionForm.tsx:106`.
 - **Qué ve el usuario:** sin ítems, aparece en inglés "Array must contain at least 1 element(s)".
 
-**M5-23 · Bajo · parámetros** · confirmado
+**✅ M5-23 · Bajo · parámetros** · confirmado
 - **Dónde:** `CotizacionForm.tsx:1910-1915`.
 - **Qué ve el usuario:** al borrar la fecha de una forma de pago sale "Fecha con formato erróneo… YYYY-MM-DD".
 - **Arreglo:** convertir `''` en `null`.
@@ -143,7 +143,7 @@
 - **Dónde:** `seguimiento/page.tsx:235-238`.
 - **Qué ve el usuario:** aparece "X ya está en seguimiento", sin enlace para abrirlo, aunque el backend devuelve `oportunidad_id`.
 
-**M5-27 · Bajo · roles personalizados** · confirmado (casos borde)
+**✅ M5-27 · Bajo · roles personalizados** · confirmado (casos borde)
 - **Dónde:** `cotizaciones/page.tsx:53`; `seguimiento/page.tsx:175`.
 - **Qué pasa:** el frontend decide "solo lo suyo" con `rol` o `es_profesional`, mientras el backend usa `comercial.ver_sede`.
 - **Arreglo:** que `/me` exponga `ve_solo_su_actividad_comercial`.

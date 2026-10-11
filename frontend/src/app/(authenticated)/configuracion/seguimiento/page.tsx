@@ -5,11 +5,13 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { CalendarClock, Clock, Hourglass, Loader2, Repeat } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { seguimientoApi } from '@/lib/api/seguimiento'
 import { toast } from '@/hooks/use-toast'
 import { formatFechaDMY } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import type { ConfigSeguimiento } from '@/types/seguimiento'
 
 type Campo = 'dias_tras_compra' | 'tolerancia_dias' | 'dias_sin_sesion' | 'dias_aviso_previo'
@@ -45,7 +47,7 @@ function enDias(dias: number): string {
 
 export default function ConfiguracionSeguimientoPage() {
   const qc = useQueryClient()
-  const { data, isLoading } = useQuery({ queryKey: ['seguimiento', 'config'], queryFn: seguimientoApi.config })
+  const { data, isLoading, isError, error, refetch } = useQuery({ queryKey: ['seguimiento', 'config'], queryFn: seguimientoApi.config })
   const [valores, setValores] = useState<Record<Campo, number> | null>(null)
 
   useEffect(() => {
@@ -81,7 +83,11 @@ export default function ConfiguracionSeguimientoPage() {
         description="Cuándo avisar en &quot;Para hoy&quot; que un paciente ya debió agendar su sesión."
       />
 
-      {isLoading || !valores ? (
+      {isError && !data ? (
+        <div className="rounded-xl border bg-white">
+          <ErrorState message={mensajeDeError(error, 'No se pudo cargar la configuración de seguimiento.')} onRetry={() => refetch()} />
+        </div>
+      ) : isLoading || !valores ? (
         <div className="flex h-40 items-center justify-center rounded-xl border bg-white">
           <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
         </div>

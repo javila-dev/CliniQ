@@ -42,6 +42,7 @@ import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 import { cn, formatTime, formatDuracion } from '@/lib/utils'
 
 interface Props {
@@ -135,8 +136,16 @@ export default function AtencionCitaPage({ params }: Props) {
     if (!isReady || !historia || !cita) return
     if (notaId) return   // ya existe borrador para esta sesión
     historiaClinicaApi.notas.createBorrador(historia.id, cita.id)
-      .then((nota) => setNota(nota.id, cita.id))
-      .catch(() => {/* H26 pendiente — no bloquear la pantalla */})
+      .then((nota) => {
+        setNota(nota.id, cita.id)
+        // Las pestañas leen las notas de la caché: sin esto, la primera vez
+        // apuntaban a la nota de la visita anterior (p. ej. al subir fotos).
+        queryClient.invalidateQueries({ queryKey: ['historia', historia.id, 'notas'] })
+      })
+      .catch((err) => {
+        // Sin nota no se puede documentar: avisar en vez de dejar las pestañas en blanco.
+        toast.error('No se pudo abrir la nota de esta atención', mensajeDeError(err, 'Recarga la página e intenta de nuevo.'))
+      })
   }, [isReady, historia?.id, cita?.id])
 
   // Limpiar store al desmontar
@@ -169,8 +178,10 @@ export default function AtencionCitaPage({ params }: Props) {
         })
       }
       // H26: completar la nota antes de cambiar estado de cita
+      // Si la nota no se puede cerrar, la cita tampoco: antes quedaba completada
+      // con la nota en borrador.
       if (notaId) {
-        await historiaClinicaApi.notas.completar(notaId).catch(() => {/* H26 pendiente */})
+        await historiaClinicaApi.notas.completar(notaId)
       }
       return agendaApi.citas.cambiarEstado(citaId, { estado: 'completada' })
     },
@@ -184,7 +195,7 @@ export default function AtencionCitaPage({ params }: Props) {
       if (data.code === 'CONSENTIMIENTOS_FALTANTES') {
         toast.error('Consentimientos faltantes', 'La sesión tiene consentimientos vencidos o sin firmar. Fírmalos antes de completar.')
       } else {
-        toast.error('No se pudo completar la atención', data.error ?? 'Intenta de nuevo.')
+        toast.error('No se pudo completar la atención', mensajeDeError(err, 'Intenta de nuevo.'))
       }
     },
   })

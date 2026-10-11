@@ -172,7 +172,8 @@ export default function SeguimientoPage() {
   const canGestionar = hasPermission(user, PERM.SEGUIMIENTO_GESTIONAR)
   // Atiende pacientes sin permiso de ver toda la sede: el backend ya le muestra
   // solo los suyos, así que "Todos / Míos" no aplica.
-  const soloLosSuyos = (!!user?.es_profesional || user?.rol === 'profesional') && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.COMERCIAL_VER_SEDE)
+  const soloLosSuyos = user?.ve_solo_su_actividad_comercial
+    ?? ((!!user?.es_profesional || user?.rol === 'profesional') && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.COMERCIAL_VER_SEDE))
   const { sedes } = useUserSedes()
 
   const [tab, setTab] = useState<'hoy' | 'embudo'>('hoy')

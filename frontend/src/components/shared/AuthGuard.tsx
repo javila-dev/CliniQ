@@ -8,7 +8,7 @@ import { isSuperAdmin } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, logout, user } = useAuthStore()
+  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, logout, user, errorConexion } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
@@ -16,11 +16,11 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   }, [hasCheckedAuth, loadUser])
 
   useEffect(() => {
-    if (hasCheckedAuth && !isLoading && !isAuthenticated) {
+    if (hasCheckedAuth && !isLoading && !isAuthenticated && !errorConexion) {
       const next = `${window.location.pathname}${window.location.search}${window.location.hash}`
       router.replace(`/login?next=${encodeURIComponent(next)}`)
     }
-  }, [hasCheckedAuth, isLoading, isAuthenticated, router])
+  }, [hasCheckedAuth, isLoading, isAuthenticated, errorConexion, router])
 
   // Equipo interno (is_staff, sin clínica) no opera dentro de una clínica —
   // su lugar es /console. No es un error de datos como el caso de abajo.
@@ -34,6 +34,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
   // Escuchar el evento de sesión expirada del interceptor HTTP
   useEffect(() => {
     const onSessionExpired = () => {
+      toast.error('Tu sesión venció', 'Vuelve a ingresar para continuar.')
       logout()
       // El useEffect anterior detectará isAuthenticated=false y redirigirá con ?next=
     }
@@ -59,6 +60,25 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
           <Skeleton className="h-8 w-full" />
           <Skeleton className="h-4 w-3/4" />
           <Skeleton className="h-4 w-1/2" />
+        </div>
+      </div>
+    )
+  }
+
+  if (errorConexion) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="text-center space-y-4 max-w-sm px-4">
+          <h2 className="text-lg font-semibold">Sin conexión con el servidor</h2>
+          <p className="text-sm text-muted-foreground">
+            No pudimos verificar tu sesión. Revisa tu internet; tu sesión sigue abierta.
+          </p>
+          <button
+            onClick={() => loadUser()}
+            className="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted"
+          >
+            Reintentar
+          </button>
         </div>
       </div>
     )

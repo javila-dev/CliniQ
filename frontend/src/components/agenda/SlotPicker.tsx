@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { agendaApi } from '@/lib/api/agenda'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn, formatTime } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 
 interface SlotPickerProps {
   profesionalId: string
@@ -48,7 +49,7 @@ export function SlotPicker({
 
   const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, duracionMin, citaId]
 
-  const { data: slots, isLoading } = useQuery({
+  const { data: slots, isLoading, isError, error, refetch } = useQuery({
     queryKey,
     queryFn: () => agendaApi.citas.slotsDisponibles(slotParams),
     enabled,
@@ -72,6 +73,22 @@ export function SlotPicker({
         {Array.from({ length: 8 }).map((_, i) => (
           <Skeleton key={i} className="h-9 w-full rounded-md" />
         ))}
+      </div>
+    )
+  }
+
+  // El backend explica por qué no puede calcular horarios (p. ej. falta la duración).
+  if (isError) {
+    return (
+      <div className="text-center py-4 space-y-2">
+        <p className="text-sm text-destructive">{mensajeDeError(error, 'No se pudieron cargar los horarios.')}</p>
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="text-xs font-medium text-primary hover:underline"
+        >
+          Reintentar
+        </button>
       </div>
     )
   }

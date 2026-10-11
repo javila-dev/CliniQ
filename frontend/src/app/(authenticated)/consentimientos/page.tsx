@@ -4,6 +4,10 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileText, Plus, ExternalLink, XCircle, Clock, MessageCircle, Copy, Check, Loader2 } from 'lucide-react'
 import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
@@ -40,9 +44,19 @@ function ConsentimientosContent() {
     queryFn: () => consentimientosApi.plantillas.list(),
   })
 
-  const { mutate: revocar } = useMutation({
-    mutationFn: (id: string) => consentimientosApi.revocar(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['consentimientos'] }),
+  // Revocar exige el motivo (el backend responde 400 sin él; antes el botón
+  // "no hacía nada").
+  const [aRevocar, setARevocar] = useState<string | null>(null)
+  const [motivoRevocacion, setMotivoRevocacion] = useState('')
+  const { mutate: revocar, isPending: revocando } = useMutation({
+    mutationFn: ({ id, motivo }: { id: string; motivo: string }) => consentimientosApi.revocar(id, motivo),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
+      setARevocar(null)
+      setMotivoRevocacion('')
+      toast.success('Consentimiento revocado')
+    },
+    onError: (err) => toast.error('No se pudo revocar', mensajeDeError(err)),
   })
 
   const consentimientos = data?.results ?? []
@@ -93,7 +107,7 @@ function ConsentimientosContent() {
               items={pendientes}
               emptyText="Sin consentimientos pendientes de firma"
               onRevocar={puedeRevocar ? (id) => {
-                if (confirm('¿Revocar este consentimiento?')) revocar(id)
+                setMotivoRevocacion(''); setARevocar(id)
               } : undefined}
             />
           </TabsContent>
@@ -103,7 +117,7 @@ function ConsentimientosContent() {
               items={firmados}
               emptyText="Sin consentimientos firmados"
               onRevocar={puedeRevocar ? (id) => {
-                if (confirm('¿Revocar este consentimiento firmado?')) revocar(id)
+                setMotivoRevocacion(''); setARevocar(id)
               } : undefined}
             />
           </TabsContent>
@@ -122,6 +136,37 @@ function ConsentimientosContent() {
         open={showGenerar}
         onOpenChange={setShowGenerar}
       />
+
+      <Dialog open={!!aRevocar} onOpenChange={(v) => { if (!v) setARevocar(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Revocar consentimiento</DialogTitle>
+            <DialogDescription>
+              El consentimiento deja de ser válido. Queda registrado el motivo.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="motivo-revocacion">Motivo *</Label>
+            <Textarea
+              id="motivo-revocacion" rows={3} value={motivoRevocacion}
+              onChange={(e) => setMotivoRevocacion(e.target.value)}
+              placeholder="Ej. El paciente retiró su autorización"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <Button variant="outline" className="flex-1" onClick={() => setARevocar(null)} disabled={revocando}>
+              Cancelar
+            </Button>
+            <Button
+              variant="destructive" className="flex-1"
+              disabled={!motivoRevocacion.trim() || revocando}
+              onClick={() => aRevocar && revocar({ id: aRevocar, motivo: motivoRevocacion.trim() })}
+            >
+              {revocando ? 'Revocando…' : 'Revocar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

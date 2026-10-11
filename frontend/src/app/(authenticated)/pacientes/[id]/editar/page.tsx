@@ -35,6 +35,7 @@ export default function EditarPacientePage({ params }: Props) {
   })
 
   const { mutateAsync, isPending } = useMutation({
+    meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: (data: Partial<CreatePacienteRequest>) => pacientesApi.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['pacientes', id] })
@@ -45,15 +46,7 @@ export default function EditarPacientePage({ params }: Props) {
 
   const handleSubmit = async (data: CreatePacienteRequest) => {
     setServerError(null)
-    try {
-      await mutateAsync(data)
-    } catch (err: any) {
-      const msg =
-        err?.response?.data?.error ||
-        Object.values(err?.response?.data ?? {})[0] ||
-        'Error al guardar los cambios.'
-      setServerError(String(msg))
-    }
+    await mutateAsync(data) // PacienteForm muestra el error en el campo y junto al botón
   }
 
   if (isLoading) return <LoadingState rows={4} />

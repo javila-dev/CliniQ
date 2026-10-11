@@ -25,6 +25,8 @@ import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import { AgendaTour } from '@/components/agenda/AgendaTour'
 import { AvisoCitasSinConfirmar } from '@/components/shared/AvisoCitasSinConfirmar'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { mensajeDeError } from '@/lib/errores'
 import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG } from '@/lib/constants'
 import type { Cita, EstadoCita, BloqueoAgenda } from '@/types/agenda'
@@ -763,6 +765,15 @@ function PeriodListView({
 }
 
 // ─── VIEW: Día ────────────────────────────────────────────────
+// Si fallan las citas no se muestra la agenda: vacía parecería un día libre.
+function AgendaError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  return (
+    <div className="flex flex-1 items-center justify-center bg-white">
+      <ErrorState message={mensajeDeError(error, 'No se pudieron cargar las citas.')} onRetry={onRetry} />
+    </div>
+  )
+}
+
 function DayView({
   fecha, selectedId, onSelectCita, onClickSlot, filterSede, filterProfesional, filterPaciente,
   profesionales, mode, density,
@@ -783,7 +794,7 @@ function DayView({
     scrollRef.current.scrollTop = Math.max(0, top - 100)
   }, [fecha, hourPx, mode])
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['citas', 'dia', fecha, filterSede, filterProfesional.join(','), filterPaciente],
     queryFn: () => agendaApi.citas.list({
       fecha_inicio__date: fecha,
@@ -810,6 +821,10 @@ function DayView({
 
   if (isLoading) {
     return <div className="flex flex-1 items-center justify-center bg-white"><p className="text-sm text-muted-foreground">Cargando agenda...</p></div>
+  }
+
+  if (isError) {
+    return <AgendaError error={error} onRetry={() => refetch()} />
   }
 
   if (mode === 'lista') {
@@ -1131,6 +1146,11 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
     return <div className="flex flex-1 items-center justify-center bg-white"><p className="text-sm text-muted-foreground">Cargando semana...</p></div>
   }
 
+  const fallidas = queries.filter((q) => q.isError)
+  if (fallidas.length > 0) {
+    return <AgendaError error={fallidas[0].error} onRetry={() => fallidas.forEach((q) => q.refetch())} />
+  }
+
   if (mode === 'lista') {
     return (
       <PeriodListView
@@ -1233,7 +1253,7 @@ function MonthView({ monthDate, onSelectDay, onSelectCita, selectedId, filterSed
   const lastDay = new Date(year, month + 1, 0).getDate()
   const monthEnd = `${year}-${String(month + 1).padStart(2, '0')}-${String(lastDay).padStart(2, '0')}`
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['citas', 'mes', monthStart, filterSede, filterProfesional.join(','), filterPaciente],
     queryFn: () => agendaApi.citas.list({
       fecha_inicio__date__gte: monthStart,
@@ -1261,6 +1281,10 @@ function MonthView({ monthDate, onSelectDay, onSelectCita, selectedId, filterSed
 
   if (isLoading) {
     return <div className="flex flex-1 items-center justify-center bg-white"><p className="text-sm text-muted-foreground">Cargando mes...</p></div>
+  }
+
+  if (isError) {
+    return <AgendaError error={error} onRetry={() => refetch()} />
   }
 
   if (mode === 'lista') {

@@ -66,6 +66,18 @@ def ve_solo_su_actividad_comercial(user, request=None) -> bool:
     return atiende and not user_has_permission(user, PERM_COMERCIAL_VER_SEDE, request=request)
 
 
+def atiende_solo_lo_propio(user) -> bool:
+    """True si el usuario atiende pacientes y no es administrador: documenta (notas,
+    fotos, antecedentes) solo en sus propias citas.
+
+    Antes se decidía con el rol fijo `rol == "profesional"`: un rol personalizado que
+    atiende escribía en citas ajenas y un Profesional de sistema no podía cubrir.
+    """
+    if not user or not getattr(user, "is_authenticated", False) or user_is_tenant_admin(user):
+        return False
+    return bool(getattr(user, "es_profesional", False)) or getattr(user, "rol", None) == "profesional"
+
+
 def user_is_tenant_admin(user) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False

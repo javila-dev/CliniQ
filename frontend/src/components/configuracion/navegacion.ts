@@ -227,7 +227,9 @@ export const CATEGORIAS: CategoriaConfig[] = [
         label: 'Grupos de atención',
         description: 'Profesionales que se asignan en bloque a los procedimientos.',
         keywords: 'grupos atencion profesionales procedimientos asignar especialidades esteticistas medicos',
-        perm: PERM.USUARIOS_VER,
+        // Mismo permiso que exige guardar (antes "Ver usuarios" mostraba la
+        // pantalla y el guardado fallaba).
+        perm: PERM.COLABORADORES_GESTIONAR,
       },
       {
         href: '/configuracion/roles',
@@ -255,6 +257,27 @@ export function categoriasVisibles(user: AuthUser | null | undefined): Categoria
   return CATEGORIAS
     .map((c) => ({ ...c, ajustes: c.ajustes.filter((a) => !a.perm || hasPermission(user, a.perm)) }))
     .filter((c) => c.ajustes.length > 0)
+}
+
+// Sedes, plantillas de consentimiento y formas de pago de solo lectura los tiene
+// casi todo el equipo (para los selectores de otras pantallas): por sí solos no
+// abren Configuración. Sí la abren si además se pueden gestionar.
+const SOLO_CONSULTA: Record<string, string> = {
+  [PERM.SEDES_VER]: PERM.SEDES_GESTIONAR,
+  [PERM.CONSENTIMIENTOS_PLANTILLAS_VER]: PERM.CONSENTIMIENTOS_GESTIONAR,
+  [PERM.FORMAS_PAGO_VER]: PERM.FORMAS_PAGO_GESTIONAR,
+}
+
+/** True si el usuario tiene al menos un ajuste de Configuración que puede usar.
+ *  Reemplaza a canAccess.configuracion (solo clinicas.editar, usuarios.ver o
+ *  roles.ver): con otros permisos de configuración el menú no aparecía o la
+ *  página devolvía al Dashboard sin explicación. */
+export function puedeEntrarAConfiguracion(user: AuthUser | null | undefined): boolean {
+  return categoriasVisibles(user).some((c) => c.ajustes.some((a) => {
+    if (!a.perm) return true
+    const gestion = SOLO_CONSULTA[a.perm]
+    return !gestion || hasPermission(user, gestion)
+  }))
 }
 
 /** Categoría a la que pertenece una ruta (incluye subrutas como /consentimientos/nuevo). */

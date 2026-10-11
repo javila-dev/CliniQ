@@ -1,6 +1,8 @@
 export type UserRole = 'superadmin' | 'admin' | 'profesional' | 'recepcion' | string
 
 export interface AuthUser {
+  /** Solo ve sus cotizaciones, ventas y seguimientos (lo calcula el backend). */
+  ve_solo_su_actividad_comercial?: boolean
   id: string
   email: string
   first_name: string

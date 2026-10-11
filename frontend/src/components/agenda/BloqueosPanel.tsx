@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Check, X, Ban } from 'lucide-react'
+import { mensajeDeError } from '@/lib/errores'
 import { agendaApi } from '@/lib/api/agenda'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { useAuthStore } from '@/store/authStore'
@@ -135,7 +136,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
       resetForm()
     },
     onError: (err: any) => {
-      setFormError(err?.message ?? err?.response?.data?.detail ?? 'Error al crear el bloqueo')
+      setFormError(mensajeDeError(err, 'No se pudo crear el bloqueo.'))
     },
   })
 

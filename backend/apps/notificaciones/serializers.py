@@ -35,19 +35,6 @@ class NotificacionFallidaCallbackSerializer(serializers.Serializer):
     motivo = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-class EmailConfigSerializer(serializers.Serializer):
-    provider = serializers.CharField()
-    backend = serializers.CharField()
-    host = serializers.CharField()
-    port = serializers.IntegerField()
-    username = serializers.CharField()
-    use_tls = serializers.BooleanField()
-    use_ssl = serializers.BooleanField()
-    timeout = serializers.IntegerField()
-    default_from_email = serializers.EmailField()
-    configured = serializers.BooleanField()
-
-
 class AsignacionSedeSerializer(serializers.Serializer):
     sede_id = serializers.UUIDField()
     tipo = serializers.ChoiceField(choices=AsignacionWhatsappSede.Tipo.choices)

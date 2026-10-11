@@ -6,6 +6,7 @@ from rest_framework import serializers
 from apps.clinicas.models import Sede
 from apps.core.storage import get_signed_url
 from apps.inventario.models import Insumo
+from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import get_clinica_activa
 from apps.historia_clinica.models import (
     AnotacionZona,
@@ -145,7 +146,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"historia": "La historia no pertenece a tu clinica."})
         if cita and historia and cita.paciente_id != historia.paciente_id:
             raise serializers.ValidationError({"cita": "La cita no corresponde al paciente de la historia."})
-        if user.rol == "profesional":
+        if atiende_solo_lo_propio(user):
             if not cita or cita.profesional_id != user.id:
                 raise serializers.ValidationError({"cita": "Solo el profesional asignado a la cita puede crear la nota."})
         return attrs

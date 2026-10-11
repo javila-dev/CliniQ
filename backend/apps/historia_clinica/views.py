@@ -69,7 +69,7 @@ from apps.notificaciones.services import (
     resolver_ruta_whatsapp,
 )
 from apps.pacientes.serializers import enmascarar_cola
-from apps.users.authorization import user_has_permission, user_is_tenant_admin
+from apps.users.authorization import atiende_solo_lo_propio, user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
 
@@ -77,10 +77,9 @@ logger = logging.getLogger(__name__)
 
 
 def user_can_manage_order_templates(user) -> bool:
-    if user_is_tenant_admin(user):
-        return True
-    rol_dinamico = getattr(user, "rol_dinamico", None)
-    return bool(rol_dinamico and rol_dinamico.slug == "coordinador")
+    # Las plantillas de órdenes son configuración de la clínica: mismo permiso que
+    # el menú que las muestra. Antes solo el admin o un rol llamado "coordinador".
+    return user_is_tenant_admin(user) or user_has_permission(user, "clinicas.editar")
 
 
 def _imagen_b64(path: str) -> str | None:
@@ -594,7 +593,7 @@ class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, Gene
         # Una nota sin cita (p. ej. la mini-atención generada desde una cotización)
         # no tiene "dueño" por cita: solo se bloquea el cruce hacia la cita de otro
         # profesional, no la ausencia de cita.
-        if user.rol == "profesional" and nota.cita_id and nota.cita.profesional_id != user.id:
+        if atiende_solo_lo_propio(user) and nota.cita_id and nota.cita.profesional_id != user.id:
             raise serializers.ValidationError({"nota": "Solo puedes subir fotos a notas de tus propias citas."})
         serializer.save()
 

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Search, Lock, Loader2 } from 'lucide-react'
+import { mensajeDeError } from '@/lib/errores'
 import { proveedoresApi } from '@/lib/api/proveedores'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { inventarioApi } from '@/lib/api/inventario'
@@ -258,7 +259,7 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
       toast.success('Guardado', 'La compra quedó guardada como borrador.')
       router.push('/compras')
     },
-    onError: () => setError('No se pudo guardar la compra. Revisa los datos.'),
+    onError: (err) => setError(mensajeDeError(err, 'No se pudo guardar la compra. Revisa los datos.')),
   })
 
   const recibirMutation = useMutation({
@@ -277,7 +278,7 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
       toast.success('Compra recibida', 'El stock ya quedó actualizado.')
       router.push('/compras')
     },
-    onError: () => setError('No se pudo registrar la recepción. Revisa las cantidades.'),
+    onError: (err) => setError(mensajeDeError(err, 'No se pudo registrar la recepción. Revisa las cantidades.')),
   })
 
   const guardando = guardarMutation.isPending || recibirMutation.isPending

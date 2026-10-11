@@ -22,7 +22,7 @@ from apps.colaboradores.serializers import (
     colaborador_tiene_citas_futuras,
 )
 from apps.users import services as user_services
-from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
+from apps.users.permissions import HasClinicamente, RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,10 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
             # Selector de profesionales de agenda, bloqueos y procedimientos: no
             # exige `colaboradores.ver` (ese permiso es para la ficha del personal).
             permission_classes = (IsAuthenticated,)
+        elif self.action in {"list", "retrieve"}:
+            # Configuración → Usuarios muestra esta misma lista: basta con ver
+            # colaboradores o ver usuarios.
+            permission_classes = (RequireAnyPermission("colaboradores.ver", "usuarios.ver"),)
         else:
             permission_classes = (RequirePermission("colaboradores.ver"),)
         return [permission() for permission in permission_classes]
@@ -315,15 +319,13 @@ class HorarioColaboradorViewSet(ModelViewSet):
         if user.rol != "superadmin":
             queryset = queryset.filter(sede__clinica=user.clinica)
 
-        if self.action == "retrieve" and user.rol not in {"admin", "superadmin"}:
-            return queryset.filter(colaborador__user=user)
-
+        # Ver horarios exige "colaboradores.horarios.ver" (get_permissions). Antes,
+        # sin rol fijo admin solo se veían los propios: Recepción abría el horario de
+        # un profesional y lo veía vacío, y al guardar chocaba con los existentes.
         colaborador_id = self.request.query_params.get("colaborador")
         if self.action == "list":
             if not colaborador_id:
                 return queryset.none()
             queryset = queryset.filter(colaborador_id=colaborador_id)
-            if user.rol not in {"admin", "superadmin"}:
-                queryset = queryset.filter(colaborador__user=user)
 
         return queryset

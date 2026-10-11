@@ -23,7 +23,7 @@ from apps.protocolos.services import (
     verificar_otp,
 )
 from apps.users.models import User
-from apps.users.permissions import IsAdmin, IsAdminOrProfesional, IsAdminOrRecepcion
+from apps.users.permissions import IsAdmin, IsAdminOrProfesional, RequireAnyPermission
 
 
 class TratamientoPacienteViewSet(ModelViewSet):
@@ -48,7 +48,10 @@ class TratamientoPacienteViewSet(ModelViewSet):
             return [IsAuthenticated()]
         if self.action == "destroy":
             return [IsAdmin()]
-        return [IsAdminOrRecepcion()]
+        # Crear o editar un tratamiento: quien agenda o quien atiende. Antes
+        # IsAdminOrRecepcion dejaba pasar a cualquier rol personalizado (todos
+        # guardan "recepcion" como rol fijo), aunque solo viera la agenda.
+        return [RequireAnyPermission("agenda.citas.crear", "historia.notas.crear")()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -112,8 +115,16 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
             if request.user.rol != "superadmin":
                 profesional_qs = profesional_qs.filter(clinica=request.user.clinica)
             profesional = get_object_or_404(profesional_qs, id=profesional_id)
-        elif request.user.rol == "profesional":
+        elif getattr(request.user, "es_profesional", False):
             profesional = request.user
+        else:
+            # Lo completa un admin u otro rol en nombre del profesional: se conserva
+            # el de la cita o el que ya tenía la sesión (antes quedaba en blanco).
+            profesional = (
+                (cita.profesional if cita else None)
+                or (sesion.cita.profesional if sesion.cita_id else None)
+                or sesion.profesional
+            )
         try:
             sesion = marcar_sesion_completada(
                 sesion,

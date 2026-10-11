@@ -129,8 +129,12 @@ function ColaboradorRow({
   onResend,
   resending,
   canActivate,
+  puedeGestionar,
+  puedeReenviar,
 }: {
   colaborador: Colaborador
+  puedeGestionar: boolean
+  puedeReenviar: boolean
   onEdit: () => void
   onToggle: () => void
   onImpersonate?: () => void
@@ -216,7 +220,7 @@ function ColaboradorRow({
         )}
       </div>
 
-      <DropdownMenu>
+      {(puedeGestionar || puedeReenviar || onImpersonate) && <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -228,10 +232,12 @@ function ColaboradorRow({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-56">
-          <DropdownMenuItem onClick={onEdit}>
-            <Pencil className="mr-2 h-3.5 w-3.5" />Editar
-          </DropdownMenuItem>
-          {colaborador.invitacion_pendiente && (
+          {puedeGestionar && (
+            <DropdownMenuItem onClick={onEdit}>
+              <Pencil className="mr-2 h-3.5 w-3.5" />Editar
+            </DropdownMenuItem>
+          )}
+          {puedeReenviar && colaborador.invitacion_pendiente && (
             <DropdownMenuItem onClick={onResend} disabled={resending}>
               <Mail className="mr-2 h-3.5 w-3.5" />Reenviar invitación
             </DropdownMenuItem>
@@ -241,8 +247,8 @@ function ColaboradorRow({
               <LogIn className="mr-2 h-3.5 w-3.5" />Ingresar como este usuario
             </DropdownMenuItem>
           )}
-          <DropdownMenuSeparator />
-          {colaborador.activo ? (
+          {puedeGestionar && <DropdownMenuSeparator />}
+          {!puedeGestionar ? null : colaborador.activo ? (
             <DropdownMenuItem onClick={onToggle} className="text-red-600 focus:text-red-600">
               <UserX className="mr-2 h-3.5 w-3.5" />Desactivar
             </DropdownMenuItem>
@@ -259,7 +265,7 @@ function ColaboradorRow({
             </DropdownMenuItem>
           )}
         </DropdownMenuContent>
-      </DropdownMenu>
+      </DropdownMenu>}
     </div>
   )
 }
@@ -323,6 +329,10 @@ export default function PersonalPage() {
   const { user: currentUser, impersonate } = useAuthStore()
   const canImpersonate = isSuperAdmin(currentUser)
   const isAdmin = hasPermission(currentUser, PERM.USUARIOS_CREAR)
+  // Crear, editar y activar colaboradores: "Gestionar colaboradores". Reenviar la
+  // invitación: "Editar usuarios". Sin ellos, la lista es de solo consulta.
+  const puedeGestionar = hasPermission(currentUser, PERM.COLABORADORES_GESTIONAR)
+  const puedeReenviar = hasPermission(currentUser, PERM.USUARIOS_EDITAR)
 
   const [search, setSearch] = useState('')
   const [filtroRol, setFiltroRol] = useState('todos')
@@ -425,7 +435,7 @@ export default function PersonalPage() {
           <Tooltip>
             <TooltipTrigger asChild>
               <span>
-                <Button onClick={handleNew} disabled={!puedeAgregar}>
+                <Button onClick={handleNew} disabled={!puedeAgregar} className={cn(!puedeGestionar && 'hidden')}>
                   <Plus className="h-4 w-4 mr-1.5" />
                   Nuevo colaborador
                 </Button>
@@ -525,6 +535,8 @@ export default function PersonalPage() {
               key={c.id}
               colaborador={c}
               canActivate={puedeAgregar}
+              puedeGestionar={puedeGestionar}
+              puedeReenviar={puedeReenviar}
               onEdit={() => handleEdit(c)}
               onToggle={() => setToggleTarget(c)}
               onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}

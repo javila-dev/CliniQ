@@ -19,7 +19,7 @@
 - **Causa:** la API devuelve el documento y el correo enmascarados (`••••5678`). RHF valida con zod también los campos `disabled`, así que la validación falla antes de quitarlos del payload.
 - **Arreglo:** con `lockSensitive`, aplicar un esquema que no valide los campos sensibles, o no registrarlos en el formulario.
 
-**M2-02 · Alto · parámetros/errores** · confirmado
+**✅ M2-02 · Alto · parámetros/errores** · confirmado
 - **Dónde:** `PacienteForm.tsx:53,209,293`; `backend/apps/pacientes/models.py:86`; `pacientes/nuevo/page.tsx:56-59`; `registro/[token]/page.tsx:43-46`
 - **Qué ve el usuario:** la fecha de nacimiento parece opcional (sin `*`). Si se deja vacía:
   - en Nuevo paciente sale "Este campo es requerido." sin decir cuál campo;
@@ -27,7 +27,7 @@
 - **Causa:** el campo es `NOT NULL` en el modelo. Además, los mensajes de error descartan el nombre del campo.
 - **Arreglo:** marcarla como obligatoria con `*` (o permitir null) y mostrar los errores 400 en cada campo con `setError`.
 
-**M2-03 · Alto · llamada sin resolver** · confirmado
+**✅ M2-03 · Alto · llamada sin resolver** · confirmado
 - **Dónde:** `components/agenda/NuevaCitaModal.tsx:264-280`; `components/cotizaciones/CotizacionForm.tsx:642-656`
 - **Qué ve el usuario:** "Crear y seleccionar" paciente desde la agenda o una cotización **no muestra ningún error** (documento duplicado, fecha vacía, sin permiso).
 - **Causa:** `try/finally` sin `catch`.
@@ -54,7 +54,7 @@
 - **Causa:** el límite es de 20 por hora por IP y lo comparten las 3 vistas, y la pantalla muestra el 429 como "enlace no válido".
 - **Arreglo:** límite propio de cada vista, más alto, y un mensaje específico para el 429.
 
-**M2-07 · Medio · roles personalizados** · confirmado
+**✅ M2-07 · Medio · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/pacientes/views.py:106-115`
 - **Qué ve el usuario:** "No tienes permiso para consultar los antecedentes", aunque el rol tenga `pacientes.antecedentes.ver`.
 - **Causa:** `_can_manage_antecedentes` usa el `user.rol` fijo.
@@ -97,13 +97,13 @@
 - **Qué ve el usuario:** quien solo tiene "ver pacientes" puede registrar consentimientos manuales y subir PDFs legales, sin que se valide el tipo de archivo.
 - **Arreglo:** exigir `historia.consentimientos.gestionar` y validar que el archivo sea PDF.
 
-**M2-14 · Medio · permisos** · confirmado
+**✅ M2-14 · Medio · permisos** · confirmado
 - **Dónde:** `backend/apps/migracion/views.py:16-25,68-72`
 - **Qué ve el usuario:** en puesta en marcha, cualquier usuario puede cargar lotes y **revertir lotes ajenos**, lo que borra cobros, citas y cartera.
 - **Causa:** `migracion.gestionar` existe pero nunca se revisa.
 - **Arreglo:** decidir si exigirlo, al menos para revertir.
 
-**M2-15 · Medio · errores** · confirmado
+**✅ M2-15 · Medio · errores** · confirmado
 - **Dónde:** `components/puesta-en-marcha/PacienteEnCursoWizard.tsx:214-217`; `backend/apps/migracion/serializers.py:136`; `puesta-en-marcha/page.tsx`
 - **Qué ve el usuario:**
   - toasts con JSON crudo (`{"plan_saldo":[...],"code":[...]}`);
@@ -124,7 +124,7 @@
   - con el enlace se puede averiguar si un documento, teléfono o correo ya es paciente.
 - **Arreglo:** marcar duplicados solo por documento y responder con un mensaje genérico.
 
-**M2-18 · Bajo · carga** · confirmado
+**✅ M2-18 · Bajo · carga** · confirmado
 - **Dónde:** `app/registro/[token]/page.tsx:181-188`
 - **Qué ve el usuario:** "Registrarme" no muestra spinner y permite el doble envío; el segundo da 500.
 - **Arreglo:** pasar `isLoading` al formulario.

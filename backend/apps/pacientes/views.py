@@ -25,6 +25,7 @@ from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.serializers import ConsentimientoInformadoSerializer
 from apps.protocolos.models import ConsentimientoPaciente
 from apps.protocolos.serializers import ConsentimientoPacienteSerializer
+from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
@@ -104,11 +105,12 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         return Response(resultado, status=status.HTTP_200_OK)
 
     def _can_manage_antecedentes(self, paciente):
+        # El permiso (ver/editar antecedentes) ya lo exige get_permissions. Quien
+        # atiende pacientes, además, solo los de pacientes que ha atendido. Antes
+        # se miraba el rol fijo y un rol personalizado con el permiso quedaba fuera.
         user = self.request.user
-        if user.rol in {"admin", "superadmin"}:
+        if not atiende_solo_lo_propio(user):
             return True
-        if user.rol != "profesional":
-            return False
         return Cita.objects.filter(
             paciente=paciente,
             profesional=user,

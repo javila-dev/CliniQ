@@ -44,23 +44,23 @@
 - **Causa:** borrar solo desactiva la plantilla; las relaciones `ServicioConsentimiento` siguen activas.
 - **Arreglo:** desactivar también las relaciones, o filtrar por `template__activo=True`.
 
-**M1-06 · Alto · roles personalizados** · confirmado (igual que M0-09)
+**✅ M1-06 · Alto · roles personalizados** · confirmado (igual que M0-09)
 - **Dónde:** `AppShell.tsx:71`; `configuracion/layout.tsx:9`; `lib/permissions.ts:251-256`.
 - **Qué ve el usuario:** con solo "Gestionar promociones", "Consentimientos", "Formas de pago", "Sedes" o "Cajas", al entrar **vuelve al Dashboard sin explicación**.
 
-**M1-07 · Alto · roles personalizados** · confirmado (igual que M0-04)
+**✅ M1-07 · Alto · roles personalizados** · confirmado (igual que M0-04)
 - **Dónde:** `backend/apps/configuracion/views.py:257,292,327`; `ClinicaConfig.tsx:257-260,631`.
 - **Qué ve el usuario:** con un rol personalizado que tiene "Editar datos de la clínica", los interruptores de Recepción no hacen nada, sin mensaje. Biometría y Otros documentos responden "No se pudo actualizar".
 - **Causa:** se usa `IsAdmin` y falta `onError`.
 - **Arreglo:** `RequirePermission("clinicas.editar")` y mostrar el error.
 
-**M1-08 · Alto · roles personalizados** · confirmado
+**✅ M1-08 · Alto · roles personalizados** · confirmado
 - **Dónde:** `backend/apps/historia_clinica/views.py:78-82,949-951`; `PlantillaOrdenSheet.tsx:50-58`; `plantillas-ordenes/page.tsx:26-29`.
 - **Qué ve el usuario:** con un rol personalizado, Guardar y Desactivar una plantilla de orden **no hacen nada**.
 - **Causa:** solo lo permite al admin o a un rol con slug `coordinador`, y no hay `onError`.
 - **Arreglo:** usar una clave de permiso del catálogo.
 
-**M1-09 · Medio · errores** · confirmado
+**✅ M1-09 · Medio · errores** · confirmado
 - **Dónde:** `serializers.py:336-344`; `views.py:627-642`; `configuracion/sedes/page.tsx:240-242`.
 - **Qué ve el usuario:** crear o renombrar una sede con un nombre repetido muestra "Error al guardar. Intenta de nuevo", y reintentar nunca funciona.
 - **Causa:** la validación se salta cuando no viene `clinica` en el payload, así que el `IntegrityError` termina en 500.
@@ -113,7 +113,7 @@
 - **Qué ve el usuario:** con solo "ver plantillas" aparecen Nueva, Mapear y Eliminar. Eliminar no hace nada.
 - **Arreglo:** mostrar esas acciones solo con `consentimientos.plantillas.gestionar` y agregar `onError`.
 
-**M1-19 · Medio · roles personalizados** · confirmado
+**✅ M1-19 · Medio · roles personalizados** · confirmado
 - **Dónde:** `permissions_catalog.py:520-523,616-620,640-644`; `navegacion.ts:199-204`; `catalogo/page.tsx:26`.
 - **Qué ve el usuario:**
   - con "Crear y editar procedimientos": "No tienes permiso para ver el catálogo";
@@ -127,7 +127,7 @@
 - **Qué ve el usuario:** "Preparar mi clínica" dice "N procedimientos sin profesional" aunque estén cubiertos por un grupo de atención. Nunca llega a "Lista para agendar".
 - **Arreglo:** reutilizar `procedimientos_sin_profesional`.
 
-**M1-21 · Medio · permisos** · confirmado (igual que M2-14)
+**✅ M1-21 · Medio · permisos** · confirmado (igual que M2-14)
 - **Dónde:** `backend/apps/migracion/views.py:32,68`.
 - **Qué ve el usuario:** cualquier usuario puede revertir una carga de migración completa.
 
@@ -136,7 +136,7 @@
 - **Qué ve el usuario:** una promoción que termina hoy aparece "Vencida" desde las 7 p. m.
 - **Causa:** usa la fecha en UTC (ver T-04).
 
-**M1-23 · Bajo · carga** · confirmado
+**✅ M1-23 · Bajo · carga** · confirmado
 - **Dónde:** `ProcedimientosCatalogo.tsx:176-194,281`; `TratamientosCatalogo.tsx:137-144`; `formas-pago/page.tsx:204-207`.
 - **Qué ve el usuario:** si la carga falla, dice "No hay procedimientos". Activar o desactivar puede fallar sin avisar.
 
@@ -145,7 +145,7 @@
 - **Qué ve el usuario:** con más de 25 formas de pago, promociones o sedes, las demás no aparecen.
 - **Causa:** es el mismo problema de paginación de T-01.
 
-**M1-25 · Bajo · carga** · confirmado
+**✅ M1-25 · Bajo · carga** · confirmado
 - **Dónde:** `backend/apps/seguimiento/views.py:287-290`; `configuracion/seguimiento/page.tsx:48,84`.
 - **Qué ve el usuario:** quien edita la clínica pero no ve seguimiento se queda en "Cargando…" para siempre en Configuración → Seguimiento.
 - **Arreglo:** permitir el GET con `clinicas.editar` y mostrar el error.

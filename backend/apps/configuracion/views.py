@@ -36,7 +36,7 @@ from apps.configuracion.serializers import (
     PlantillaCamposSerializer,
 )
 from apps.pacientes.models import ConfiguracionFacial
-from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
 class PlantillaConsentimientoViewSet(GenericViewSet):
@@ -132,7 +132,7 @@ class DocumensoConsentimientoTemplateViewSet(GenericViewSet):
         if self.request.method.lower() == "get":
             permission_classes = (IsAuthenticated,)
         else:
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         return [permission() for permission in permission_classes]
 
     def _get_clinica(self):
@@ -181,7 +181,7 @@ class ConfiguracionSignosVitalesViewSet(GenericViewSet):
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         else:
             permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
@@ -254,7 +254,7 @@ class ConfiguracionCarteraViewSet(GenericViewSet):
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         else:
             permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
@@ -289,7 +289,7 @@ class ConfiguracionWizardViewSet(GenericViewSet):
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         else:
             permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
@@ -324,7 +324,7 @@ class ConfiguracionFacialViewSet(GenericViewSet):
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         else:
             permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]
@@ -362,7 +362,7 @@ class ConfiguracionRegistroPublicoViewSet(GenericViewSet):
 
     def get_permissions(self):
         if self.request.method.lower() == "patch":
-            permission_classes = (IsAdmin,)
+            permission_classes = (RequirePermission("clinicas.editar"),)
         else:
             permission_classes = (IsAuthenticated,)
         return [permission() for permission in permission_classes]

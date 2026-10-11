@@ -1,12 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { useMutation } from '@tanstack/react-query'
 import { Save, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
-import { historiaClinicaApi } from '@/lib/api/historiaClinica'
+import { useBorradorNota } from './useBorradorNota'
+import { EstadoGuardado } from './EstadoGuardado'
 import { formatDate } from '@/lib/utils'
 import type { HistoriaClinica, NotaClinica } from '@/types/historia'
 
@@ -20,20 +19,10 @@ export function TabPlanManejo({ historia, notas, notaId }: TabPlanManejoProps) {
   const modoAtencion = Boolean(notaId)
 
   const notaActual = notas.find((n) => n.id === notaId)
-  const [texto, setTexto] = useState(notaActual?.plan_manejo ?? '')
-  const [guardado, setGuardado] = useState(false)
-
-  useEffect(() => {
-    if (notaActual?.plan_manejo) setTexto(notaActual.plan_manejo)
-  }, [notaActual?.plan_manejo])
-
-  const { mutate, isPending } = useMutation({
-    mutationFn: (value: string) => historiaClinicaApi.notas.patch(notaId!, { plan_manejo: value }),
-    onSuccess: () => {
-      setGuardado(true)
-      setTimeout(() => setGuardado(false), 2000)
-    },
-  })
+  // Autoguardado: lo escrito no se pierde al cambiar de pestaña.
+  const { texto, setTexto, estado, hayCambios, guardarAhora } = useBorradorNota(
+    notaId, 'plan_manejo', notaActual?.plan_manejo ?? '', historia.id,
+  )
 
   const timeline = notas
     .filter((n) => n.estado === 'completada' && n.plan_manejo?.trim())
@@ -49,16 +38,13 @@ export function TabPlanManejo({ historia, notas, notaId }: TabPlanManejoProps) {
           value={texto}
           onChange={(e) => setTexto(e.target.value)}
         />
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            onClick={() => mutate(texto)}
-            disabled={isPending || texto === (notaActual?.plan_manejo ?? '')}
-          >
-            {isPending
+        <div className="flex items-center justify-end gap-3">
+          <EstadoGuardado estado={estado} />
+          <Button size="sm" variant="outline" onClick={guardarAhora} disabled={!hayCambios || estado === 'guardando'}>
+            {estado === 'guardando'
               ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
               : <Save className="h-3.5 w-3.5 mr-1.5" />}
-            {guardado ? '¡Guardado!' : 'Guardar'}
+            Guardar
           </Button>
         </div>
       </div>

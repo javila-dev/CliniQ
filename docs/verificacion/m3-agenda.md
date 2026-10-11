@@ -54,17 +54,17 @@
 - **Qué ve el usuario:** nada en pantalla. Pero por API se pueden crear citas o bloqueos en la sede o con el profesional **de otra clínica**. Un usuario de la sede A también puede mover citas a la sede B.
 - **Arreglo:** acotar los querysets a la clínica activa y validar que la sede esté entre las acotadas del usuario.
 
-**M3-08 · Medio · llamada sin resolver** · confirmado
+**✅ M3-08 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `CitaDetailSheet.tsx:93-111,135-143`
 - **Qué ve el usuario:** "Cancelar cita", "No asistió" o "Confirmar asistencia" muestran "Guardando…" y luego no pasa nada.
 - **Causa:** falta `onError`.
 
-**M3-09 · Medio · errores/carga** · confirmado
+**✅ M3-09 · Medio · errores/carga** · confirmado
 - **Dónde:** `SlotPicker.tsx:51-105`; `agenda/views.py:678-684`
 - **Qué ve el usuario:** "No hay horarios disponibles", cuando en realidad el tratamiento no tiene duración configurada o hubo un error. El mensaje del backend tiene voseo ("Configurá").
 - **Arreglo:** mostrar el error real y una acción para resolverlo.
 
-**M3-10 · Medio · carga** · confirmado
+**✅ M3-10 · Medio · carga** · confirmado
 - **Dónde:** `agenda/page.tsx:786,1103,1236,1471`
 - **Qué ve el usuario:** si la API falla, la agenda se ve vacía, como un día libre.
 - **Arreglo:** estado de error con "Reintentar".
@@ -95,12 +95,12 @@
 - **Qué ve el usuario:** el aviso de "citas sin cerrar" cuenta de menos.
 - **Arreglo:** filtrar por estado y orden en el backend.
 
-**M3-16 · Medio · errores** · confirmado
+**✅ M3-16 · Medio · errores** · confirmado
 - **Dónde:** `BloqueosPanel.tsx:137-139`
 - **Qué ve el usuario:** "Request failed with status code 400".
 - **Arreglo:** dar prioridad a `response.data` sobre `err.message`.
 
-**M3-17 · Medio · permisos** · confirmado
+**✅ M3-17 · Medio · permisos** · confirmado
 - **Dónde:** `agenda/views.py:1158-1165`; `BloqueosPanel.tsx:142-155,376-388`
 - **Qué ve el usuario:** quien puede "crear bloqueo" puede editar o borrar bloqueos **aprobados** por otros. Aprobar, rechazar y eliminar fallan sin mensaje.
 - **Causa:** `agenda.bloqueos.gestionar` nunca se revisa, y faltan los `onError`.
@@ -128,7 +128,7 @@
   - se confirmarían citas canceladas;
   - no se mostraría el error.
 
-**M3-22 · Medio · llamada sin resolver** · confirmado
+**✅ M3-22 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `NuevaCitaModal.tsx:264-281`
 - **Qué ve el usuario:** crear un paciente desde "Nueva cita" con datos inválidos no muestra ningún mensaje (igual que M2-03).
 
