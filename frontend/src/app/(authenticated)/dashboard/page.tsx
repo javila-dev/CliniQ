@@ -27,7 +27,7 @@ import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { SetupChecklist, useSetupChecklist } from '@/components/shared/SetupChecklist'
 import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
-import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
+import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM, veDashboard } from '@/lib/permissions'
 import { addDaysISO, cn, formatTime, scrollWheelFallback, todayISO, toTitleCase } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
@@ -631,7 +631,43 @@ function SheetNotificacionesFallidas({
 }
 
 export default function DashboardPage() {
-  return <RoleGuard check={canAccess.dashboard}><DashboardContent /></RoleGuard>
+  const { user } = useAuthStore()
+  return (
+    <RoleGuard check={canAccess.dashboard}>
+      {veDashboard(user) ? <DashboardContent /> : <DashboardSinReportes />}
+    </RoleGuard>
+  )
+}
+
+/** Sin permiso de reportes: accesos a lo que sí puede usar, en vez de
+ *  indicadores en cero que parecen datos reales. */
+function DashboardSinReportes() {
+  const { user } = useAuthStore()
+  const accesos = [
+    { href: '/agenda', label: 'Agenda', detalle: 'Citas del día y por agendar', visible: canAccess.agenda(user) },
+    { href: '/atenciones', label: 'Atenciones', detalle: 'Pacientes que atiendes hoy', visible: canAccess.atenciones(user) },
+    { href: '/pacientes', label: 'Pacientes', detalle: 'Buscar y abrir fichas', visible: canAccess.pacientes(user) },
+  ].filter((a) => a.visible)
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold tracking-tight">{greeting()}, {user?.first_name}</h1>
+        <p className="text-sm text-muted-foreground capitalize">{todayLong()}</p>
+      </div>
+      {accesos.length > 0 ? (
+        <div className="grid gap-3 sm:grid-cols-3">
+          {accesos.map((a) => (
+            <Link key={a.href} href={a.href} className="rounded-xl border bg-white p-4 transition-colors hover:bg-muted/40">
+              <p className="font-medium">{a.label}</p>
+              <p className="text-sm text-muted-foreground">{a.detalle}</p>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">Usa el menú para ir a las secciones de tu rol.</p>
+      )}
+    </div>
+  )
 }
 
 function DashboardContent() {

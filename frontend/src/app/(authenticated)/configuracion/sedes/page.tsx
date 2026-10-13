@@ -8,6 +8,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -260,10 +263,12 @@ function SedeCard({
   sede,
   onEdit,
   onToggle,
+  puedeGestionar,
 }: {
   sede: Sede
   onEdit: (s: Sede) => void
   onToggle: (s: Sede) => void
+  puedeGestionar: boolean
 }) {
   return (
     <div className={cn(
@@ -289,23 +294,25 @@ function SedeCard({
           </div>
         </div>
 
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
-              <MoreHorizontal className="h-4 w-4" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onEdit(sede)}>Editar sede</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onClick={() => onToggle(sede)}
-              className={sede.activo ? 'text-red-600 focus:text-red-600' : 'text-green-600 focus:text-green-600'}
-            >
-              {sede.activo ? 'Desactivar' : 'Activar'}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+        {puedeGestionar && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label={`Acciones de ${sede.nombre}`}>
+                <MoreHorizontal className="h-4 w-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onEdit(sede)}>Editar sede</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                onClick={() => onToggle(sede)}
+                className={sede.activo ? 'text-red-600 focus:text-red-600' : 'text-green-600 focus:text-green-600'}
+              >
+                {sede.activo ? 'Desactivar' : 'Activar'}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
       </div>
 
       <div className="space-y-1.5">
@@ -330,14 +337,21 @@ function SedeCard({
 
 // ─── Página principal ─────────────────────────────────────────
 
+const SEDES_TODAS = ['sedes', 'todas'] as const
+
 export default function SedesPage() {
   const qc = useQueryClient()
+  const { user } = useAuthStore()
+  // Con solo "ver sedes" no aparecen Nueva, Editar ni Desactivar (fallaban).
+  const puedeGestionar = hasPermission(user, PERM.SEDES_GESTIONAR)
   const [search, setSearch] = useState('')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [editando, setEditando] = useState<Sede | null>(null)
 
+  // Clave propia: esta lista trae también las inactivas. Con ['sedes'] la
+  // pisaba la lista de solo activas de Promociones y no se podían reactivar.
   const { data, isLoading } = useQuery({
-    queryKey: ['sedes'],
+    queryKey: SEDES_TODAS,
     queryFn: () => clinicasApi.sedes.list(),
   })
 
@@ -356,16 +370,17 @@ export default function SedesPage() {
   const toggleMutation = useMutation({
     mutationFn: (s: Sede) => clinicasApi.sedes.update(s.id, { activo: !s.activo }),
     onMutate: async (s: Sede) => {
-      await qc.cancelQueries({ queryKey: ['sedes'] })
-      const prev = qc.getQueryData(['sedes'])
-      qc.setQueryData(['sedes'], (old: any) => old ? {
+      await qc.cancelQueries({ queryKey: SEDES_TODAS })
+      const prev = qc.getQueryData(SEDES_TODAS)
+      qc.setQueryData(SEDES_TODAS, (old: any) => old ? {
         ...old,
-        results: old.results.map((r: Sede) => r.id === s.id ? { ...r, activa: !s.activo } : r),
+        results: old.results.map((r: Sede) => r.id === s.id ? { ...r, activo: !s.activo } : r),
       } : old)
       return { prev }
     },
-    onError: (_err, _s, ctx) => {
-      qc.setQueryData(['sedes'], ctx?.prev)
+    onError: (err, _s, ctx) => {
+      qc.setQueryData(SEDES_TODAS, ctx?.prev)
+      toast.error('No se pudo cambiar la sede', mensajeDeError(err))
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: ['sedes'] })
@@ -395,14 +410,16 @@ export default function SedesPage() {
             {isLoading ? 'Cargando…' : `${data?.count ?? 0} sede${(data?.count ?? 0) !== 1 ? 's' : ''} registradas`}
           </p>
         </div>
-        <Button
-          onClick={() => { setEditando(null); setSheetOpen(true) }}
-          disabled={enLimite}
-          title={enLimite ? `Límite de ${maxSedes} sedes alcanzado` : undefined}
-        >
-          <Plus className="h-4 w-4 mr-1.5" />
-          Nueva sede
-        </Button>
+        {puedeGestionar && (
+          <Button
+            onClick={() => { setEditando(null); setSheetOpen(true) }}
+            disabled={enLimite}
+            title={enLimite ? `Límite de ${maxSedes} sedes alcanzado` : undefined}
+          >
+            <Plus className="h-4 w-4 mr-1.5" />
+            Nueva sede
+          </Button>
+        )}
       </div>
 
       {/* Cuota de sedes */}
@@ -468,11 +485,15 @@ export default function SedesPage() {
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <Building2 className="h-12 w-12 text-muted-foreground/20 mb-3" />
           <p className="text-sm font-semibold">Sin sedes</p>
-          <p className="text-sm text-muted-foreground mt-1">Crea la primera sede de la clínica</p>
-          <Button className="mt-4" onClick={() => setSheetOpen(true)}>
-            <Plus className="h-4 w-4 mr-1.5" />
-            Nueva sede
-          </Button>
+          {puedeGestionar && (
+            <>
+              <p className="text-sm text-muted-foreground mt-1">Crea la primera sede de la clínica</p>
+              <Button className="mt-4" onClick={() => setSheetOpen(true)}>
+                <Plus className="h-4 w-4 mr-1.5" />
+                Nueva sede
+              </Button>
+            </>
+          )}
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -482,6 +503,7 @@ export default function SedesPage() {
               sede={s}
               onEdit={handleEdit}
               onToggle={s => toggleMutation.mutate(s)}
+              puedeGestionar={puedeGestionar}
             />
           ))}
         </div>

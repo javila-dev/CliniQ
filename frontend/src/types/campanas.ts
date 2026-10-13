@@ -35,6 +35,8 @@ export interface CreateCampanaRequest {
   fecha_fin:    string
   activo?:      boolean
   sedes?:       string[]
+  /** Ítems creados junto con la promoción (una sola operación). */
+  items?:       CreateCampanaItemRequest[]
 }
 
 export interface CreateCampanaItemRequest {

@@ -1,3 +1,8 @@
+import uuid
+from datetime import date
+
+from django.db.models import Q
+from rest_framework.exceptions import ValidationError
 from rest_framework.mixins import ListModelMixin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -27,14 +32,36 @@ class LogAccionViewSet(ListModelMixin, GenericViewSet):
             queryset = queryset.filter(clinica_id=clinica)
         if accion := params.get("accion"):
             queryset = queryset.filter(accion=accion)
-        if usuario := params.get("usuario"):
-            queryset = queryset.filter(usuario_id=usuario)
-        if fecha_desde := params.get("fecha_desde"):
+        if usuario := params.get("usuario", "").strip():
+            # La pantalla manda el nombre que se escribe; un id también sirve.
+            # Antes se filtraba por usuario_id con el texto y respondía 500.
+            try:
+                queryset = queryset.filter(usuario_id=uuid.UUID(usuario))
+            except ValueError:
+                filtro = Q()
+                for palabra in usuario.split():
+                    filtro &= (
+                        Q(usuario__first_name__icontains=palabra)
+                        | Q(usuario__last_name__icontains=palabra)
+                        | Q(usuario__email__icontains=palabra)
+                    )
+                queryset = queryset.filter(filtro)
+        if fecha_desde := self._fecha(params, "fecha_desde"):
             queryset = queryset.filter(created_at__date__gte=fecha_desde)
-        if fecha_hasta := params.get("fecha_hasta"):
+        if fecha_hasta := self._fecha(params, "fecha_hasta"):
             queryset = queryset.filter(created_at__date__lte=fecha_hasta)
 
         return queryset
+
+    @staticmethod
+    def _fecha(params, nombre):
+        valor = params.get(nombre)
+        if not valor:
+            return None
+        try:
+            return date.fromisoformat(valor)
+        except ValueError as exc:
+            raise ValidationError({nombre: "Usa el formato AAAA-MM-DD."}) from exc
 
 
 class ConfiguracionGlobalView(APIView):

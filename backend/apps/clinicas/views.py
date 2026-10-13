@@ -1409,6 +1409,18 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
 # ─── Campañas ─────────────────────────────────────────────────────────────────
 
 
+def _textos_error(errores):
+    """Mensajes legibles de los errores de un serializer (anidados o no)."""
+    if isinstance(errores, dict):
+        for valor in errores.values():
+            yield from _textos_error(valor)
+    elif isinstance(errores, (list, tuple)):
+        for valor in errores:
+            yield from _textos_error(valor)
+    elif errores:
+        yield str(errores)
+
+
 class CampanaViewSet(HasClinicamente, ModelViewSet):
     serializer_class = CampanaSerializer
     queryset = Campana.objects.select_related("clinica").prefetch_related("items", "sedes").all()
@@ -1458,8 +1470,30 @@ class CampanaViewSet(HasClinicamente, ModelViewSet):
         serializer = self.get_serializer(instance, context=self._stats_context([instance]))
         return Response(serializer.data)
 
-    def perform_create(self, serializer):
-        serializer.save(clinica=get_clinica_activa(self.request))
+    def create(self, request, *args, **kwargs):
+        """Crea la promoción con sus ítems en una sola operación. Antes eran
+        llamadas separadas: si un ítem fallaba la promoción quedaba creada y al
+        reintentar se duplicaba."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        clinica = get_clinica_activa(request)
+        items = []
+        for n, datos in enumerate(request.data.get("items") or [], start=1):
+            item_serializer = CampanaItemSerializer(data=datos, context={"request": request})
+            if not item_serializer.is_valid():
+                mensaje = next(iter(_textos_error(item_serializer.errors)), "Revisa los datos.")
+                raise ValidationError({"items": [f"Ítem {n}: {mensaje}"]})
+            for campo in ("procedimiento", "tratamiento"):
+                objeto = item_serializer.validated_data.get(campo)
+                if objeto and clinica and objeto.clinica_id != clinica.id:
+                    raise ValidationError({"items": [f"Ítem {n}: no pertenece a esta clínica."]})
+            items.append(item_serializer)
+        with transaction.atomic():
+            campana = serializer.save(clinica=clinica)
+            for item_serializer in items:
+                item_serializer.save(campana=campana)
+        data = self.get_serializer(campana, context=self._stats_context([campana])).data
+        return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
         instance.activo = False

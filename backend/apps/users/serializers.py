@@ -543,6 +543,8 @@ class RolSerializer(serializers.ModelSerializer):
             "updated_at",
         )
         read_only_fields = ("id", "es_sistema", "editable", "permission_keys", "usuarios_count", "created_at", "updated_at")
+        # El slug lo genera validate() desde el nombre si no viene.
+        extra_kwargs = {"slug": {"required": False}}
 
     def get_permission_keys(self, obj):
         return sorted(obj.permisos.filter(activo=True).values_list("clave", flat=True))
@@ -556,15 +558,55 @@ class RolSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Este slug esta reservado.")
         return value
 
+    def validate_nombre(self, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise serializers.ValidationError("Escribe un nombre de al menos 2 letras.")
+        return value
+
     def validate(self, attrs):
         request = self.context["request"]
-        slug = attrs.get("slug", getattr(self.instance, "slug", None))
-        qs = Rol.objects.filter(clinica=get_clinica_activa(request), slug=slug)
+        clinica = get_clinica_activa(request)
+        roles = Rol.objects.filter(clinica=clinica)
         if self.instance:
-            qs = qs.exclude(id=self.instance.id)
-        if qs.exists():
+            roles = roles.exclude(id=self.instance.id)
+
+        # Nombre repetido (sin importar mayúsculas ni tildes): antes "Recepción"
+        # chocaba con el rol de sistema y solo decía "Error al guardar el rol".
+        nombre = attrs.get("nombre")
+        if nombre:
+            clave = _clave_nombre_rol(nombre)
+            if any(_clave_nombre_rol(n) == clave for n in roles.values_list("nombre", flat=True)):
+                raise serializers.ValidationError(
+                    {"nombre": f"Ya existe un rol llamado «{nombre}». Elige otro nombre."}
+                )
+
+        if not self.instance:
+            # El código interno (slug) lo genera el sistema a partir del nombre.
+            base = attrs.get("slug") or _slug_rol(nombre or "rol")
+            slug, n = base, 2
+            ocupados = set(Rol.objects.filter(clinica=clinica).values_list("slug", flat=True)) | {"superadmin"}
+            while slug in ocupados:
+                slug = f"{base[:45]}_{n}"
+                n += 1
+            attrs["slug"] = slug
+        elif "slug" in attrs and roles.filter(slug=attrs["slug"]).exists():
             raise serializers.ValidationError({"slug": "Ya existe un rol con ese slug en tu clinica."})
         return attrs
+
+
+def _clave_nombre_rol(nombre: str) -> str:
+    import unicodedata
+
+    sin_tildes = unicodedata.normalize("NFD", nombre).encode("ascii", "ignore").decode()
+    return " ".join(sin_tildes.lower().split())
+
+
+def _slug_rol(nombre: str) -> str:
+    import re
+
+    slug = re.sub(r"[^a-z0-9]+", "_", _clave_nombre_rol(nombre)).strip("_")
+    return (slug or "rol")[:45]
 
 
 class RolPermisosUpdateSerializer(serializers.Serializer):

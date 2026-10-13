@@ -53,6 +53,17 @@ class ReglaDeQuienRealizaTests(GruposBase):
         self.assertIn(str(self.peeling.id), antes)
         self.assertNotIn(str(self.peeling.id), despues)
 
+    def test_preparar_mi_clinica_cuenta_los_procedimientos_de_un_grupo(self):
+        # M1-20: antes solo contaban los asignados directo.
+        from apps.clinicas.preparacion import construir_preparacion, procedimientos_sin_profesional
+
+        self._activar_filtro()
+        self._asignar(self.esteticistas, self.peeling)
+        self.assertNotIn(self.peeling, procedimientos_sin_profesional(self.clinica))
+        paso = next(p for p in construir_preparacion(self.clinica, self.admin)["items"] if p["key"] == "procedimientos")
+        sin = len(procedimientos_sin_profesional(self.clinica))
+        self.assertEqual("no tiene" in paso["resumen"] or "no tienen" in paso["resumen"], sin > 0)
+
     def test_la_cobertura_del_listado_cuenta_directos_y_grupos_sin_repetir(self):
         self._asignar(self.esteticistas, self.limpieza)
         # prof_ambos ya hace limpieza directo; en el grupo no debe contarse dos veces.

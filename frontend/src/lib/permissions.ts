@@ -271,9 +271,19 @@ export const canAccess = {
 
 // ── Ruta de aterrizaje post-login ─────────────────────────────────────────────
 
+/** Quien no ve reportes no tiene nada que mirar en el Dashboard (antes veía
+ *  "0 citas hoy"): aterriza en la primera pantalla de trabajo que tiene. */
+export function veDashboard(user: AuthUser | null | undefined): boolean {
+  return isAdminOrSuperAdmin(user) || hasPermission(user, PERM.REPORTES_VER)
+}
+
 export function defaultRoute(user: AuthUser): string {
   // Superadmin y el equipo interno (staff sin clínica) no tienen "su" clínica —
   // aterrizan en /console. Un usuario de clínica normal siempre trae clinica_id.
   if (!user.clinica_id) return '/console'
+  if (veDashboard(user)) return '/dashboard'
+  if (canAccess.agenda(user)) return '/agenda'
+  if (canAccess.atenciones(user)) return '/atenciones'
+  if (canAccess.pacientes(user)) return '/pacientes'
   return '/dashboard'
 }

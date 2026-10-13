@@ -22,25 +22,17 @@ import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Badge } from '@/components/ui/badge'
 import { cn } from '@/lib/utils'
-import { mensajeDeError } from '@/lib/errores'
+import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse } from '@/types/usuarios'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
+// El código interno del rol (slug) lo genera el backend desde el nombre.
+// Antes se armaba aquí: con un nombre de una letra el botón no hacía nada.
 const rolSchema = z.object({
-  slug:        z.string().min(2).regex(/^[a-z0-9_]+$/),
-  nombre:      z.string().min(1, 'Requerido'),
+  nombre:      z.string().trim().min(2, 'Escribe un nombre de al menos 2 letras.'),
   descripcion: z.string().optional(),
 })
-
-function toSlug(nombre: string): string {
-  return nombre
-    .toLowerCase()
-    .normalize('NFD').replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9\s]/g, '')
-    .trim()
-    .replace(/\s+/g, '_')
-}
 
 // ── Editor de capacidades (capa semántica) ────────────────────────────────────
 // `selected` son siempre claves de permiso técnicas — es lo que se envía al
@@ -285,16 +277,10 @@ function RolDialog({
   const areas = capacidades?.areas ?? []
   const gruposTecnicos = capacidades?.permisos_tecnicos ?? []
 
-  const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm({
+  const { register, handleSubmit, reset, setError, formState: { errors } } = useForm({
     resolver: zodResolver(rolSchema),
-    values: rol ? { slug: rol.slug, nombre: rol.nombre, descripcion: rol.descripcion } : undefined,
+    values: rol ? { nombre: rol.nombre, descripcion: rol.descripcion } : undefined,
   })
-
-  // Auto-genera el slug desde el nombre solo en modo creación
-  const nombreValue = watch('nombre')
-  useEffect(() => {
-    if (!isEditing) setValue('slug', toSlug(nombreValue ?? ''))
-  }, [nombreValue, isEditing, setValue])
 
   // Permisos seleccionados en este modal
   const [permKeys, setPermKeys] = useState<string[]>(rol?.permission_keys ?? [])
@@ -314,13 +300,15 @@ function RolDialog({
     if (open) setVerTecnicos(false)
   }, [open, rol?.id])
 
+  // Un nombre repetido se muestra en el campo Nombre, no como error genérico.
+  const marcarErrorDeCampo = (err: unknown) => aplicarErroresDeCampo(err, setError, ['nombre', 'descripcion'])
+
   const crearMutation = useMutation({
-    mutationFn: async (data: z.infer<typeof rolSchema>) => {
-      const nuevo = await rolesApi.create(data)
-      if (permKeys.length) await rolesApi.updatePermisos(nuevo.id, permKeys)
-      return nuevo
-    },
+    // Rol y permisos en una sola llamada: si algo falla no queda un rol vacío.
+    mutationFn: (data: z.infer<typeof rolSchema>) =>
+      rolesApi.create({ ...data, permission_keys: permKeys }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); reset(); onClose() },
+    onError: marcarErrorDeCampo,
   })
 
   const editarMutation = useMutation({
@@ -329,10 +317,14 @@ function RolDialog({
       await rolesApi.updatePermisos(rol!.id, permKeys)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); onClose() },
+    onError: marcarErrorDeCampo,
   })
 
   const isPending = crearMutation.isPending || editarMutation.isPending
   const isError   = crearMutation.isError   || editarMutation.isError
+  const errorGuardar = crearMutation.error ?? editarMutation.error
+  // Si el error ya se muestra en un campo, no se repite abajo.
+  const errorEnCampo = Boolean(errors.nombre?.type === 'server' || errors.descripcion?.type === 'server')
 
   const onSubmit = (data: z.infer<typeof rolSchema>) => {
     if (isEditing) editarMutation.mutate(data)
@@ -366,9 +358,6 @@ function RolDialog({
               />
               {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
             </div>
-
-            {/* slug oculto — se auto-genera desde el nombre */}
-            <input type="hidden" {...register('slug')} />
 
             <div className="space-y-1.5">
               <Label>Descripción</Label>
@@ -456,9 +445,9 @@ function RolDialog({
             </Button>
           </div>
         )}
-        {isError && (
+        {isError && !errorEnCampo && (
           <p className="shrink-0 px-6 pb-4 text-sm text-red-500">
-            Error al guardar el rol. Intenta de nuevo.
+            {mensajeDeError(errorGuardar, 'No se pudo guardar el rol. Intenta de nuevo.')}
           </p>
         )}
       </DialogContent>

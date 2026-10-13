@@ -242,7 +242,9 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     mutationFn: async ({ data }: { data: FormValues; otro: boolean }) => {
       const selectedId = data.requiere_consentimiento ? (data.documenso_template_id ?? null) : null
       const templateId = selectedId ?? null
-      const payload: CreateProcedimientoRequest = {
+      const payload: CreateProcedimientoRequest & { activo?: boolean } = {
+        // Al editar, "Activo" se guarda: antes no viajaba y el procedimiento seguía activo.
+        ...(isEdit && { activo: data.activo ?? true }),
         nombre: data.nombre,
         descripcion: data.descripcion,
         duracion_min: data.duracion_min,

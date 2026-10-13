@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/dialog'
 import { cn } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
+import { useDebounce } from '@/hooks/useDebounce'
 import type { LogAccion } from '@/types/core'
 
 const PAGE_SIZE = 50
@@ -238,13 +239,15 @@ export default function LogAccionesPage() {
   const [filterDesde, setFilterDesde]     = useState('')
   const [filterHasta, setFilterHasta]     = useState('')
   const [detalle, setDetalle]         = useState<LogAccion | null>(null)
+  // El nombre se busca al dejar de escribir, no con cada letra.
+  const usuarioBuscado = useDebounce(filterUsuario.trim(), 350)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['log-acciones', page, filterUsuario, filterDesde, filterHasta],
+    queryKey: ['log-acciones', page, usuarioBuscado, filterDesde, filterHasta],
     queryFn: () => coreApi.logAcciones.list({
       page,
       page_size: PAGE_SIZE,
-      ...(filterUsuario.trim() && { usuario: filterUsuario.trim() }),
+      ...(usuarioBuscado && { usuario: usuarioBuscado }),
       ...(filterDesde          && { fecha_desde: filterDesde }),
       ...(filterHasta          && { fecha_hasta: filterHasta }),
     }),

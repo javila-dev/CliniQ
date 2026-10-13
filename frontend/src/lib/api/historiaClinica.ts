@@ -249,7 +249,10 @@ export const historiaClinicaApi = {
       return Array.isArray(res.data) ? res.data : (res.data as any).results ?? []
     },
     listAll: async (): Promise<PlantillaOrden[]> => {
-      const res = await apiClient.get<PlantillaOrden[]>('/historia-clinica/plantillas-ordenes/')
+      // Sin 'activa' el backend devuelve solo las activas: "Mostrar inactivas" salía vacío.
+      const res = await apiClient.get<PlantillaOrden[]>('/historia-clinica/plantillas-ordenes/', {
+        params: { activa: 'todas' },
+      })
       return Array.isArray(res.data) ? res.data : (res.data as any).results ?? []
     },
     create: async (data: { nombre: string; contenido: string; permite_edicion_profesional: boolean }): Promise<PlantillaOrden> => {

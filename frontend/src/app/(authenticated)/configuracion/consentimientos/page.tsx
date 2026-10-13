@@ -10,13 +10,19 @@ import { configuracionApi, type PlantillaConsentimiento } from '@/lib/api/config
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 
 function PlantillaCard({
   plantilla,
   onDelete,
+  puedeGestionar,
 }: {
   plantilla: PlantillaConsentimiento
   onDelete: (id: string) => void
+  puedeGestionar: boolean
 }) {
   return (
     <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-4 flex items-start gap-4 hover:shadow-md transition-all duration-200">
@@ -58,7 +64,7 @@ function PlantillaCard({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        {plantilla.tiene_pdf && (
+        {plantilla.tiene_pdf && puedeGestionar && (
           <Button size="sm" variant="outline" asChild>
             <Link href={`/configuracion/consentimientos/${plantilla.id}/campos`}>
               <MapPin className="h-3.5 w-3.5 mr-1.5" />
@@ -66,14 +72,17 @@ function PlantillaCard({
             </Link>
           </Button>
         )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          onClick={() => onDelete(plantilla.id)}
-        >
-          <Trash2 className="h-4 w-4" />
-        </Button>
+        {puedeGestionar && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            onClick={() => onDelete(plantilla.id)}
+            aria-label={`Eliminar ${plantilla.nombre || plantilla.label}`}
+          >
+            <Trash2 className="h-4 w-4" />
+          </Button>
+        )}
       </div>
     </div>
   )
@@ -81,6 +90,9 @@ function PlantillaCard({
 
 export default function ConsentimientosConfigPage() {
   const qc = useQueryClient()
+  const { user } = useAuthStore()
+  // Con solo "ver plantillas" no aparecen Nueva, Mapear ni Eliminar (fallaban).
+  const puedeGestionar = hasPermission(user, PERM.CONSENTIMIENTOS_GESTIONAR)
 
   const { data: plantillas = [], isLoading } = useQuery({
     queryKey: ['plantillas-consentimiento'],
@@ -91,7 +103,9 @@ export default function ConsentimientosConfigPage() {
     mutationFn: (id: string) => configuracionApi.plantillasConsentimiento.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['plantillas-consentimiento'] })
+      toast.success('Plantilla eliminada')
     },
+    onError: (err) => toast.error('No se pudo eliminar la plantilla', mensajeDeError(err)),
   })
 
   const handleDelete = (id: string) => {
@@ -106,14 +120,14 @@ export default function ConsentimientosConfigPage() {
         helpSlug="consentimientos-informados-como-funcionan"
         title="Plantillas de consentimiento"
         description="Sube tus PDFs de consentimiento, mapea los campos y asócialos a procedimientos."
-        action={
+        action={puedeGestionar ? (
           <Button asChild>
             <Link href="/configuracion/consentimientos/nuevo">
               <Plus className="h-4 w-4 mr-2" />
               Nueva plantilla
             </Link>
           </Button>
-        }
+        ) : undefined}
       />
 
       {isLoading ? (
@@ -129,16 +143,18 @@ export default function ConsentimientosConfigPage() {
               Sube el PDF del consentimiento y luego mapea dónde va cada campo (firma, nombre, fecha…).
             </p>
           </div>
-          <Button className="mt-2" asChild>
-            <Link href="/configuracion/consentimientos/nuevo">
-              <Plus className="h-4 w-4 mr-2" /> Crear primera plantilla
-            </Link>
-          </Button>
+          {puedeGestionar && (
+            <Button className="mt-2" asChild>
+              <Link href="/configuracion/consentimientos/nuevo">
+                <Plus className="h-4 w-4 mr-2" /> Crear primera plantilla
+              </Link>
+            </Button>
+          )}
         </div>
       ) : (
         <div className="space-y-3">
           {plantillas.map(p => (
-            <PlantillaCard key={p.id} plantilla={p} onDelete={handleDelete} />
+            <PlantillaCard key={p.id} plantilla={p} onDelete={handleDelete} puedeGestionar={puedeGestionar} />
           ))}
         </div>
       )}

@@ -19,16 +19,16 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | ✅ Hecho | `03c7e93` |
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | `84f0e36` |
-| 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | pendiente de commit |
-| 7b | Los medios, módulo por módulo (M0 a M7) | Pendiente | — |
+| 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | `472b176` |
+| 7b | Los medios, módulo por módulo (M0 a M7) | En curso: M0 y M1 hechos | pendiente de commit |
 | 7c | Los bajos | Pendiente | — |
 
-**Hallazgos:** 118 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 131 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
-| M0 Acceso y roles | 23 | 7 | 0 |
-| M1 Configuración y catálogo | 14 | 17 | 0 |
+| M0 Acceso y roles | 26 | 4 | 0 |
+| M1 Configuración y catálogo | 24 | 7 | 0 |
 | M2 Pacientes | 10 | 16 | 0 |
 | M3 Agenda | 21 | 9 | 0 |
 | M4 Atención clínica | 15 | 13 | 0 |
@@ -413,6 +413,33 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 - **Riesgo anterior encontrado y corregido:** al editar una cita, el backend recalculaba la hora de fin como inicio + `duracion_min`. En las citas sin `duracion_min` (13 de 47 en la base local) eso dejaba fin = inicio, y si cambió la duración del procedimiento en el catálogo, editar una nota corría la hora de fin. Ahora, si no cambian la hora ni el procedimiento, la hora de fin queda tal cual; sin `duracion_min` se usa lo que la cita ocupa en la agenda. `scripts/auditoria/citas_fin_inconsistente.py` cuenta esas citas (solo lee).
 - **Pruebas** (en `test_verificacion_paso6.py`): editar una nota, cambiar el profesional, reenviar la hora que devuelve la API y cambiar la duración del catálogo no mueven la cita; reprogramar una cita sin duración conserva lo que dura.
 - **Para revisar en pantalla:** en la ficha de un paciente con un consentimiento sin PDF, el enlace "Reintentar"; y una recepcionista de una sede, en Cotizaciones y Cartera.
+
+**Paso 7b — medios de M0 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M0-11 | El filtro "Usuario" del log busca por nombre o correo (también acepta un id) y espera a que se deje de escribir. Una fecha mal escrita responde 400 en vez de 500. |
+| M0-16 | El código interno del rol lo genera el backend desde el nombre (con sufijo si ya existe). Un nombre repetido, aunque cambien mayúsculas o tildes, dice "Ya existe un rol llamado…" en el campo Nombre. El rol y sus permisos se guardan en una sola operación: si los permisos fallan, el rol no queda creado vacío. Un nombre de una letra explica que pide al menos 2. |
+| M0-20 | Quien no ve reportes ya no aterriza en un Dashboard con "0 citas hoy": entra a Agenda, Atenciones o Pacientes (la primera que tenga), y si abre el Dashboard ve accesos a esas pantallas. |
+
+- **Pruebas:** 4 nuevas en `test_verificacion_paso7.py`.
+
+**Paso 7b — medios de M1 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M1-10 | En Sedes, "Nueva sede", "Editar" y "Desactivar" solo aparecen con `sedes.gestionar`; si activar o desactivar falla, se avisa. (El cupo del plan ya se abrió en el paso 4.) |
+| M1-11 | La lista de Sedes usa su propia clave de caché (`['sedes', 'todas']`): Promociones ya no la reemplaza por la de solo activas, y las inactivas se pueden reactivar. |
+| M1-12 | Desmarcar "Activo" en un procedimiento se guarda. |
+| M1-13 | El NIT es obligatorio (con `*`) y un NIT repetido se explica en el campo. Los demás errores muestran el motivo real. |
+| M1-14 | El logo acepta PNG o JPG, y la pantalla ya no ofrece WebP (el backend no lo acepta y el logo va en los PDF). |
+| M1-15 | "Mostrar inactivas" en Plantillas de órdenes trae también las inactivas (`activa=todas`). |
+| M1-16 | La promoción y sus ítems se crean en una sola operación: un ítem inválido no deja la promoción creada (ni duplicada al reintentar) y el aviso dice qué ítem y por qué. Guardar cambios también muestra el motivo. |
+| M1-17 | Al crear una plantilla de consentimiento, si el PDF ya se subió y falla guardar los campos, el reintento solo guarda los campos (no sube otra copia). El error muestra el motivo, no "Request failed…". |
+| M1-18 | Con solo "ver plantillas" no aparecen Nueva, Mapear ni Eliminar. Eliminar avisa si falla. |
+| M1-20 | "Preparar mi clínica" cuenta como listos los procedimientos cubiertos por un grupo de atención. |
+
+- **Pruebas:** 4 nuevas en `test_verificacion_paso7.py` y 1 en `colaboradores/tests_grupos.py`.
 
 ## Orden de corrección sugerido
 

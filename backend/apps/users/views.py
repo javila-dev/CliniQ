@@ -664,22 +664,46 @@ class RolViewSet(GenericViewSet):
             )
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        rol = serializer.save(
-            clinica=clinica_activa,
-            es_sistema=False,
-            editable=True,
-        )
-        RolAuditoria.objects.create(
-            rol=rol,
-            usuario=request.user,
-            accion=RolAuditoria.Accion.CREAR,
-            despues=RolSerializer(rol, context=self.get_serializer_context()).data,
-        )
+        # Los permisos pueden venir en la misma llamada: antes eran dos y, si
+        # fallaba la segunda, el rol quedaba creado y vacío.
+        keys = None
+        if "permission_keys" in request.data:
+            permisos_serializer = RolPermisosUpdateSerializer(data=request.data)
+            permisos_serializer.is_valid(raise_exception=True)
+            keys = permisos_serializer.validated_data["permission_keys"]
+        with transaction.atomic():
+            rol = serializer.save(
+                clinica=clinica_activa,
+                es_sistema=False,
+                editable=True,
+            )
+            if keys is not None:
+                self._guardar_permisos(rol, keys)
+            RolAuditoria.objects.create(
+                rol=rol,
+                usuario=request.user,
+                accion=RolAuditoria.Accion.CREAR,
+                despues=RolSerializer(rol, context=self.get_serializer_context()).data,
+            )
         registrar_accion(
             request, "rol.crear", rol,
             {"resumen": f"Rol «{rol.nombre}» creado"}, clinica=rol.clinica,
         )
         return Response(self.get_serializer(rol).data, status=status.HTTP_201_CREATED)
+
+    @staticmethod
+    def _guardar_permisos(rol, keys):
+        """Reemplaza los permisos del rol. El perfil profesional del rol se deriva
+        de las capacidades clinicas; quien atiende pacientes lo decide solo el
+        check "atiende pacientes" de cada usuario."""
+        permisos = list(Permiso.objects.filter(clave__in=keys))
+        es_profesional = role_is_professional_from_keys(keys)
+        RolPermiso.objects.filter(rol=rol).delete()
+        RolPermiso.objects.bulk_create([RolPermiso(rol=rol, permiso=permiso) for permiso in permisos])
+        if rol.es_profesional != es_profesional:
+            rol.es_profesional = es_profesional
+            rol.save(update_fields=["es_profesional", "updated_at"])
+        return es_profesional
 
     def _rechazar_rol_propio(self, request, rol):
         """Quien gestiona roles sin ser administrador no edita su propio rol: podía
@@ -760,18 +784,8 @@ class RolViewSet(GenericViewSet):
         serializer.is_valid(raise_exception=True)
         keys = serializer.validated_data["permission_keys"]
         antes = RolSerializer(rol, context=self.get_serializer_context()).data
-        permisos = list(Permiso.objects.filter(clave__in=keys))
-        # El perfil profesional del rol se deriva de las capacidades clinicas
-        # seleccionadas; se propaga a los usuarios que ya tienen el rol asignado.
-        es_profesional = role_is_professional_from_keys(keys)
         with transaction.atomic():
-            RolPermiso.objects.filter(rol=rol).delete()
-            RolPermiso.objects.bulk_create([RolPermiso(rol=rol, permiso=permiso) for permiso in permisos])
-            if rol.es_profesional != es_profesional:
-                rol.es_profesional = es_profesional
-                rol.save(update_fields=["es_profesional", "updated_at"])
-            # Quien atiende pacientes lo decide solo el check "atiende pacientes" de
-            # cada usuario: el rol no marca ni desmarca a sus usuarios.
+            es_profesional = self._guardar_permisos(rol, keys)
             RolAuditoria.objects.create(
                 rol=rol,
                 usuario=request.user,

@@ -16,9 +16,12 @@ export interface Rol {
 }
 
 export interface CreateRolRequest {
-  slug: string
+  /** Opcional: si no viene, el backend lo genera desde el nombre. */
+  slug?: string
   nombre: string
   descripcion?: string
+  /** Permisos del rol, guardados en la misma operación que el rol. */
+  permission_keys?: string[]
 }
 
 export interface UpdateRolRequest {

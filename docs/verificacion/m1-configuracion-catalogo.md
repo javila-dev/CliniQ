@@ -66,49 +66,49 @@
 - **Causa:** la validación se salta cuando no viene `clinica` en el payload, así que el `IntegrityError` termina en 500.
 - **Arreglo:** validar el nombre contra la clínica activa y mostrar el error en el campo.
 
-**M1-10 · Medio · permisos** · confirmado
+**✅ M1-10 · Medio · permisos** · confirmado
 - **Dónde:** `configuracion/sedes/page.tsx:298-305,343-346,397-405`; `views.py:120-121`.
 - **Qué ve el usuario:** con solo "ver sedes" aparecen Nueva, Editar y Desactivar, y todos fallan. Un rol personalizado no ve el cupo del plan.
 - **Arreglo:** mostrar las acciones solo con `sedes.gestionar` y abrir `plan_usage` a `clinicas.ver`.
 
-**M1-11 · Medio · previsible** · confirmado
+**✅ M1-11 · Medio · previsible** · confirmado
 - **Dónde:** `configuracion/campanas/page.tsx:829-832` vs `configuracion/sedes/page.tsx:338-341`.
 - **Qué ve el usuario:** después de entrar a Promociones, en Sedes desaparecen las sedes inactivas y no se pueden reactivar.
 - **Causa:** las dos pantallas usan la misma clave de caché `['sedes']` para consultas distintas.
 - **Arreglo:** usar claves distintas.
 
-**M1-12 · Medio · faltante** · confirmado
+**✅ M1-12 · Medio · faltante** · confirmado
 - **Dónde:** `ProcedimientoDialog.tsx:244-256,527-537`.
 - **Qué ve el usuario:** desmarca "Activo" y guarda, pero el procedimiento **sigue activo**.
 - **Causa:** el payload no incluye `activo`.
 
-**M1-13 · Medio · errores** · confirmado
+**✅ M1-13 · Medio · errores** · confirmado
 - **Dónde:** `ClinicaConfig.tsx:100,385`; `clinicas/models.py:156`.
 - **Qué ve el usuario:** si el NIT está vacío o repetido, solo sale "Error al guardar".
 - **Arreglo:** marcar el NIT como obligatorio y mostrar el error en el campo.
 
-**M1-14 · Medio · parámetros** · confirmado
+**✅ M1-14 · Medio · parámetros** · confirmado
 - **Dónde:** `ClinicaConfig.tsx:203,346,351` vs `clinicas/views.py:241`.
 - **Qué ve el usuario:** la pantalla dice que acepta "PNG, JPG o WebP", pero un logo WebP falla.
 - **Arreglo:** aceptar WebP en el backend o quitarlo del texto.
 
-**M1-15 · Medio · parámetros** · confirmado
+**✅ M1-15 · Medio · parámetros** · confirmado
 - **Dónde:** `lib/api/historiaClinica.ts:250-252`; `historia_clinica/views.py:957-962`.
 - **Qué ve el usuario:** "Mostrar inactivas" en Plantillas de órdenes no muestra nada, así que una plantilla desactivada no se puede recuperar.
 - **Causa:** `listAll` no envía `activa`.
 
-**M1-16 · Medio · llamada sin resolver** · confirmado
+**✅ M1-16 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `configuracion/campanas/page.tsx:167-179,205`.
 - **Qué ve el usuario:** al crear una promoción con un ítem inválido sale "Error al crear". Si vuelve a guardar, **se duplica**. No le dice el motivo (por ejemplo, fechas invertidas).
 - **Causa:** se crea la campaña y luego cada ítem por separado.
 - **Arreglo:** hacerlo en una sola petición, o pasar a edición después del primer éxito, y mostrar `response.data`.
 
-**M1-17 · Medio · llamada sin resolver** · confirmado
+**✅ M1-17 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `configuracion/consentimientos/nuevo/page.tsx:13-18,49-55`.
 - **Qué ve el usuario:** "Request failed with status code 400", y al reintentar se crea una plantilla duplicada.
 - **Arreglo:** después de subir el PDF, navegar a `/[id]/campos` y traducir el error.
 
-**M1-18 · Medio · permisos** · confirmado
+**✅ M1-18 · Medio · permisos** · confirmado
 - **Dónde:** `configuracion/consentimientos/page.tsx:83-97,104-112`.
 - **Qué ve el usuario:** con solo "ver plantillas" aparecen Nueva, Mapear y Eliminar. Eliminar no hace nada.
 - **Arreglo:** mostrar esas acciones solo con `consentimientos.plantillas.gestionar` y agregar `onError`.
@@ -122,7 +122,7 @@
 - **Causa:** las capacidades de "gestionar" no incluyen su permiso de "ver".
 - **Arreglo:** que cada capacidad de gestionar incluya el permiso de ver.
 
-**M1-20 · Medio · previsible** · confirmado
+**✅ M1-20 · Medio · previsible** · confirmado
 - **Dónde:** `backend/apps/clinicas/preparacion.py:40-50,116-118,147`.
 - **Qué ve el usuario:** "Preparar mi clínica" dice "N procedimientos sin profesional" aunque estén cubiertos por un grupo de atención. Nunca llega a "Lista para agendar".
 - **Arreglo:** reutilizar `procedimientos_sin_profesional`.

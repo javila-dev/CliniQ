@@ -23,6 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 import { cn, todayISO } from '@/lib/utils'
 import { precioEnSede, precioGeneralProcedimiento } from '@/lib/precios'
 import type { Campana, CampanaItem, CreateCampanaRequest, CreateCampanaItemRequest } from '@/types/campanas'
@@ -166,16 +167,21 @@ function CampanaDialog({
 
   const createMutation = useMutation({
     mutationFn: async (values: CampanaFormValues) => {
-      const payload: CreateCampanaRequest = { ...values, descripcion: values.descripcion ?? '' }
-      const campana = await campanasApi.create(payload)
-      for (const item of itemsDraft) await campanasApi.addItem(campana.id, payloadItem(item))
+      // Promoción e ítems en una sola llamada: si un ítem es inválido no queda
+      // nada creado y reintentar no la duplica.
+      const payload: CreateCampanaRequest = {
+        ...values,
+        descripcion: values.descripcion ?? '',
+        items: itemsDraft.map(payloadItem),
+      }
+      await campanasApi.create(payload)
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
       toast.success('Promoción creada')
       onOpenChange(false)
     },
-    onError: () => toast.error('Error al crear la promoción'),
+    onError: (err) => toast.error('No se pudo crear la promoción', mensajeDeError(err)),
   })
 
   const updateMutation = useMutation({
@@ -202,7 +208,7 @@ function CampanaDialog({
       toast.success('Promoción actualizada')
       onOpenChange(false)
     },
-    onError: () => toast.error('Error al guardar la promoción'),
+    onError: (err) => toast.error('No se pudo guardar la promoción', mensajeDeError(err)),
   })
 
   const isPending = createMutation.isPending || updateMutation.isPending

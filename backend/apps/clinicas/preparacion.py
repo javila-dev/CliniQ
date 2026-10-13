@@ -113,8 +113,11 @@ def construir_preparacion(clinica, user=None) -> dict:
     profesionales = list(profesionales_activos(clinica).filter(sedes__in=sedes).select_related("user").distinct())
     procedimientos = Servicio.objects.filter(clinica=clinica, activo=True)
     filtra = clinica.filtrar_profesionales_por_procedimiento
+    # Un procedimiento cubierto por un grupo de atención también está listo:
+    # antes solo contaban los asignados directo y nunca llegaba a "Lista para agendar".
     procedimientos_listos = (
-        procedimientos.filter(colaboradores__in=profesionales_activos(clinica)) if filtra else procedimientos
+        procedimientos.exclude(id__in=[p.id for p in procedimientos_sin_profesional(clinica)])
+        if filtra else procedimientos
     )
     total_procedimientos = procedimientos.count()
 

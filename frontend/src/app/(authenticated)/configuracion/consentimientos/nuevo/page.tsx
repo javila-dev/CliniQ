@@ -9,13 +9,15 @@ import { configuracionApi, type CampoPlantilla } from '@/lib/api/configuracion'
 import { MapeadorCampos } from '@/components/consentimientos/MapeadorCampos'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { mensajeDeError } from '@/lib/errores'
 
 function mensajeError(error: unknown) {
   const data = (error as { response?: { data?: { campos?: string | string[] } } })?.response?.data
   const campos = data?.campos
   if (campos) return Array.isArray(campos) ? campos.join(' ') : campos
-  if (error instanceof Error && error.message) return error.message
-  return 'No se pudo guardar la plantilla. Intenta de nuevo.'
+  if (!(error as { response?: unknown })?.response && error instanceof Error && error.message) return error.message
+  // Antes salía "Request failed with status code 400".
+  return mensajeDeError(error, 'No se pudo guardar la plantilla. Intenta de nuevo.')
 }
 
 export default function NuevaPlantillaPage() {
@@ -29,6 +31,9 @@ export default function NuevaPlantillaPage() {
   const [fileError, setFileError] = useState<string | null>(null)
   // Tras guardar se navega al listado; el botón sigue "guardando" hasta que la página cambie.
   const [redirigiendo, setRedirigiendo] = useState(false)
+  // Plantilla ya subida en un intento anterior: reintentar solo guarda los
+  // campos, no sube otra copia (antes cada reintento la duplicaba).
+  const plantillaSubida = useRef<string | null>(null)
 
   const handleFile = (f: File) => {
     if (!f.name.toLowerCase().endsWith('.pdf')) {
@@ -40,6 +45,7 @@ export default function NuevaPlantillaPage() {
       return
     }
     setFileError(null)
+    plantillaSubida.current = null
     setFile(f)
     if (!nombre) setNombre(f.name.replace(/\.pdf$/i, ''))
     if (pdfBlob) URL.revokeObjectURL(pdfBlob)
@@ -49,9 +55,11 @@ export default function NuevaPlantillaPage() {
   const saveMutation = useMutation({
     mutationFn: async ({ campos, requiere }: { campos: CampoPlantilla[]; requiere: boolean }) => {
       if (!file || !nombre.trim()) throw new Error('Falta el nombre de la plantilla.')
-      const plantilla = await configuracionApi.plantillasConsentimiento.upload(nombre.trim(), file)
-      await configuracionApi.plantillasConsentimiento.guardarCampos(plantilla.id, campos, requiere)
-      return plantilla
+      if (!plantillaSubida.current) {
+        const plantilla = await configuracionApi.plantillasConsentimiento.upload(nombre.trim(), file)
+        plantillaSubida.current = plantilla.id
+      }
+      await configuracionApi.plantillasConsentimiento.guardarCampos(plantillaSubida.current, campos, requiere)
     },
     onSuccess: () => {
       setRedirigiendo(true)

@@ -17,6 +17,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { toast } from '@/hooks/use-toast'
+import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import type { ConfiguracionFacial } from '@/types/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FiltroProfesionalesPorProcedimiento } from '@/components/configuracion/FiltroProfesionalesPorProcedimiento'
@@ -98,7 +99,7 @@ const INTERVALO_RECORDATORIO_OPTIONS = [
 
 const schema = z.object({
   nombre: z.string().min(1, 'El nombre es obligatorio'),
-  nit: z.string().optional(),
+  nit: z.string().trim().min(1, 'El NIT es obligatorio'),
   telefono: z.string().optional(),
 })
 type FormData = z.infer<typeof schema>
@@ -169,7 +170,7 @@ export function ClinicaConfig({
   const facialHabilitado = miClinica?.facial_verificacion_habilitada ?? false
 
   // ── Datos generales ──────────────────────────────────────────────────────
-  const { register, handleSubmit, reset, formState: { errors, isDirty: isFormDirty } } = useForm<FormData>({
+  const { register, handleSubmit, reset, setError, formState: { errors, isDirty: isFormDirty } } = useForm<FormData>({
     resolver: zodResolver(schema),
   })
 
@@ -180,6 +181,8 @@ export function ClinicaConfig({
   const updateMutation = useMutation({
     mutationFn: (data: FormData) => clinicasApi.update(clinicaId!, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['clinica', clinicaId] }),
+    // NIT repetido u otro error del campo: se muestra junto al campo.
+    onError: (err) => { aplicarErroresDeCampo(err, setError, ['nombre', 'nit', 'telefono']) },
   })
 
   // ── Logo ─────────────────────────────────────────────────────────────────
@@ -201,7 +204,7 @@ export function ClinicaConfig({
     const file = e.target.files?.[0]
     if (!file) return
     if (file.size > 2 * 1024 * 1024) { setLogoError('El archivo supera los 2 MB permitidos.'); return }
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) { setLogoError('Solo se permiten archivos PNG, JPG o WebP.'); return }
+    if (!['image/png', 'image/jpeg'].includes(file.type)) { setLogoError('Solo se permiten archivos PNG o JPG.'); return }
     setLogoError(null)
     logoMutation.mutate(file)
     e.target.value = ''
@@ -357,12 +360,12 @@ export function ClinicaConfig({
                           </Button>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">PNG, JPG o WebP · máx. 2 MB · fondo transparente recomendado</p>
+                      <p className="text-xs text-muted-foreground">PNG o JPG · máx. 2 MB · fondo transparente recomendado</p>
                       {logoError && <p className="text-xs text-destructive">{logoError}</p>}
                     </div>
                   )}
                 </div>
-                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/webp" className="hidden" onChange={handleFileChange} />
+                <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFileChange} />
               </Section>
 
               {/* Datos */}
@@ -386,8 +389,9 @@ export function ClinicaConfig({
                       </div>
                       <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
-                          <Label htmlFor="nit" className="text-xs text-gray-500">NIT</Label>
+                          <Label htmlFor="nit" className="text-xs text-gray-500">NIT *</Label>
                           <Input id="nit" {...register('nit')} disabled={!isAdmin} placeholder="Ej. 901234567-8" />
+                          {errors.nit && <p className="text-xs text-red-500">{errors.nit.message}</p>}
                         </div>
                         <div className="space-y-1.5">
                           <Label htmlFor="telefono" className="text-xs text-gray-500">Teléfono</Label>
@@ -396,7 +400,9 @@ export function ClinicaConfig({
                       </div>
                     </>
                   )}
-                  {updateMutation.isError && <p className="text-sm text-red-500">Error al guardar. Intenta de nuevo.</p>}
+                  {updateMutation.isError && !errors.nit && !errors.nombre && (
+                    <p className="text-sm text-red-500">{mensajeDeError(updateMutation.error, 'No se pudo guardar. Intenta de nuevo.')}</p>
+                  )}
                   {isAdmin && (
                     <div className="flex items-center gap-3 pt-2 border-t">
                       <Button type="submit" disabled={!isFormDirty || updateMutation.isPending} className="gap-1.5">

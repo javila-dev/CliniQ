@@ -11,6 +11,7 @@ from apps.cartera.models import Cartera
 from apps.clinicas.models import PrecioSede, Sede, ServicioConsentimiento
 from apps.colaboradores.models import Colaborador
 from apps.configuracion.models import DocumensoConsentimientoTemplate
+from apps.core.models import LogAccion
 from apps.core.tests.factories import ClinicaFixtureMixin, User
 from apps.cotizaciones.models import Cotizacion
 from apps.pacientes.registro_publico import (
@@ -18,6 +19,7 @@ from apps.pacientes.registro_publico import (
     RegistroPublicoFotoThrottle,
     RegistroPublicoThrottle,
 )
+from apps.users.models import Rol
 from apps.users.serializers import build_auth_user_payload
 
 
@@ -133,3 +135,88 @@ class VerificacionPaso7AltosTests(ClinicaFixtureMixin, TestCase):
         self.assertIn(str(propia.id), ids)
         self.assertNotIn(str(ajena.id), ids)
         self.assertEqual(self.client.get(f"/api/v1/cartera/{ajena.id}/").status_code, 404)
+
+
+class VerificacionPaso7MediosM0Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    # ── M0-11: filtro de usuario en el log por nombre ──────────────────────
+    def test_m011_el_log_se_filtra_por_nombre_de_usuario(self):
+        LogAccion.objects.create(clinica=self.clinica, usuario=self.admin, accion="x", objeto_tipo="t", objeto_id="1")
+        LogAccion.objects.create(clinica=self.clinica, usuario=self.profesional, accion="y", objeto_tipo="t", objeto_id="2")
+        response = self.client.get("/api/v1/core/log-acciones/", {"usuario": "ana prof"})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual([r["accion"] for r in response.json()["results"]], ["y"])
+        self.assertEqual(self.client.get("/api/v1/core/log-acciones/", {"fecha_desde": "ayer"}).status_code, 400)
+
+    # ── M0-16: crear roles ─────────────────────────────────────────────────
+    def test_m016_un_nombre_repetido_se_explica_en_el_campo(self):
+        Rol.objects.create(clinica=self.clinica, slug="recepcion_x", nombre="Recepción")
+        response = self.client.post("/api/v1/usuarios/roles/", {"nombre": "recepcion"}, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Ya existe un rol", str(response.json()["nombre"]))
+
+    def test_m016_el_rol_se_crea_con_sus_permisos_y_slug_propio(self):
+        Rol.objects.create(clinica=self.clinica, slug="auxiliar", nombre="Otro nombre")
+        response = self.client.post("/api/v1/usuarios/roles/", {
+            "nombre": "Auxiliar", "permission_keys": ["agenda.citas.ver"],
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["slug"], "auxiliar_2")
+        self.assertEqual(response.json()["permission_keys"], ["agenda.citas.ver"])
+
+    def test_m016_permisos_invalidos_no_dejan_un_rol_vacio(self):
+        response = self.client.post("/api/v1/usuarios/roles/", {
+            "nombre": "Auxiliar", "permission_keys": ["no.existe"],
+        }, format="json")
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Rol.objects.filter(clinica=self.clinica, nombre="Auxiliar").exists())
+
+
+class VerificacionPaso7MediosM1Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    # ── M1-15: "Mostrar inactivas" en plantillas de órdenes ────────────────
+    def test_m115_las_plantillas_inactivas_se_pueden_listar(self):
+        from apps.historia_clinica.models import PlantillaOrden
+
+        inactiva = PlantillaOrden.objects.create(clinica=self.clinica, nombre="Vieja", contenido="x", activa=False)
+        url = "/api/v1/historia-clinica/plantillas-ordenes/"
+        ids = lambda r: [p["id"] for p in (r.json() if isinstance(r.json(), list) else r.json()["results"])]  # noqa: E731
+        self.assertNotIn(str(inactiva.id), ids(self.client.get(url)))
+        self.assertIn(str(inactiva.id), ids(self.client.get(url, {"activa": "todas"})))
+
+    # ── M1-16: promoción e ítems en una sola operación ─────────────────────
+    def _promo(self, items):
+        hoy = timezone.localdate()
+        return self.client.post("/api/v1/clinicas/campanas/", {
+            "nombre": "Octubre", "fecha_inicio": hoy.isoformat(),
+            "fecha_fin": (hoy + timedelta(days=10)).isoformat(), "items": items,
+        }, format="json")
+
+    def test_m116_un_item_invalido_no_deja_la_promocion_creada(self):
+        from apps.clinicas.models import Campana
+
+        response = self._promo([{"procedimiento": str(self.servicio.id), "descuento_pct": "150"}])
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("Ítem 1", str(response.json()["items"]))
+        self.assertFalse(Campana.objects.filter(clinica=self.clinica).exists())
+
+    def test_m116_la_promocion_se_crea_con_sus_items(self):
+        response = self._promo([{"procedimiento": str(self.servicio.id), "precio_campana": "90000"}])
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(len(response.json()["items"]), 1)

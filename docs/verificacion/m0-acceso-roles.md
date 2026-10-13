@@ -83,7 +83,7 @@
 - **Qué ve el usuario:** con "Gestionar formas de pago" nunca ve esa pantalla.
 - **Causa:** el menú pide `configuracion.formas_pago.ver`, que ninguna capacidad otorga.
 
-**M0-11 · Medio · parámetros** · confirmado
+**✅ M0-11 · Medio · parámetros** · confirmado
 - **Dónde:** `log-acciones/page.tsx:245`; `backend/apps/core/views.py:30-31`.
 - **Qué ve el usuario:** al escribir un nombre en el filtro "Usuario" aparece "No hay registros".
 - **Causa:** el texto se envía como `usuario_id` y el backend responde 500.
@@ -115,7 +115,7 @@
 - **Qué ve el usuario:** los errores se ven distintos en cada pantalla, o no se ven.
 - **Arreglo:** ver T-02.
 
-**M0-16 · Medio · errores** · confirmado
+**✅ M0-16 · Medio · errores** · confirmado
 - **Dónde:** `configuracion/roles/page.tsx:28-41,313-320,446-449`.
 - **Qué ve el usuario:**
   - crear un rol llamado "Recepción" o "Admin" da "Error al guardar el rol" sin explicación;
@@ -140,7 +140,7 @@
 - **Dónde:** `backend/apps/users/views.py:500-501`.
 - **Causa:** `MeView.patch` descarta los errores de cada campo y muestra un mensaje genérico.
 
-**M0-20 · Medio · carga** · confirmado
+**✅ M0-20 · Medio · carga** · confirmado
 - **Dónde:** `dashboard/page.tsx:667-722`; `lib/permissions.ts:198,267-271`.
 - **Qué ve el usuario:** un rol sin reportes entra a un Dashboard que muestra **"0 citas hoy"**.
 - **Arreglo:** decidir la pantalla de aterrizaje según los permisos y condicionar los indicadores.
