@@ -8,6 +8,8 @@ import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { AnotacionZona, DiagramaConAnotaciones, TipoAplicacion } from '@/types/historia'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 
 interface Props {
   notaId: string
@@ -413,17 +415,20 @@ function DiagramaPanel({
       setPendingTexto('')
       setPopupFixedPos(null)
     },
+    onError: (err) => toast.error('No se pudo marcar la zona', mensajeDeError(err)),
   })
 
   const updateMut = useMutation({
     mutationFn: ({ id, ...data }: { id: string; texto?: string; radio?: number; tipo_aplicacion?: TipoAplicacion; parametros?: Record<string, string> }) =>
       historiaClinicaApi.zonas.update(id, data),
     onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
+    onError: (err) => toast.error('No se pudo actualizar la zona', mensajeDeError(err)),
   })
 
   const deleteMut = useMutation({
     mutationFn: (id: string) => historiaClinicaApi.zonas.delete(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: qKey }),
+    onError: (err) => toast.error('No se pudo quitar la zona', mensajeDeError(err)),
   })
 
   const getRelPos = (e: React.MouseEvent<HTMLDivElement>) => {

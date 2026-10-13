@@ -274,6 +274,49 @@ class VerificacionPaso6Tests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(self.client.post(f"/api/v1/agenda/bloqueos/{pendiente.id}/aprobar/").status_code, 403)
         self.assertEqual(self.client.delete(f"/api/v1/agenda/bloqueos/{aprobado.id}/").status_code, 403)
 
+    # ── M3-18: bloqueo encima de citas (paso 7b) ───────────────────────────
+    def _crear_bloqueo(self, **extra):
+        return self.client.post("/api/v1/agenda/bloqueos/", {
+            "sede": str(self.sede.id), "fecha_inicio": (self.inicio - timedelta(hours=1)).isoformat(),
+            "fecha_fin": (self.inicio + timedelta(hours=2)).isoformat(), "motivo": "Fumigación", **extra,
+        }, format="json")
+
+    def test_m318_crear_un_bloqueo_sobre_citas_las_muestra_y_pide_confirmar(self):
+        cita = self._cita()
+        response = self._crear_bloqueo()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "BLOQUEO_CON_CITAS")
+        self.assertEqual([c["id"] for c in response.json()["citas"]], [str(cita.id)])
+        self.assertFalse(BloqueoAgenda.objects.exists())
+        confirmado = self._crear_bloqueo(confirmar_citas_afectadas=True)
+        self.assertEqual(confirmado.status_code, 201, confirmado.content)
+        cita.refresh_from_db()
+        self.assertEqual(cita.estado, Cita.Estado.PENDIENTE)
+
+    def test_m318_sin_citas_el_bloqueo_se_crea_directo(self):
+        self.assertEqual(self._crear_bloqueo().status_code, 201)
+
+    # ── M3-21: confirmación por enlace (paso 7b) ───────────────────────────
+    def test_m321_no_se_confirma_por_enlace_una_cita_cancelada(self):
+        from apps.agenda.confirmacion import generar_token
+
+        token = generar_token(self._cita(estado=Cita.Estado.CANCELADA))
+        self.client.force_authenticate(None)
+        response = self.client.get(f"/api/v1/agenda/confirmar/{token.token}/")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("ya no está activa", response.json()["error"])
+
+    def test_m321_una_cita_sin_procedimiento_se_confirma_sin_error(self):
+        from apps.agenda.confirmacion import generar_token
+
+        cita = self._cita()
+        token = generar_token(cita)
+        self.client.force_authenticate(None)
+        response = self.client.get(f"/api/v1/agenda/confirmar/{token.token}/")
+        self.assertEqual(response.status_code, 200, response.content)
+        cita.refresh_from_db()
+        self.assertEqual(cita.estado, Cita.Estado.CONFIRMADA)
+
     # ── M3-29 ──────────────────────────────────────────────────────────────
     def test_m329_slots_con_fecha_mal_escrita_responde_400(self):
         response = self.client.get("/api/v1/agenda/citas/slots_disponibles/", {

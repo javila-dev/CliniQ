@@ -460,6 +460,24 @@ def refrescar_pdf_consentimiento_informado(consentimiento) -> str:
     return "actualizado"
 
 
+def paciente_rechazo_consentimiento_en_documenso(consentimiento) -> bool:
+    """True si el paciente rechazó el documento desde el enlace de firma.
+
+    Antes el rechazo se ignoraba y la pantalla seguía en "Esperando firma".
+    """
+    if consentimiento.firmado or not consentimiento.documenso_document_id:
+        return False
+    from apps.consentimientos.services import _estado_firma_desde_envelope
+    from apps.historia_clinica.documenso_firmantes import resolver_envelope_id
+
+    try:
+        envelope_id = resolver_envelope_id(consentimiento.documenso_document_id)
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+    except DocumensoIntegrationError:
+        return False
+    return _estado_firma_desde_envelope(payload) == "rechazada"
+
+
 def verificar_firma_consentimiento_en_documenso(consentimiento) -> bool:
     """Consulta a Documenso si el consentimiento ya fue firmado y lo marca como firmado.
 

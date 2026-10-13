@@ -105,7 +105,7 @@
 - **Qué ve el usuario:** quien puede "crear bloqueo" puede editar o borrar bloqueos **aprobados** por otros. Aprobar, rechazar y eliminar fallan sin mensaje.
 - **Causa:** `agenda.bloqueos.gestionar` nunca se revisa, y faltan los `onError`.
 
-**M3-18 · Medio · faltante** · confirmado
+**✅ M3-18 · Medio · faltante** · confirmado
 - **Dónde:** `agenda/views.py:1202-1219`
 - **Qué ve el usuario:** crea un bloqueo encima de citas existentes y no recibe ningún aviso.
 - **Arreglo:** listar las citas afectadas y pedir confirmación.
@@ -121,7 +121,7 @@
 - **Qué ve el usuario:** en clínicas fuera de Colombia, los horarios quedan corridos 1 o 2 horas.
 - **Arreglo:** zona horaria por clínica (T-04).
 
-**M3-21 · Medio · faltante** · confirmado
+**✅ M3-21 · Medio · faltante** · confirmado
 - **Dónde:** `agenda/confirmacion.py:31-79`; `views.py:1127-1136`; `confirmar/[token]/page.tsx:27-34,80-83`
 - **Qué ve el usuario:** la autoconfirmación por enlace **no existe en la práctica**: nunca se genera el token. Si se activara así como está:
   - las citas sin procedimiento darían 500 después de confirmarse;

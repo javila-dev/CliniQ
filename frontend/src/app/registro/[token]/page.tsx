@@ -39,13 +39,8 @@ export default function RegistroPublicoPage() {
     } catch (err: any) {
       const code = err?.response?.data?.code
       if (code === 'PACIENTE_YA_EXISTE') {
-        const campo = err?.response?.data?.campo ?? 'dato'
-        const mensajes: Record<string, string> = {
-          telefono: 'Ya existe un paciente registrado con ese número de teléfono.',
-          email: 'Ya existe un paciente registrado con ese correo electrónico.',
-          numero_documento: 'Ya existe un paciente registrado con ese número de documento.',
-        }
-        setYaExiste(mensajes[campo] ?? 'Ya estás registrado en esta clínica.')
+        // Mensaje genérico: no revela qué dato coincidió.
+        setYaExiste(err?.response?.data?.error ?? 'Ya estás registrado en esta clínica.')
       } else {
         // El formulario muestra el error en su campo (p. ej. fecha de nacimiento).
         throw err

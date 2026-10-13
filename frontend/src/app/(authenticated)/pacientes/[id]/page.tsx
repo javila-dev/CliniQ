@@ -26,7 +26,7 @@ import { EtiquetaSeguimientoPaciente } from '@/components/seguimiento/EtiquetaSe
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
-import { formatDate, cn } from '@/lib/utils'
+import { formatDate, cn, edadPaciente } from '@/lib/utils'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
@@ -60,15 +60,6 @@ const TIPO_AFILIADO_LABEL: Record<string, string> = {
 const REGIMEN_LABEL: Record<string, string> = {
   contributivo: 'Contributivo', subsidiado: 'Subsidiado', vinculado: 'Vinculado',
   especial: 'Especial / Excepción', pensionado: 'Pensionado',
-}
-
-function calcularEdad(fechaNacimiento: string): number {
-  const hoy = new Date()
-  const nac = new Date(fechaNacimiento)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const m = hoy.getMonth() - nac.getMonth()
-  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--
-  return edad
 }
 
 const CONSENT_ESTADO: Record<string, { label: string; className: string }> = {
@@ -169,6 +160,18 @@ function Dato({ label, value, wide }: { label: string; value?: string | null | b
 
 // ── Página ────────────────────────────────────────────────────────────────────
 
+/** Error al cargar una sección de la ficha: distinto de "no hay registros". */
+function ErrorCargaModal({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="px-6 py-4 text-sm">
+      <p className="text-destructive">No se pudo cargar esta información.</p>
+      <button type="button" onClick={onRetry} className="mt-1 text-xs font-medium underline-offset-2 hover:underline">
+        Reintentar
+      </button>
+    </div>
+  )
+}
+
 type ModalType = 'cotizaciones' | 'asistencias' | 'ingresos' | 'consentimientos' | 'verificaciones' | null
 
 interface Props { params: Promise<{ id: string }> }
@@ -183,6 +186,13 @@ export default function PacienteDetailPage({ params }: Props) {
   const canCambiarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_CAMBIAR)
   const canEliminarFotoControl = hasPermission(user, PERM.PACIENTES_FOTO_CONTROL_ELIMINAR)
   const canCrearCotizacion = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  // Cada sección solo aparece con su permiso: sin él mostraba "Sin cotizaciones"
+  // o "Sin ingresos" aunque existieran (la consulta respondía 403).
+  const canVerCotizaciones = hasPermission(user, PERM.COTIZACIONES_VER)
+  const canVerCobros = hasPermission(user, PERM.COBROS_VER)
+  const canVerAgenda = hasPermission(user, PERM.AGENDA_VER)
+  const canVerHistoria = hasPermission(user, PERM.HISTORIA_VER)
+  const canEditar = hasPermission(user, PERM.PACIENTES_EDITAR)
 
   const { data: p, isLoading, isError, refetch } = useQuery({
     queryKey: ['pacientes', id],
@@ -194,40 +204,44 @@ export default function PacienteDetailPage({ params }: Props) {
     queryFn: () => clinicasApi.wizardConfig.get(),
   })
 
-  const { data: cotizacionesData } = useQuery({
+  const cotizacionesQ = useQuery({
     queryKey: ['cotizaciones', { paciente: id }],
     queryFn: () => cotizacionesApi.list({ paciente: id }),
-    enabled: !!id,
+    enabled: !!id && canVerCotizaciones,
   })
+  const cotizacionesData = cotizacionesQ.data
 
-  const { data: cobrosData } = useQuery({
+  const cobrosQ = useQuery({
     queryKey: ['ingresos', { paciente: id, page_size: 5 }],
     queryFn: () => cobrosApi.list({ paciente: id, page_size: 5 }),
-    enabled: !!id,
+    enabled: !!id && canVerCobros,
   })
+  const cobrosData = cobrosQ.data
 
-  const { data: consentimientos } = useQuery({
+  const consentimientosQ = useQuery({
     queryKey: ['consentimientos-paciente', id],
     queryFn: () => protocolosApi.consentimientos.list(id),
     enabled: !!id,
     retry: 1,
   })
+  const consentimientos = consentimientosQ.data
 
-  const { data: citasFirmadas } = useQuery({
+  const asistenciasQ = useQuery({
     queryKey: ['citas-asistencias', id],
     queryFn: async () => {
       const res = await agendaApi.citas.list({ paciente: id, firma_asistencia_estado: 'firmada' })
       return res.results ?? []
     },
-    enabled: !!id,
+    enabled: !!id && canVerAgenda,
   })
+  const citasFirmadas = asistenciasQ.data
 
   if (isLoading) return <LoadingState rows={4} />
   if (isError || !p) return <ErrorState onRetry={refetch} />
 
   const initials = `${p.nombres.charAt(0)}${p.apellidos.charAt(0)}`.toUpperCase()
   const fotoControlUrl = resolveMediaUrl(p.foto_control_url ?? null)
-  const edad = p.edad ?? (p.fecha_nacimiento ? calcularEdad(p.fecha_nacimiento) : null)
+  const edad = edadPaciente(p)
   const direccionCompleta = [p.direccion, p.barrio, p.ciudad].filter(Boolean).join(', ')
 
   const cotCount = cotizacionesData?.results?.length ?? 0
@@ -280,14 +294,16 @@ export default function PacienteDetailPage({ params }: Props) {
           <Button variant="outline" asChild>
             <Link href="/pacientes"><ArrowLeft className="h-4 w-4 mr-2" />Volver</Link>
           </Button>
-          <Button variant="outline" asChild>
-            <Link href={`/pacientes/${id}/editar`}><Pencil className="h-4 w-4 mr-2" />Editar</Link>
-          </Button>
+          {canEditar && (
+            <Button variant="outline" asChild>
+              <Link href={`/pacientes/${id}/editar`}><Pencil className="h-4 w-4 mr-2" />Editar</Link>
+            </Button>
+          )}
         </div>
       </div>
 
       {/* ── Banner foto de control faltante ──────────────────────────────── */}
-      {wizardConfig?.paso_verificacion_facial && !p.tiene_foto_control && (
+      {wizardConfig?.paso_verificacion_facial && !p.tiene_foto_control && canCambiarFotoControl && (
         <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
           <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />
           <div className="flex-1 min-w-0">
@@ -393,16 +409,20 @@ export default function PacienteDetailPage({ params }: Props) {
               <CardTitle className="text-base">Acciones rápidas</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button variant="outline" className="w-full justify-start" asChild>
-                <Link href={`/pacientes/${id}/historia`}>
-                  <FileText className="h-4 w-4 mr-2" />Historia clínica
-                </Link>
-              </Button>
-              <Button variant="outline" className="w-full justify-start" asChild>
-                <Link href={`/agenda?paciente=${id}`}>
-                  <Calendar className="h-4 w-4 mr-2" />Ver citas
-                </Link>
-              </Button>
+              {canVerHistoria && (
+                <Button variant="outline" className="w-full justify-start" asChild>
+                  <Link href={`/pacientes/${id}/historia`}>
+                    <FileText className="h-4 w-4 mr-2" />Historia clínica
+                  </Link>
+                </Button>
+              )}
+              {canVerAgenda && (
+                <Button variant="outline" className="w-full justify-start" asChild>
+                  <Link href={`/agenda?paciente=${id}`}>
+                    <Calendar className="h-4 w-4 mr-2" />Ver citas
+                  </Link>
+                </Button>
+              )}
               {canCrearCotizacion && (
                 <Button variant="outline" className="w-full justify-start" asChild>
                   <Link href={`/cotizaciones/nueva?paciente=${id}`}>
@@ -419,36 +439,42 @@ export default function PacienteDetailPage({ params }: Props) {
               <CardTitle className="text-base">Historial</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2">
-              <Button
-                variant="outline"
-                className="w-full justify-between"
-                onClick={() => setActiveModal('cotizaciones')}
-              >
-                <span className="flex items-center gap-2">
-                  <ClipboardList className="h-4 w-4" />Cotizaciones
-                </span>
-                {cotCount > 0 && <Badge variant="secondary" className="text-xs">{cotCount}</Badge>}
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-between"
-                onClick={() => setActiveModal('asistencias')}
-              >
-                <span className="flex items-center gap-2">
-                  <ClipboardCheck className="h-4 w-4" />Asistencias
-                </span>
-                {asistenciasCount > 0 && <Badge variant="secondary" className="text-xs">{asistenciasCount}</Badge>}
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full justify-between"
-                onClick={() => setActiveModal('ingresos')}
-              >
-                <span className="flex items-center gap-2">
-                  <Wallet className="h-4 w-4" />Ingresos
-                </span>
-                {cobrosCount > 0 && <Badge variant="secondary" className="text-xs">{cobrosCount}</Badge>}
-              </Button>
+              {canVerCotizaciones && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-between"
+                  onClick={() => setActiveModal('cotizaciones')}
+                >
+                  <span className="flex items-center gap-2">
+                    <ClipboardList className="h-4 w-4" />Cotizaciones
+                  </span>
+                  {cotCount > 0 && <Badge variant="secondary" className="text-xs">{cotCount}</Badge>}
+                </Button>
+              )}
+              {canVerAgenda && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-between"
+                  onClick={() => setActiveModal('asistencias')}
+                >
+                  <span className="flex items-center gap-2">
+                    <ClipboardCheck className="h-4 w-4" />Asistencias
+                  </span>
+                  {asistenciasCount > 0 && <Badge variant="secondary" className="text-xs">{asistenciasCount}</Badge>}
+                </Button>
+              )}
+              {canVerCobros && (
+                <Button
+                  variant="outline"
+                  className="w-full justify-between"
+                  onClick={() => setActiveModal('ingresos')}
+                >
+                  <span className="flex items-center gap-2">
+                    <Wallet className="h-4 w-4" />Ingresos
+                  </span>
+                  {cobrosCount > 0 && <Badge variant="secondary" className="text-xs">{cobrosCount}</Badge>}
+                </Button>
+              )}
               <Button
                 variant="outline"
                 className="w-full justify-between"
@@ -505,7 +531,9 @@ export default function PacienteDetailPage({ params }: Props) {
             </DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 -mx-6 px-0">
-            {!cotCount ? (
+            {cotizacionesQ.isError ? (
+              <ErrorCargaModal onRetry={() => cotizacionesQ.refetch()} />
+            ) : !cotCount ? (
               <p className="text-sm text-muted-foreground/60 italic px-6 py-4">Sin cotizaciones registradas.</p>
             ) : (
               <div className="divide-y">
@@ -545,7 +573,9 @@ export default function PacienteDetailPage({ params }: Props) {
             <DialogTitle>Asistencias firmadas</DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 -mx-6 px-0">
-            {!asistenciasCount ? (
+            {asistenciasQ.isError ? (
+              <ErrorCargaModal onRetry={() => asistenciasQ.refetch()} />
+            ) : !asistenciasCount ? (
               <p className="text-sm text-muted-foreground/60 italic px-6 py-4">Sin asistencias firmadas.</p>
             ) : (
               <div className="divide-y">
@@ -572,7 +602,9 @@ export default function PacienteDetailPage({ params }: Props) {
             </DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 -mx-6 px-0">
-            {!cobrosData?.results?.length ? (
+            {cobrosQ.isError ? (
+              <ErrorCargaModal onRetry={() => cobrosQ.refetch()} />
+            ) : !cobrosData?.results?.length ? (
               <p className="text-sm text-muted-foreground/60 italic px-6 py-4">Sin ingresos registrados.</p>
             ) : (
               <div className="divide-y">
@@ -605,7 +637,9 @@ export default function PacienteDetailPage({ params }: Props) {
             <DialogTitle>Consentimientos</DialogTitle>
           </DialogHeader>
           <div className="overflow-y-auto flex-1 py-2">
-            {!consentCount ? (
+            {consentimientosQ.isError ? (
+              <ErrorCargaModal onRetry={() => consentimientosQ.refetch()} />
+            ) : !consentCount ? (
               <p className="text-sm text-muted-foreground/60 italic py-4">Sin consentimientos registrados.</p>
             ) : (
               <div className="space-y-3">

@@ -253,6 +253,7 @@ export default function AtencionCitaPage({ params }: Props) {
       clearNota()
       startTransition(() => router.push('/atenciones'))
     },
+    onError: (err) => toast.error('No se pudo descartar la atención', mensajeDeError(err)),
   })
 
   // ── Gate: atención aún no en curso ─────────────────────────────────────────
@@ -353,7 +354,8 @@ export default function AtencionCitaPage({ params }: Props) {
     }
     const cerrada = ['completada', 'cancelada', 'no_asistio'].includes(cita.estado)
     const puedeIniciar =
-      canIniciarAtencion(user) && ['confirmada', 'en_espera'].includes(cita.estado)
+      // Desde "Confirmada" el backend exige pasar antes por "En espera" (preparación).
+      canIniciarAtencion(user) && cita.estado === 'en_espera'
     // En espera = la recepción ya completó la preparación; solo falta iniciar.
     const lista = cita.estado === 'en_espera'
     const onIniciar = () => {
@@ -683,7 +685,7 @@ export default function AtencionCitaPage({ params }: Props) {
           <DialogHeader>
             <DialogTitle>Descartar atención</DialogTitle>
             <DialogDescription>
-              ¿Qué deseas hacer con esta atención? Los datos registrados en esta sesión se perderán.
+              ¿Qué deseas hacer con esta atención?
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">
@@ -693,7 +695,9 @@ export default function AtencionCitaPage({ params }: Props) {
               onClick={() => descartar('desiniciar')}
             >
               <p className="text-sm font-medium">Desiniciar atención</p>
-              <p className="text-xs text-muted-foreground">La cita vuelve a estado "Confirmada". Úsalo si iniciaste por error.</p>
+              <p className="text-xs text-muted-foreground">
+                La cita vuelve a "En espera" para iniciarla después. Lo que ya registraste (nota, fotos, insumos) se conserva.
+              </p>
             </button>
             <button
               className="w-full text-left rounded-lg border border-destructive/30 p-3 hover:bg-destructive/5 transition-colors space-y-0.5 disabled:opacity-50"
@@ -701,7 +705,9 @@ export default function AtencionCitaPage({ params }: Props) {
               onClick={() => descartar('cancelar')}
             >
               <p className="text-sm font-medium text-destructive">Cancelar cita</p>
-              <p className="text-xs text-muted-foreground">La cita queda cancelada y no se podrá recuperar.</p>
+              <p className="text-xs text-muted-foreground">
+                La cita queda cancelada y no se podrá recuperar. Los insumos registrados vuelven al inventario.
+              </p>
             </button>
           </div>
           <DialogFooter>

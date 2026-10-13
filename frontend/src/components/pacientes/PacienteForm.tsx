@@ -215,24 +215,27 @@ export function PacienteForm({
   }
 
   const handleFormSubmit = async (values: FormValues) => {
+    // Al editar, un campo que se borró viaja vacío: con undefined no se enviaba
+    // y el valor anterior volvía a aparecer (correo, dirección, EPS…).
+    const vacio = defaultValues ? '' : undefined
     const payload: CreatePacienteRequest = {
       nombres: values.nombres, apellidos: values.apellidos,
       tipo_documento: values.tipo_documento, numero_documento: values.numero_documento,
       sexo: values.sexo, fecha_nacimiento: values.fecha_nacimiento || undefined,
-      telefono: '+' + dialCode + values.telefono, email: values.email || undefined,
+      telefono: '+' + dialCode + values.telefono, email: values.email || vacio,
       canal_confirmacion: values.canal_confirmacion, autoriza_datos: values.autoriza_datos,
-      direccion: values.direccion || undefined, ciudad: values.ciudad || undefined, barrio: values.barrio || undefined,
-      estado_civil: (values.estado_civil || undefined) as CreatePacienteRequest['estado_civil'],
-      ocupacion: values.ocupacion || undefined,
-      escolaridad: (values.escolaridad || undefined) as CreatePacienteRequest['escolaridad'],
-      grupo_etnico: (values.grupo_etnico || undefined) as CreatePacienteRequest['grupo_etnico'],
-      grupo_sanguineo: (values.grupo_sanguineo || undefined) as CreatePacienteRequest['grupo_sanguineo'],
-      eps: values.eps || undefined,
-      tipo_afiliado: (values.tipo_afiliado || undefined) as CreatePacienteRequest['tipo_afiliado'],
-      regimen: (values.regimen || undefined) as CreatePacienteRequest['regimen'],
-      nombre_responsable: values.nombre_responsable || undefined,
-      parentesco_responsable: values.parentesco_responsable || undefined,
-      telefono_responsable: values.telefono_responsable || undefined,
+      direccion: values.direccion || vacio, ciudad: values.ciudad || vacio, barrio: values.barrio || vacio,
+      estado_civil: (values.estado_civil || vacio) as CreatePacienteRequest['estado_civil'],
+      ocupacion: values.ocupacion || vacio,
+      escolaridad: (values.escolaridad || vacio) as CreatePacienteRequest['escolaridad'],
+      grupo_etnico: (values.grupo_etnico || vacio) as CreatePacienteRequest['grupo_etnico'],
+      grupo_sanguineo: (values.grupo_sanguineo || vacio) as CreatePacienteRequest['grupo_sanguineo'],
+      eps: values.eps || vacio,
+      tipo_afiliado: (values.tipo_afiliado || vacio) as CreatePacienteRequest['tipo_afiliado'],
+      regimen: (values.regimen || vacio) as CreatePacienteRequest['regimen'],
+      nombre_responsable: values.nombre_responsable || vacio,
+      parentesco_responsable: values.parentesco_responsable || vacio,
+      telefono_responsable: values.telefono_responsable || vacio,
     }
 
     if (lockSensitive) {

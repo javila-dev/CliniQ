@@ -7,6 +7,7 @@ import { apiClient } from '@/lib/api/client'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { formatDateTime } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 
 interface ConfirmarResponse {
   ok: boolean
@@ -24,7 +25,7 @@ interface Props {
 export default function ConfirmarCitaPage({ params }: Props) {
   const { token } = use(params)
 
-  const { data, isLoading, isError } = useQuery({
+  const { data, isLoading, error } = useQuery({
     queryKey: ['confirmar', token],
     queryFn: async (): Promise<ConfirmarResponse> => {
       const res = await apiClient.get(`/agenda/confirmar/${token}/`)
@@ -71,7 +72,9 @@ export default function ConfirmarCitaPage({ params }: Props) {
                   Hola <strong>{data.paciente_nombre}</strong>, tu cita ha sido confirmada.
                 </p>
                 <div className="rounded-md bg-muted/50 p-3 text-left space-y-1.5 text-sm">
-                  <p><span className="text-muted-foreground">Procedimiento:</span> {data.servicio_nombre}</p>
+                  {data.servicio_nombre && (
+                    <p><span className="text-muted-foreground">Procedimiento:</span> {data.servicio_nombre}</p>
+                  )}
                   <p><span className="text-muted-foreground">Profesional:</span> {data.profesional_nombre}</p>
                   <p><span className="text-muted-foreground">Fecha:</span> {formatDateTime(data.fecha_inicio)}</p>
                 </div>
@@ -79,7 +82,8 @@ export default function ConfirmarCitaPage({ params }: Props) {
               </>
             ) : (
               <p className="text-muted-foreground text-sm">
-                {data?.error ?? 'Este enlace no es válido o ya fue utilizado.'}
+                {/* El 400 trae el motivo (cita cancelada, ya pasó, enlace usado). */}
+                {data?.error ?? (error ? mensajeDeError(error, 'Este enlace no es válido o ya fue utilizado.') : 'Este enlace no es válido o ya fue utilizado.')}
               </p>
             )}
           </CardContent>

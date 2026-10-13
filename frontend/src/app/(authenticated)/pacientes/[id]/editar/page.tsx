@@ -16,12 +16,13 @@ import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import type { CreatePacienteRequest } from '@/types/pacientes'
+import { RoleGuard } from '@/components/shared/RoleGuard'
 
 interface Props {
   params: Promise<{ id: string }>
 }
 
-export default function EditarPacientePage({ params }: Props) {
+function EditarPacienteContent({ params }: Props) {
   const { id } = use(params)
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -85,5 +86,13 @@ export default function EditarPacientePage({ params }: Props) {
         </CardContent>
       </Card>
     </div>
+  )
+}
+
+export default function EditarPacientePage(props: Props) {
+  return (
+    <RoleGuard check={(u) => hasPermission(u, PERM.PACIENTES_EDITAR)}>
+      <EditarPacienteContent {...props} />
+    </RoleGuard>
   )
 }

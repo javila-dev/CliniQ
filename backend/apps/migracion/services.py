@@ -170,11 +170,19 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         pago_ids.append(str(pr.id))
 
     # ── 3. Citas de sesiones ya realizadas (solo las que traen profesional) ──
+    from apps.clinicas.models import Servicio
+    from apps.users.models import User
+
     cita_ids = []
     for s in realizadas:
         prof_id = s.get("profesional")
         if not prof_id:
             continue
+        # El profesional y el procedimiento llegan por id: deben ser de esta clínica.
+        if not User.objects.filter(id=prof_id, clinica=clinica).exists():
+            raise ValidationError({"profesional": "El profesional de una sesión no pertenece a esta clínica."})
+        if s.get("servicio") and not Servicio.objects.filter(id=s["servicio"], clinica=clinica).exists():
+            raise ValidationError({"servicio": "El procedimiento de una sesión no pertenece a esta clínica."})
         fecha = s.get("fecha")
         dur = 30
         inicio = _dt(fecha)
@@ -285,7 +293,46 @@ def revertir_lote(lote: LoteMigracion, *, actor) -> None:
         raise ValidationError({"error": "El lote ya fue revertido.", "code": "LOTE_YA_REVERTIDO"})
 
     m = lote.manifest or {}
-    # Orden inverso a la creación para respetar los PROTECT.
+    from django.db.models import ProtectedError
+
+    # Lo que se registró después de la carga sobre lo migrado (pagos, citas
+    # del paquete) no se borra a ciegas: se explica qué impide revertir.
+    nuevos_pagos = (
+        PagoRecibido.objects.filter(cobro_id__in=m.get("cobros", [])).exclude(id__in=m.get("pagos", [])).count()
+    )
+    nuevas_citas = (
+        Cita.objects.filter(item_cotizacion_id__in=m.get("items_cotizacion", []))
+        .exclude(id__in=m.get("citas", []))
+        .exclude(estado=Cita.Estado.CANCELADA)
+        .count()
+    )
+    pendientes = []
+    if nuevos_pagos:
+        pendientes.append(f"{nuevos_pagos} pago{'s' if nuevos_pagos != 1 else ''} registrado{'s' if nuevos_pagos != 1 else ''} después de la carga")
+    if nuevas_citas:
+        pendientes.append(f"{nuevas_citas} cita{'s' if nuevas_citas != 1 else ''} agendada{'s' if nuevas_citas != 1 else ''} con ese tratamiento")
+    if pendientes:
+        raise ValidationError({
+            "error": "No se puede revertir esta carga: tiene " + " y ".join(pendientes)
+            + ". Reversa esos pagos o cancela esas citas primero.",
+            "code": "LOTE_CON_MOVIMIENTOS",
+        })
+
+    try:
+        _borrar_lote(m)
+    except ProtectedError as exc:
+        raise ValidationError({
+            "error": "No se puede revertir esta carga: otros registros dependen de lo que se cargó.",
+            "code": "LOTE_CON_MOVIMIENTOS",
+        }) from exc
+
+    lote.revertido_en = timezone.now()
+    lote.revertido_por = actor
+    lote.save(update_fields=["revertido_en", "revertido_por"])
+
+
+def _borrar_lote(m):
+    """Borra lo cargado en orden inverso a la creación, para respetar los PROTECT."""
     from apps.consentimientos.models import Consentimiento
     from apps.obesidad.models import MedicionAntropometrica
     from apps.protocolos.models import TratamientoPaciente
@@ -302,7 +349,3 @@ def revertir_lote(lote: LoteMigracion, *, actor) -> None:
     Cobro.objects.filter(id__in=m.get("cobros", [])).delete()
     ItemCotizacion.objects.filter(id__in=m.get("items_cotizacion", [])).delete()
     Cotizacion.objects.filter(id__in=cot_ids).delete()
-
-    lote.revertido_en = timezone.now()
-    lote.revertido_por = actor
-    lote.save(update_fields=["revertido_en", "revertido_por"])

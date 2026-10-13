@@ -10,7 +10,7 @@ import SignatureCanvas from 'react-signature-canvas'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { cn } from '@/lib/utils'
+import { cn, htmlATexto } from '@/lib/utils'
 
 interface Props {
   params: Promise<{ token: string }>
@@ -148,7 +148,7 @@ export default function FirmarConsentimientoPage({ params }: Props) {
             Contenido del documento
           </p>
           <div className="rounded-xl border border-gray-200 bg-gray-50 p-4 max-h-64 overflow-y-auto text-sm text-foreground leading-relaxed whitespace-pre-line">
-            {consentimiento?.contenido_snapshot}
+            {htmlATexto(consentimiento?.contenido_snapshot)}
           </div>
           <p className="text-[11px] text-muted-foreground mt-1.5">
             Hash del documento: <span className="font-mono">{consentimiento?.hash_contenido?.slice(0, 16)}…</span>

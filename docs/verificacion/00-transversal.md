@@ -20,18 +20,18 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | `84f0e36` |
 | 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | `472b176` |
-| 7b | Los medios, módulo por módulo (M0 a M7) | En curso: M0 y M1 hechos | pendiente de commit |
+| 7b | Los medios, módulo por módulo (M0 a M7) | En curso: M0 a M4 hechos (M3 con 2 pendientes de decisión) | `dee5046` (M0 y M1); M2 a M4 pendientes de commit |
 | 7c | Los bajos | Pendiente | — |
 
-**Hallazgos:** 131 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 149 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
 | M0 Acceso y roles | 26 | 4 | 0 |
 | M1 Configuración y catálogo | 24 | 7 | 0 |
-| M2 Pacientes | 10 | 16 | 0 |
-| M3 Agenda | 21 | 9 | 0 |
-| M4 Atención clínica | 15 | 13 | 0 |
+| M2 Pacientes | 18 | 8 | 0 |
+| M3 Agenda | 23 | 7 | 0 |
+| M4 Atención clínica | 23 | 5 | 0 |
 | M5 Comercial | 10 | 20 | 0 |
 | M6 Dinero | 17 | 10 | 0 |
 | M7 Inventario y plataforma | 8 | 17 | 0 |
@@ -440,6 +440,48 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 | M1-20 | "Preparar mi clínica" cuenta como listos los procedimientos cubiertos por un grupo de atención. |
 
 - **Pruebas:** 4 nuevas en `test_verificacion_paso7.py` y 1 en `colaboradores/tests_grupos.py`.
+
+**Paso 7b — medios de M2 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M2-08 | Al editar un paciente, borrar el correo, la dirección, la EPS u otro dato opcional se guarda (viaja vacío en vez de no viajar). |
+| M2-09 | "Ver citas" abre la agenda filtrada por el paciente, "Nueva cotización" llega con el paciente elegido, y "Ver todos" de Ingresos filtra la lista y los totales por él (con "Ver todos los pacientes" para quitar el filtro). |
+| M2-10 | En la ficha del paciente, una sección que no carga dice "No se pudo cargar · Reintentar" en vez de "Sin cotizaciones" o "Sin ingresos". (El error de la historia ya se había resuelto en el paso 5.) |
+| M2-11 | Cotizaciones, Ingresos, Asistencias, Ver citas e Historia solo aparecen con su permiso; Editar con `pacientes.editar`; "Tomar foto" con `pacientes.foto_control.cambiar`; "Nuevo paciente" y "Cargar masivo" con `pacientes.crear`. Las rutas de nuevo y editar paciente están protegidas. |
+| M2-12 | La edad sale de `edad` de la API (el profesional sin datos sensibles ya no ve "—") y, si se calcula desde la fecha, se lee como día local (`edadPaciente`). |
+| M2-13 | Registrar un consentimiento manual o subir su PDF pide `historia.consentimientos.gestionar` (consultarlos sigue con "ver pacientes"). El archivo debe ser un PDF de verdad, de hasta 20 MB. |
+| M2-16 | Revertir una carga que tiene pagos o citas registrados después explica qué lo impide ("Reversa esos pagos o cancela esas citas primero") en vez de fallar. Al cargar, el profesional y el procedimiento de cada sesión deben ser de la clínica. |
+| M2-17 | El autorregistro solo marca duplicado por documento (dos familiares pueden compartir teléfono) y el mensaje no dice qué dato coincidió. |
+
+- **Pruebas:** 6 nuevas en `test_verificacion_paso7.py`; la del autorregistro duplicado por teléfono se reemplazó por dos (familiares con el mismo teléfono, y documento repetido con mensaje genérico).
+
+**Paso 7b — medios de M3 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M3-18 | Crear un bloqueo encima de citas pendientes, confirmadas o en espera muestra la lista de esas citas y pide "Crear de todas formas" (el bloqueo no las cancela; quedan para reprogramar). Si se cambian las fechas, el aviso se recalcula. |
+| M3-21 | La confirmación por enlace (aún no se envía a los pacientes: ningún flujo genera el token) quedó lista para activarse: no confirma citas canceladas, cerradas o ya pasadas, no falla con citas sin procedimiento y la pantalla muestra el motivo real. |
+
+- **Pendientes que necesitan decisión:**
+  - **M3-19** (listado de la agenda pesado): la descarga de Documenso ya salió (M4-08). Falta un serializer liviano para el listado, que cambia lo que muestra cada tarjeta de cita; conviene hacerlo midiendo con datos reales.
+  - **M3-20** (zona horaria por clínica, T-04): exige guardar la zona de cada clínica y activarla en cada petición. Todas las clínicas actuales están en Colombia, así que hoy no afecta; es un cambio delicado para las horas de las citas y conviene hacerlo aparte, con su propia revisión.
+- **Pruebas:** 4 nuevas en `test_verificacion_paso6.py`.
+
+**Paso 7b — medios de M4 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M4-11 | Las fotos clínicas aceptan solo JPG, PNG, WebP o HEIC de hasta 15 MB (el modal avisa antes de subir y muestra el motivo real si falla). El cruce entre clínicas ya se había cerrado en el paso 3. |
+| M4-15 | "Iniciar atención" solo aparece con la cita "En espera"; desde "Confirmada" el backend exigía la preparación y el botón siempre fallaba. |
+| M4-16 | "Desiniciar" dice lo que hace (vuelve a "En espera" y conserva nota, fotos e insumos). Cancelar una atención ya iniciada devuelve al inventario los insumos registrados. Si descartar falla, se avisa. |
+| M4-17 | Crear y enviar órdenes, descargar su PDF y el de la historia, crear y eliminar exámenes, y marcar, cambiar o quitar zonas avisan con el motivo cuando fallan. |
+| M4-18 | "Comprobar firma" detecta si el paciente rechazó el consentimiento desde el enlace: avisa "El paciente rechazó el documento" y vuelve a elegir cómo firmar, en vez de quedarse en "Esperando firma". |
+| M4-20 | El listado de consentimientos trae hasta 500 (antes 25) y, si hay más, dice "Mostrando X de N". |
+| M4-21 | Los errores al abrir la firma o enviar el enlace muestran el motivo (sin permiso, plantilla incompleta…) en vez de "No se pudo abrir la firma". |
+| M4-22 | El texto del consentimiento que ve el paciente al firmar se muestra legible (párrafos y viñetas), sin etiquetas HTML crudas y sin ejecutar nada (`htmlATexto`). |
+
+- **Pruebas:** 3 nuevas en `test_verificacion_paso7.py`.
 
 ## Orden de corrección sugerido
 

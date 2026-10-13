@@ -69,7 +69,11 @@ function ConsentimientosContent() {
       <PageHeader
         helpSlug="consentimientos-informados-como-funcionan"
         title="Consentimientos"
-        description={`${consentimientos.length} consentimiento${consentimientos.length !== 1 ? 's' : ''} en total`}
+        description={
+          (data?.count ?? 0) > consentimientos.length
+            ? `Mostrando ${consentimientos.length} de ${data?.count} consentimientos`
+            : `${consentimientos.length} consentimiento${consentimientos.length !== 1 ? 's' : ''} en total`
+        }
         action={
           puedeGenerar ? (
             <Button onClick={() => setShowGenerar(true)}>

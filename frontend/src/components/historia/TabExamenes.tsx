@@ -11,6 +11,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { formatDate } from '@/lib/utils'
 import type { HistoriaClinica } from '@/types/historia'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 
 interface TabExamenesProps {
   historia: HistoriaClinica
@@ -64,11 +66,13 @@ export function TabExamenes({ historia, notaId }: TabExamenesProps) {
       setArchivo(null)
       if (fileRef.current) fileRef.current.value = ''
     },
+    onError: (err) => toast.error('No se pudo guardar el examen', mensajeDeError(err)),
   })
 
   const { mutate: eliminar } = useMutation({
     mutationFn: (id: string) => historiaClinicaApi.resultadosExamenes.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['resultados-examenes', historia.id] }),
+    onError: (err) => toast.error('No se pudo eliminar el examen', mensajeDeError(err)),
   })
 
   function toggleExpandido(id: string) {

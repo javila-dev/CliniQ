@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Check, X, Ban } from 'lucide-react'
 import { mensajeDeError } from '@/lib/errores'
@@ -29,7 +29,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import type { BloqueoAgenda, EstadoBloqueo } from '@/types/agenda'
+import type { BloqueoAgenda, CitaAfectadaBloqueo, EstadoBloqueo } from '@/types/agenda'
 
 interface BloqueosPanelProps {
   open: boolean
@@ -88,6 +88,9 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
   const [formFin, setFormFin] = useState(todayDTLocal)
   const [formMotivo, setFormMotivo] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
+  const [citasAfectadas, setCitasAfectadas] = useState<CitaAfectadaBloqueo[] | null>(null)
+  // Si cambia el horario, el aviso de citas afectadas ya no aplica.
+  useEffect(() => { setCitasAfectadas(null) }, [formInicio, formFin, formSede, formProfesional])
 
   // Usuario acotado: solo sus sedes, y no puede bloquear toda la clínica.
   const { sedes, isAllSedes } = useUserSedes()
@@ -121,10 +124,11 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
     setFormFin(todayDTLocal())
     setFormMotivo('')
     setFormError(null)
+    setCitasAfectadas(null)
   }
 
   const { mutate: crear, isPending: creando } = useMutation({
-    mutationFn: () => {
+    mutationFn: (confirmar: boolean = false) => {
       if (!formInicio || !formFin) throw new Error('Completa las fechas')
       const inicio = localToISO(formInicio)
       const fin = localToISO(formFin)
@@ -135,6 +139,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
         fecha_inicio: inicio,
         fecha_fin: fin,
         motivo: formMotivo,
+        ...(confirmar && { confirmar_citas_afectadas: true }),
       })
     },
     onSuccess: (bloqueo) => {
@@ -146,6 +151,14 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
       }
     },
     onError: (err: any) => {
+      const data = err?.response?.data
+      if (data?.code === 'BLOQUEO_CON_CITAS') {
+        // El bloqueo no cancela las citas: se muestran para reprogramarlas.
+        setCitasAfectadas(data.citas ?? [])
+        setFormError(mensajeDeError(err))
+        return
+      }
+      setCitasAfectadas(null)
       setFormError(mensajeDeError(err, 'No se pudo crear el bloqueo.'))
     },
   })
@@ -318,13 +331,29 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
             {formError && (
               <p className="text-sm text-destructive">{formError}</p>
             )}
+            {citasAfectadas && citasAfectadas.length > 0 && (
+              <ul className="max-h-36 overflow-y-auto rounded-md border bg-amber-50/60 px-3 py-2 text-xs space-y-1">
+                {citasAfectadas.map((c) => (
+                  <li key={c.id} className="flex justify-between gap-2">
+                    <span className="truncate">{c.paciente}</span>
+                    <span className="shrink-0 text-muted-foreground">{formatDT(c.fecha_inicio)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
-            <Button onClick={() => crear()} disabled={creando}>
-              {creando ? 'Guardando...' : canAprobar ? 'Crear bloqueo' : 'Enviar solicitud'}
-            </Button>
+            {citasAfectadas && citasAfectadas.length > 0 ? (
+              <Button variant="destructive" onClick={() => crear(true)} disabled={creando}>
+                {creando ? 'Guardando...' : 'Crear de todas formas'}
+              </Button>
+            ) : (
+              <Button onClick={() => crear(false)} disabled={creando}>
+                {creando ? 'Guardando...' : canAprobar ? 'Crear bloqueo' : 'Enviar solicitud'}
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

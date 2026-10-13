@@ -10,6 +10,8 @@ import { Badge } from '@/components/ui/badge'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { formatDate } from '@/lib/utils'
 import type { HistoriaClinica, OrdenMedica, PlantillaOrden } from '@/types/historia'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 
 interface TabOrdenesMedicasProps {
   historia: HistoriaClinica
@@ -54,6 +56,7 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
         ...(notaId ? { nota: notaId } : {}),
         ...(plantillaSeleccionada ? { plantilla_origen: plantillaSeleccionada.id } : {}),
       }),
+    onError: (err) => toast.error('No se pudo crear la orden', mensajeDeError(err)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['ordenes-medicas', historia.id] })
       setAgregando(false)
@@ -70,7 +73,10 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
       setEnviado(id)
       setTimeout(() => setEnviado(null), 3000)
     },
-    onError: () => setEnviandoId(null),
+    onError: (err) => {
+      setEnviandoId(null)
+      toast.error('No se pudo enviar la orden', mensajeDeError(err))
+    },
   })
 
   async function descargarPdf(id: string, fecha: string) {
@@ -83,6 +89,8 @@ export function TabOrdenesMedicas({ historia, notaId }: TabOrdenesMedicasProps) 
       a.download = `orden-medica-${fecha}.pdf`
       a.click()
       URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('No se pudo descargar el PDF', mensajeDeError(err))
     } finally {
       setDescargandoId(null)
     }

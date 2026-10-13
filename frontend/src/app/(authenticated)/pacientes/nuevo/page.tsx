@@ -14,8 +14,10 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
 import type { CreatePacienteRequest } from '@/types/pacientes'
+import { RoleGuard } from '@/components/shared/RoleGuard'
+import { hasPermission, PERM } from '@/lib/permissions'
 
-export default function NuevoPacientePage() {
+function NuevoPacienteContent() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const [serverError, setServerError] = useState<string | null>(null)
@@ -239,5 +241,13 @@ function EnrollmentFotoDialog({
         </div>
       )}
     </div>
+  )
+}
+
+export default function NuevoPacientePage() {
+  return (
+    <RoleGuard check={(u) => hasPermission(u, PERM.PACIENTES_CREAR)}>
+      <NuevoPacienteContent />
+    </RoleGuard>
   )
 }

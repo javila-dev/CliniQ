@@ -30,7 +30,9 @@ export const consentimientosApi = {
   },
 
   list: async (): Promise<Paginated<Consentimiento>> => {
-    const res = await apiClient.get<Paginated<Consentimiento>>('/consentimientos/')
+    // Antes solo llegaban los primeros 25 y el total y las pestañas se
+    // calculaban sobre ellos.
+    const res = await apiClient.get<Paginated<Consentimiento>>('/consentimientos/', { params: { page_size: 500 } })
     return res.data
   },
 

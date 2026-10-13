@@ -50,27 +50,24 @@ def get_clinica_by_token(token):
         return None
 
 
-def find_duplicate_paciente(clinica, *, tipo_documento, numero_documento, telefono, email):
+MENSAJE_YA_REGISTRADO = (
+    "Ya estás registrado en esta clínica. Si necesitas actualizar tus datos, comunícate con ella."
+)
+
+
+def find_duplicate_paciente(clinica, *, tipo_documento, numero_documento, telefono=None, email=None):
+    """Duplicado en el autorregistro: solo por documento.
+
+    Antes también por teléfono o correo: dos familiares que comparten el número
+    no podían registrarse, y con el enlace público se podía averiguar si un
+    teléfono o correo ya era paciente. El mensaje no dice qué dato coincidió.
+    """
     if Paciente.objects.filter(
         clinica=clinica,
         tipo_documento=tipo_documento,
         numero_documento=numero_documento,
     ).exists():
-        return (
-            "numero_documento",
-            "Ya existe un paciente registrado con ese documento en esta clinica.",
-        )
-    if Paciente.objects.filter(clinica=clinica, telefono=telefono).exists():
-        return (
-            "telefono",
-            "Ya existe un paciente registrado con ese telefono en esta clinica.",
-        )
-    email = (email or "").strip()
-    if email and Paciente.objects.filter(clinica=clinica, email__iexact=email).exists():
-        return (
-            "email",
-            "Ya existe un paciente registrado con ese email en esta clinica.",
-        )
+        return MENSAJE_YA_REGISTRADO
     return None
 
 
@@ -106,14 +103,7 @@ class RegistroPublicoPacienteSerializer(PacienteSerializer):
             email=attrs.get("email"),
         )
         if duplicate:
-            campo, mensaje = duplicate
-            raise serializers.ValidationError(
-                {
-                    "error": mensaje,
-                    "code": "PACIENTE_YA_EXISTE",
-                    "campo": campo,
-                }
-            )
+            raise serializers.ValidationError({"error": duplicate, "code": "PACIENTE_YA_EXISTE"})
 
         tab_error = validate_registro_publico_tabs(clinica, attrs)
         if tab_error:

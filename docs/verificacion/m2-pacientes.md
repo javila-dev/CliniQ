@@ -60,19 +60,19 @@
 - **Causa:** `_can_manage_antecedentes` usa el `user.rol` fijo.
 - **Arreglo:** usar `user_is_tenant_admin` y `user_has_permission`.
 
-**M2-08 · Medio · faltante** · confirmado
+**✅ M2-08 · Medio · faltante** · confirmado
 - **Dónde:** `PacienteForm.tsx:209-224`
 - **Qué ve el usuario:** borrar el correo, la dirección o la EPS al editar no se guarda; el valor vuelve a aparecer.
 - **Causa:** el payload convierte `''` en `undefined`.
 - **Arreglo:** en modo edición, enviar `''`.
 
-**M2-09 · Medio · parámetros/faltante** · confirmado
+**✅ M2-09 · Medio · parámetros/faltante** · confirmado
 - **Dónde:** `pacientes/[id]/page.tsx:301,307,499,567`
 - **Qué ve el usuario:** "Ver citas", "Nueva cotización" y "Ver todos" (Ingresos) no llegan filtrados por el paciente.
 - **Causa:** la agenda, `cotizaciones/nueva` e `ingresos` no leen `?paciente=`.
 - **Arreglo:** leer `?paciente=` en esas tres pantallas.
 
-**M2-10 · Medio · llamada sin resolver** · confirmado
+**✅ M2-10 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `pacientes/[id]/page.tsx:196-222` (modales 507, 575, 607 y 648); `[id]/historia/page.tsx:113-118,142`
 - **Qué ve el usuario:**
   - sin permiso de cotizaciones, cobros o agenda: "Sin cotizaciones" o "Sin ingresos", aunque existan;
@@ -80,19 +80,19 @@
 - **Causa:** no se maneja `isError`.
 - **Arreglo:** distinguir "error/sin permiso" de "vacío" y ocultar los botones sin permiso.
 
-**M2-11 · Medio · permisos (frontend)** · confirmado
+**✅ M2-11 · Medio · permisos (frontend)** · confirmado
 - **Dónde:** `pacientes/page.tsx:296-305`; `[id]/page.tsx:282-284,297-306`; `[id]/historia/page.tsx:222`
 - **Qué ve el usuario:** un rol de solo lectura ve "Nuevo paciente", "Cargar masivo", "Editar" y "Tomar foto". Llena todo el formulario y recibe "No tienes permiso".
 - **Causa:** no hay `RoleGuard` en `/pacientes/*` ni chequeo de `PACIENTES_CREAR`/`EDITAR`/`FOTO_CONTROL_CAMBIAR`.
 - **Arreglo:** ocultar las acciones según el permiso y proteger las rutas.
 
-**M2-12 · Medio · previsible** · confirmado
+**✅ M2-12 · Medio · previsible** · confirmado
 - **Dónde:** `historia/page.tsx:167`; `components/atenciones/PanelPaciente.tsx:28-35,100`; `components/historia/TabDatosGenerales.tsx:114`
 - **Qué ve el usuario:** el Profesional no ve la edad del paciente en la atención; sale "—".
 - **Causa:** la edad se calcula con `fecha_nacimiento`, que llega en null por el enmascarado. Además, `new Date('YYYY-MM-DD')` interpreta la fecha en UTC y adelanta el cumpleaños un día.
 - **Arreglo:** usar `paciente.edad`, que ya trae la API, y parsear las fechas en hora local.
 
-**M2-13 · Medio · permisos** · confirmado
+**✅ M2-13 · Medio · permisos** · confirmado
 - **Dónde:** `backend/apps/pacientes/views.py:49-50,179-217,255-264`
 - **Qué ve el usuario:** quien solo tiene "ver pacientes" puede registrar consentimientos manuales y subir PDFs legales, sin que se valide el tipo de archivo.
 - **Arreglo:** exigir `historia.consentimientos.gestionar` y validar que el archivo sea PDF.
@@ -111,13 +111,13 @@
   - ante un 403, la lista de lotes dice "Todavía no cargaste…".
 - **Arreglo:** extraer un mensaje legible, pasar los textos a español neutro y manejar `isError`.
 
-**M2-16 · Medio · previsible** · probable
+**✅ M2-16 · Medio · previsible** · probable
 - **Dónde:** `backend/apps/migracion/services.py:282-304`
 - **Qué ve el usuario:** "No se pudo revertir", o un 500, si después de la carga se registraron pagos o citas que cuelgan de lo migrado.
 - **Causa:** `ProtectedError` sin manejar. Tampoco se valida `profesional_id`/`servicio_id` contra la clínica.
 - **Arreglo:** revisar las dependencias antes de borrar y responder un 400 que lo explique.
 
-**M2-17 · Medio · previsible/privacidad** · confirmado
+**✅ M2-17 · Medio · previsible/privacidad** · confirmado
 - **Dónde:** `backend/apps/pacientes/registro_publico.py:35-56`
 - **Qué ve el usuario:**
   - dos familiares con el mismo teléfono no pueden autorregistrarse;

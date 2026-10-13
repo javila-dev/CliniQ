@@ -186,4 +186,13 @@ export interface CreateBloqueoRequest {
   fecha_inicio: string
   fecha_fin: string
   motivo?: string
+  /** Crear aunque haya citas en ese horario (el backend avisa primero). */
+  confirmar_citas_afectadas?: boolean
+}
+
+/** Cita que queda dentro de un bloqueo nuevo (respuesta 400 BLOQUEO_CON_CITAS). */
+export interface CitaAfectadaBloqueo {
+  id: string
+  paciente: string
+  fecha_inicio: string
 }

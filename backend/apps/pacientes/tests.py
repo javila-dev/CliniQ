@@ -243,8 +243,8 @@ class RegistroPublicoTests(TestCase):
         paciente = Paciente.objects.get(id=response.json()["id"])
         self.assertEqual(paciente.clinica_id, self.clinica.id)
 
-    def test_post_rechaza_duplicado_por_telefono(self):
-        Paciente.objects.create(
+    def _paciente_existente(self, **datos):
+        base = dict(
             clinica=self.clinica,
             tipo_documento=Paciente.TipoDocumento.CC,
             numero_documento="1110002222",
@@ -256,12 +256,26 @@ class RegistroPublicoTests(TestCase):
             canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
             autoriza_datos=True,
         )
+        return Paciente.objects.create(**{**base, **datos})
+
+    def test_post_permite_familiares_con_el_mismo_telefono(self):
+        # M2-17: el duplicado es por documento; un familiar comparte el número.
+        self._paciente_existente(telefono=self.payload["telefono"])
+
+        response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
+
+        self.assertEqual(response.status_code, 201, response.content)
+
+    def test_post_rechaza_documento_repetido_sin_decir_que_coincidio(self):
+        self._paciente_existente(
+            tipo_documento=self.payload["tipo_documento"], numero_documento=self.payload["numero_documento"],
+        )
 
         response = self.client.post("/api/v1/registro-publico/pacientes/", self.payload, format="json")
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "PACIENTE_YA_EXISTE")
-        self.assertEqual(response.json()["campo"], "telefono")
+        self.assertNotIn("campo", response.json())
 
     def test_mi_clinica_expone_registro_publico_token(self):
         self.client.force_authenticate(self.admin)

@@ -29,6 +29,19 @@ from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
 
 
+MAX_PDF_CONSENTIMIENTO = 20 * 1024 * 1024
+
+
+def validar_archivo_pdf(archivo):
+    """Un consentimiento firmado es un PDF: se revisa el contenido, no solo el nombre."""
+    if archivo.size > MAX_PDF_CONSENTIMIENTO:
+        raise ValidationError({"archivo": "El archivo no puede superar 20 MB."})
+    inicio = archivo.read(5)
+    archivo.seek(0)
+    if inicio != b"%PDF-":
+        raise ValidationError({"archivo": "El archivo debe ser un PDF."})
+
+
 class PacienteViewSet(HasClinicamente, ModelViewSet):
     serializer_class = PacienteSerializer
     queryset = Paciente.objects.select_related("clinica").all()
@@ -47,7 +60,14 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
                 permission_classes = (RequirePermission("pacientes.antecedentes.ver"),)
             else:
                 permission_classes = (RequirePermission("pacientes.antecedentes.editar"),)
-        elif self.action in {"consentimientos", "subir_pdf_consentimiento", "verificar_consentimientos"}:
+        elif self.action == "consentimientos" and self.request.method == "GET":
+            # Consultar sigue con "ver pacientes" (la ficha y la cotización lo usan).
+            permission_classes = (RequirePermission("pacientes.ver"),)
+        elif self.action in {"consentimientos", "subir_pdf_consentimiento"}:
+            # Registrar un consentimiento o subir su PDF es un acto legal: antes
+            # bastaba con "ver pacientes".
+            permission_classes = (RequirePermission("historia.consentimientos.gestionar"),)
+        elif self.action == "verificar_consentimientos":
             permission_classes = (RequirePermission("pacientes.ver"),)
         elif self.action == "enrollment":
             permission_classes = (RequirePermission("pacientes.foto_control.cambiar"),)
@@ -264,6 +284,7 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         archivo = request.FILES.get("archivo")
         if archivo is None:
             raise ValidationError({"archivo": "Debes adjuntar un archivo."})
+        validar_archivo_pdf(archivo)
         consentimiento.archivo = archivo
         consentimiento.save(update_fields=["archivo", "updated_at"])
         return Response(ConsentimientoPacienteSerializer(consentimiento, context={"request": request}).data)

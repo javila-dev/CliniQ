@@ -22,6 +22,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sh
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
+import { pacientesApi } from '@/lib/api/pacientes'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import { AgendaTour } from '@/components/agenda/AgendaTour'
 import { AvisoCitasSinConfirmar } from '@/components/shared/AvisoCitasSinConfirmar'
@@ -1563,6 +1564,16 @@ function AgendaContent() {
   useEffect(() => {
     const f = searchParams.get('fecha')
     if (f) { setFecha(f); setView('dia') }
+  }, [searchParams])
+
+  // "Ver citas" desde la ficha del paciente: la agenda llega filtrada por él.
+  useEffect(() => {
+    const pacienteId = searchParams.get('paciente')
+    if (!pacienteId) return
+    pacientesApi.get(pacienteId).then((p) => setFilterPaciente({
+      id: p.id, nombre_completo: p.nombre_completo, numero_documento: p.numero_documento,
+      tipo_documento: p.tipo_documento, telefono: p.telefono, canal_confirmacion: p.canal_confirmacion,
+    })).catch(() => {})
   }, [searchParams])
 
   // Navigation labels & prev/next logic per view

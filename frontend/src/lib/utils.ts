@@ -62,6 +62,39 @@ export function fechaLocalISO(d: Date): string {
   return d.toLocaleDateString('en-CA')
 }
 
+/**
+ * Texto legible de un HTML guardado (p. ej. el contenido de una plantilla):
+ * conserva los saltos de párrafo y no ejecuta nada. Antes el paciente veía las
+ * etiquetas crudas (`<p>`, `<strong>`).
+ */
+export function htmlATexto(html: string | null | undefined): string {
+  if (!html) return ''
+  if (!/<[a-z!/]/i.test(html)) return html
+  const conSaltos = html
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/(p|div|li|h[1-6]|tr)>/gi, '\n')
+    .replace(/<li[^>]*>/gi, '• ')
+  const doc = new DOMParser().parseFromString(conSaltos, 'text/html')
+  return (doc.body.textContent ?? '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+/**
+ * Edad del paciente. Usa `edad` de la API: quien no ve datos sensibles recibe
+ * la fecha de nacimiento en null (antes salía "—"). Si solo hay fecha, se lee
+ * como día local: `new Date('YYYY-MM-DD')` es UTC y adelantaba el cumpleaños.
+ */
+export function edadPaciente(p: { edad?: number | null; fecha_nacimiento?: string | null } | null | undefined): number | null {
+  if (!p) return null
+  if (typeof p.edad === 'number') return p.edad
+  if (!p.fecha_nacimiento) return null
+  const [y, m, d] = p.fecha_nacimiento.slice(0, 10).split('-').map(Number)
+  if (!y || !m || !d) return null
+  const hoy = new Date()
+  let edad = hoy.getFullYear() - y
+  if (hoy.getMonth() + 1 < m || (hoy.getMonth() + 1 === m && hoy.getDate() < d)) edad--
+  return edad
+}
+
 /** Fecha y hora local para un `<input type="datetime-local">` (YYYY-MM-DDTHH:mm). */
 export function fechaHoraLocalInput(d: Date = new Date()): string {
   const pad = (n: number) => String(n).padStart(2, '0')

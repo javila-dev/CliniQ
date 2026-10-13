@@ -74,7 +74,7 @@
 - **Qué ve el usuario:** cualquier usuario autenticado, incluida Recepción sin permisos clínicos, puede crear, editar y borrar signos vitales y mediciones. Además puede hacerlo **sobre pacientes de otra clínica**.
 - **Arreglo:** exigir `historia.notas.crear` y `historia.ver`, validar la clínica y dejar `tomado_por` e `indicado_por` como solo lectura.
 
-**M4-11 · Medio · permisos (multiclínica)** · confirmado
+**✅ M4-11 · Medio · permisos (multiclínica)** · confirmado
 - **Dónde:** `historia_clinica/serializers.py:30-49`; `views.py:546`.
 - **Problema:** se pueden subir fotos a la nota de otra clínica, y no hay límite de tamaño ni de tipo de archivo.
 
@@ -94,21 +94,21 @@
   - si falla completar la nota, igual se cierra la cita y la nota queda en borrador;
   - "descartar" no tiene `onError`.
 
-**M4-15 · Medio · faltante** · confirmado
+**✅ M4-15 · Medio · faltante** · confirmado
 - **Dónde:** `atenciones/[citaId]/page.tsx:401`; `agenda/views.py:313`.
 - **Qué ve el usuario:** en una cita "Confirmada" aparece "Iniciar atención", y siempre falla.
 - **Arreglo:** mostrar el botón solo cuando la cita está `en_espera`.
 
-**M4-16 · Medio · previsible** · confirmado
+**✅ M4-16 · Medio · previsible** · confirmado
 - **Dónde:** `atenciones/[citaId]/page.tsx:675-685`.
 - **Qué ve el usuario:** "Descartar" dice "los datos se perderán, vuelve a Confirmada", pero la cita pasa a "en espera" y la nota, las fotos y los insumos se quedan. Si cancela, **el stock de insumos no se devuelve**.
 - **Arreglo:** corregir el texto y revertir los consumos al cancelar, o advertirlo.
 
-**M4-17 · Medio · llamada sin resolver** · confirmado
+**✅ M4-17 · Medio · llamada sin resolver** · confirmado
 - **Dónde:** `TabOrdenesMedicas.tsx:49,65,86`; `TabExamenes.tsx:48,69`; `TabZonas.tsx:405-426`; `pacientes/[id]/historia/page.tsx:85`.
 - **Qué ve el usuario:** crear o enviar una orden, descargar PDFs, crear o eliminar exámenes y marcar zonas **fallan sin ningún mensaje**.
 
-**M4-18 · Medio · previsible** · confirmado
+**✅ M4-18 · Medio · previsible** · confirmado
 - **Dónde:** webhook `historia_clinica/webhooks.py`.
 - **Qué ve el usuario:** el paciente rechaza el consentimiento desde el enlace, pero la pantalla sigue en "Esperando firma".
 - **Causa:** se ignora `DOCUMENT_DECLINED` para el consentimiento informado.
@@ -118,16 +118,16 @@
 - **Dónde:** `FirmaProfesionalModal.tsx:156`.
 - **Qué ve el usuario:** si falla la carga, ve un spinner infinito. `guardarTp` no tiene `onError`.
 
-**M4-20 · Medio · previsible** · confirmado
+**✅ M4-20 · Medio · previsible** · confirmado
 - **Dónde:** `consentimientos/page.tsx:48`.
 - **Qué ve el usuario:** solo los primeros 25 consentimientos. El total y las pestañas Pendientes/Firmados se calculan sobre esos 25.
 
-**M4-21 · Medio · errores** · confirmado / probable
+**✅ M4-21 · Medio · errores** · confirmado / probable
 - **Dónde:** `ElegirMetodoFirma.tsx`; `ConsentimientoFirmaContent.tsx`.
 - **Qué ve el usuario:** un 403 o un 400 aparece como "No se pudo abrir la firma". "Reintentar" vuelve a usar un token que quizá ya venció.
 - **Arreglo:** un helper común de mensajes y regenerar el sobre de firma.
 
-**M4-22 · Medio · previsible** · probable
+**✅ M4-22 · Medio · previsible** · probable
 - **Dónde:** `firmar-consentimiento/[token]/page.tsx:149`.
 - **Qué ve el usuario:** el paciente ve etiquetas HTML crudas (`<p>`, `<strong>`).
 - **Arreglo:** mostrar el HTML saneado con DOMPurify.

@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { Check, CheckCircle2, Copy, Loader2, MessageCircle, PenLine } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 
 interface LinkResult {
   enviado: boolean
@@ -37,7 +38,8 @@ export function ElegirMetodoFirma({ documentoLabel, onFirmarAqui, enviarLink, on
     try {
       await onFirmarAqui()
     } catch (err: any) {
-      toast.error('No se pudo abrir la firma', err?.response?.data?.error ?? 'Intenta de nuevo.')
+      // Un 403 o un 400 dicen su motivo (sin permiso, plantilla incompleta…).
+      toast.error('No se pudo abrir la firma', mensajeDeError(err, 'Intenta de nuevo.'))
       setPreparando(false)
     }
   }
@@ -53,7 +55,7 @@ export function ElegirMetodoFirma({ documentoLabel, onFirmarAqui, enviarLink, on
         setInfo(r)
       }
     } catch (err: any) {
-      toast.error('No se pudo enviar el link', err?.response?.data?.error ?? 'Intenta de nuevo.')
+      toast.error('No se pudo enviar el link', mensajeDeError(err, 'Intenta de nuevo.'))
     } finally {
       setEnviando(false)
     }

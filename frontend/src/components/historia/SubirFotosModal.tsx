@@ -16,6 +16,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import type { TipoFoto } from '@/types/historia'
+import { mensajeDeError } from '@/lib/errores'
 
 interface SubirFotosModalProps {
   open: boolean
@@ -62,6 +63,11 @@ export function SubirFotosModal({ open, onOpenChange, notaId, historiaId }: Subi
 
   const handleSubmit = async () => {
     if (!file) return
+    // Mismo límite que el backend: se avisa antes de subir.
+    if (file.size > 15 * 1024 * 1024) {
+      setServerError('La foto no puede superar 15 MB.')
+      return
+    }
     setServerError(null)
     try {
       const fd = new FormData()
@@ -71,7 +77,7 @@ export function SubirFotosModal({ open, onOpenChange, notaId, historiaId }: Subi
       fd.append('archivo', file)
       await mutateAsync(fd)
     } catch (err: any) {
-      setServerError(err?.response?.data?.error ?? 'Error al subir la foto')
+      setServerError(mensajeDeError(err, 'No se pudo subir la foto.'))
     }
   }
 

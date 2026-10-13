@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { ElegirMetodoFirma } from '@/components/shared/ElegirMetodoFirma'
 import { EsperaFirmaLink, type LinkFirmaInfo } from '@/components/shared/EsperaFirmaLink'
+import { mensajeDeError } from '@/lib/errores'
 
 interface ConsentimientoFirmaContentProps {
   pacienteId: string
@@ -80,8 +81,8 @@ export function ConsentimientoFirmaContent({
     onSuccess: ({ signing_token }) => {
       setSigningToken(signing_token)
     },
-    onError: () => {
-      setEmbedError('No se pudo iniciar la firma en Documenso. Intenta de nuevo.')
+    onError: (err) => {
+      setEmbedError(mensajeDeError(err, 'No se pudo iniciar la firma en Documenso. Intenta de nuevo.'))
     },
   })
 
@@ -106,9 +107,15 @@ export function ConsentimientoFirmaContent({
 
   const targetConsentimientoId = consentimientoId ?? consentimientoCreado?.id
 
-  async function comprobarEnDocumenso(): Promise<boolean> {
+  async function comprobarEnDocumenso(): Promise<boolean | 'rechazado'> {
     if (!linkConsentimientoId) return false
     const consentimiento = await historiaClinicaApi.consentimientosInformados.verificarFirma(linkConsentimientoId)
+    if (consentimiento.rechazado) {
+      // Rechazó desde el enlace: se vuelve a elegir cómo firmar.
+      setLinkInfo(null)
+      setLinkConsentimientoId(null)
+      return 'rechazado'
+    }
     if (!consentimiento.firmado) return false
     setPendienteProfesional(Boolean(consentimiento.pendiente_firma_profesional))
     queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })

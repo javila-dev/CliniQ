@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Search, Receipt, CreditCard, ChevronLeft, ChevronRight,
@@ -11,6 +12,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { cobrosApi } from '@/lib/api/cobros'
+import { pacientesApi } from '@/lib/api/pacientes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -555,10 +557,18 @@ const ORIGEN_TABS: { value: string; label: string }[] = [
 // ─── Main ─────────────────────────────────────────────────────
 
 export default function IngresosPage() {
-  return <RoleGuard check={canAccess.cobros}><IngresosContent /></RoleGuard>
+  return <RoleGuard check={canAccess.cobros}><Suspense><IngresosContent /></Suspense></RoleGuard>
 }
 
 function IngresosContent() {
+  // "Ver todos" desde la ficha del paciente: llega filtrado por él.
+  const searchParams = useSearchParams()
+  const [pacienteId, setPacienteId] = useState<string | null>(() => searchParams.get('paciente'))
+  const { data: pacienteFiltro } = useQuery({
+    queryKey: ['pacientes', pacienteId],
+    queryFn: () => pacientesApi.get(pacienteId!),
+    enabled: Boolean(pacienteId),
+  })
   const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
   const [sedeId, setSedeId] = useState<string | null>(null)
   const [search, setSearch] = useState('')
@@ -597,6 +607,7 @@ function IngresosContent() {
     fecha_desde:  fechaDesde || undefined,
     fecha_hasta:  fechaHasta || undefined,
     sede,
+    paciente:     pacienteId || undefined,
     page,
     page_size: 25,
   }
@@ -613,6 +624,7 @@ function IngresosContent() {
     fecha_desde: fechaDesde || undefined,
     fecha_hasta: fechaHasta || undefined,
     sede,
+    paciente:    pacienteId || undefined,
   }
   const { data: resumen } = useQuery({
     queryKey: ['ingresos-resumen', resumenParams],
@@ -741,6 +753,21 @@ function IngresosContent() {
           ))}
         </div>
       </div>
+
+      {pacienteId && (
+        <div className="flex items-center gap-2 text-sm">
+          <span className="rounded-full border bg-white px-3 py-1">
+            Paciente: <span className="font-medium">{pacienteFiltro?.nombre_completo ?? '…'}</span>
+          </span>
+          <button
+            type="button"
+            className="text-xs text-muted-foreground underline-offset-2 hover:underline"
+            onClick={() => { setPacienteId(null); setPage(1) }}
+          >
+            Ver todos los pacientes
+          </button>
+        </div>
+      )}
 
       {/* Filters */}
       <div className="flex flex-col sm:flex-row gap-2.5">

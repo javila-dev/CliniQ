@@ -58,7 +58,7 @@ export const cobrosApi = {
     return res.data
   },
 
-  resumen: async (params?: Pick<CobrosFilter, 'sede' | 'origen' | 'fecha_desde' | 'fecha_hasta'>): Promise<ResumenIngresos> => {
+  resumen: async (params?: Pick<CobrosFilter, 'sede' | 'origen' | 'fecha_desde' | 'fecha_hasta' | 'paciente'>): Promise<ResumenIngresos> => {
     const res = await apiClient.get<ResumenIngresos>('/cobros/cobros/resumen/', { params })
     return res.data
   },

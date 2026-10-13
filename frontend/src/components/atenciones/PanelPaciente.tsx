@@ -10,7 +10,7 @@ import { agendaApi } from '@/lib/api/agenda'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TabDatosGenerales } from '@/components/historia/TabDatosGenerales'
-import { formatDate } from '@/lib/utils'
+import { formatDate, edadPaciente } from '@/lib/utils'
 import type { Paciente } from '@/types/pacientes'
 import type { Cita } from '@/types/agenda'
 import type { HistoriaClinica } from '@/types/historia'
@@ -23,15 +23,6 @@ interface PanelPacienteProps {
   totalFotos?: number
   /** Respeta el toggle de configuración de la clínica para este tab/sección. */
   mostrarDatosGenerales?: boolean
-}
-
-function calcularEdad(fechaNacimiento: string | null): string {
-  if (!fechaNacimiento) return '—'
-  const hoy = new Date()
-  const nac = new Date(fechaNacimiento)
-  const edad = hoy.getFullYear() - nac.getFullYear()
-  const m = hoy.getMonth() - nac.getMonth()
-  return String(m < 0 || (m === 0 && hoy.getDate() < nac.getDate()) ? edad - 1 : edad) + ' años'
 }
 
 export function PanelPaciente({
@@ -97,7 +88,7 @@ export function PanelPaciente({
             {initials}
           </div>
           <p className="font-semibold text-sm leading-tight">{paciente.nombre_completo}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">{calcularEdad(paciente.fecha_nacimiento)}</p>
+          <p className="text-xs text-muted-foreground mt-0.5">{edadPaciente(paciente) !== null ? `${edadPaciente(paciente)} años` : '—'}</p>
           {historia && mostrarDatosGenerales && (
             <Button
               variant="outline"

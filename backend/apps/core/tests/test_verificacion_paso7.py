@@ -19,7 +19,7 @@ from apps.pacientes.registro_publico import (
     RegistroPublicoFotoThrottle,
     RegistroPublicoThrottle,
 )
-from apps.users.models import Rol
+from apps.users.models import Permiso, Rol, RolPermiso
 from apps.users.serializers import build_auth_user_payload
 
 
@@ -220,3 +220,148 @@ class VerificacionPaso7MediosM1Tests(ClinicaFixtureMixin, TestCase):
         response = self._promo([{"procedimiento": str(self.servicio.id), "precio_campana": "90000"}])
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(len(response.json()["items"]), 1)
+
+
+class VerificacionPaso7MediosM2Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    # ── M2-08: borrar un dato opcional al editar ───────────────────────────
+    def test_m208_borrar_el_correo_y_la_eps_se_guarda(self):
+        self.paciente.email = "viejo@example.com"
+        self.paciente.eps = "Sura"
+        self.paciente.save(update_fields=["email", "eps"])
+        response = self.client.patch(f"/api/v1/pacientes/{self.paciente.id}/", {"email": "", "eps": ""}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.paciente.refresh_from_db()
+        self.assertEqual((self.paciente.email, self.paciente.eps), ("", ""))
+
+    # ── M2-09: totales de Ingresos del paciente ────────────────────────────
+    def test_m209_el_resumen_de_ingresos_se_filtra_por_paciente(self):
+        response = self.client.get("/api/v1/cobros/cobros/resumen/", {"paciente": str(self.paciente.id)})
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.client.get("/api/v1/cobros/cobros/resumen/", {"paciente": "x"}).status_code, 400)
+
+    # ── M2-13: consentimientos manuales ────────────────────────────────────
+    def test_m213_solo_ver_pacientes_no_registra_consentimientos(self):
+        rol = Rol.objects.create(clinica=self.clinica, slug="solo_ver", nombre="Solo ver")
+        RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave="pacientes.ver"))
+        usuario = User.objects.create_user(
+            email="ver@test.com", password="Secret123!", first_name="Ve", last_name="R",
+            rol=User.Role.RECEPCION, clinica=self.clinica, rol_dinamico=rol,
+        )
+        self.client.force_authenticate(usuario)
+        url = f"/api/v1/pacientes/{self.paciente.id}/consentimientos/"
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.client.post(url, {}, format="json").status_code, 403)
+
+    def test_m213_el_pdf_del_consentimiento_debe_ser_pdf(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+        from rest_framework.exceptions import ValidationError
+
+        from apps.pacientes.views import validar_archivo_pdf
+
+        with self.assertRaises(ValidationError):
+            validar_archivo_pdf(SimpleUploadedFile("firma.pdf", b"<html>no</html>", content_type="application/pdf"))
+        validar_archivo_pdf(SimpleUploadedFile("firma.pdf", b"%PDF-1.7 ...", content_type="application/pdf"))
+
+    # ── M2-16: revertir una carga con movimientos posteriores ──────────────
+    def test_m216_revertir_con_pagos_posteriores_se_explica(self):
+        from apps.clinicas.models import FormaDePago
+        from apps.cobros.models import Cobro, PagoRecibido
+        from apps.migracion.models import LoteMigracion
+
+        self.clinica.modo_puesta_en_marcha = True
+        self.clinica.save(update_fields=["modo_puesta_en_marcha"])
+        cobro = Cobro.objects.create(
+            origen=Cobro.Origen.LIBRE, paciente=self.paciente, profesional=self.admin, sede=self.sede,
+            created_by=self.admin, total="100.00", subtotal="100.00",
+        )
+        PagoRecibido.objects.create(
+            cobro=cobro, medio_pago=FormaDePago.objects.filter(clinica=self.clinica).first(),
+            valor="50.00", recibido_por=self.admin,
+        )
+        lote = LoteMigracion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, tipo=LoteMigracion.Tipo.PACIENTE_EN_CURSO,
+            creado_por=self.admin, manifest={"cobros": [str(cobro.id)], "pagos": []},
+        )
+        response = self.client.post(f"/api/v1/migracion/lotes/{lote.id}/revertir/")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "LOTE_CON_MOVIMIENTOS")
+        self.assertTrue(Cobro.objects.filter(id=cobro.id).exists())
+
+
+class VerificacionPaso7MediosM4Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        from apps.historia_clinica.models import HistoriaClinica, NotaClinica
+
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica, es_profesional=True,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        historia, _ = HistoriaClinica.objects.get_or_create(paciente=self.paciente, defaults={"clinica": self.clinica})
+        inicio = self.proximo_dia_habil_10am()
+        from apps.agenda.models import Cita
+
+        self.cita = Cita.objects.create(
+            paciente=self.paciente, sede=self.sede, profesional=self.admin,
+            fecha_inicio=inicio, fecha_fin=inicio + timedelta(minutes=30), duracion_min=30,
+            estado=Cita.Estado.EN_CURSO, canal_confirmacion=self.paciente.canal_confirmacion,
+            canal_origen=Cita.CanalOrigen.PRESENCIAL,
+        )
+        self.nota = NotaClinica.objects.create(historia=historia, cita=self.cita)
+
+    # ── M4-11: tipo y tamaño de las fotos clínicas ─────────────────────────
+    def test_m411_solo_se_suben_imagenes(self):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        archivo = SimpleUploadedFile("virus.exe", b"MZ...", content_type="application/octet-stream")
+        response = self.client.post("/api/v1/historia-clinica/fotos/", {
+            "nota": str(self.nota.id), "tipo": "antes", "archivo": archivo,
+        }, format="multipart")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("archivo", response.json())
+
+    # ── M4-16: cancelar una atención iniciada devuelve los insumos ─────────
+    def test_m416_cancelar_una_atencion_iniciada_devuelve_el_stock(self):
+        from apps.historia_clinica.services import registrar_consumo_insumo
+        from apps.inventario.models import Insumo, StockInsumoSede
+        from apps.inventario.services import registrar_ajuste
+
+        insumo = Insumo.objects.create(clinica=self.clinica, nombre="Gasa", unidad_medida="unidad")
+        registrar_ajuste(insumo=insumo, sede=self.sede, cantidad_nueva=Decimal("10"), user=self.admin, motivo="Inicial")
+        registrar_consumo_insumo(nota=self.nota, insumo=insumo, cantidad=Decimal("3"), user=self.admin, sede=self.sede)
+        self.assertEqual(StockInsumoSede.objects.get(insumo=insumo, sede=self.sede).stock_actual, Decimal("7"))
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": "cancelada", "motivo_cancelacion": "El paciente se sintió mal"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(StockInsumoSede.objects.get(insumo=insumo, sede=self.sede).stock_actual, Decimal("10"))
+
+    # ── M4-18: rechazo del consentimiento desde el enlace ──────────────────
+    def test_m418_verificar_firma_avisa_si_el_paciente_rechazo(self):
+        from unittest.mock import patch
+
+        from apps.historia_clinica.models import ConsentimientoInformado
+
+        consentimiento = ConsentimientoInformado.objects.create(
+            clinica=self.clinica, paciente=self.paciente, tipo=ConsentimientoInformado.TipoConsentimiento.choices[0][0],
+            documenso_document_id="envelope_9",
+        )
+        envelope = {"status": "PENDING", "recipients": [{"signingStatus": "REJECTED", "rejectionReason": "No"}]}
+        with patch("apps.historia_clinica.services._fetch_documenso_json", return_value=envelope), \
+                patch("apps.historia_clinica.documenso_firmantes.resolver_envelope_id", return_value="envelope_9"):
+            response = self.client.post(f"/api/v1/historia-clinica/consentimientos/{consentimiento.id}/verificar_firma/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertTrue(response.json()["rechazado"])
+        self.assertFalse(response.json()["firmado"])

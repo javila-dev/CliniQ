@@ -19,6 +19,8 @@ import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import type { Paciente } from '@/types/pacientes'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 
 // ─── helpers ──────────────────────────────────────────────────
 
@@ -257,6 +259,7 @@ export default function PacientesPage() {
   const [pageSize, setPageSize] = useState(25)
   const [filtroActivo, setFiltroActivo] = useState<string>('todos')
   const [cargaMasivaOpen, setCargaMasivaOpen] = useState(false)
+  const puedeCrear = hasPermission(useAuthStore((s) => s.user), PERM.PACIENTES_CREAR)
   const debouncedSearch = useDebounce(search, 400)
 
   const params = {
@@ -293,16 +296,21 @@ export default function PacientesPage() {
         </div>
         <div className="flex items-center gap-2">
           <PuestaEnMarchaButton />
-          <Button variant="outline" onClick={() => setCargaMasivaOpen(true)}>
-            <Upload className="h-4 w-4 mr-1.5" />
-            Cargar masivo
-          </Button>
-          <Button asChild>
-            <Link href="/pacientes/nuevo">
-              <Plus className="h-4 w-4 mr-1.5" />
-              Nuevo paciente
-            </Link>
-          </Button>
+          {/* Sin permiso de crear, el formulario terminaba en "No tienes permiso". */}
+          {puedeCrear && (
+            <>
+              <Button variant="outline" onClick={() => setCargaMasivaOpen(true)}>
+                <Upload className="h-4 w-4 mr-1.5" />
+                Cargar masivo
+              </Button>
+              <Button asChild>
+                <Link href="/pacientes/nuevo">
+                  <Plus className="h-4 w-4 mr-1.5" />
+                  Nuevo paciente
+                </Link>
+              </Button>
+            </>
+          )}
         </div>
       </div>
 

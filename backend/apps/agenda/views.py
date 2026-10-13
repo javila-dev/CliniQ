@@ -426,6 +426,7 @@ class CitaViewSet(ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        estado_anterior = cita.estado
         cita.estado = nuevo_estado
         update_fields = ["estado", "updated_at"]
 
@@ -465,6 +466,16 @@ class CitaViewSet(ModelViewSet):
             cita.sesiones_protocolo.filter(
                 estado=SesionProcedimiento.Estado.PENDIENTE
             ).update(cita=None, updated_at=timezone.now())
+
+            if estado_anterior == Cita.Estado.EN_CURSO:
+                # Se canceló una atención ya iniciada: los insumos que se
+                # registraron vuelven al stock (antes se quedaban descontados).
+                from apps.historia_clinica.models import ConsumoInsumo
+                from apps.historia_clinica.services import eliminar_consumo_insumo
+
+                with transaction.atomic():
+                    for consumo in ConsumoInsumo.objects.filter(nota__cita=cita, activo=True):
+                        eliminar_consumo_insumo(consumo, request.user)
 
         if nuevo_estado in {
             Cita.Estado.CONFIRMADA,
@@ -1170,7 +1181,8 @@ class ConfirmacionPublicaView(APIView):
             {
                 "ok": True,
                 "paciente_nombre": cita.paciente.nombre_completo,
-                "servicio_nombre": cita.servicio.nombre,
+                # Citas de paquete o libres no tienen servicio (antes daba 500).
+                "servicio_nombre": cita.servicio_nombre or (cita.servicio.nombre if cita.servicio_id else ""),
                 "fecha_inicio": cita.fecha_inicio,
                 "profesional_nombre": cita.profesional.nombre_completo,
             },
@@ -1285,7 +1297,43 @@ class BloqueoAgendaViewSet(ModelViewSet):
         else:
             estado = BloqueoAgenda.Estado.PENDIENTE
 
+        self._avisar_citas_afectadas(serializer.validated_data, sede, clinica)
         serializer.save(creado_por=user, clinica=clinica, estado=estado)
+
+    def _avisar_citas_afectadas(self, datos, sede, clinica):
+        """Un bloqueo encima de citas ya agendadas no las cancela: antes se creaba
+        sin decir nada. Si hay citas en ese horario se pide confirmar, con la
+        lista, para que recepción las reprograme."""
+        if str(self.request.data.get("confirmar_citas_afectadas", "")).lower() in {"true", "1"}:
+            return
+        citas = Cita.objects.filter(
+            fecha_inicio__lt=datos["fecha_fin"],
+            fecha_fin__gt=datos["fecha_inicio"],
+            estado__in=[Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA, Cita.Estado.EN_ESPERA],
+        )
+        if datos.get("profesional"):
+            citas = citas.filter(profesional=datos["profesional"])
+        elif sede is not None:
+            citas = citas.filter(sede=sede)
+        else:
+            citas = citas.filter(sede__clinica=clinica)
+        afectadas = list(citas.select_related("paciente").order_by("fecha_inicio")[:20])
+        if not afectadas:
+            return
+        total = citas.count()
+        raise ValidationError({
+            "error": f"Hay {total} cita{'s' if total != 1 else ''} en ese horario. El bloqueo no las cancela: "
+                     "reprográmalas o confirma para crearlo de todas formas.",
+            "code": "BLOQUEO_CON_CITAS",
+            "citas": [
+                {
+                    "id": str(c.id),
+                    "paciente": c.paciente.nombre_completo,
+                    "fecha_inicio": timezone.localtime(c.fecha_inicio).isoformat(),
+                }
+                for c in afectadas
+            ],
+        })
 
     def _puede_modificar(self, bloqueo):
         """Editar o borrar un bloqueo: quien gestiona bloqueos, o quien lo creó

@@ -49,6 +49,18 @@ class FotoClinicaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     def get_url_firmada(self, obj):
         return generar_url_firmada_storage(obj.archivo)
 
+    def validate_archivo(self, archivo):
+        # Antes se aceptaba cualquier archivo de cualquier tamaño.
+        if archivo.size > MAX_FOTO_CLINICA:
+            raise serializers.ValidationError("La foto no puede superar 15 MB.")
+        if (getattr(archivo, "content_type", "") or "").lower() not in TIPOS_FOTO_CLINICA:
+            raise serializers.ValidationError("Solo se permiten fotos JPG, PNG, WebP o HEIC.")
+        return archivo
+
+
+MAX_FOTO_CLINICA = 15 * 1024 * 1024
+TIPOS_FOTO_CLINICA = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"}
+
 
 class NotaClinicaResumenSerializer(serializers.ModelSerializer):
     """Serializer ligero usado en el listado de notas de una historia."""

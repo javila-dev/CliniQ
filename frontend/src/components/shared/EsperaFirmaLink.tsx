@@ -18,7 +18,8 @@ export interface LinkFirmaInfo {
 interface Props {
   linkInfo: LinkFirmaInfo
   /** Consulta el estado en Documenso. Devuelve true si el paciente ya firmó. */
-  onComprobar: () => Promise<boolean>
+  /** true = firmó; 'rechazado' = el paciente rechazó el documento desde el enlace. */
+  onComprobar: () => Promise<boolean | 'rechazado'>
   /** Vuelve a la elección del método de firma. */
   onElegirOtro: () => void
 }
@@ -47,7 +48,9 @@ export function EsperaFirmaLink({ linkInfo, onComprobar, onElegirOtro }: Props) 
     setComprobando(true)
     try {
       const firmado = await onComprobar()
-      if (firmado) {
+      if (firmado === 'rechazado') {
+        toast.error('El paciente rechazó el documento', 'Habla con él y, si está de acuerdo, genera uno nuevo.')
+      } else if (firmado) {
         toast.success('Firma confirmada', 'El paciente ya firmó el documento.')
       } else {
         toast({ title: 'Todavía sin firmar', description: 'El paciente aún no ha firmado. Espera un momento e inténtalo de nuevo.' })

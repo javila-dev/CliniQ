@@ -59,7 +59,12 @@ def confirmar_cita(token_str: str) -> Cita:
         raise ValueError("Token de confirmacion invalido.") from exc
 
     if not token.esta_vigente():
-        raise ValueError("El token de confirmacion ya no es valido.")
+        raise ValueError("Este enlace ya no es válido. Comunícate con la clínica.")
+    # Una cita cancelada, cerrada o ya pasada no se confirma por enlace.
+    if token.cita.estado not in {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}:
+        raise ValueError("Esta cita ya no está activa. Comunícate con la clínica.")
+    if token.cita.fecha_inicio < timezone.now():
+        raise ValueError("Esta cita ya pasó. Comunícate con la clínica.")
 
     token.usado = True
     token.save(update_fields=["usado", "updated_at"])

@@ -49,6 +49,7 @@ from apps.obesidad.models import MedicionAntropometrica
 from apps.historia_clinica.services import (
     DocumensoIntegrationError,
     descargar_pdf_documenso_sellado,
+    paciente_rechazo_consentimiento_en_documenso,
     verificar_firma_consentimiento_en_documenso,
     eliminar_consumo_insumo,
     guardar_pdf_firmado,
@@ -831,9 +832,11 @@ class ConsentimientoInformadoViewSet(
         """Consulta directamente a Documenso si el paciente ya firmo (p. ej. desde el
         link de WhatsApp) y reconcilia el estado. Respaldo del webhook."""
         consentimiento = self.get_object()
-        verificar_firma_consentimiento_en_documenso(consentimiento)
+        firmado = verificar_firma_consentimiento_en_documenso(consentimiento)
         consentimiento.refresh_from_db()
-        return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
+        data = dict(self.get_serializer(consentimiento).data)
+        data["rechazado"] = (not firmado) and paciente_rechazo_consentimiento_en_documenso(consentimiento)
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="iniciar_firma")
     def iniciar_firma(self, request, pk=None):

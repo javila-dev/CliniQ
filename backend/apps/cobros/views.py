@@ -27,6 +27,7 @@ from apps.users.authorization import user_sede_ids_acotadas
 from apps.users.permissions import RequirePermission, get_clinica_activa
 from django.utils import timezone
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -252,6 +253,12 @@ class CobroViewSet(ModelViewSet):
             qs = qs.filter(origen=origen)
         if sede:
             qs = qs.filter(sede_id=sede)
+        if paciente := request.query_params.get("paciente"):
+            # "Ver todos" desde la ficha del paciente: los totales también son suyos.
+            try:
+                qs = qs.filter(paciente_id=uuid.UUID(paciente))
+            except ValueError as exc:
+                raise ValidationError({"paciente": "Identificador inválido."}) from exc
         if search:
             qs = qs.filter(Q(paciente__nombres__icontains=search) | Q(paciente__apellidos__icontains=search))
 

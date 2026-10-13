@@ -29,8 +29,9 @@ import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { useHistoriaConfig } from '@/hooks/usePestanasClinica'
 import { useAuthStore } from '@/store/authStore'
-import { cn } from '@/lib/utils'
+import { cn, edadPaciente } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 
 const ALL_TABS: { value: string; label: string }[] = [
   { value: 'datos-generales', label: 'Datos Generales' },
@@ -46,16 +47,6 @@ const ALL_TABS: { value: string; label: string }[] = [
 
 const SEXO_LABEL: Record<string, string> = { M: 'Masculino', F: 'Femenino', O: 'Otro' }
 const DOC_LABEL:  Record<string, string> = { CC: 'CC', CE: 'CE', PA: 'Pasaporte', TI: 'TI', NIT: 'NIT' }
-
-function calcularEdad(fechaNacimiento: string | null): string | null {
-  if (!fechaNacimiento) return null
-  const hoy = new Date()
-  const nac = new Date(fechaNacimiento)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const m = hoy.getMonth() - nac.getMonth()
-  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--
-  return `${edad} años`
-}
 
 interface Props { params: Promise<{ id: string }> }
 
@@ -84,6 +75,8 @@ function HistoriaContent({ params }: Props) {
       a.download = `historia-${historia.numero}.pdf`
       a.click()
       URL.revokeObjectURL(url)
+    } catch (err) {
+      toast.error('No se pudo descargar la historia', mensajeDeError(err))
     } finally {
       setDownloadingPdf(false)
     }
@@ -187,7 +180,8 @@ function HistoriaContent({ params }: Props) {
   }
 
   const totalFotos = notas?.reduce((acc, n) => acc + (n.fotos?.length ?? 0), 0) ?? 0
-  const edad = paciente ? calcularEdad(paciente.fecha_nacimiento) : null
+  const edadNum = edadPaciente(paciente)
+  const edad = edadNum !== null ? `${edadNum} años` : null
   const iniciales = paciente
     ? `${paciente.nombres?.[0] ?? ''}${paciente.apellidos?.[0] ?? ''}`.toUpperCase()
     : '?'

@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Edit, Phone, Mail, FileText, Users } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { formatDate } from '@/lib/utils'
+import { formatDate, edadPaciente } from '@/lib/utils'
 import type { Paciente } from '@/types/pacientes'
 import type { HistoriaClinica, AntecedentePaciente } from '@/types/historia'
 
@@ -42,16 +42,6 @@ const TIPO_AFILIADO_LABELS: Record<string, string> = {
 const REGIMEN_LABELS: Record<string, string> = {
   contributivo: 'Contributivo', subsidiado: 'Subsidiado', vinculado: 'Vinculado',
   especial: 'Especial/Excepción', pensionado: 'Pensionado',
-}
-
-function calcularEdad(fechaNacimiento: string | null): string {
-  if (!fechaNacimiento) return '—'
-  const hoy = new Date()
-  const nac = new Date(fechaNacimiento)
-  let edad = hoy.getFullYear() - nac.getFullYear()
-  const m = hoy.getMonth() - nac.getMonth()
-  if (m < 0 || (m === 0 && hoy.getDate() < nac.getDate())) edad--
-  return `${edad} años`
 }
 
 function Fila({ label, value }: { label: React.ReactNode; value: React.ReactNode }) {
@@ -112,8 +102,9 @@ export function TabDatosGenerales({ paciente, historia, antecedentes, totalNotas
         <Fila
           label="Fecha de nacimiento"
           value={paciente.fecha_nacimiento
-            ? `${formatDate(paciente.fecha_nacimiento)} (${calcularEdad(paciente.fecha_nacimiento)})`
-            : null}
+            ? `${formatDate(paciente.fecha_nacimiento)} (${edadPaciente(paciente)} años)`
+            // Con la fecha oculta, al menos la edad.
+            : edadPaciente(paciente) !== null ? `${edadPaciente(paciente)} años` : null}
         />
       </Section>
 

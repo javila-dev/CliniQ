@@ -228,6 +228,8 @@ export interface ConsentimientoInformado {
   documenso_template_nombre: string
   fecha_firma: string | null
   firmado: boolean
+  /** Solo en la respuesta de verificar_firma: el paciente rechazó el documento. */
+  rechazado?: boolean
   url_firmada: string | null
   archivo: string | null
   archivo_url: string | null
