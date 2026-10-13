@@ -810,6 +810,8 @@ function DayView({
     queryKey: ['bloqueos', 'dia', fecha, filterSede],
     queryFn: () => agendaApi.bloqueos.list({
       estado: 'aprobado',
+      desde: fecha,
+      hasta: fecha,
       ...(filterSede && { sede: filterSede }),
     }),
     select: (list) => list.filter((b) => {
@@ -1131,6 +1133,8 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
     queryKey: ['bloqueos', 'semana', weekAnchor, filterSede],
     queryFn: () => agendaApi.bloqueos.list({
       estado: 'aprobado',
+      desde: weekAnchor,
+      hasta: weekEnd,
       ...(filterSede && { sede: filterSede }),
     }),
     select: (list) => list.filter((b) => {
@@ -1402,7 +1406,8 @@ function AgendaContent() {
   const [filterPaciente, setFilterPaciente] = useState<BusquedaPaciente | null>(null)
   const [sheetNoCerradas, setSheetNoCerradas] = useState(false)
   const [showBloqueos, setShowBloqueos] = useState(false)
-  const canBloqueos = hasPermission(user, PERM.AGENDA_CREAR_BLOQUEO) || hasPermission(user, PERM.AGENDA_APROBAR_BLOQUEO)
+  // Quien ve la agenda puede solicitar bloqueos (y ver los suyos).
+  const canBloqueos = hasPermission(user, PERM.AGENDA_VER)
   const canCrearCita = hasPermission(user, PERM.AGENDA_CREAR)
 
   const isAdmin = user?.rol === 'admin' || user?.rol === 'superadmin'
@@ -1501,7 +1506,8 @@ function AgendaContent() {
       return agendaApi.citas.list({
         fecha_inicio__date__gte: hace90,
         fecha_inicio__date__lt: hoy,   // estrictamente antes de hoy (fecha local)
-        page_size: 100,
+        estado__in: ESTADOS_NO_CERRADOS.join(','),
+        page_size: 500,
         ...(filterSede && { sede: filterSede }),
         // Un profesional puro solo ve sus propias citas sin cerrar, no las de toda la clínica.
         ...(esSoloProfesional && user?.id ? { profesional: user.id } : {}),
@@ -1532,11 +1538,16 @@ function AgendaContent() {
     queryFn: () => colaboradoresApi.profesionales(filterSede || undefined),
   })
 
-  // Auto-filtrar por profesional solo si es un profesional puro (no admin)
+  // Un profesional puro arranca viendo sus propias citas. Es solo el filtro
+  // inicial: puede quitarlo para ver la agenda de los demás.
+  const filtroInicialAplicado = useRef(false)
   useEffect(() => {
-    if (!esSoloProfesional || !profesionales) return
+    if (filtroInicialAplicado.current || !esSoloProfesional || !profesionales) return
     const miPerfil = profesionales.find((p) => p.id === user?.id)
-    if (miPerfil) setFilterProfesional([miPerfil.id])
+    if (miPerfil) {
+      setFilterProfesional([miPerfil.id])
+      filtroInicialAplicado.current = true
+    }
   }, [esSoloProfesional, profesionales, user?.id])
 
   const handleSedeChange = (val: string) => {
@@ -1756,13 +1767,11 @@ function AgendaContent() {
               </SelectContent>
             </Select>
 
-            {!esSoloProfesional && (
-              <ProfessionalMultiSelect
-                options={profesionales ?? []}
-                value={filterProfesional}
-                onChange={setFilterProfesional}
-              />
-            )}
+            <ProfessionalMultiSelect
+              options={profesionales ?? []}
+              value={filterProfesional}
+              onChange={setFilterProfesional}
+            />
           </div>
 
           {/* Actions */}

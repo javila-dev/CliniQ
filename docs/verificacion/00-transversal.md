@@ -1,6 +1,6 @@
 # T — Resumen general: problemas transversales, avance y lo que falta
 
-**Estado:** En corrección. Pasos 1 a 5 de 7 hechos.
+**Estado:** En corrección. Pasos 1 a 6 de 7 hechos.
 
 Este es el **resumen de toda la verificación**. Tiene tres partes:
 1. El tablero de abajo: qué se hizo y qué falta.
@@ -16,19 +16,19 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 1 | Bloqueos del día a día: paginación, sesión, editar pacientes, recordatorios, autorregistro, buscador de Ingresos, atención con roles personalizados, confirmar citas | ✅ Hecho | `c8e2a65` |
 | 2 | Dinero y stock: pagos y abonos dobles, stock, edición de cobros, reportes de ingresos, arqueo, "Por cobrar", reversar pagos | ✅ Hecho | `28db7ce` |
 | 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | ✅ Hecho | `521456f` |
-| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | ✅ Hecho | ver git log (pasos 4 y 5) |
-| 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | ver git log (pasos 4 y 5) |
-| 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | Pendiente | — |
+| 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | ✅ Hecho | `03c7e93` |
+| 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
+| 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | pendiente de commit |
 | 7 | Todo lo demás, por módulo y severidad | Pendiente | — |
 
-**Hallazgos:** 94 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 106 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
 | M0 Acceso y roles | 22 | 8 | 0 |
 | M1 Configuración y catálogo | 11 | 20 | 0 |
 | M2 Pacientes | 9 | 17 | 0 |
-| M3 Agenda | 9 | 21 | 0 |
+| M3 Agenda | 21 | 9 | 0 |
 | M4 Atención clínica | 13 | 15 | 0 |
 | M5 Comercial | 8 | 22 | 0 |
 | M6 Dinero | 15 | 12 | 0 |
@@ -42,6 +42,7 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | ¿Revertir una carga de migración exige un permiso? | **Sí.** | M1-21 y M2-14: exigir `migracion.gestionar` para revertir (paso 4). |
 | ¿La historia clínica se acota por sede? | **No.** La historia es del paciente, no de la sede. | Se mantiene el alcance por clínica (nota de M4). |
 | ¿El Profesional ve reportes financieros por defecto? | **No el rol de sistema Profesional. El Admin sí.** | M6-12 y M0-21: quitar `reportes.ver_financieros` del default del Profesional, migrar los roles de sistema existentes y que la pestaña Resumen/P&L se rija por ese permiso (paso 4). |
+| ¿Quién puede pedir un bloqueo de agenda? (13/10/2026) | **Quien ve la agenda lo solicita; solo quien tiene "aprobar bloqueos" lo acepta.** | M3-25: crear un bloqueo pide `agenda.citas.ver` (o `agenda.crear_bloqueo`); sin permiso de aprobar queda pendiente (paso 6). |
 | ¿Quién entrega los obsequios de producto? | **Quien atiende pacientes.** | M5-15 (segunda parte): ya funciona así, porque la entrega exige `inventario.consumo.registrar`, que da el check "atiende pacientes". Solo falta que la pantalla lo explique a quien no puede (paso 5). |
 
 ## Resumen en números
@@ -361,6 +362,27 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 
 - **Siguen sin mensaje propio:** quedan 46 archivos de la lista de `calidad_frontend.txt`. Ya no fallan en silencio (los cubre el aviso global), pero muestran un texto genérico.
 - **Pendiente de este grupo para el paso 7:** M0-11 (filtro de usuario en el log), M2-10 (modales de la ficha del paciente), M4-17 (descargas de PDF) y M4-21 (mensajes de firma).
+
+**Paso 6 — agenda (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M3-02 | `GET /agenda/bloqueos/` acepta `desde` y `hasta` (días, ambos incluidos) y trae todo bloqueo que se cruce con el rango, también los de varios días que empezaron antes. La agenda (Día y Semana) pide solo los de su rango, y el panel de bloqueos los vigentes y próximos, hasta 500. Una fecha mal escrita responde 400. |
+| M3-03 | `bloqueos_aplicables()` en `agenda/services.py` reúne los bloqueos del profesional, de su sede y de toda la clínica que se cruzan con el horario. La usan los horarios disponibles, crear y editar citas. Una cita dentro de un bloqueo responde "Ese horario está bloqueado en la agenda" (`HORARIO_BLOQUEADO`). |
+| M3-05 | "Editar" aparece en citas pendientes y confirmadas. En citas de paquete, de sesión o de consulta libre el procedimiento se muestra fijo y los horarios se calculan con la duración de la cita. Reprogramar una cita de paquete ya no vuelve a exigir que la cotización tenga sesiones libres. |
+| M3-06 | `estado` y `motivo_cancelacion` son de solo lectura en la cita: el estado cambia solo por `cambiar_estado`. Una cita completada, cancelada o con "No asistió" no se edita (`CITA_CERRADA`). |
+| M3-11 | El horario de la sede y del profesional se comparan en hora local. "Cambiar profesional" en una cita de las 19:00 ya no dice "fuera del horario". |
+| M3-12 y M3-13 | Al cambiar la fecha se reinician el recordatorio y la confirmación, así le llega el aviso de la nueva fecha. Al cambiar el procedimiento se actualiza el nombre que muestra la agenda. |
+| M3-14 | Crear y editar citas bloquean la agenda del profesional mientras revisan y guardan: dos recepcionistas ya no toman el mismo horario. Si falla, la lista de horarios se refresca. |
+| M3-15 | El aviso de "citas sin cerrar" filtra por estado en el backend; antes contaba solo dentro de las primeras 100 citas. |
+| M3-19 (en parte) | Los horarios disponibles leen las citas y bloqueos del día una sola vez, no todo el historial por cada horario. Queda el listado, que puede llamar a Documenso (paso 7, junto con M4-08). |
+| M3-23 | "Editar", "Cambiar profesional" y "Recordatorio" dependen de `agenda.citas.editar`; las acciones de estado, de `cambiar_estado` o de ser quien atiende la cita. Confirmar la cita lo puede hacer quien crea o edita citas, igual que "No confirmó" (decisión del paso 1). |
+| M3-24 | El profesional arranca viendo sus citas, pero el filtro de profesionales queda visible y puede ver la agenda completa, que es lo que el backend ya le permite. |
+| M3-25 | Por decisión del usuario, quien ve la agenda (`agenda.citas.ver`) puede **solicitar** un bloqueo: queda pendiente y no bloquea hasta que alguien con `agenda.aprobar_bloqueo` lo acepte. Quien aprueba lo crea ya aprobado. El botón dice "Solicitar bloqueo" o "Nuevo bloqueo" según el caso, y avisa que queda pendiente. Quien solicita ve sus solicitudes aunque no tenga "ver bloqueos", y solo puede borrarlas mientras siguen pendientes. |
+| Otros | Bloqueos sin sede rotulados "Toda la clínica" (parte de M3-28). `slots_disponibles` con fecha mal escrita responde 400 (parte de M3-29). |
+
+- **Pruebas:** `test_verificacion_paso6.py` (18). La suite completa (794 tests) pasa salvo los 7 de login con Google (entorno); después del ajuste de solicitudes de bloqueo se volvieron a correr agenda, usuarios y el paso 6 (168 tests), con el mismo resultado.
+- **Queda de agenda para el paso 7:** M3-18 (avisar de las citas afectadas al crear un bloqueo), M3-19 (el listado), M3-20 (zona horaria por clínica), M3-21 (autoconfirmación por enlace) y M3-26 a M3-30.
 
 ## Orden de corrección sugerido
 

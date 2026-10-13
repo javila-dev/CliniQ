@@ -53,33 +53,68 @@ def obtener_rango_ocupado(cita: Cita) -> tuple[datetime, datetime]:
     return cita.fecha_inicio, cita.fecha_fin
 
 
-def verificar_disponibilidad_profesional(profesional_id, fecha_inicio, fecha_fin, excluir_cita_id=None) -> bool:
+def _rangos_citas_ocupadas(profesional_id, desde, hasta, excluir_cita_id=None) -> list[tuple[datetime, datetime]]:
+    """Rangos que ocupan las citas del profesional entre `desde` y `hasta`.
+
+    Solo trae las citas de esa ventana (antes recorría todo el historial por
+    cada horario). Una cita en curso ocupa desde su inicio real, que puede no
+    coincidir con la hora agendada.
+    """
     citas = (
         Cita.objects.filter(profesional_id=profesional_id)
         .exclude(estado=Cita.Estado.CANCELADA)
-        .select_related("servicio")
+        .filter(
+            Q(fecha_inicio__lt=hasta, fecha_fin__gt=desde)
+            | Q(
+                estado=Cita.Estado.EN_CURSO,
+                fecha_inicio_real__lt=hasta,
+                fecha_inicio_real__gt=desde - timedelta(days=1),
+            )
+        )
+        .only("id", "estado", "fecha_inicio", "fecha_fin", "fecha_inicio_real", "duracion_min")
     )
     if excluir_cita_id:
         citas = citas.exclude(id=excluir_cita_id)
+    return [obtener_rango_ocupado(cita) for cita in citas]
 
-    citas_ocupadas = False
-    for cita in citas:
-        cita_inicio, cita_fin = obtener_rango_ocupado(cita)
-        if cita_inicio < fecha_fin and cita_fin > fecha_inicio:
-            citas_ocupadas = True
-            break
 
-    bloqueos = BloqueoAgenda.objects.filter(
-        profesional_id=profesional_id,
+def bloqueos_aplicables(profesional_id, sede, desde, hasta):
+    """Bloqueos aprobados que se cruzan con [desde, hasta) y afectan a ese
+    profesional en esa sede: los suyos, los de toda la sede y los de toda la
+    clínica. Un bloqueo de varios días cuenta en todos sus días."""
+    alcance = Q(profesional_id=profesional_id)
+    if sede is not None:
+        alcance |= Q(profesional__isnull=True, sede_id=sede.id)
+        alcance |= Q(profesional__isnull=True, sede__isnull=True, clinica_id=sede.clinica_id)
+    return BloqueoAgenda.objects.filter(
+        alcance,
         estado=BloqueoAgenda.Estado.APROBADO,
-        fecha_inicio__lt=fecha_fin,
-        fecha_fin__gt=fecha_inicio,
+        fecha_inicio__lt=hasta,
+        fecha_fin__gt=desde,
     )
 
-    return not citas_ocupadas and not bloqueos.exists()
+
+def rango_bloqueado(profesional_id, sede, fecha_inicio, fecha_fin) -> bool:
+    return bloqueos_aplicables(profesional_id, sede, fecha_inicio, fecha_fin).exists()
+
+
+def _se_cruza(rangos, inicio, fin) -> bool:
+    return any(r_ini < fin and r_fin > inicio for r_ini, r_fin in rangos)
+
+
+def verificar_disponibilidad_profesional(profesional_id, fecha_inicio, fecha_fin, excluir_cita_id=None, sede=None) -> bool:
+    """El profesional no tiene otra cita ni un bloqueo en ese rango. Con `sede`
+    también cuentan los bloqueos de la sede y de la clínica."""
+    if _se_cruza(_rangos_citas_ocupadas(profesional_id, fecha_inicio, fecha_fin, excluir_cita_id), fecha_inicio, fecha_fin):
+        return False
+    return not rango_bloqueado(profesional_id, sede, fecha_inicio, fecha_fin)
 
 
 def verificar_horario_sede(sede: Sede, fecha_inicio: datetime, fecha_fin: datetime) -> bool:
+    # El horario de la sede está en hora local: una cita de las 19:00 en UTC ya
+    # cae al día siguiente y quedaba "fuera del horario".
+    fecha_inicio = timezone.localtime(fecha_inicio)
+    fecha_fin = timezone.localtime(fecha_fin)
     key_dia = DIAS_SEMANA.get(fecha_inicio.weekday())
     rango = sede.horario.get(key_dia)
     if not rango or len(rango) != 2:
@@ -176,6 +211,8 @@ def obtener_rango_horario_profesional(profesional_id, sede_id, fecha):
 
 
 def verificar_horario_profesional(profesional_id, sede_id, fecha_inicio: datetime, fecha_fin: datetime) -> bool:
+    fecha_inicio = timezone.localtime(fecha_inicio)
+    fecha_fin = timezone.localtime(fecha_fin)
     rango_profesional = obtener_rango_horario_profesional(profesional_id, sede_id, fecha_inicio.date())
     if rango_profesional is None:
         return True
@@ -207,24 +244,15 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
     if rango_profesional:
         actual, limite = rango_profesional
 
-    bloqueos_sede = list(
-        BloqueoAgenda.objects.filter(
-            sede_id=sede_id,
-            profesional__isnull=True,
-            estado=BloqueoAgenda.Estado.APROBADO,
-            fecha_inicio__date=fecha,
-        ).values_list("fecha_inicio", "fecha_fin")
-    )
+    # Citas y bloqueos del día se leen una sola vez, no por cada horario.
+    # Los bloqueos incluyen los de varios días que empezaron antes.
+    ocupados = _rangos_citas_ocupadas(profesional_id, actual, limite, excluir_cita_id)
+    ocupados += list(bloqueos_aplicables(profesional_id, sede, actual, limite).values_list("fecha_inicio", "fecha_fin"))
 
     slots = []
     while actual + timedelta(minutes=duracion_min) <= limite:
         fin = calcular_fecha_fin(actual, duracion_min)
-        bloqueado_sede = any(b_ini < fin and b_fin > actual for b_ini, b_fin in bloqueos_sede)
-        if (
-            not bloqueado_sede
-            and verificar_horario_sede(sede, actual, fin)
-            and verificar_disponibilidad_profesional(profesional_id, actual, fin, excluir_cita_id=excluir_cita_id)
-        ):
+        if not _se_cruza(ocupados, actual, fin) and verificar_horario_sede(sede, actual, fin):
             slots.append(actual)
         actual = actual + timedelta(minutes=intervalo_min)
 
@@ -368,6 +396,28 @@ def _validar_deuda_paciente(paciente, clinica, *, accion="agendar una nueva cita
     })
 
 
+def _bloquear_agenda_del_profesional(profesional_id):
+    """Serializa las reservas del mismo profesional: dos recepcionistas (o un
+    doble clic) ya no pueden tomar el mismo horario a la vez. Se usa dentro de
+    una transacción, antes de revisar la disponibilidad."""
+    from django.contrib.auth import get_user_model
+
+    get_user_model().objects.select_for_update().filter(pk=profesional_id).values_list("pk", flat=True).first()
+
+
+def validar_horario_cita(*, sede, profesional, fecha_inicio, fecha_fin, excluir_cita_id=None):
+    """Reglas comunes al crear y al editar una cita."""
+    if not verificar_horario_sede(sede, fecha_inicio, fecha_fin):
+        raise ValidationError({"error": "La cita está fuera del horario de la sede."})
+    if not verificar_horario_profesional(profesional.id, sede.id, fecha_inicio, fecha_fin):
+        raise ValidationError({"error": "La cita está fuera del horario del colaborador."})
+    if rango_bloqueado(profesional.id, sede, fecha_inicio, fecha_fin):
+        raise ValidationError({"error": "Ese horario está bloqueado en la agenda.", "code": "HORARIO_BLOQUEADO"})
+    if not verificar_disponibilidad_profesional(profesional.id, fecha_inicio, fecha_fin, excluir_cita_id=excluir_cita_id):
+        raise ValidationError({"error": "El profesional no está disponible en ese horario.", "code": "HORARIO_OCUPADO"})
+
+
+@transaction.atomic
 def crear_cita(data: dict, created_by) -> Cita:
     data = dict(data)
     servicio = data.get("servicio")
@@ -393,12 +443,8 @@ def crear_cita(data: dict, created_by) -> Cita:
         raise ValidationError({"error": "El procedimiento no pertenece a la clinica de la sede."})
     if profesional.clinica_id != sede.clinica_id:
         raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
-    if not verificar_horario_sede(sede, fecha_inicio, fecha_fin):
-        raise ValidationError({"error": "La cita esta fuera del horario de la sede."})
-    if not verificar_horario_profesional(profesional.id, sede.id, fecha_inicio, fecha_fin):
-        raise ValidationError({"error": "La cita esta fuera del horario del colaborador."})
-    if not verificar_disponibilidad_profesional(profesional.id, fecha_inicio, fecha_fin):
-        raise ValidationError({"error": "El profesional no esta disponible en ese horario."})
+    _bloquear_agenda_del_profesional(profesional.id)
+    validar_horario_cita(sede=sede, profesional=profesional, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
 
     _validar_deuda_paciente(paciente, sede.clinica)
 

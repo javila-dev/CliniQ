@@ -151,10 +151,13 @@ export const agendaApi = {
       sede?: string
       profesional?: string
       estado?: string
-      fecha_inicio__gte?: string
-      fecha_fin__lte?: string
+      /** Días YYYY-MM-DD (incluidos): trae los bloqueos que se cruzan con el rango. */
+      desde?: string
+      hasta?: string
     }): Promise<BloqueoAgenda[]> => {
-      const res = await apiClient.get<Paginated<BloqueoAgenda>>('/agenda/bloqueos/', { params })
+      const res = await apiClient.get<Paginated<BloqueoAgenda>>('/agenda/bloqueos/', {
+        params: { page_size: 500, ...params },
+      })
       return res.data.results
     },
     create: async (data: CreateBloqueoRequest): Promise<BloqueoAgenda> => {

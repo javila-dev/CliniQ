@@ -27,7 +27,8 @@ import type { Cita } from '@/types/agenda'
 const schema = z.object({
   sede: z.string().min(1, 'Selecciona una sede'),
   profesional: z.string().min(1, 'Selecciona un profesional'),
-  servicio: z.string().min(1, 'Selecciona un procedimiento'),
+  // Obligatorio solo en citas de procedimiento (ver superRefine en el formulario).
+  servicio: z.string().optional(),
   fecha: z.string().min(1, 'Selecciona una fecha'),
   slot: z.string().min(1, 'Selecciona un horario'),
   canal_origen: z.enum(['presencial', 'telefono', 'web', 'redes']),
@@ -53,12 +54,22 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   const canAprobarExcepcion = hasPermission(user, PERM.CARTERA_APROBAR_EXCEPCION)
   const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
 
+  // Una cita de paquete (ítem de cotización), de sesión o de consulta libre
+  // tiene la duración fija: se reprograma sin pedir un procedimiento.
+  const conProcedimiento = Boolean(cita.servicio)
+
   const { control, register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormValues>({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(
+      schema.superRefine((v, ctx) => {
+        if (conProcedimiento && !v.servicio) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['servicio'], message: 'Selecciona un procedimiento' })
+        }
+      }),
+    ),
     defaultValues: {
       sede: cita.sede,
       profesional: cita.profesional,
-      servicio: cita.servicio,
+      servicio: cita.servicio ?? '',
       fecha: cita.fecha_inicio.split('T')[0],
       slot: cita.fecha_inicio,
       canal_origen: cita.canal_origen,
@@ -87,7 +98,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
       agendaApi.citas.update(cita.id, {
         sede: values.sede,
         profesional: values.profesional,
-        servicio: values.servicio,
+        ...(conProcedimiento && { servicio: values.servicio }),
         fecha_inicio: values.slot,
         canal_origen: values.canal_origen,
         notas_internas: values.notas_internas || undefined,
@@ -153,7 +164,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
               onValueChange={(v) => {
                 field.onChange(v)
                 setValue('profesional', '')
-                setValue('servicio', '')
+                if (conProcedimiento) setValue('servicio', '')
                 setValue('slot', '')
               }}
             />
@@ -175,7 +186,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
                 sedeId={sedeId}
                 disabled={!sedeId}
                 filtro={servicioId ? { servicioIds: [servicioId] } : undefined}
-                esperando={filtroActivo && (!sedeId || !servicioId) ? 'Elige sede y procedimiento primero' : undefined}
+                esperando={filtroActivo && conProcedimiento && (!sedeId || !servicioId) ? 'Elige sede y procedimiento primero' : undefined}
               />
             )}
           />
@@ -183,22 +194,31 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
         </div>
 
         <div className={cn('space-y-1.5', filtroActivo && 'order-1')}>
-          <Label>Procedimiento *</Label>
-          <Controller
-            name="servicio"
-            control={control}
-            render={({ field }) => (
-              <ServicioSelect
-                value={field.value}
-                onValueChange={(v) => {
-                  field.onChange(v)
-                  setValue('slot', '')
-                  if (filtroActivo) setValue('profesional', '')
-                }}
-                clinicaId={clinicaId}
-              />
-            )}
-          />
+          <Label>Procedimiento{conProcedimiento && ' *'}</Label>
+          {conProcedimiento ? (
+            <Controller
+              name="servicio"
+              control={control}
+              render={({ field }) => (
+                <ServicioSelect
+                  value={field.value ?? ''}
+                  onValueChange={(v) => {
+                    field.onChange(v)
+                    setValue('slot', '')
+                    if (filtroActivo) setValue('profesional', '')
+                  }}
+                  clinicaId={clinicaId}
+                />
+              )}
+            />
+          ) : (
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+              <p className="truncate">{cita.servicio_nombre || 'Consulta libre'}</p>
+              {cita.duracion_min ? (
+                <p className="text-xs text-muted-foreground">{cita.duracion_min} min</p>
+              ) : null}
+            </div>
+          )}
           {errors.servicio && <p className="text-xs text-destructive">{errors.servicio.message}</p>}
         </div>
       </div>
@@ -240,7 +260,8 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
           <SlotPicker
             profesionalId={profesionalId}
             sedeId={sedeId}
-            servicioId={servicioId}
+            servicioId={conProcedimiento ? servicioId : undefined}
+            duracionMin={conProcedimiento ? undefined : cita.duracion_min ?? undefined}
             fecha={fecha}
             value={slot}
             onSelect={(s) => setValue('slot', s)}

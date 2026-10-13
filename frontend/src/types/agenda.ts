@@ -172,6 +172,7 @@ export interface BloqueoAgenda {
   fecha_fin: string
   motivo: string
   estado: EstadoBloqueo
+  creado_por: string | null
   creado_por_nombre: string
   aprobado_por_nombre: string | null
   aprobado_en: string | null

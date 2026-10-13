@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { agendaApi } from '@/lib/api/agenda'
-import { hasPermission, isProfesional, PERM } from '@/lib/permissions'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -176,12 +176,22 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
   })
   const itemSesiones = sesionesData?.items.find((i) => i.item_id === cita?.item_cotizacion_id)
 
+  // Lo mismo que revisa el backend: cambiar el estado lo hace quien tiene el
+  // permiso o quien atiende la cita; confirmar, quien gestiona la agenda.
+  const puedeEditar = hasPermission(user, PERM.AGENDA_EDITAR)
+  const puedeGestionarAgenda = puedeEditar || hasPermission(user, PERM.AGENDA_CREAR)
+  const puedeCambiarEstado = hasPermission(user, PERM.AGENDA_CAMBIAR_ESTADO)
+    || (Boolean(user?.es_profesional) && cita?.profesional === user?.id)
+  const puedeTransicionar = (estado: EstadoCita) =>
+    puedeCambiarEstado || (estado === 'confirmada' && puedeGestionarAgenda)
+
   const transiciones: EstadoCita[] = (() => {
     if (!cita) return []
     const base = TRANSICIONES_ESTADO[cita.estado] ?? []
-    if (!isPasada) return base
-    if (cita.estado === 'pendiente') return ['confirmada', 'no_asistio', 'cancelada']
-    return base
+    const posibles: EstadoCita[] = isPasada && cita.estado === 'pendiente'
+      ? ['confirmada', 'no_asistio', 'cancelada']
+      : base
+    return posibles.filter(puedeTransicionar)
   })()
 
   const handleClose = () => {
@@ -203,7 +213,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
               {cita && <SheetDescription>{formatDateTime(cita.fecha_inicio)}</SheetDescription>}
             </div>
             <div className="flex gap-2">
-              {cita?.estado === 'pendiente' && !editando && !isProfesional(user) && (
+              {(cita?.estado === 'pendiente' || cita?.estado === 'confirmada') && !editando && puedeEditar && (
                 <Button size="sm" variant="outline" onClick={() => setEditando(true)}>
                   <Pencil className="h-3.5 w-3.5 mr-1.5" />
                   Editar
@@ -418,7 +428,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
               {/* Acciones + recordatorio — todos inline */}
               {(() => {
                 const accionesModal: AccionModal[] = [
-                  ...(cita.estado === 'confirmada' && !isPasada && cita.estado_confirmacion !== 'confirmado'
+                  ...(cita.estado === 'confirmada' && !isPasada && cita.estado_confirmacion !== 'confirmado' && puedeGestionarAgenda
                     ? [{ kind: 'manual' as const }]
                     : []),
                   ...transiciones
@@ -430,14 +440,14 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 // Con la atención en curso (o cerrada) ya no hay nada que hacer desde la agenda.
                 const necesitaAccion = tieneEnEspera || tieneEnCurso
                 // El recordatorio solo sirve antes de que el paciente llegue.
-                const tieneRecordatorio = ['pendiente', 'confirmada'].includes(cita.estado) && !isPasada
+                const tieneRecordatorio = ['pendiente', 'confirmada'].includes(cita.estado) && !isPasada && puedeEditar
                 if (!necesitaAccion && accionesModal.length === 0 && !tieneRecordatorio) return null
                 // Desde 'confirmada' el asistente solo checkea la llegada (→ en_espera): el
                 // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
                 // no dar a entender que recepción "inicia la atención".
                 const soloCheckin = tieneEnEspera && !tieneEnCurso
                 const puedeCambiarProf =
-                  (cita.estado === 'confirmada' || cita.estado === 'en_espera') && hasPermission(user, PERM.AGENDA_EDITAR)
+                  (cita.estado === 'confirmada' || cita.estado === 'en_espera') && puedeEditar
                 // Confirmar (cita pendiente o asistencia de una confirmada) abre el
                 // modal de contacto con sus salidas — confirmó / canceló / no confirmó
                 // / no asistió —, así que esas acciones ya no se repiten en el menú.

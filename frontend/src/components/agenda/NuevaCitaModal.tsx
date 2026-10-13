@@ -221,6 +221,8 @@ export function NuevaCitaModal({
   const { mutateAsync, isPending } = useMutation({
     meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: agendaApi.citas.create,
+    // Si el horario se ocupó mientras tanto, la lista de horarios se refresca.
+    onError: () => queryClient.invalidateQueries({ queryKey: ['slots'] }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['seguimiento'] })

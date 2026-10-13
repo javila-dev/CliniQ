@@ -19,13 +19,13 @@
 - **Causa:** el backend ignora `page_size` y el frontend solo lee la página 1.
 - **Arreglo:** T-01, o una acción de agenda sin paginar y acotada por rango de fechas.
 
-**M3-02 · Alto · parámetros/API** · confirmado
+**✅ M3-02 · Alto · parámetros/API** · confirmado
 - **Dónde:** `frontend/src/lib/api/agenda.ts:150-159`; `backend/apps/agenda/views.py:1177-1200`
 - **Qué ve el usuario:** cuando ya hay más de 25 bloqueos antiguos, **los bloqueos nuevos no se ven** ni en la agenda ni en el panel.
 - **Causa:** el backend devuelve la página 1, ordenada del más viejo al más nuevo, y no implementa los filtros de fecha que declara el tipo.
 - **Arreglo:** aceptar un rango de fechas en el backend y enviarlo desde el frontend.
 
-**M3-03 · Alto · previsible** · confirmado
+**✅ M3-03 · Alto · previsible** · confirmado
 - **Dónde:** `backend/apps/agenda/services.py:56-79,210-217,396-401`; `views.py:264-274`
 - **Qué ve el usuario:** **se puede agendar dentro de un bloqueo** de toda la sede o de toda la clínica. También se puede en el día 2 o siguientes de un bloqueo de varios días, por ejemplo el cierre de fin de año.
 - **Causa:** la disponibilidad solo mira los bloqueos con profesional. Los slots solo consideran bloqueos que empiezan ese mismo día. Crear o editar la cita por API no revisa los bloqueos de sede.
@@ -37,14 +37,14 @@
 - **Causa:** la acción exige `agenda.citas.confirmar_manual`, que los roles Recepción de las 5 clínicas no tienen. Además, el frontend no lee `detail`.
 - **Arreglo aplicado (por decisión del usuario):** se eliminó el permiso aparte. Confirmar o marcar "No confirmó" lo puede hacer quien puede crear o editar citas. La migración `users 0024` lo quita de la base de datos.
 
-**M3-05 · Alto · faltante** · confirmado
+**✅ M3-05 · Alto · faltante** · confirmado
 - **Dónde:** `CitaDetailSheet.tsx:206`; `EditarCitaForm.tsx:30,240-248`
 - **Qué ve el usuario:** cuando el paciente pide mover su cita:
   - si la cita está **confirmada**, no hay forma de reprogramarla; hay que cancelar y crear otra, y se pierde el vínculo con la cotización;
   - si es de **paquete** o **consulta libre**, Editar obliga a elegir un procedimiento.
 - **Arreglo:** permitir reprogramar citas pendientes y confirmadas, respetando el tipo de cita (`itemCotizacionId` o `duracion_min`).
 
-**M3-06 · Alto · previsible/permisos** · confirmado
+**✅ M3-06 · Alto · previsible/permisos** · confirmado
 - **Dónde:** `backend/apps/agenda/serializers.py:252-279`
 - **Qué ve el usuario:** nada en pantalla. Pero por API, Recepción puede hacer `PATCH {"estado":"completada"}` y saltarse consentimientos, mora y tiempos.
 - **Arreglo:** dejar `estado` y `motivo_cancelacion` como solo lectura, y rechazar la edición de citas cerradas.
@@ -69,28 +69,28 @@
 - **Qué ve el usuario:** si la API falla, la agenda se ve vacía, como un día libre.
 - **Arreglo:** estado de error con "Reintentar".
 
-**M3-11 · Medio · zona horaria** · confirmado (shell)
+**✅ M3-11 · Medio · zona horaria** · confirmado (shell)
 - **Dónde:** `agenda/views.py:248,264-267`; `services.py:82-94,178-185`
 - **Qué ve el usuario:** "Cambiar profesional" en una cita de las 19:00 o más tarde responde "fuera del horario de la sede".
 - **Causa:** se valida con la hora en UTC.
 - **Arreglo:** usar `timezone.localtime` antes de validar.
 
-**M3-12 · Medio · previsible** · confirmado
+**✅ M3-12 · Medio · previsible** · confirmado
 - **Dónde:** `agenda/views.py:276-281`
 - **Qué ve el usuario:** al reprogramar una cita, al paciente **no le llega recordatorio** de la nueva fecha.
 - **Arreglo:** al cambiar la fecha, reiniciar `recordatorio_enviado`, `recordatorio_manual_pendiente` y `estado_confirmacion`.
 
-**M3-13 · Medio · previsible** · confirmado
+**✅ M3-13 · Medio · previsible** · confirmado
 - **Dónde:** `agenda/views.py:277-281`; `serializers.py:287-288`
 - **Qué ve el usuario:** al cambiar el procedimiento, la agenda sigue mostrando el nombre anterior.
 - **Arreglo:** recalcular `servicio_nombre` al editar.
 
-**M3-14 · Medio · doble reserva** · probable
+**✅ M3-14 · Medio · doble reserva** · probable
 - **Dónde:** `services.py:371-412`; `NuevaCitaModal.tsx:221-229,769`
 - **Qué ve el usuario:** con dos recepcionistas o un doble clic, se reserva el mismo horario dos veces. Después del error, la lista de horarios no se refresca.
 - **Arreglo:** transacción con bloqueo e invalidar `['slots']` en `onError`.
 
-**M3-15 · Medio · parámetros** · confirmado
+**✅ M3-15 · Medio · parámetros** · confirmado
 - **Dónde:** `agenda/page.tsx:1471-1492`
 - **Qué ve el usuario:** el aviso de "citas sin cerrar" cuenta de menos.
 - **Arreglo:** filtrar por estado y orden en el backend.
@@ -132,16 +132,16 @@
 - **Dónde:** `NuevaCitaModal.tsx:264-281`
 - **Qué ve el usuario:** crear un paciente desde "Nueva cita" con datos inválidos no muestra ningún mensaje (igual que M2-03).
 
-**M3-23 · Bajo · roles personalizados** · confirmado
+**✅ M3-23 · Bajo · roles personalizados** · confirmado
 - **Dónde:** `CitaDetailSheet.tsx:206,419-520`; `lib/permissions.ts:166-168`
 - **Qué ve el usuario:** "Editar" se oculta a quien atiende pacientes y se muestra a quien no tiene permiso. Las acciones de estado no revisan `cambiar_estado`.
 
-**M3-24 · Bajo · roles personalizados** · confirmado
+**✅ M3-24 · Bajo · roles personalizados** · confirmado
 - **Dónde:** `agenda/page.tsx:1384-1387,1512-1516,1735`
 - **Qué ve el usuario:** un rol personalizado "profesional + ver agenda" solo ve sus propias citas y pierde el filtro, aunque el backend le deja ver todo.
 - **Arreglo:** un permiso explícito para "ver la agenda de todos".
 
-**M3-25 · Bajo · permisos/faltante** · confirmado
+**✅ M3-25 · Bajo · permisos/faltante** · confirmado
 - **Dónde:** `BloqueosPanel.tsx:70`
 - **Qué ve el usuario:** quien solo puede "aprobar" ve "Nuevo bloqueo". Recepción y Profesional no tienen `crear_bloqueo`, así que el flujo de solicitud no se usa nunca.
 

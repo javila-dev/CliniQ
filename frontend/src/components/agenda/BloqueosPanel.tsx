@@ -4,12 +4,13 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Plus, Trash2, Check, X, Ban } from 'lucide-react'
 import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { agendaApi } from '@/lib/api/agenda'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { hasPermission, PERM } from '@/lib/permissions'
-import { cn } from '@/lib/utils'
+import { cn, todayISO } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -68,8 +69,12 @@ function todayDTLocal() {
 export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPanelProps) {
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
-  const canCrear = hasPermission(user, PERM.AGENDA_CREAR_BLOQUEO) || hasPermission(user, PERM.AGENDA_APROBAR_BLOQUEO)
+  // Quien ve la agenda puede solicitar un bloqueo; queda pendiente hasta que
+  // alguien con "aprobar bloqueos" lo acepte (quien aprueba lo crea aprobado).
+  const canCrear = hasPermission(user, PERM.AGENDA_CREAR_BLOQUEO) || hasPermission(user, PERM.AGENDA_VER)
   const canAprobar = hasPermission(user, PERM.AGENDA_APROBAR_BLOQUEO)
+  const canGestionar = hasPermission(user, PERM.AGENDA_GESTIONAR_BLOQUEOS)
+  const textoCrear = canAprobar ? 'Nuevo bloqueo' : 'Solicitar bloqueo'
 
   // Filters
   const [filterSede, setFilterSede] = useState(defaultSedeId ?? '')
@@ -99,8 +104,10 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
   })
 
   const { data: bloqueos, isLoading } = useQuery({
-    queryKey: ['bloqueos', filterSede, filterEstado],
+    queryKey: ['bloqueos', 'panel', filterSede, filterEstado],
     queryFn: () => agendaApi.bloqueos.list({
+      // Vigentes y próximos: los ya terminados no se gestionan.
+      desde: todayISO(),
       ...(filterSede && { sede: filterSede }),
       ...(filterEstado && { estado: filterEstado }),
     }),
@@ -130,10 +137,13 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
         motivo: formMotivo,
       })
     },
-    onSuccess: () => {
+    onSuccess: (bloqueo) => {
       queryClient.invalidateQueries({ queryKey: ['bloqueos'] })
       setDialogOpen(false)
       resetForm()
+      if (bloqueo.estado === 'pendiente') {
+        toast.success('Solicitud enviada', 'El bloqueo queda pendiente hasta que lo aprueben.')
+      }
     },
     onError: (err: any) => {
       setFormError(mensajeDeError(err, 'No se pudo crear el bloqueo.'))
@@ -165,7 +175,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
               {canCrear && (
                 <Button size="sm" onClick={() => { resetForm(); setDialogOpen(true) }}>
                   <Plus className="h-4 w-4 mr-1.5" />
-                  Nuevo bloqueo
+                  {textoCrear}
                 </Button>
               )}
             </SheetTitle>
@@ -215,6 +225,9 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
                 key={b.id}
                 bloqueo={b}
                 canAprobar={canAprobar}
+                // Igual que el backend: quien gestiona bloqueos borra cualquiera;
+                // quien lo solicitó, solo mientras sigue pendiente.
+                canEliminar={canGestionar || (b.estado === 'pendiente' && b.creado_por === user?.id)}
                 onAprobar={() => aprobar(b.id)}
                 onRechazar={() => rechazar(b.id)}
                 onEliminar={() => eliminar(b.id)}
@@ -228,8 +241,13 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
       <Dialog open={dialogOpen} onOpenChange={(v) => { setDialogOpen(v); if (!v) resetForm() }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Nuevo bloqueo</DialogTitle>
+            <DialogTitle>{textoCrear}</DialogTitle>
           </DialogHeader>
+          {!canAprobar && (
+            <p className="text-sm text-muted-foreground -mt-2">
+              Quedará pendiente hasta que alguien con permiso lo apruebe. Mientras tanto la agenda sigue abierta.
+            </p>
+          )}
 
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
@@ -305,7 +323,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
           <DialogFooter>
             <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancelar</Button>
             <Button onClick={() => crear()} disabled={creando}>
-              {creando ? 'Guardando...' : 'Crear bloqueo'}
+              {creando ? 'Guardando...' : canAprobar ? 'Crear bloqueo' : 'Enviar solicitud'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -315,10 +333,11 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
 }
 
 function BloqueoRow({
-  bloqueo, canAprobar, onAprobar, onRechazar, onEliminar,
+  bloqueo, canAprobar, canEliminar, onAprobar, onRechazar, onEliminar,
 }: {
   bloqueo: BloqueoAgenda
   canAprobar: boolean
+  canEliminar: boolean
   onAprobar: () => void
   onRechazar: () => void
   onEliminar: () => void
@@ -336,7 +355,7 @@ function BloqueoRow({
             {bloqueo.profesional_nombre ? (
               <span className="text-xs font-medium text-gray-700 truncate">{bloqueo.profesional_nombre}</span>
             ) : (
-              <span className="text-xs text-muted-foreground">Toda la sede</span>
+              <span className="text-xs text-muted-foreground">{bloqueo.sede ? 'Toda la sede' : 'Toda la clínica'}</span>
             )}
           </div>
           <p className="text-xs text-gray-600">
@@ -374,7 +393,7 @@ function BloqueoRow({
           {bloqueo.estado === 'rechazado' && (
             <Ban className="h-4 w-4 text-red-400" />
           )}
-          {(bloqueo.estado === 'aprobado' || bloqueo.estado === 'pendiente') && (
+          {(bloqueo.estado === 'aprobado' || bloqueo.estado === 'pendiente') && canEliminar && (
             <Button
               size="icon"
               variant="ghost"

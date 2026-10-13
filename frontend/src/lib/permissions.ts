@@ -16,8 +16,10 @@ export const PERM = {
   AGENDA_VER:                'agenda.citas.ver',
   AGENDA_CREAR:              'agenda.citas.crear',
   AGENDA_EDITAR:             'agenda.citas.editar',
+  AGENDA_CAMBIAR_ESTADO:     'agenda.citas.cambiar_estado',
   AGENDA_CREAR_BLOQUEO:      'agenda.crear_bloqueo',
   AGENDA_APROBAR_BLOQUEO:    'agenda.aprobar_bloqueo',
+  AGENDA_GESTIONAR_BLOQUEOS: 'agenda.bloqueos.gestionar',
 
   // Pacientes
   PACIENTES_VER:             'pacientes.ver',

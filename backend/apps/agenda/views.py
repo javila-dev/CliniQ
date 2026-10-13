@@ -1,5 +1,5 @@
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 import hmac
 import uuid
 import logging
@@ -247,8 +247,16 @@ class CitaViewSet(ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    ESTADOS_CERRADOS = {Cita.Estado.COMPLETADA, Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO}
+
+    @transaction.atomic
     def perform_update(self, serializer):
         instance = self.get_object()
+        if instance.estado in self.ESTADOS_CERRADOS:
+            raise ValidationError({
+                "error": "La cita ya está cerrada y no se puede editar.",
+                "code": "CITA_CERRADA",
+            })
         data = serializer.validated_data
         servicio = data.get("servicio", instance.servicio)
         sede = data.get("sede", instance.sede)
@@ -257,8 +265,11 @@ class CitaViewSet(ModelViewSet):
         fecha_inicio = data.get("fecha_inicio", instance.fecha_inicio)
 
         duracion_min = instance.duracion_min or 0
+        servicio_nombre = instance.servicio_nombre
         if "servicio" in data and data.get("servicio"):
             duracion_min = data["servicio"].duracion_min
+            # Cambió el procedimiento: la agenda mostraba el nombre anterior.
+            servicio_nombre = data["servicio"].nombre
         elif "duracion_min" in data and data.get("duracion_min"):
             duracion_min = data["duracion_min"]
 
@@ -270,23 +281,30 @@ class CitaViewSet(ModelViewSet):
             raise ValidationError({"error": "El procedimiento no pertenece a la clinica de la sede."})
         if profesional.clinica_id != sede.clinica_id:
             raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
-        if not services.verificar_horario_sede(sede, fecha_inicio, fecha_fin):
-            raise ValidationError({"error": "La cita esta fuera del horario de la sede."})
-        if not services.verificar_horario_profesional(profesional.id, sede.id, fecha_inicio, fecha_fin):
-            raise ValidationError({"error": "La cita esta fuera del horario del colaborador."})
-        if not services.verificar_disponibilidad_profesional(
-            profesional.id,
-            fecha_inicio,
-            fecha_fin,
+        services._bloquear_agenda_del_profesional(profesional.id)
+        services.validar_horario_cita(
+            sede=sede,
+            profesional=profesional,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
             excluir_cita_id=instance.id,
-        ):
-            raise ValidationError({"error": "El profesional no esta disponible en ese horario."})
+        )
 
         fecha_anterior = instance.fecha_inicio
+        extra = {}
+        if fecha_inicio != fecha_anterior:
+            # Nueva fecha: el recordatorio y la confirmación eran de la anterior.
+            extra = {
+                "recordatorio_enviado": False,
+                "recordatorio_manual_pendiente": False,
+                "estado_confirmacion": Cita.EstadoConfirmacion.SIN_ENVIAR,
+            }
         serializer.save(
             fecha_fin=fecha_fin,
             duracion_min=duracion_min,
+            servicio_nombre=servicio_nombre,
             canal_confirmacion=paciente.canal_confirmacion,
+            **extra,
         )
         if serializer.instance.fecha_inicio != fecha_anterior:
             registrar_accion(
@@ -703,7 +721,10 @@ class CitaViewSet(ModelViewSet):
                 raise ValidationError({"duracion_min": "Debe ser al menos 5 minutos."})
 
         logger.debug("[slots_disponibles] llamando get_slots_disponibles: profesional=%s, sede=%s, fecha=%s, duracion=%s", profesional.id, sede.id, fecha, duracion_min)
-        fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
+        try:
+            fecha_date = datetime.strptime(fecha, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValidationError({"fecha": "Usa el formato AAAA-MM-DD."}) from exc
         excluir_cita_id = None
         if cita_id:
             try:
@@ -1171,7 +1192,10 @@ class BloqueoAgendaViewSet(ModelViewSet):
             return [PuedeVerBloqueos()]
         if self.action in {"aprobar", "rechazar"}:
             return [RequirePermission("agenda.aprobar_bloqueo")()]
-        return [RequirePermission("agenda.crear_bloqueo")()]
+        # Quien ve la agenda puede solicitar un bloqueo (queda pendiente hasta
+        # que alguien con agenda.aprobar_bloqueo lo acepte). Editar o borrar
+        # se acota en _puede_modificar.
+        return [RequireAnyPermission("agenda.crear_bloqueo", "agenda.citas.ver")()]
 
     def get_queryset(self):
         from apps.users.authorization import user_has_permission
@@ -1200,13 +1224,37 @@ class BloqueoAgendaViewSet(ModelViewSet):
             queryset = queryset.filter(filtro)
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
+        # Rango de días (YYYY-MM-DD, ambos incluidos): trae todo bloqueo que se
+        # cruce con el rango, también los de varios días que empezaron antes.
+        # Sin esto la agenda leía la primera página de todos los bloqueos
+        # históricos y los nuevos no aparecían.
+        desde = self._fecha_param("desde")
+        hasta = self._fecha_param("hasta")
+        tz = timezone.get_current_timezone()
+        if desde:
+            queryset = queryset.filter(fecha_fin__gt=timezone.make_aware(datetime.combine(desde, time.min), tz))
+        if hasta:
+            queryset = queryset.filter(
+                fecha_inicio__lt=timezone.make_aware(datetime.combine(hasta + timedelta(days=1), time.min), tz)
+            )
         if estado:
             queryset = queryset.filter(estado=estado)
         if self.action in {"list", "retrieve"} and not user_has_permission(
             user, "agenda.bloqueos.ver", request=self.request
         ):
-            queryset = queryset.filter(estado=BloqueoAgenda.Estado.APROBADO)
+            # Sin "ver bloqueos": los aprobados y sus propias solicitudes, para
+            # que quien pidió un bloqueo vea si se lo aprobaron.
+            queryset = queryset.filter(Q(estado=BloqueoAgenda.Estado.APROBADO) | Q(creado_por=user))
         return queryset.order_by("fecha_inicio")
+
+    def _fecha_param(self, nombre):
+        valor = self.request.query_params.get(nombre)
+        if not valor:
+            return None
+        try:
+            return datetime.strptime(valor, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise ValidationError({nombre: "Usa el formato AAAA-MM-DD."}) from exc
 
     def perform_create(self, serializer):
         from apps.users.authorization import user_has_permission

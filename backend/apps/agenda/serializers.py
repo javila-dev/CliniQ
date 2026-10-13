@@ -265,6 +265,10 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "fecha_fin",
             "fecha_inicio_real",
             "fecha_fin_real",
+            # El estado solo cambia por cambiar_estado, que valida consentimientos,
+            # mora y tiempos; un PATCH directo se los saltaba.
+            "estado",
+            "motivo_cancelacion",
             "estado_confirmacion",
             "canal_confirmacion",
             "confirmado_por",
@@ -446,7 +450,9 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la clinica de la sede."})
         if profesional and sede and profesional.clinica_id != sede.clinica_id:
             raise serializers.ValidationError({"profesional": "El profesional no pertenece a la clinica de la sede."})
-        if item_cotizacion:
+        # Al reprogramar una cita de paquete el ítem no cambia: no se vuelve a
+        # exigir que la cotización siga aceptada ni que queden sesiones.
+        if item_cotizacion and (not self.instance or "item_cotizacion" in attrs):
             if item_cotizacion.cotizacion.estado != "aceptada":
                 raise serializers.ValidationError(
                     {

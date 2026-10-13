@@ -116,7 +116,7 @@ CAPABILITY_CATALOG = [
             {
                 "clave": "agenda.ver",
                 "titulo": "Ver la agenda",
-                "descripcion": "Consultar el calendario de citas de la clinica.",
+                "descripcion": "Consultar el calendario de citas de la clínica y solicitar bloqueos de horario, que quedan pendientes de aprobación.",
                 "permisos": ["agenda.citas.ver"],
             },
             {
@@ -139,7 +139,7 @@ CAPABILITY_CATALOG = [
             {
                 "clave": "agenda.gestionar_bloqueos",
                 "titulo": "Gestionar bloqueos de agenda",
-                "descripcion": "Ver y crear bloqueos de horario (vacaciones, ausencias, mantenimiento).",
+                "descripcion": "Ver todos los bloqueos de horario (vacaciones, ausencias, mantenimiento), y editar o borrar cualquiera.",
                 "permisos": [
                     "agenda.bloqueos.ver",
                     "agenda.crear_bloqueo",

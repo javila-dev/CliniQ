@@ -157,6 +157,14 @@ class CanChangeAppointmentState(BasePermission):
         user = request.user
         if user_has_permission(user, "agenda.citas.cambiar_estado", request=request):
             return True
+        # Confirmar la cita es parte de gestionar la agenda (igual que
+        # confirmar_manual y no_confirmo): basta con poder crear o editar citas.
+        if getattr(view, "action", None) == "cambiar_estado" and request.data.get("estado") == "confirmada":
+            if any(
+                user_has_permission(user, clave, request=request)
+                for clave in ("agenda.citas.crear", "agenda.citas.editar")
+            ):
+                return True
         # Quien atiende pacientes (check del usuario, sea cual sea su rol) puede
         # mover el estado de sus propias citas.
         return bool(getattr(user, "es_profesional", False)) and getattr(obj, "profesional_id", None) == user.id
