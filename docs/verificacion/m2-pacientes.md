@@ -48,7 +48,7 @@
 - **Causa:** `clinica` es escribible y `perform_create` la respeta.
 - **Arreglo:** `clinica` de solo lectura y tomarla siempre de `get_clinica_activa`.
 
-**M2-06 · Alto · previsible** · confirmado
+**✅ M2-06 · Alto · previsible** · confirmado
 - **Dónde:** `backend/apps/pacientes/registro_publico.py:19-23,114,148,198`; `app/registro/[token]/page.tsx:61-75`
 - **Qué ve el usuario:** con una tableta de autorregistro, o con el WiFi de la clínica, después de unos 6 registros por hora aparece **"Enlace no válido o ha expirado"**.
 - **Causa:** el límite es de 20 por hora por IP y lo comparten las 3 vistas, y la pantalla muestra el 429 como "enlace no válido".

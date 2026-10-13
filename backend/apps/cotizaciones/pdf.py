@@ -64,7 +64,7 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
                 **item_payload,
                 "descripcion": item.descripcion,
                 "catalogo_ref": catalogo_ref,
-                "num_sesiones": item.num_citas,
+                "num_sesiones": item.num_sesiones_efectivas(),
             })
         else:
             tipo_label = "Procedimiento" if item.tipo == "procedimiento" else "Libre"
@@ -178,7 +178,7 @@ def build_consolidado_asistencia_context(cotizacion: Cotizacion) -> dict:
             })
         secciones.append({
             "descripcion": item.descripcion,
-            "num_citas": item.num_citas,
+            "num_citas": item.num_sesiones_efectivas(),
             "citas_registradas": len(citas),
             "citas_firmadas": sum(1 for f in filas if f["firma_img_b64"]),
             "filas": filas,

@@ -1,6 +1,7 @@
 import mimetypes
 
 from django.http import FileResponse, Http404
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
@@ -119,6 +120,9 @@ class PlantillaConsentimientoViewSet(GenericViewSet):
             raise Http404
         plantilla.activo = False
         plantilla.save(update_fields=["activo", "updated_at"])
+        # Los procedimientos dejan de exigirla: antes se seguía pidiendo al
+        # agendar y atender, y editar el procedimiento fallaba a medias.
+        plantilla.servicios_que_lo_requieren.filter(activo=True).update(activo=False, updated_at=timezone.now())
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

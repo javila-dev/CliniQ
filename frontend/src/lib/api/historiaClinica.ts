@@ -191,6 +191,14 @@ export const historiaClinicaApi = {
         return res.data
       }, linkSinEnviar),
     // Consulta a Documenso si ya firmó (p. ej. desde el link de WhatsApp); respaldo del webhook.
+    /** Vuelve a traer de Documenso el PDF firmado cuando la descarga falló. */
+    reintentarPdf: async (id: string): Promise<ConsentimientoInformado> => {
+      const res = await apiClient.post<ConsentimientoInformado>(
+        `/historia-clinica/consentimientos/${id}/reintentar_pdf/`,
+        {}
+      )
+      return res.data
+    },
     verificarFirma: async (id: string): Promise<ConsentimientoInformado> => {
       const res = await apiClient.post<ConsentimientoInformado>(
         `/historia-clinica/consentimientos/${id}/verificar_firma/`,

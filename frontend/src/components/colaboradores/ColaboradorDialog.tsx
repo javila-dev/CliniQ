@@ -19,7 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Switch } from '@/components/ui/switch'
-import { cn } from '@/lib/utils'
+import { cn, todayISO } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { GruposAtencionSelect, useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
 import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
@@ -462,7 +462,7 @@ function valoresIniciales(): CreateForm {
     especialidades: [],
     grupos: [],
     sedes_ids: [],
-    fecha_ingreso: new Date().toISOString().split('T')[0],
+    fecha_ingreso: todayISO(),
     es_profesional: false,
   }
 }

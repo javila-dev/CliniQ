@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import type { CheckInRecord } from '@/lib/api/pacientes'
 import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
+import { ReintentarPdfConsentimiento } from '@/components/historia/ReintentarPdfConsentimiento'
 import Link from 'next/link'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -624,6 +625,12 @@ export default function PacienteDetailPage({ params }: Props) {
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
+                        {!c.archivo_url && c.pdf_pendiente && (
+                          <ReintentarPdfConsentimiento
+                            consentimientoId={c.id}
+                            invalidar={[['consentimientos-paciente', id]]}
+                          />
+                        )}
                         {c.archivo_url && (
                           <a
                             href={c.archivo_url}

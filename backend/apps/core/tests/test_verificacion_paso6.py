@@ -179,6 +179,65 @@ class VerificacionPaso6Tests(ClinicaFixtureMixin, TestCase):
         )
         self.assertEqual(cancelar.status_code, 403)
 
+    # ── Editar una cita nunca corre su hora (revisión del 13/10/2026) ──────
+    def _horas(self, cita):
+        cita.refresh_from_db()
+        return cita.fecha_inicio, cita.fecha_fin
+
+    def test_editar_una_nota_no_cambia_las_horas(self):
+        cita = self._cita(duracion=45)
+        antes = self._horas(cita)
+        self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {"notas_internas": "trae exámenes"}, format="json")
+        self.assertEqual(self._horas(cita), antes)
+
+    def test_cita_vieja_sin_duracion_no_queda_con_fin_igual_al_inicio(self):
+        cita = self._cita(duracion=40)
+        Cita.objects.filter(pk=cita.pk).update(duracion_min=None)
+        antes = self._horas(cita)
+        response = self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {"notas_internas": "x"}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self._horas(cita), antes)
+
+    def test_reprogramar_una_cita_sin_duracion_conserva_lo_que_dura(self):
+        cita = self._cita(duracion=40)
+        Cita.objects.filter(pk=cita.pk).update(duracion_min=None)
+        destino = self.inicio + timedelta(hours=2)
+        self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {"fecha_inicio": destino.isoformat()}, format="json")
+        self.assertEqual(self._horas(cita), (destino, destino + timedelta(minutes=40)))
+
+    def test_cambiar_profesional_no_cambia_las_horas(self):
+        otro = User.objects.create_user(
+            email="otro2@test.com", password="Secret123!", first_name="Otro", last_name="Prof",
+            rol=User.Role.PROFESIONAL, clinica=self.clinica, es_profesional=True,
+        )
+        cita = self._cita(estado=Cita.Estado.CONFIRMADA)
+        antes = self._horas(cita)
+        response = self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {"profesional": str(otro.id)}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self._horas(cita), antes)
+
+    def test_reenviar_la_hora_que_devuelve_la_api_no_la_corre(self):
+        # El formulario de edición reenvía la hora tal como llega ("...-05:00").
+        cita = self._cita(servicio=self.servicio)
+        antes = self._horas(cita)
+        detalle = self.client.get(f"/api/v1/agenda/citas/{cita.id}/").json()
+        response = self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {
+            "sede": detalle["sede"], "profesional": detalle["profesional"], "servicio": detalle["servicio"],
+            "fecha_inicio": detalle["fecha_inicio"], "canal_origen": detalle["canal_origen"],
+        }, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self._horas(cita), antes)
+
+    def test_cambiar_la_duracion_del_catalogo_no_mueve_citas_ya_agendadas(self):
+        cita = self._cita(servicio=self.servicio, duracion=30)
+        antes = self._horas(cita)
+        self.servicio.duracion_min = 90
+        self.servicio.save(update_fields=["duracion_min"])
+        self.client.patch(f"/api/v1/agenda/citas/{cita.id}/", {
+            "servicio": str(self.servicio.id), "notas_internas": "x",
+        }, format="json")
+        self.assertEqual(self._horas(cita), antes)
+
     # ── M3-25: quien ve la agenda solicita bloqueos, no los aprueba ─────────
     def _solo_ver_agenda(self):
         rol = Rol.objects.create(clinica=self.clinica, slug=f"rol-{uuid.uuid4().hex[:6]}", nombre="Solo agenda")

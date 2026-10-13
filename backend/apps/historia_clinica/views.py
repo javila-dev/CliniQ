@@ -615,7 +615,9 @@ class ConsentimientoInformadoViewSet(
     http_method_names = ["get", "post", "patch", "delete"]
 
     def get_permissions(self):
-        if self.action in {"list", "retrieve", "resumen"}:
+        # Reintentar el PDF solo trae de Documenso lo que ya se firmó: basta con
+        # poder ver la historia.
+        if self.action in {"list", "retrieve", "resumen", "reintentar_pdf"}:
             permission_classes = (RequirePermission("historia.ver"),)
         else:
             permission_classes = (RequirePermission("historia.consentimientos.gestionar"),)

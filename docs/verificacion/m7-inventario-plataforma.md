@@ -27,7 +27,7 @@
   - En el kardex, la página 3 da 404 y aparece "Sin movimientos".
 - **Arreglo:** ver T-01, o usar búsqueda remota en los selectores.
 
-**M7-03 · Alto · llamada sin resolver** · confirmado
+**✅ M7-03 · Alto · llamada sin resolver** · confirmado
 - **Dónde:** `CompraForm.tsx:264-281`
 - **Qué ve el usuario:** "Registrar y recibir" falla y, cada vez que reintenta, **queda una compra borrador duplicada** que no se puede borrar.
 - **Causa:** son dos llamadas que no forman una sola operación (crear y recibir). Si falla la segunda, por ejemplo por falta del permiso `ordenes.recibir`, el formulario no se entera de que la compra ya existe.

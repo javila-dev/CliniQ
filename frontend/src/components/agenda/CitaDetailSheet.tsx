@@ -29,6 +29,7 @@ import { ConfirmarCitaDialog } from './ConfirmarCitaDialog'
 import { RegistrosConfirmacion } from './RegistrosConfirmacion'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
 import { CambiarProfesionalDialog } from './CambiarProfesionalDialog'
+import { ReintentarPdfConsentimiento } from '@/components/historia/ReintentarPdfConsentimiento'
 import { formatDateTime, formatTime } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG, TRANSICIONES_ESTADO, CANAL_LABEL } from '@/lib/constants'
 import type { EstadoCita, MedioConfirmacion } from '@/types/agenda'
@@ -420,6 +421,14 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                       </span>
                     ))}
                   </div>
+                  {cita.consentimiento_info!.consentimientos
+                    .filter((c) => c.vigente && !c.archivo_url && c.pdf_pendiente && c.consentimiento_id)
+                    .map((c) => (
+                      <div key={`pdf-${c.template_token}`} className="flex items-center gap-1.5 text-[11px]">
+                        <span className="truncate text-muted-foreground">{c.template_nombre}:</span>
+                        <ReintentarPdfConsentimiento consentimientoId={c.consentimiento_id!} invalidar={[['citas', cita.id]]} />
+                      </div>
+                    ))}
                 </div>
               )}
 

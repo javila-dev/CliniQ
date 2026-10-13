@@ -27,7 +27,7 @@ import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
+import { cn, fechaLocalISO } from '@/lib/utils'
 import type { Cobro, EstadoCobro, OrigenCobro } from '@/types/cobros'
 import { useFormasPago } from '@/hooks/useFormasPago'
 import { HelpButton } from '@/components/ayuda/HelpButton'
@@ -518,7 +518,7 @@ function Pagination({ page, total, pageSize, onPage }: {
 
 // ─── Date helpers ─────────────────────────────────────────────
 
-function fmt(d: Date) { return d.toISOString().slice(0, 10) }
+function fmt(d: Date) { return fechaLocalISO(d) }
 
 const DATE_SHORTCUTS: { label: string; desde: () => string; hasta: () => string }[] = [
   {

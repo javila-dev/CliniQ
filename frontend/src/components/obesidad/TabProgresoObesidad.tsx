@@ -15,7 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { obesidadApi } from '@/lib/api/obesidad'
-import { formatDate } from '@/lib/utils'
+import { formatDate, todayISO } from '@/lib/utils'
 import type { ObjetivoObesidadInput } from '@/types/obesidad'
 
 interface Props {
@@ -32,7 +32,7 @@ interface ObjetivoFormValues {
 const EMPTY_OBJETIVO: ObjetivoFormValues = {
   peso_inicial_kg: '',
   peso_objetivo_kg: '',
-  fecha_inicio: new Date().toISOString().slice(0, 10),
+  fecha_inicio: todayISO(),
   fecha_objetivo: '',
 }
 

@@ -18,11 +18,14 @@ export default function RegistroPublicoPage() {
   const [serverError, setServerError] = useState<string | null>(null)
   const [fotoLista, setFotoLista] = useState(false)
 
-  const { data: clinica, isLoading, isError } = useQuery({
+  const { data: clinica, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ['registro-publico-clinica', token],
     queryFn: () => registroPublicoApi.getClinica(token),
     retry: false,
   })
+  // Demasiadas solicitudes seguidas (p. ej. una tableta en recepción): el
+  // enlace sigue sirviendo, solo hay que esperar.
+  const esperaPorLimite = (error as { response?: { status?: number } } | null)?.response?.status === 429
 
   const [enviando, setEnviando] = useState(false)
 
@@ -57,6 +60,30 @@ export default function RegistroPublicoPage() {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: '#1a1118' }}>
         <Loader2 className="h-7 w-7 animate-spin text-rose-300/60" />
+      </div>
+    )
+  }
+
+  if (isError && esperaPorLimite) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6" style={{ background: '#1a1118' }}>
+        <div className="max-w-xs text-center space-y-4">
+          <div className="h-14 w-14 rounded-full bg-amber-500/10 flex items-center justify-center mx-auto">
+            <AlertCircle className="h-6 w-6 text-amber-300" />
+          </div>
+          <h1 className="text-lg font-semibold text-white">Espera unos minutos</h1>
+          <p className="text-sm text-white/60 leading-relaxed">
+            Se hicieron muchos registros seguidos desde este equipo. El enlace sigue funcionando: intenta de nuevo en unos minutos.
+          </p>
+          <button
+            type="button"
+            onClick={() => refetch()}
+            disabled={isFetching}
+            className="rounded-md bg-white/10 px-4 py-2 text-sm text-white hover:bg-white/15 disabled:opacity-50"
+          >
+            {isFetching ? 'Intentando…' : 'Intentar de nuevo'}
+          </button>
+        </div>
       </div>
     )
   }

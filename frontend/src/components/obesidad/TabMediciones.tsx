@@ -19,7 +19,7 @@ import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useToast } from '@/hooks/use-toast'
 import { obesidadApi } from '@/lib/api/obesidad'
-import { formatDate } from '@/lib/utils'
+import { fechaHoraLocalInput, formatDate } from '@/lib/utils'
 import type { MedicionAntropometrica, MedicionAntropometricaInput } from '@/types/obesidad'
 import { MEDICION_FIELDS, MEDICION_FIELD_KEYS, type FieldKey, type FieldConfig } from './medicionFields'
 
@@ -57,7 +57,7 @@ interface FormValues {
 }
 
 const EMPTY: FormValues = {
-  fecha: new Date().toISOString().slice(0, 16),
+  fecha: fechaHoraLocalInput(),
   peso_kg: '',
   talla_cm: '',
   presion_sistolica: '',

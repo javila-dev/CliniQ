@@ -9,6 +9,8 @@ export interface ConsentimientoInfoItem {
   vigente: boolean
   consentimiento_id: string | null
   archivo_url: string | null
+  /** Firmado, pero el PDF sellado aún no se guardó: se puede reintentar. */
+  pdf_pendiente?: boolean
   requiere_firma_cada_vez: boolean
   /** El documento lo firma también el profesional que atiende (firma diferida). */
   requiere_firma_profesional?: boolean

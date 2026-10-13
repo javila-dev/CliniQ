@@ -20,6 +20,9 @@ import { ProveedorSearchInput } from '@/components/proveedores/ProveedorSearchIn
 import { NuevoProveedorDialog } from '@/components/proveedores/NuevoProveedorDialog'
 import { toast } from '@/hooks/use-toast'
 import type { OrdenCompra } from '@/types/proveedores'
+import { todayISO } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
@@ -169,11 +172,15 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
   const router = useRouter()
   const qc = useQueryClient()
   const esNueva = !compraExistente
+  const { user } = useAuthStore()
+  // Sin permiso de recibir, "Registrar y recibir" creaba el borrador y fallaba
+  // al recibir: cada reintento dejaba otra compra duplicada.
+  const puedeRecibir = hasPermission(user, PERM.PROVEEDORES_ORDENES_RECIBIR)
   const esInmutable = !!compraExistente && compraExistente.estado !== 'borrador'
 
   const [proveedor, setProveedor] = useState(compraExistente?.proveedor ?? '')
   const [sede, setSede] = useState(compraExistente?.sede ?? '')
-  const [fecha, setFecha] = useState(compraExistente?.fecha ?? new Date().toISOString().slice(0, 10))
+  const [fecha, setFecha] = useState(compraExistente?.fecha ?? todayISO())
   const [numeroFactura, setNumeroFactura] = useState(compraExistente?.numero_factura_proveedor ?? '')
   const [fechaFactura, setFechaFactura] = useState(compraExistente?.fecha_factura_proveedor ?? '')
   const [notas, setNotas] = useState(compraExistente?.notas ?? '')
@@ -267,18 +274,36 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
       const orden = esNueva
         ? await proveedoresApi.createOrden(payloadHeader())
         : await proveedoresApi.updateOrden(compraExistente!.id, payloadHeader())
-      return proveedoresApi.recibirOrden(orden.id, {
-        items_recibidos: orden.items.map((i) => ({ item_id: i.id, cantidad: i.cantidad })),
-        numero_factura_proveedor: numeroFactura || undefined,
-        fecha_factura_proveedor: fechaFactura || undefined,
-      })
+      try {
+        return await proveedoresApi.recibirOrden(orden.id, {
+          items_recibidos: orden.items.map((i) => ({ item_id: i.id, cantidad: i.cantidad })),
+          numero_factura_proveedor: numeroFactura || undefined,
+          fecha_factura_proveedor: fechaFactura || undefined,
+        })
+      } catch (err) {
+        // La compra ya quedó guardada: se reintenta desde ese borrador, no
+        // creando otra.
+        throw Object.assign(new Error('recepcion'), { causa: err, ordenId: orden.id })
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['compras'] })
       toast.success('Compra recibida', 'El stock ya quedó actualizado.')
       router.push('/compras')
     },
-    onError: (err) => setError(mensajeDeError(err, 'No se pudo registrar la recepción. Revisa las cantidades.')),
+    onError: (err: Error & { causa?: unknown; ordenId?: string }) => {
+      if (err.ordenId) {
+        qc.invalidateQueries({ queryKey: ['compras'] })
+        toast.error(
+          'La compra quedó como borrador',
+          `${mensajeDeError(err.causa, 'No se pudo registrar la recepción.')} Puedes reintentar desde el borrador.`,
+        )
+        if (esNueva) router.push(`/compras/${err.ordenId}`)
+        else setError(mensajeDeError(err.causa, 'No se pudo registrar la recepción. Revisa las cantidades.'))
+        return
+      }
+      setError(mensajeDeError(err, 'No se pudo registrar la recepción. Revisa las cantidades.'))
+    },
   })
 
   const guardando = guardarMutation.isPending || recibirMutation.isPending
@@ -404,14 +429,16 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
             {guardarMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
             {guardarMutation.isPending ? 'Guardando…' : 'Guardar borrador'}
           </Button>
-          <Button
-            type="button"
-            disabled={guardando}
-            onClick={() => { if (validar()) recibirMutation.mutate() }}
-          >
-            {recibirMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
-            {recibirMutation.isPending ? 'Registrando…' : 'Registrar y recibir'}
-          </Button>
+          {puedeRecibir && (
+            <Button
+              type="button"
+              disabled={guardando}
+              onClick={() => { if (validar()) recibirMutation.mutate() }}
+            >
+              {recibirMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
+              {recibirMutation.isPending ? 'Registrando…' : 'Registrar y recibir'}
+            </Button>
+          )}
         </div>
       )}
 

@@ -123,6 +123,8 @@ export interface ConsentimientoPaciente {
   vigencia_hasta:       string | null
   metodo:               MetodoConsentimiento
   archivo_url:          string | null
+  /** Firmado, pero el PDF sellado aún no se guardó: se puede reintentar. */
+  pdf_pendiente?:       boolean
   registrado_por_nombre?: string
   created_at:           string
 }

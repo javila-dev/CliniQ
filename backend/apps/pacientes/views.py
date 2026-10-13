@@ -205,6 +205,9 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
                     "vigencia_hasta": c_data.get("fecha_vencimiento"),
                     "metodo": "documenso",
                     "archivo_url": c_data.get("archivo_url") or "",
+                    "pdf_pendiente": bool(
+                        not c_obj.archivo and c_obj.documenso_document_id and not c_obj.pendiente_firma_profesional
+                    ),
                     "documenso_envelope_id": c_obj.documenso_document_id,
                     "notas": c_obj.notas,
                     "estado": c_data.get("vigente") and "vigente" or "vencido",

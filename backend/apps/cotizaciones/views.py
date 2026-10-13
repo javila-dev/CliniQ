@@ -15,7 +15,7 @@ from django.utils import timezone
 import requests
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
@@ -48,7 +48,7 @@ from apps.notificaciones.services import (
     enviar_whatsapp,
     resolver_ruta_whatsapp,
 )
-from apps.users.authorization import ve_solo_su_actividad_comercial
+from apps.users.authorization import sede_ids_para_filtro, ve_solo_su_actividad_comercial
 from apps.users.permissions import RequirePermission
 
 logger = logging.getLogger(__name__)
@@ -122,6 +122,12 @@ class CotizacionViewSet(ModelViewSet):
         # los flujos que abren una cotización puntual (paciente, cartera…).
         if self.action == "list" and ve_solo_su_actividad_comercial(user, self.request):
             queryset = queryset.filter(profesional=user)
+        # Alcance por sede (igual que ventas y seguimiento): el listado comercial
+        # muestra solo las cotizaciones de las sedes del usuario. Las pantallas
+        # del paciente (?paciente=) ven todas las suyas: un paquete vendido en
+        # otra sede también se agenda y se cobra aquí.
+        if self.action == "list" and not self.request.query_params.get("paciente"):
+            queryset = self._acotar_por_sede(queryset, self.request.query_params.get("sede"))
         activo = self.request.query_params.get("activo")
         if activo is None:
             queryset = queryset.filter(activo=True)
@@ -140,6 +146,28 @@ class CotizacionViewSet(ModelViewSet):
         elif enviada in {"false", "0"}:
             queryset = queryset.filter(_primer_envio__isnull=True)
         return queryset
+
+    # Acciones que cambian la cotización: solo en las sedes del usuario.
+    ACCIONES_EN_SU_SEDE = {
+        "update", "partial_update", "destroy", "cambiar_estado", "renovar",
+        "enviar_whatsapp", "enviar_email_action", "registrar_envio",
+    }
+
+    def _acotar_por_sede(self, queryset, sede_pedida=None):
+        sede_ids = sede_ids_para_filtro(self.request.user, sede_pedida)
+        if sede_ids is None:
+            return queryset
+        filtro = Q(sede_id__in=sede_ids)
+        if not sede_pedida:
+            filtro |= Q(sede__isnull=True)
+        return queryset.filter(filtro)
+
+    def get_object(self):
+        cotizacion = super().get_object()
+        if self.action in self.ACCIONES_EN_SU_SEDE and cotizacion.sede_id:
+            if not sede_ids_para_filtro(self.request.user, cotizacion.sede_id):
+                raise PermissionDenied("Esta cotización es de otra sede.")
+        return cotizacion
 
     def _filtrar_por_fecha(self, queryset):
         def parse(valor):
@@ -867,6 +895,7 @@ class CotizacionViewSet(ModelViewSet):
         cotizaciones = Cotizacion.objects.filter(activo=True)
         if request.user.rol != "superadmin":
             cotizaciones = cotizaciones.filter(clinica=request.user.clinica)
+        cotizaciones = self._acotar_por_sede(cotizaciones)
         usuarios = User.objects.filter(id__in=cotizaciones.values("profesional_id")).order_by("first_name", "last_name")
         return Response([{"id": str(u.id), "nombre": u.nombre_completo} for u in usuarios])
 

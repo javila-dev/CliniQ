@@ -22,6 +22,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { primerTexto } from '@/lib/errores'
 import type { Cita } from '@/types/agenda'
 
 const schema = z.object({
@@ -57,6 +58,10 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   // Una cita de paquete (ítem de cotización), de sesión o de consulta libre
   // tiene la duración fija: se reprograma sin pedir un procedimiento.
   const conProcedimiento = Boolean(cita.servicio)
+  // Las citas viejas pueden no tener duracion_min: se usa la que ocupan en la agenda.
+  const duracionFija = cita.duracion_min
+    || Math.round((new Date(cita.fecha_fin).getTime() - new Date(cita.fecha_inicio).getTime()) / 60000)
+    || undefined
 
   const { control, register, handleSubmit, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(
@@ -133,7 +138,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
         sede: 'Sede', profesional: 'Profesional', servicio: 'Procedimiento',
         fecha_inicio: 'Fecha/Hora', canal_origen: '¿Cómo agendó el paciente?',
       }
-      return entries.map(([f, m]) => `${labels[f] ?? f}: ${Array.isArray(m) ? m[0] : m}`).join(' | ')
+      return entries.map(([f, m]) => `${labels[f] ?? f}: ${primerTexto(m) ?? String(m)}`).join(' | ')
     }
     return 'Error al guardar los cambios'
   })()
@@ -214,8 +219,8 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
           ) : (
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
               <p className="truncate">{cita.servicio_nombre || 'Consulta libre'}</p>
-              {cita.duracion_min ? (
-                <p className="text-xs text-muted-foreground">{cita.duracion_min} min</p>
+              {duracionFija ? (
+                <p className="text-xs text-muted-foreground">{duracionFija} min</p>
               ) : null}
             </div>
           )}
@@ -261,7 +266,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
             profesionalId={profesionalId}
             sedeId={sedeId}
             servicioId={conProcedimiento ? servicioId : undefined}
-            duracionMin={conProcedimiento ? undefined : cita.duracion_min ?? undefined}
+            duracionMin={conProcedimiento ? undefined : duracionFija}
             fecha={fecha}
             value={slot}
             onSelect={(s) => setValue('slot', s)}

@@ -24,6 +24,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { cn, toTitleCase, scrollWheelFallback } from '@/lib/utils'
+import { primerTexto } from '@/lib/errores'
 import type { Procedimiento, CreateProcedimientoRequest } from '@/types/clinicas'
 import type { ColaboradorProfesional } from '@/types/colaboradores'
 
@@ -309,7 +310,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
     if (!data) return ['Ocurrió un error. Intenta de nuevo.']
     if (data.detail) return [String(data.detail)]
     const lineas = Object.entries(data).map(
-      ([campo, mensaje]) => `${ETIQUETAS_DE_ERROR[campo] ?? campo}: ${Array.isArray(mensaje) ? mensaje[0] : mensaje}`,
+      ([campo, mensaje]) => `${ETIQUETAS_DE_ERROR[campo] ?? campo}: ${primerTexto(mensaje) ?? String(mensaje)}`,
     )
     return lineas.length ? lineas : ['Ocurrió un error. Intenta de nuevo.']
   })()

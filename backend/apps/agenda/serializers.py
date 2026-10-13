@@ -11,42 +11,33 @@ from apps.core.storage import get_signed_url
 from apps.historia_clinica.services import (
     consentimiento_informado_vigente,
     consentimiento_satisfecho,
-    descargar_pdf_documenso_sellado,
-    guardar_pdf_firmado,
 )
 from apps.protocolos.models import SesionProcedimiento
 from apps.users.models import User
-from apps.core.clinica_scope import AcotadoAClinicaMixin
-from apps.users.authorization import sede_ids_para_filtro
-from rest_framework.exceptions import PermissionDenied
-
-
-def validar_sede_del_usuario(request, sede) -> None:
-    """Un usuario acotado a ciertas sedes no agenda ni bloquea en otra."""
-    if request is None or sede is None or not getattr(request.user, "is_authenticated", False):
-        return
-    if not sede_ids_para_filtro(request.user, sede.id):
-        raise PermissionDenied("No tienes acceso a esa sede.")
+from apps.core.clinica_scope import AcotadoAClinicaMixin, validar_sede_del_usuario
 
 logger = logging.getLogger(__name__)
 
 
 def _archivo_url(consentimiento) -> str | None:
-    if not consentimiento:
+    # Ya no descarga de Documenso aquí: se hacía por cada cita de la agenda y,
+    # con Documenso lento, la Agenda, Atenciones y el asistente quedaban
+    # cargando. Si falta el PDF se marca `pdf_pendiente` y se recupera con
+    # "Reintentar" (consentimientos/{id}/reintentar_pdf/).
+    if not consentimiento or not consentimiento.archivo:
         return None
-    # Pendiente del profesional: Documenso aún no lo sella, no tiene sentido consultarlo.
-    if not consentimiento.archivo and consentimiento.documenso_document_id and not consentimiento.pendiente_firma_profesional:
-        try:
-            pdf_bytes = descargar_pdf_documenso_sellado(consentimiento.documenso_document_id)
-            if pdf_bytes:
-                guardar_pdf_firmado(
-                    consentimiento,
-                    pdf_bytes,
-                    filename=f"consentimiento-documenso-{consentimiento.id}.pdf",
-                )
-        except Exception:
-            logger.exception("Auto-recuperacion PDF fallida | consentimiento_id=%s", consentimiento.id)
-    return get_signed_url(consentimiento.archivo.name) if consentimiento.archivo else None
+    return get_signed_url(consentimiento.archivo.name)
+
+
+def pdf_pendiente(consentimiento) -> bool:
+    """Firmado, pero el PDF sellado aún no se guardó (falló la descarga)."""
+    return bool(
+        consentimiento
+        and consentimiento.firmado
+        and not consentimiento.archivo
+        and consentimiento.documenso_document_id
+        and not consentimiento.pendiente_firma_profesional
+    )
 
 
 def _datos_firma_profesional(consentimiento) -> dict:
@@ -116,6 +107,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
                     "vigente": vigente,
                     "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                     "archivo_url": _archivo_url(consentimiento),
+                    "pdf_pendiente": pdf_pendiente(consentimiento),
                     "requiere_firma_cada_vez": cada_vez,
                     **_datos_firma_profesional(consentimiento),
                 }
@@ -161,6 +153,7 @@ def build_consentimiento_info(cita):
                 "vigente": vigente,
                 "consentimiento_id": str(consentimiento.id) if consentimiento else None,
                 "archivo_url": _archivo_url(consentimiento),
+                "pdf_pendiente": pdf_pendiente(consentimiento),
                 "requiere_firma_cada_vez": cada_vez,
                 **_datos_firma_profesional(consentimiento),
             }

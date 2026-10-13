@@ -7,6 +7,7 @@ from rest_framework import serializers
 from apps.clinicas.models import FormaDePago, Sede
 from apps.clinicas.precios import precio_lista as precio_lista_en_sede
 from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion, MotivoDescarte
+from apps.core.clinica_scope import validar_sede_del_usuario
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
@@ -792,6 +793,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         request = self.context["request"]
+        # Un usuario acotado a sedes no cotiza en otra (ni mueve una cotización a otra).
+        validar_sede_del_usuario(request, attrs.get("sede"))
         paciente = attrs.get("paciente", getattr(self.instance, "paciente", None))
         sede = attrs.get("sede", getattr(self.instance, "sede", None))
         estado = attrs.get("estado")

@@ -12,13 +12,13 @@
 
 ## Hallazgos
 
-**M5-01 · Alto · permisos** · confirmado
+**✅ M5-01 · Alto · permisos** · confirmado
 - **Dónde:** `backend/apps/cotizaciones/views.py:115-142,860`.
 - **Qué ve el usuario:** una recepcionista de la Sede Norte ve, abre, edita, acepta y descarta cotizaciones de la Sede Sur.
 - **Causa:** no se usa `sede_ids_para_filtro`, que ventas y seguimiento sí usan. Además, al crear no se valida que la sede elegida sea del usuario.
 - **Arreglo:** aplicar ese filtro en el listado, el detalle y `profesionales`, y validar la sede en el serializer.
 
-**M5-02 · Alto · previsible** · confirmado
+**✅ M5-02 · Alto · previsible** · confirmado
 - **Dónde:** `backend/apps/cotizaciones/pdf.py:66`; `pdf_cotizacion.html:253`.
 - **Qué ve el usuario:** el PDF que recibe el paciente dice "Sesiones: 1" en un paquete de 6, y la descripción dice "(6 sesiones)".
 - **Causa:** usa `num_citas`.

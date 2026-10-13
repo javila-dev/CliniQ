@@ -17,10 +17,28 @@ from django.utils import timezone
 
 
 class RegistroPublicoThrottle(SimpleRateThrottle):
-    rate = "20/hour"
+    """Límite por IP y por enlace de clínica, propio de cada vista.
+
+    Antes las tres vistas compartían 20/hora por IP: una tableta de
+    autorregistro (o el WiFi de la clínica) se quedaba sin cupo a los ~6
+    pacientes, porque cada registro consulta la clínica, guarda y sube la foto.
+    """
+
+    rate = "60/hour"
+    alcance = "registro"
 
     def get_cache_key(self, request, view):
-        return f"registro_publico_{self.get_ident(request)}"
+        token = str(request.query_params.get("token") or request.data.get("token") or "")[:64]
+        return f"registro_publico_{self.alcance}_{token}_{self.get_ident(request)}"
+
+
+class RegistroPublicoConsultaThrottle(RegistroPublicoThrottle):
+    rate = "300/hour"
+    alcance = "consulta"
+
+
+class RegistroPublicoFotoThrottle(RegistroPublicoThrottle):
+    alcance = "foto"
 
 
 def get_clinica_by_token(token):
@@ -111,7 +129,7 @@ class RegistroPublicoPacienteSerializer(PacienteSerializer):
 class RegistroPublicoClinicaView(APIView):
     authentication_classes = ()
     permission_classes = ()
-    throttle_classes = (RegistroPublicoThrottle,)
+    throttle_classes = (RegistroPublicoConsultaThrottle,)
 
     def get(self, request, *args, **kwargs):
         token = request.query_params.get("token", "").strip()
@@ -195,7 +213,7 @@ class RegistroPublicoEnrollmentView(APIView):
     """
     authentication_classes = ()
     permission_classes = ()
-    throttle_classes = (RegistroPublicoThrottle,)
+    throttle_classes = (RegistroPublicoFotoThrottle,)
     parser_classes = (MultiPartParser,)
 
     def post(self, request, paciente_id, *args, **kwargs):

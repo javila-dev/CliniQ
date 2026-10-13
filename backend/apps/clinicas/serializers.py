@@ -95,6 +95,22 @@ class PlanUsageSerializer(serializers.Serializer):
     sin_limite = serializers.BooleanField()
 
 
+def dias_de_prueba_restantes(clinica):
+    """Días que le quedan a la prueba (None si la clínica ya tiene plan).
+
+    Se redondea hacia arriba: con 10 horas por delante todavía queda 1 día, y
+    0 significa que la prueba ya venció.
+    """
+    if clinica.plan_id is not None or not clinica.trial_expires_at:
+        return None
+    import math
+
+    from django.utils import timezone
+
+    segundos = (clinica.trial_expires_at - timezone.now()).total_seconds()
+    return max(0, math.ceil(segundos / 86400))
+
+
 class ClinicaSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
@@ -129,11 +145,7 @@ class ClinicaSerializer(serializers.ModelSerializer):
         )
 
     def get_trial_days_remaining(self, obj):
-        if obj.plan_id is not None or not obj.trial_expires_at:
-            return None
-        from django.utils import timezone
-        delta = obj.trial_expires_at - timezone.now()
-        return max(0, delta.days)
+        return dias_de_prueba_restantes(obj)
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
@@ -192,12 +204,19 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     registro_publico = serializers.SerializerMethodField()
     registro_publico_token = serializers.CharField(source="token_registro_publico", read_only=True)
     whatsapp_uso = serializers.SerializerMethodField()
+    # El aviso de prueba (TrialBanner y Configuración → Plan) lee estos campos
+    # de /mi-clinica/; sin ellos la clínica nunca veía "quedan X días".
+    plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
+    trial_days_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = Clinica
         fields = (
             "id",
             "nombre",
+            "plan_nombre",
+            "trial_expires_at",
+            "trial_days_remaining",
             "nit",
             "telefono",
             "ciudad",
@@ -219,6 +238,9 @@ class MiClinicaSerializer(serializers.ModelSerializer):
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
+
+    def get_trial_days_remaining(self, obj):
+        return dias_de_prueba_restantes(obj)
 
     def _get_sede_principal(self, obj):
         return obj.sedes.filter(activo=True).order_by("created_at").first()
@@ -347,7 +369,10 @@ class SedeSerializer(serializers.ModelSerializer):
 class PrecioSedeEntradaSerializer(serializers.Serializer):
     """Un precio propio de sede: ``{"sede": id, "precio": "320000"}``."""
 
-    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.filter(activo=True))
+    # También sedes inactivas: el formulario reenvía el precio que ya tenía una
+    # sede desactivada, y rechazarlo impedía guardar el procedimiento. La
+    # clínica se valida en _guardar_precios_sede.
+    sede = serializers.PrimaryKeyRelatedField(queryset=Sede.objects.all())
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
     precio = serializers.DecimalField(max_digits=12, decimal_places=2, min_value=Decimal("1"))
 

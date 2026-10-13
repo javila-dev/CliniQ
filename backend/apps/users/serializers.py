@@ -488,31 +488,14 @@ class LoginSerializer(TokenObtainPairSerializer):
 def build_auth_user_payload(user) -> dict:
     """Datos del usuario que el frontend guarda tras iniciar sesion.
 
-    Formato unico para el login por contrasena y el login con Google.
+    Formato unico para el login por contrasena y el login con Google, y el
+    mismo que ``/auth/me/``: antes faltaban telefono, firma y registro
+    profesional, y hasta recargar la pagina el perfil mostraba "Carga tu
+    firma" y guardar el nombre borraba el telefono.
     """
-    return {
-        "id": str(user.id),
-        "email": user.email,
-        "first_name": user.first_name,
-        "last_name": user.last_name,
-        "nombre_completo": user.nombre_completo,
-        "rol": user_role_slug(user),
-        "role_id": user_role_id(user),
-        "role_nombre": user_role_name(user),
-        "permissions": sorted(get_user_permission_keys(user)),
-        "es_profesional": user.es_profesional,
-        "es_admin": user.es_admin,
-        "is_staff": user.is_staff,
-        "centro_ayuda_habilitado": ConfiguracionGlobal.get_solo().centro_ayuda_habilitado,
-        "modo_puesta_en_marcha": user.clinica.modo_puesta_en_marcha if user.clinica_id else False,
-        "filtrar_profesionales_por_procedimiento": (
-            user.clinica.filtrar_profesionales_por_procedimiento if user.clinica_id else False
-        ),
-        "clinica_id": str(user.clinica_id) if user.clinica_id else None,
-        "sede_id": user_sede_id(user),
-        "sedes": user_sedes(user),
-        "clinica_nombre": user.clinica.nombre if user.clinica_id else None,
-    }
+    data = dict(UserSerializer(user).data)
+    data["id"] = str(user.id)
+    return data
 
 
 def issue_login_tokens(user, *, user_agent: str = "") -> dict:

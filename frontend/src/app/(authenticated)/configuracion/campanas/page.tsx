@@ -23,7 +23,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
+import { cn, todayISO } from '@/lib/utils'
 import { precioEnSede, precioGeneralProcedimiento } from '@/lib/precios'
 import type { Campana, CampanaItem, CreateCampanaRequest, CreateCampanaItemRequest } from '@/types/campanas'
 import type { Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
@@ -33,7 +33,7 @@ import type { Procedimiento, TratamientoCatalogo } from '@/types/clinicas'
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
 function todayStr() {
-  return new Date().toISOString().split('T')[0]
+  return todayISO()
 }
 
 function campanaEstado(c: Campana): { label: string; color: string } {

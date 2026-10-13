@@ -18,7 +18,9 @@ interface ErrorHttp {
 
 const PERMISO_GENERICO = /no tienes permiso para realizar esta acci[oó]n/i
 
-function primerTexto(valor: unknown): string | null {
+/** Primer mensaje legible de un error de campo, aunque venga anidado
+ *  (p. ej. `precios_sede: [{sede: ["..."]}]`, que antes salía "[object Object]"). */
+export function primerTexto(valor: unknown): string | null {
   if (typeof valor === 'string' && valor.trim()) return valor
   if (Array.isArray(valor)) {
     for (const v of valor) {

@@ -22,6 +22,18 @@ CAMINOS_A_CLINICA = (
 )
 
 
+def validar_sede_del_usuario(request, sede) -> None:
+    """Un usuario acotado a ciertas sedes no agenda, cotiza ni bloquea en otra."""
+    from rest_framework.exceptions import PermissionDenied
+
+    from apps.users.authorization import sede_ids_para_filtro
+
+    if request is None or sede is None or not getattr(request.user, "is_authenticated", False):
+        return
+    if not sede_ids_para_filtro(request.user, sede.id):
+        raise PermissionDenied("No tienes acceso a esa sede.")
+
+
 def camino_a_clinica(modelo) -> str | None:
     """Primer camino de CAMINOS_A_CLINICA que existe en el modelo, o None."""
     for camino in CAMINOS_A_CLINICA:

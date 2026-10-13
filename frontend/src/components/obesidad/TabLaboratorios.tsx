@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { obesidadApi } from '@/lib/api/obesidad'
-import { formatDate } from '@/lib/utils'
+import { formatDate, todayISO } from '@/lib/utils'
 import type { ResultadoLaboratorioInput, TipoLaboratorio } from '@/types/obesidad'
 
 const TIPO_LABELS: Record<TipoLaboratorio, string> = {
@@ -47,7 +47,7 @@ interface FormValues {
 }
 
 const EMPTY: FormValues = {
-  fecha: new Date().toISOString().slice(0, 10),
+  fecha: todayISO(),
   tipo: '',
   observaciones: '',
 }

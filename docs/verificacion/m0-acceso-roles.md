@@ -96,7 +96,7 @@
   - en Equipo aparecen solo 25 personas.
 - **Arreglo:** ver T-01.
 
-**M0-13 · Alto · previsible** · confirmado
+**✅ M0-13 · Alto · previsible** · confirmado
 - **Dónde:** `backend/apps/users/serializers.py:447-474`; `perfil/page.tsx:80-93`; `AvisoDatosProfesionales.tsx:14`.
 - **Qué ve el usuario:**
   - aunque ya cargó su firma, aparece "Carga tu firma";

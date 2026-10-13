@@ -58,13 +58,13 @@
 - **Qué ve el usuario:** en la primera entrada a una atención, las fotos **se guardan en la nota de la visita anterior**. Si solo se suben fotos, el sistema dice "Nota sin contenido".
 - **Causa:** se usa `notas[0]` en vez de `notaId`, y la caché no se refresca después de crear el borrador.
 
-**M4-08 · Alto · Documenso caído** · código confirmado; impacto probable
+**✅ M4-08 · Alto · Documenso caído** · código confirmado; impacto probable
 - **Dónde:** `backend/apps/agenda/serializers.py:23-38` (`_archivo_url`).
 - **Qué ve el usuario:** si Documenso está lento, **la Agenda, Atenciones y el asistente se quedan cargando**.
 - **Causa:** al serializar cada cita se descarga en línea el PDF de cada consentimiento firmado que no tiene archivo, con esperas de 10 a 30 segundos.
 - **Arreglo:** sacar esa descarga del serializer y hacerla en una tarea (`refrescar_pdfs_firmados`) o bajo demanda.
 
-**M4-09 · Alto · faltante** · confirmado
+**✅ M4-09 · Alto · faltante** · confirmado
 - **Dónde:** `historia_clinica/views.py:882` (`reintentar_pdf` sin uso); `pacientes/views.py:180-210`.
 - **Qué ve el usuario:** un consentimiento firmado cuyo PDF falló aparece sin enlace, sin aviso y sin forma de reintentar.
 - **Arreglo:** mostrar "PDF pendiente · Reintentar".

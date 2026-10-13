@@ -26,19 +26,19 @@
 - **Causa:** el PATCH va a `/clinicas/mi-clinica/`, que ignora esos campos y responde 200. El endpoint real es `/configuracion/registro-publico/`.
 - **Arreglo:** leer y guardar en `/configuracion/registro-publico/`.
 
-**M1-03 · Alto · faltante** · confirmado
+**✅ M1-03 · Alto · faltante** · confirmado
 - **Dónde:** `components/shared/TrialBanner.tsx:17-19`; `configuracion/plan/page.tsx:77`; `serializers.py:198-217`.
 - **Qué ve el usuario:** una clínica en prueba **nunca ve "quedan X días"**. El día que vence, todo empieza a fallar sin aviso previo.
 - **Causa:** `MiClinicaSerializer` no devuelve `trial_days_remaining` (ni `plan_nombre`).
 - **Arreglo:** agregar esos campos al serializer.
 
-**M1-04 · Alto · previsible** · confirmado
+**✅ M1-04 · Alto · previsible** · confirmado
 - **Dónde:** `components/configuracion/PreciosPorSedeEditor.tsx:18-21`; `serializers.py:350`; `ProcedimientoDialog.tsx:306-315`.
 - **Qué ve el usuario:** si se desactiva una sede que tenía precio propio, **ya no se puede guardar ese procedimiento o tratamiento**. Aparece "precios_sede: [object Object]".
 - **Causa:** el formulario reenvía el precio de la sede inactiva y el backend solo acepta sedes activas.
 - **Arreglo:** filtrar el payload (o ignorar esas sedes en el backend) y mostrar bien los errores anidados.
 
-**M1-05 · Alto · previsible** · confirmado (bloqueo en recepción: probable)
+**✅ M1-05 · Alto · previsible** · confirmado (bloqueo en recepción: probable)
 - **Dónde:** `backend/apps/configuracion/views.py:116-122`; `configuracion/consentimientos/page.tsx:94`; `apps/agenda/serializers.py:86,130`; `ProcedimientoDialog.tsx:262-275`.
 - **Qué ve el usuario:** borra una plantilla de consentimiento, pero los procedimientos **la siguen exigiendo** al agendar y atender. Al editar el procedimiento sale "template_id: No existe un template activo…", y lo demás queda guardado a medias.
 - **Causa:** borrar solo desactiva la plantilla; las relaciones `ServicioConsentimiento` siguen activas.

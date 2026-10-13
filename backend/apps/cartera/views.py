@@ -27,7 +27,23 @@ from apps.cartera.services import anular_acuerdo_pago, aplicar_acuerdo_pago_por_
 from apps.cobros.models import Cobro
 from apps.cobros.services import registrar_pago
 from apps.core.logging import registrar_accion
+from apps.users.authorization import sede_ids_para_filtro
 from apps.users.permissions import RequirePermission, get_clinica_activa
+
+
+def acotar_por_sede(queryset, user, campo_sede, sede_pedida=None):
+    """Un usuario acotado a sedes solo ve la cartera de las cotizaciones de
+    sus sedes (igual que ventas y seguimiento). Sin filtro explícito también
+    ve las carteras cuya cotización no tiene sede."""
+    from django.db.models import Q
+
+    sede_ids = sede_ids_para_filtro(user, sede_pedida)
+    if sede_ids is None:
+        return queryset
+    filtro = Q(**{f"{campo_sede}__in": sede_ids})
+    if not sede_pedida:
+        filtro |= Q(**{f"{campo_sede}__isnull": True})
+    return queryset.filter(filtro)
 
 
 class CarteraPagination(PageNumberPagination):
@@ -112,8 +128,7 @@ class CarteraViewSet(ReadOnlyModelViewSet):
         sede_id = self.request.query_params.get("sede_id")
         if paciente:
             queryset = queryset.filter(paciente_id=paciente)
-        if sede_id:
-            queryset = queryset.filter(cotizacion__sede_id=sede_id)
+        queryset = acotar_por_sede(queryset, user, "cotizacion__sede_id", sede_id)
         if estado in {"pagada", "vencida", "pendiente"}:
             queryset = self._filter_by_estado(queryset, estado)
         if self.action == "list":
@@ -340,7 +355,7 @@ class CuotaCarteraViewSet(GenericViewSet):
             queryset = queryset.filter(cartera__paciente__clinica=clinica)
         elif user.rol != "superadmin":
             queryset = queryset.none()
-        return queryset
+        return acotar_por_sede(queryset, user, "cartera__cotizacion__sede_id")
 
     def _guard_acuerdo_pendiente(self, cuota):
         pendiente = cuota.cartera.acuerdos.filter(
@@ -534,6 +549,7 @@ class AcuerdoPagoViewSet(GenericViewSet):
             queryset = queryset.filter(cartera__paciente__clinica=clinica)
         elif user.rol != "superadmin":
             queryset = queryset.none()
+        queryset = acotar_por_sede(queryset, user, "cartera__cotizacion__sede_id")
         cartera_id = self.request.query_params.get("cartera")
         if cartera_id:
             queryset = queryset.filter(cartera_id=cartera_id)

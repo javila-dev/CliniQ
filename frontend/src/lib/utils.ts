@@ -56,6 +56,18 @@ export function todayISO(): string {
   return new Date().toLocaleDateString('en-CA') // YYYY-MM-DD
 }
 
+/** Día local (YYYY-MM-DD) de una fecha. `toISOString()` da el día en UTC:
+ *  después de las 19:00 en Colombia ya es el día siguiente. */
+export function fechaLocalISO(d: Date): string {
+  return d.toLocaleDateString('en-CA')
+}
+
+/** Fecha y hora local para un `<input type="datetime-local">` (YYYY-MM-DDTHH:mm). */
+export function fechaHoraLocalInput(d: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${fechaLocalISO(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
+
 /**
  * Formatea una fecha "solo día" (YYYY-MM-DD, o el prefijo de un ISO) SIN
  * corrimiento por zona horaria. `new Date("2026-08-27")` se interpreta como

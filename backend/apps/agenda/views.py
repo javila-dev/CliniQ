@@ -264,16 +264,28 @@ class CitaViewSet(ModelViewSet):
         profesional = data.get("profesional", instance.profesional)
         fecha_inicio = data.get("fecha_inicio", instance.fecha_inicio)
 
-        duracion_min = instance.duracion_min or 0
+        # Duración actual de la cita tal como está en la agenda. Las citas viejas
+        # pueden no tener duracion_min: antes se usaba 0 y editar cualquier cosa
+        # (una nota, el profesional) dejaba la hora de fin igual a la de inicio.
+        duracion_actual = int((instance.fecha_fin - instance.fecha_inicio).total_seconds() // 60)
+        duracion_min = instance.duracion_min or duracion_actual
         servicio_nombre = instance.servicio_nombre
-        if "servicio" in data and data.get("servicio"):
+        cambia_duracion = False
+        if "servicio" in data and data.get("servicio") and data["servicio"].id != instance.servicio_id:
             duracion_min = data["servicio"].duracion_min
             # Cambió el procedimiento: la agenda mostraba el nombre anterior.
             servicio_nombre = data["servicio"].nombre
-        elif "duracion_min" in data and data.get("duracion_min"):
+            cambia_duracion = True
+        elif "duracion_min" in data and data.get("duracion_min") and data["duracion_min"] != instance.duracion_min:
             duracion_min = data["duracion_min"]
+            cambia_duracion = True
 
-        fecha_fin = services.calcular_fecha_fin(fecha_inicio, duracion_min)
+        if fecha_inicio == instance.fecha_inicio and not cambia_duracion:
+            # Ni la hora ni la duración cambian: la hora de fin queda tal cual.
+            fecha_fin = instance.fecha_fin
+            duracion_min = instance.duracion_min or duracion_actual
+        else:
+            fecha_fin = services.calcular_fecha_fin(fecha_inicio, duracion_min)
 
         if paciente.clinica_id != sede.clinica_id:
             raise ValidationError({"error": "El paciente no pertenece a la clinica de la sede."})

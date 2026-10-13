@@ -26,7 +26,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { useDebounce } from '@/hooks/useDebounce'
-import { cn, formatDate } from '@/lib/utils'
+import { cn, formatDate, fechaLocalISO } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
 import type { CarteraPaciente } from '@/types/cartera'
 
@@ -94,7 +94,7 @@ function CuotasVencidasModal({ open, onClose, desde }: { open: boolean; onClose:
     ws['!cols'] = [{ wch: 28 }, { wch: 16 }, { wch: 14 }, { wch: 22 }, { wch: 16 }, { wch: 12 }, { wch: 18 }]
     const wb = XLSX.utils.book_new()
     XLSX.utils.book_append_sheet(wb, ws, 'Cuotas vencidas')
-    XLSX.writeFile(wb, `cuotas_vencidas_${hoy.toISOString().slice(0, 10)}.xlsx`)
+    XLSX.writeFile(wb, `cuotas_vencidas_${fechaLocalISO(hoy)}.xlsx`)
   }
 
   return (

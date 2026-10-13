@@ -87,10 +87,12 @@ class DescargaSoloSiEstaSelladoTests(TestCase):
         self.assertEqual(descargar_pdf_documenso_sellado("55"), b"%PDF-firmado")
 
     # ── consentimientos informados ──────────────────────────────────────
-    @patch("apps.agenda.serializers.descargar_pdf_documenso_sellado")
-    def test_archivo_url_no_guarda_pdf_sin_sellar(self, mocked_descargar):
-        mocked_descargar.return_value = None
-        _archivo_url(self.informado)
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso_sellado")
+    def test_archivo_url_no_llama_a_documenso(self, mocked_descargar):
+        # La agenda no descarga PDFs al serializar (M4-08): con Documenso lento
+        # se quedaba cargando. Recuperarlo es "Reintentar".
+        self.assertIsNone(_archivo_url(self.informado))
+        mocked_descargar.assert_not_called()
         self.informado.refresh_from_db()
         self.assertFalse(self.informado.archivo)
 

@@ -1,6 +1,6 @@
 # T — Resumen general: problemas transversales, avance y lo que falta
 
-**Estado:** En corrección. Pasos 1 a 6 de 7 hechos.
+**Estado:** En corrección. Pasos 1 a 6 de 7 hechos; del paso 7, la parte 7a (los altos).
 
 Este es el **resumen de toda la verificación**. Tiene tres partes:
 1. El tablero de abajo: qué se hizo y qué falta.
@@ -18,21 +18,23 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 3 | Legal y seguridad: consentimientos firmados sin firma, firma que no llega al PDF, correo abierto, aislamiento entre clínicas, escalada de rol, usuario desactivado que entra, registro público sin límite | ✅ Hecho | `521456f` |
 | 4 | Roles personalizados y permisos: chequeos por rol fijo, permisos huérfanos, defaults de Recepción y Profesional, menús que expulsan sin aviso | ✅ Hecho | `03c7e93` |
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
-| 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | pendiente de commit |
-| 7 | Todo lo demás, por módulo y severidad | Pendiente | — |
+| 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | `84f0e36` |
+| 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | pendiente de commit |
+| 7b | Los medios, módulo por módulo (M0 a M7) | Pendiente | — |
+| 7c | Los bajos | Pendiente | — |
 
-**Hallazgos:** 106 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 118 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
-| M0 Acceso y roles | 22 | 8 | 0 |
-| M1 Configuración y catálogo | 11 | 20 | 0 |
-| M2 Pacientes | 9 | 17 | 0 |
+| M0 Acceso y roles | 23 | 7 | 0 |
+| M1 Configuración y catálogo | 14 | 17 | 0 |
+| M2 Pacientes | 10 | 16 | 0 |
 | M3 Agenda | 21 | 9 | 0 |
-| M4 Atención clínica | 13 | 15 | 0 |
-| M5 Comercial | 8 | 22 | 0 |
-| M6 Dinero | 15 | 12 | 0 |
-| M7 Inventario y plataforma | 7 | 18 | 0 |
+| M4 Atención clínica | 15 | 13 | 0 |
+| M5 Comercial | 10 | 20 | 0 |
+| M6 Dinero | 17 | 10 | 0 |
+| M7 Inventario y plataforma | 8 | 17 | 0 |
 
 **Decisiones del usuario (10/10/2026)**
 
@@ -384,6 +386,34 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 - **Pruebas:** `test_verificacion_paso6.py` (18). La suite completa (794 tests) pasa salvo los 7 de login con Google (entorno); después del ajuste de solicitudes de bloqueo se volvieron a correr agenda, usuarios y el paso 6 (168 tests), con el mismo resultado.
 - **Queda de agenda para el paso 7:** M3-18 (avisar de las citas afectadas al crear un bloqueo), M3-19 (el listado), M3-20 (zona horaria por clínica), M3-21 (autoconfirmación por enlace) y M3-26 a M3-30.
 
+**Paso 7a — los hallazgos altos (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M0-13 | El login devuelve el mismo usuario que `/auth/me/` (`build_auth_user_payload` usa `UserSerializer`): trae teléfono, firma y registro profesional. Ya no aparece "Carga tu firma" a quien la tiene, ni se borra el teléfono al cambiar el nombre. |
+| M1-03 | `/clinicas/mi-clinica/` devuelve `trial_days_remaining`, `trial_expires_at` y `plan_nombre`: la clínica en prueba ve "quedan X días". Los días se redondean hacia arriba, así el último día no figura como vencido. |
+| M1-04 | El precio propio de una sede desactivada ya no impide guardar el procedimiento o tratamiento (se conserva). Los errores anidados se leen bien en vez de "[object Object]" (`primerTexto` en `lib/errores.ts`). |
+| M1-05 | Borrar una plantilla de consentimiento desactiva también sus relaciones con los procedimientos. La migración `clinicas 0048` limpia las plantillas que ya se habían borrado. |
+| M2-06 | El autorregistro tiene un límite propio por vista, por equipo y por enlace: 300 consultas, 60 registros y 60 fotos por hora (antes, 20 compartidos). Si se alcanza, la pantalla dice "Espera unos minutos · Intentar de nuevo" en lugar de "Enlace no válido". |
+| M4-08 | La agenda y la atención ya no descargan PDFs de Documenso al mostrar cada cita; con Documenso lento ya no se quedan cargando. |
+| M4-09 | Un consentimiento firmado cuyo PDF falló muestra "PDF pendiente · Reintentar" en la ficha del paciente y en el detalle de la cita (`reintentar_pdf`, con `historia.ver`). |
+| M5-01 | El listado de cotizaciones y el filtro de profesionales respetan las sedes del usuario. Editar, aceptar, descartar, renovar y enviar una cotización de otra sede responde 403, y no se puede crear en una sede ajena. Las pantallas del paciente (`?paciente=`) siguen viendo todas sus cotizaciones, porque un paquete vendido en otra sede también se agenda y se cobra aquí. |
+| M5-02 | El PDF de la cotización y el consolidado de asistencia muestran las sesiones reales del paquete (`num_sesiones_efectivas`), no "1". |
+| M6-10 | La cartera (listado, por paciente, resumen, cuotas y acuerdos) respeta las sedes del usuario; las carteras sin sede las ven todos. |
+| M6-11 y T-04 | "Hoy" en Ingresos y las fechas por defecto de cartera, campañas, colaboradores, obesidad y compras usan el día local (`fechaLocalISO`, `fechaHoraLocalInput`): después de las 19:00 ya no saltan al día siguiente. |
+| M7-03 | "Registrar y recibir" solo aparece con `proveedores.ordenes.recibir`. Si la compra se guarda pero no se puede recibir, avisa que quedó como borrador y abre ese borrador para reintentar, sin duplicarla. |
+
+- **Pruebas:** `test_verificacion_paso7.py` (10). `tests_documenso_sellado` ahora comprueba que la agenda no llama a Documenso. Suite completa: 805 tests, solo fallan los 7 de Google (entorno).
+
+**Revisión de seguridad de fechas (13/10/2026)**, a pedido del usuario, para asegurar que nada cambie las horas de las citas ya agendadas:
+
+- **Migraciones:** ninguna migración de la rama modifica citas (`agenda` no tiene migraciones nuevas; `clinicas 0048` solo desactiva relaciones de consentimiento).
+- **Backend:** ningún cambio guarda fechas de citas existentes. `localtime` en `verificar_horario_*` solo se usa para comparar con el horario de la sede. La API sigue devolviendo la hora local con su desfase (`15:00-05:00` = `20:00 UTC` en la base), y reenviarla deja el mismo instante.
+- **Frontend:** los cambios de `todayISO`/`fechaLocalISO` solo tocan valores por defecto de registros nuevos y filtros.
+- **Riesgo anterior encontrado y corregido:** al editar una cita, el backend recalculaba la hora de fin como inicio + `duracion_min`. En las citas sin `duracion_min` (13 de 47 en la base local) eso dejaba fin = inicio, y si cambió la duración del procedimiento en el catálogo, editar una nota corría la hora de fin. Ahora, si no cambian la hora ni el procedimiento, la hora de fin queda tal cual; sin `duracion_min` se usa lo que la cita ocupa en la agenda. `scripts/auditoria/citas_fin_inconsistente.py` cuenta esas citas (solo lee).
+- **Pruebas** (en `test_verificacion_paso6.py`): editar una nota, cambiar el profesional, reenviar la hora que devuelve la API y cambiar la duración del catálogo no mueven la cita; reprogramar una cita sin duración conserva lo que dura.
+- **Para revisar en pantalla:** en la ficha de un paciente con un consentimiento sin PDF, el enlace "Reintentar"; y una recepcionista de una sede, en Cotizaciones y Cartera.
+
 ## Orden de corrección sugerido
 
 Cada paso deja la app más usable para el siguiente. Las pruebas no técnicas de cada módulo se hacen después de su paso.
@@ -402,7 +432,7 @@ Cada paso deja la app más usable para el siguiente. Las pruebas no técnicas de
 4. **Roles personalizados y permisos:** T-03 y T-06, con la decisión de los defaults y los guards de M0-09/M1-06.
 5. **Manejo de errores y carga:** T-02, pantalla por pantalla, con el helper común.
 6. **Agenda:** M3-02, M3-03, M3-05, M3-06, M3-11 y M3-12.
-7. **Lo demás**, por módulo y en orden de severidad.
+7. **Lo demás**, en tres partes: 7a los altos, 7b los medios por módulo, 7c los bajos.
 
 ## Resultado de los tests
 

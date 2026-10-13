@@ -13,7 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/hooks/use-toast'
 import { obesidadApi } from '@/lib/api/obesidad'
-import { formatDate } from '@/lib/utils'
+import { formatDate, todayISO } from '@/lib/utils'
 import type { TratamientoFarmacologicoInput, ViaAdministracion } from '@/types/obesidad'
 
 const VIA_LABELS: Record<ViaAdministracion, string> = {
@@ -43,7 +43,7 @@ const EMPTY: FormValues = {
   dosis: '',
   via: 'oral',
   frecuencia: '',
-  fecha_inicio: new Date().toISOString().slice(0, 10),
+  fecha_inicio: todayISO(),
   fecha_fin: '',
 }
 
@@ -60,7 +60,7 @@ function SuspenderDialog({ id, medicamento, onClose }: SuspenderDialogProps) {
 
   const { mutate, isPending } = useMutation({
     mutationFn: () => obesidadApi.farmacologico.update(id, {
-      fecha_fin: new Date().toISOString().slice(0, 10),
+      fecha_fin: todayISO(),
       motivo_suspension: motivo,
     }),
     onSuccess: () => {
