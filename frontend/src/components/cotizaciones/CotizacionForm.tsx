@@ -2200,7 +2200,12 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           if (cotizacion) queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
         }}
       >
-        <DialogContent className="max-w-4xl w-[95vw]">
+        {/* Con una tableta de firma el lápiz apunta a toda la pantalla: tocar fuera no debe cerrar. */}
+        <DialogContent
+          className="max-w-4xl w-[95vw]"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-4.5 w-4.5 text-primary" />

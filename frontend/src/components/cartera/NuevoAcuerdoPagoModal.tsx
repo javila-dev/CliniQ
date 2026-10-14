@@ -139,7 +139,12 @@ export function NuevoAcuerdoPagoModal({ cartera, open, onOpenChange, onCreado }:
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) cerrar() }}>
-      <DialogContent className={paso === 'firma' ? 'max-w-4xl w-[95vw]' : 'max-w-2xl'}>
+      {/* En la firma, con tableta el lápiz apunta a toda la pantalla: tocar fuera no debe cerrar. */}
+      <DialogContent
+        className={paso === 'firma' ? 'max-w-4xl w-[95vw]' : 'max-w-2xl'}
+        onPointerDownOutside={(e) => { if (paso === 'firma') e.preventDefault() }}
+        onInteractOutside={(e) => { if (paso === 'firma') e.preventDefault() }}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center justify-between">
             <span>Nuevo acuerdo de pago</span>

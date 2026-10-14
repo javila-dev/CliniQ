@@ -192,7 +192,12 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
 
       {showFirmaAcuerdo && acuerdoPendiente?.documento && (
         <Dialog open={showFirmaAcuerdo} onOpenChange={setShowFirmaAcuerdo}>
-          <DialogContent className="max-w-4xl w-[95vw]">
+          {/* Con una tableta de firma el lápiz apunta a toda la pantalla: tocar fuera no debe cerrar. */}
+          <DialogContent
+            className="max-w-4xl w-[95vw]"
+            onPointerDownOutside={(e) => e.preventDefault()}
+            onInteractOutside={(e) => e.preventDefault()}
+          >
             <DialogHeader>
               <DialogTitle>Acta de acuerdo de pago N.° {acuerdoPendiente.numero}</DialogTitle>
             </DialogHeader>

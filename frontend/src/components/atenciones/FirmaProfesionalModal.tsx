@@ -137,7 +137,12 @@ export function FirmaProfesionalModal({ citaId, cotizacionId, pacienteNombre, on
 
   return (
       <Dialog open={!!objetivoId} onOpenChange={open => { if (!open && !firmar.isPending) onClose() }}>
-        <DialogContent className="max-w-lg">
+        {/* Aquí se puede dibujar la firma: con tableta el lápiz apunta a toda la pantalla y tocar fuera no debe cerrar. */}
+        <DialogContent
+          className="max-w-lg"
+          onPointerDownOutside={e => e.preventDefault()}
+          onInteractOutside={e => e.preventDefault()}
+        >
           <DialogHeader>
             <div className="flex items-center gap-3">
               <div className={`h-10 w-10 rounded-full flex items-center justify-center shrink-0 ${motivo ? 'bg-red-50' : 'bg-violet-50'}`}>
