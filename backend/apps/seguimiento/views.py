@@ -1,3 +1,4 @@
+import uuid
 from datetime import date
 from decimal import Decimal
 
@@ -156,7 +157,10 @@ class OportunidadViewSet(
 
     def partial_update(self, request, pk=None):
         oportunidad = self._oportunidad(pk)
-        serializer = ActualizarOportunidadSerializer(oportunidad, data=request.data, partial=True)
+        # Con el request, validate_sede revisa las sedes del usuario (M5-28).
+        serializer = ActualizarOportunidadSerializer(
+            oportunidad, data=request.data, partial=True, context={"request": request},
+        )
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return self._respuesta(oportunidad)
@@ -196,10 +200,24 @@ class OportunidadViewSet(
         from apps.pacientes.models import Paciente
 
         oportunidad = self._oportunidad(pk)
-        paciente = get_object_or_404(
-            Paciente, pk=request.data.get("paciente"), clinica_id=oportunidad.clinica_id, activo=True,
-        )
+        # Un id mal formado era un 500; ahora un 400 claro.
+        try:
+            paciente_id = uuid.UUID(str(request.data.get("paciente") or ""))
+        except ValueError:
+            raise ValidationError({"error": "Elige un paciente.", "code": "PACIENTE_INVALIDO"})
+        # Solo pacientes de la clínica de la oportunidad (la activa del usuario).
+        paciente = get_object_or_404(Paciente, pk=paciente_id, clinica_id=oportunidad.clinica_id, activo=True)
+        # Vincular a un paciente que ya existe (M5-25): si ese paciente ya tiene su
+        # propio seguimiento de venta abierto, no se duplica; se avisa con su id.
+        existente = services.abiertas_de_venta(paciente).exclude(pk=oportunidad.pk).first()
+        if existente is not None:
+            raise ValidationError({
+                "error": f"{paciente.nombre_completo} ya está en seguimiento.",
+                "code": "OPORTUNIDAD_ABIERTA",
+                "oportunidad_id": str(existente.id),
+            })
         services.vincular_paciente(oportunidad, paciente)
+        registrar_accion(request, "seguimiento.vincular_paciente", oportunidad, {"paciente": str(paciente.id)})
         return self._respuesta(oportunidad)
 
     @action(detail=False, methods=["post"], url_path="detectar", permission_classes=[AllowAny], authentication_classes=[])

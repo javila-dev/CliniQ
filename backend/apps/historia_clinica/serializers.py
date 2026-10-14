@@ -65,6 +65,8 @@ TIPOS_FOTO_CLINICA = {"image/jpeg", "image/jpg", "image/png", "image/webp", "ima
 class NotaClinicaResumenSerializer(serializers.ModelSerializer):
     """Serializer ligero usado en el listado de notas de una historia."""
     profesional_nombre = serializers.SerializerMethodField()
+    # La tarjeta de la nota muestra el procedimiento de la cita (M4-27).
+    servicio_nombre = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaClinica
@@ -75,6 +77,7 @@ class NotaClinicaResumenSerializer(serializers.ModelSerializer):
             "motivo_consulta",
             "plan_manejo",
             "profesional_nombre",
+            "servicio_nombre",
             "created_at",
             "updated_at",
         )
@@ -86,6 +89,9 @@ class NotaClinicaResumenSerializer(serializers.ModelSerializer):
         if obj.firmada_por_id:
             return obj.firmada_por.nombre_completo
         return None
+
+    def get_servicio_nombre(self, obj):
+        return obj.cita.servicio_nombre if obj.cita_id else ""
 
 
 class ResultadoExamenEmbedSerializer(serializers.ModelSerializer):
@@ -110,6 +116,8 @@ class OrdenMedicaEmbedSerializer(serializers.ModelSerializer):
 class NotaClinicaSerializer(serializers.ModelSerializer):
     """Serializer completo para detalle de una nota clínica."""
     profesional_nombre = serializers.SerializerMethodField()
+    # La tarjeta de la nota muestra el procedimiento de la cita (M4-27).
+    servicio_nombre = serializers.SerializerMethodField()
     fotos = FotoClinicaSerializer(many=True, read_only=True)
     examenes = ResultadoExamenEmbedSerializer(many=True, read_only=True)
     ordenes = OrdenMedicaEmbedSerializer(many=True, read_only=True)
@@ -125,6 +133,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "motivo_consulta",
             "plan_manejo",
             "profesional_nombre",
+            "servicio_nombre",
             "fotos",
             "examenes",
             "ordenes",
@@ -135,6 +144,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "id",
             "estado",
             "profesional_nombre",
+            "servicio_nombre",
             "fotos",
             "examenes",
             "ordenes",
@@ -148,6 +158,9 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
         if obj.firmada_por_id:
             return obj.firmada_por.nombre_completo
         return None
+
+    def get_servicio_nombre(self, obj):
+        return obj.cita.servicio_nombre if obj.cita_id else ""
 
     def validate(self, attrs):
         historia = attrs.get("historia")

@@ -118,38 +118,38 @@
 - **Qué pasa:** los PDF que se envían por WhatsApp quedan en el bucket público con una URL permanente.
 - **Arreglo:** URL firmada de corta duración, o limpieza programada.
 
-**M7-18 · Bajo · permisos (superadmin)** · confirmado
+**✅ M7-18 · Bajo · permisos (superadmin)** · confirmado
 - **Dónde:** `inventario/views.py:153-158`; `proveedores/views.py:61-64`
 - **Qué pasa:** el superadmin que opera una clínica ve las órdenes de todas las clínicas.
 - **Arreglo:** usar `get_clinica_activa`.
 
-**M7-19 · Bajo · roles personalizados** · confirmado
+**✅ M7-19 · Bajo · roles personalizados** · confirmado
 - **Dónde:** `CompraForm.tsx:52-56,298,418`
 - **Qué ve el usuario:** con "gestionar órdenes" pero sin "ver inventario", el buscador de ítems dice "Sin resultados" (en realidad es un 403). Además, "Crear proveedor" aparece sin el permiso.
 
-**M7-20 · Bajo · zona horaria** · confirmado
+**✅ M7-20 · Bajo · zona horaria** · confirmado
 - **Dónde:** `CompraForm.tsx:175`
 - **Qué ve el usuario:** después de las 7 p. m., la fecha de compra por defecto es la de mañana (ver T-04).
 
-**M7-21 · Bajo · faltante** · confirmado
+**✅ M7-21 · Bajo · faltante** · confirmado
 - **Dónde:** `proveedores/models.py:69`; `CompraForm.tsx:239-242,390-394`
 - **Qué ve el usuario:**
   - No puede guardar un borrador sin número de factura.
   - Una orden enviada o cancelada aparece como "ya fue recibida".
 
-**M7-22 · Bajo · concurrencia** · probable
+**✅ M7-22 · Bajo · concurrencia** · probable
 - **Dónde:** `proveedores/models.py:100-115`; `inventario/services.py:7-9`
 - **Qué pasa:** error 500 ocasional al crear órdenes al mismo tiempo, porque el consecutivo es global.
 
-**M7-23 · Bajo · tipos** · confirmado
+**✅ M7-23 · Bajo · tipos** · confirmado
 - **Dónde:** `lib/api/inventario.ts:54`
 - **Qué pasa:** `ajustarStock` está mal tipado; el backend devuelve el movimiento plano.
 
-**M7-24 · Bajo · permisos** · confirmado
+**✅ M7-24 · Bajo · permisos** · confirmado
 - **Dónde:** `inventario/serializers.py:163-224`
 - **Qué pasa:** quien solo puede ver el kardex ve nombres de pacientes y enlaces a su historia (además hay N+1 consultas).
 
-**M7-25 · Bajo · previsible** · confirmado
+**✅ M7-25 · Bajo · previsible** · confirmado
 - **Dónde:** `ayuda/views.py:193-200`; `notificaciones/views.py:111-144`
 - **Qué pasa:**
   - "¿Te fue útil?" se puede inflar sin límite.

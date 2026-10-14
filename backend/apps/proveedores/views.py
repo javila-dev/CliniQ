@@ -60,8 +60,12 @@ class OrdenCompraViewSet(ModelViewSet):
     def get_queryset(self):
         queryset = super().get_queryset().order_by("-fecha", "-created_at")
         user = self.request.user
-        if user.rol != "superadmin":
-            queryset = queryset.filter(proveedor__clinica=user.clinica)
+        # El superadmin que opera una clínica ve solo esa (M7-18).
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            queryset = queryset.filter(proveedor__clinica=clinica)
+        elif user.rol != "superadmin":
+            queryset = queryset.none()
 
         fecha = self.request.query_params.get("fecha")
         proveedor = self.request.query_params.get("proveedor")

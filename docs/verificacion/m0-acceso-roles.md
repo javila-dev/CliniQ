@@ -136,7 +136,7 @@
   - un rol personalizado con "editar usuarios" no puede cambiar la contraseña de otros.
 - **Arreglo:** pedir la contraseña actual, validar la fortaleza, mostrar un toast y usar `usuarios.editar`.
 
-**M0-19 · Bajo · errores** · confirmado
+**✅ M0-19 · Bajo · errores** · confirmado
 - **Dónde:** `backend/apps/users/views.py:500-501`.
 - **Causa:** `MeView.patch` descarta los errores de cada campo y muestra un mensaje genérico.
 
@@ -168,11 +168,11 @@
 - **Además:** quedan `console.log` con los payloads.
 - **Arreglo:** exponer los roles asignables con `colaboradores.gestionar`.
 
-**M0-26 · Bajo · previsible** · confirmado
+**✅ M0-26 · Bajo · previsible** · confirmado
 - **Dónde:** `equipo/personal/page.tsx:289-290,404,422`.
 - **Qué ve el usuario:** los contadores y el filtro "Profesionales" ignoran a los admin y a los roles personalizados que atienden.
 
-**M0-27 · Bajo · previsible** · confirmado
+**✅ M0-27 · Bajo · previsible** · confirmado
 - **Dónde:** `perfil/page.tsx:132`.
 - **Qué ve el usuario:** el rol aparece como "prueba-sede-unica" en lugar del nombre.
 - **Arreglo:** usar `role_nombre`.
@@ -182,7 +182,7 @@
 - **Qué ve el usuario:** cuando vence la sesión aparece el login sin ninguna explicación.
 - **Arreglo:** toast "Tu sesión venció".
 
-**M0-29 · Bajo · previsible** · confirmado
+**✅ M0-29 · Bajo · previsible** · confirmado
 - **Dónde:** `backend/apps/users/views.py:181-184`.
 - **Qué ve el usuario:** intentar entrar a una clínica inactiva cierra la sesión abierta en otro equipo.
 

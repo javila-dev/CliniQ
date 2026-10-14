@@ -500,8 +500,9 @@ class MeView(APIView):
 
     def patch(self, request, *args, **kwargs):
         serializer = MeUpdateSerializer(instance=request.user, data=request.data, partial=True, context={"request": request})
-        if not serializer.is_valid():
-            return error_response("No fue posible actualizar el perfil.", "ME_UPDATE_INVALID", status.HTTP_400_BAD_REQUEST)
+        # Los errores por campo llegan tal cual: el frontend los muestra en
+        # cada campo en vez de un "No fue posible actualizar el perfil" (M0-19).
+        serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(UserSerializer(request.user, context={"request": request}).data, status=status.HTTP_200_OK)
 

@@ -156,6 +156,27 @@ class MovimientoInventarioSerializer(serializers.ModelSerializer):
     def get_contexto(self, obj):
         """Detalle legible del origen del movimiento (a que compra, atencion
         o cobro corresponde), resuelto a partir de referencia_tipo/referencia_id."""
+        contexto = self._contexto(obj)
+        # Quien solo ve el kardex no ve a qué paciente corresponde un consumo
+        # ni recibe el enlace a su historia (M7-24).
+        if contexto and "paciente_id" in contexto and not self._ve_pacientes():
+            contexto = {k: v for k, v in contexto.items() if k not in ("paciente_id", "paciente_nombre")}
+        return contexto
+
+    def _ve_pacientes(self):
+        if not hasattr(self, "_cache_ve_pacientes"):
+            from apps.users.authorization import user_has_permission
+
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            # Sin usuario (uso interno, p. ej. un servicio) no se oculta nada.
+            if user is None or not user.is_authenticated:
+                self._cache_ve_pacientes = True
+            else:
+                self._cache_ve_pacientes = user_has_permission(user, "pacientes.ver", request=request)
+        return self._cache_ve_pacientes
+
+    def _contexto(self, obj):
         if not obj.referencia_id or not obj.referencia_tipo:
             return None
 

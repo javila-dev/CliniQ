@@ -1266,6 +1266,8 @@ class CotizacionPrecioCampanaTests(TestCase):
             "/api/v1/cotizaciones/",
             {
                 "paciente": str(self.paciente.id),
+                # Suya: un profesional solo cambia sus propias cotizaciones (M5-29).
+                "profesional": str(profesional.id),
                 "sede": str(self.sede.id),
                 "items": [
                     {
@@ -1425,7 +1427,21 @@ class CotizacionPrecioCampanaTests(TestCase):
         self.assertEqual(item["descuento_maximo_pct"], "20.00")
         self.assertEqual(item["precio_lista"], "350000.00")
 
+    def _sin_permiso_de_precio(self):
+        """Usuario que cotiza pero sin `cotizaciones.cambiar_precio`: el tope le aplica (M5-18)."""
+        from apps.users.models import Permiso, Rol, RolPermiso
+
+        rol = Rol.objects.create(clinica=self.clinica, slug="cotiza-sin-precio", nombre="Cotiza sin precio")
+        for clave in ("cotizaciones.ver", "cotizaciones.gestionar", "comercial.ver_sede"):
+            RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave=clave))
+        usuario = User.objects.create_user(
+            email="cotiza-sin-precio@test.com", password="Secret123!", first_name="Co", last_name="Tiza",
+            rol=User.Role.RECEPCION, clinica=self.clinica, rol_dinamico=rol,
+        )
+        self.client.force_authenticate(usuario)
+
     def test_descuento_supera_el_tope_del_catalogo_se_rechaza(self):
+        self._sin_permiso_de_precio()
         Servicio.objects.filter(pk=self.procedimiento.pk).update(descuento_maximo_pct=Decimal("10"))
         # 350000 con 20% -> 280000, piso = 315000 -> rechazo
         r = self._crear_borrador({
@@ -1438,6 +1454,7 @@ class CotizacionPrecioCampanaTests(TestCase):
         self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
 
     def test_sin_tope_configurado_no_admite_ningun_descuento(self):
+        self._sin_permiso_de_precio()
         # descuento_maximo_pct por defecto = 0
         r = self._crear_borrador({
             "tipo": "tratamiento",
@@ -1448,8 +1465,9 @@ class CotizacionPrecioCampanaTests(TestCase):
         self.assertEqual(r.status_code, 400)
         self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
 
-    def test_tope_es_duro_aunque_el_usuario_tenga_cambiar_precio(self):
-        # self.admin tiene cotizaciones.cambiar_precio; el tope igual aplica.
+    def test_cambiar_precio_salta_el_tope(self):
+        # Decisión del usuario (M5-18): self.admin tiene cotizaciones.cambiar_precio
+        # y puede pasar el descuento máximo del catálogo.
         Servicio.objects.filter(pk=self.procedimiento.pk).update(descuento_maximo_pct=Decimal("10"))
         r = self._crear_borrador({
             "tipo": "procedimiento",
@@ -1457,8 +1475,7 @@ class CotizacionPrecioCampanaTests(TestCase):
             "valor_unitario": "350000.00",
             "descuento_porcentaje": "30.00",
         })
-        self.assertEqual(r.status_code, 400)
-        self.assertIn("DESCUENTO_EXCEDE_MAXIMO", str(r.json()))
+        self.assertEqual(r.status_code, 201, r.content)
 
     def test_precio_de_campana_pasa_el_tope(self):
         # sin tope, pero el valor coincide con la campaña activa (280000) -> se acepta

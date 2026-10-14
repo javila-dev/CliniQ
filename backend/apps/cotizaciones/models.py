@@ -346,10 +346,11 @@ class ItemCotizacion(BaseModel):
         """Sesiones regaladas (clonadas de este tratamiento) que suman a su cupo."""
         if self.tipo != self.Tipo.TRATAMIENTO:
             return 0
-        return sum(
-            obsequio.num_citas
-            for obsequio in self.obsequios.filter(activo=True, es_obsequio=True, agendable=True)
-        )
+        # Listado de ventas: viene precargado para no consultar por ítem (M5-19).
+        obsequios = getattr(self, "_obsequios_agendables", None)
+        if obsequios is None:
+            obsequios = self.obsequios.filter(activo=True, es_obsequio=True, agendable=True)
+        return sum(obsequio.num_citas for obsequio in obsequios)
 
     def citas_no_canceladas(self):
         return self.citas.exclude(estado="cancelada").count()
@@ -363,6 +364,11 @@ class ItemCotizacion(BaseModel):
         si no hay copia (cotización sin aceptar, o una venta anterior a que se guardara).
         Las sesiones obsequiadas no cuentan aquí: se suman aparte.
         """
+        # Listado de ventas: seguimientos precargados (por created_at) con el
+        # conteo anotado en ``_n_sesiones_vendidas`` (M5-19).
+        precargados = getattr(self, "_seguimientos_vendidos", None)
+        if precargados is not None:
+            return precargados[0]._n_sesiones_vendidas if precargados else None
         seguimiento = self.tratamientos_paciente.order_by("created_at").first()
         if seguimiento is None:
             return None
@@ -405,10 +411,10 @@ class ItemCotizacion(BaseModel):
         if self.tipo == self.Tipo.TRATAMIENTO and self.tratamiento_id:
             total = self.sesiones_vendidas()
             if total is None:
-                total = sum(
-                    ts.cantidad
-                    for ts in self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
-                )
+                tipos = getattr(self.tratamiento, "_tipos_sesion_compromiso", None)
+                if tipos is None:
+                    tipos = self.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
+                total = sum(ts.cantidad for ts in tipos)
             return (total or self.num_citas) + self.sesiones_obsequio_extra()
         return self.num_citas
 

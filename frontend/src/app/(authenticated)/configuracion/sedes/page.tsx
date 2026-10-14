@@ -159,6 +159,8 @@ function HorarioResumen({ horario }: { horario: HorarioSede }) {
 
 // ─── Sheet sede ──────────────────────────────────────────────
 
+const SEDE_VACIA: SedeFormValues = { nombre: '', ciudad: '', direccion: '', telefono: '' }
+
 function SedeSheet({
   sede,
   open,
@@ -172,19 +174,23 @@ function SedeSheet({
   const isEdit = !!sede
   const [horario, setHorario] = useState<HorarioSede>(sede?.horario ?? HORARIO_DEFAULT)
 
-  useEffect(() => {
-    setHorario(sede?.horario ?? HORARIO_DEFAULT)
-  }, [sede])
-
   const { register, handleSubmit, reset, formState: { errors } } = useForm<SedeFormValues>({
     resolver: zodResolver(sedeSchema),
-    values: sede ? {
+    defaultValues: SEDE_VACIA,
+  })
+
+  // Cada vez que se abre parte de la sede elegida o vacío: con `values` el
+  // formulario conservaba los datos de la última sede editada al ir a "Nueva sede" (M1-26).
+  useEffect(() => {
+    if (!open) return
+    setHorario(sede?.horario ?? HORARIO_DEFAULT)
+    reset(sede ? {
       nombre:    sede.nombre,
       ciudad:    sede.ciudad,
       direccion: sede.direccion,
       telefono:  sede.telefono ?? '',
-    } : undefined,
-  })
+    } : SEDE_VACIA)
+  }, [open, sede, reset])
 
   const mutation = useMutation({
     mutationFn: (data: SedeFormValues) =>
@@ -193,13 +199,11 @@ function SedeSheet({
         : clinicasApi.sedes.create({ ...data, horario }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sedes'] })
-      reset()
-      setHorario(HORARIO_DEFAULT)
       onClose()
     },
   })
 
-  const handleClose = () => { reset(); setHorario(HORARIO_DEFAULT); onClose() }
+  const handleClose = () => onClose()
 
   return (
     <Sheet open={open} onOpenChange={v => { if (!v) handleClose() }}>

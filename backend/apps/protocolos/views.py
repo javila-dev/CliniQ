@@ -3,7 +3,6 @@ from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet
 
@@ -26,6 +25,9 @@ from apps.users.models import User
 from apps.users.permissions import IsAdmin, IsAdminOrProfesional, RequireAnyPermission
 
 
+PERMISOS_VER_TRATAMIENTOS = ("pacientes.ver", "agenda.citas.ver", "historia.ver")
+
+
 class TratamientoPacienteViewSet(ModelViewSet):
     queryset = TratamientoPaciente.objects.select_related(
         "paciente",
@@ -45,7 +47,9 @@ class TratamientoPacienteViewSet(ModelViewSet):
 
     def get_permissions(self):
         if self.action in {"list", "retrieve"}:
-            return [IsAuthenticated()]
+            # Lo usan la ficha del paciente, la agenda (sesiones por agendar) y la
+            # atención: basta con ver cualquiera de esas pantallas (M4-28).
+            return [RequireAnyPermission(*PERMISOS_VER_TRATAMIENTOS)()]
         if self.action == "destroy":
             return [IsAdmin()]
         # Crear o editar un tratamiento: quien agenda o quien atiende. Antes
@@ -83,7 +87,9 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
     def get_permissions(self):
         if self.action in {"marcar_completado", "marcar_completada", "marcar_inasistencia"}:
             return [IsAdminOrProfesional()]
-        return [IsAuthenticated()]
+        # Consentimientos de la sesión, check-in y OTP: los usa la llegada del
+        # paciente (agenda) y la atención (M4-28).
+        return [RequireAnyPermission(*PERMISOS_VER_TRATAMIENTOS)()]
 
     def get_queryset(self):
         queryset = super().get_queryset()
@@ -148,6 +154,9 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
     @action(detail=True, methods=["post"], url_path="marcar_inasistencia")
     def marcar_inasistencia(self, request, pk=None):
         sesion = self.get_object()
+        # Una sesión ya completada no se convierte en inasistencia (M4-28).
+        if sesion.estado == SesionProcedimiento.Estado.COMPLETADO:
+            raise ValidationError({"error": "La sesión ya está completada.", "code": "SESION_COMPLETADA"})
         sesion.estado = SesionProcedimiento.Estado.INASISTENCIA
         sesion.observaciones = request.data.get("observaciones", sesion.observaciones)
         sesion.save(update_fields=["estado", "observaciones", "updated_at"])

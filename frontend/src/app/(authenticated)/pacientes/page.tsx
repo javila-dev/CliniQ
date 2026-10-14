@@ -277,6 +277,13 @@ export default function PacientesPage() {
   const handleSearch = (v: string) => { setSearch(v); setPage(1) }
   const handleFiltro = (v: string) => { setFiltroActivo(v); setPage(1) }
 
+  // Totales de la clínica (sin filtros): antes Activos e Inactivos salían
+  // siempre "—" (M2-26).
+  const { data: resumen } = useQuery({
+    queryKey: ['pacientes', 'resumen'],
+    queryFn: () => pacientesApi.resumen(),
+  })
+
   // Stats
   const total = data?.count ?? 0
 
@@ -291,7 +298,9 @@ export default function PacientesPage() {
             <HelpButton slug="registrar-un-paciente-nuevo" />
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {isLoading ? 'Cargando...' : `${total} paciente${total !== 1 ? 's' : ''} registrados`}
+            {resumen
+              ? `${resumen.total} paciente${resumen.total !== 1 ? 's' : ''} registrado${resumen.total !== 1 ? 's' : ''}`
+              : isLoading ? 'Cargando...' : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -317,12 +326,12 @@ export default function PacientesPage() {
       <CargaMasivaPacientesModal open={cargaMasivaOpen} onOpenChange={setCargaMasivaOpen} />
 
       {/* ── Quick stats ── */}
-      {!isLoading && data && (
+      {resumen && (
         <div className="grid grid-cols-3 gap-3">
           {[
-            { icon: Users,     label: 'Total',    value: total,            color: 'text-foreground',   bg: 'bg-gray-50'   },
-            { icon: UserCheck, label: 'Activos',   value: '—',              color: 'text-green-600',    bg: 'bg-green-50'  },
-            { icon: UserX,     label: 'Inactivos', value: '—',              color: 'text-gray-500',     bg: 'bg-gray-50'   },
+            { icon: Users,     label: 'Total',     value: resumen.total,     color: 'text-foreground', bg: 'bg-gray-50'  },
+            { icon: UserCheck, label: 'Activos',   value: resumen.activos,   color: 'text-green-600',  bg: 'bg-green-50' },
+            { icon: UserX,     label: 'Inactivos', value: resumen.inactivos, color: 'text-gray-500',   bg: 'bg-gray-50'  },
           ].map(({ icon: Icon, label, value, color, bg }) => (
             <div key={label} className={cn('rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3', bg)}>
               <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
@@ -330,7 +339,7 @@ export default function PacientesPage() {
               </div>
               <div>
                 <p className="text-xs text-muted-foreground">{label}</p>
-                <p className={cn('text-base font-bold', color)}>{label === 'Total' ? total : '—'}</p>
+                <p className={cn('text-base font-bold', color)}>{value}</p>
               </div>
             </div>
           ))}

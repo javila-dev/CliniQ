@@ -53,7 +53,7 @@ function AgregarItemModal({
   const [costo, setCosto] = useState('')
   const debouncedSearch = useDebounce(search, 300)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error } = useQuery({
     queryKey: ['insumos-quick-search', debouncedSearch, sede],
     queryFn: () => inventarioApi.listInsumos({ search: debouncedSearch || undefined, activo: true, sede: sede || undefined, page_size: 15 }),
     enabled: open,
@@ -96,6 +96,11 @@ function AgregarItemModal({
               <div className="rounded-lg border max-h-56 overflow-y-auto divide-y">
                 {isLoading ? (
                   <p className="text-sm text-muted-foreground text-center py-4">Buscando…</p>
+                ) : isError ? (
+                  // Un rol sin "ver inventario" recibe 403: antes decía "Sin resultados" (M7-19).
+                  <p className="text-sm text-destructive text-center py-4 px-3">
+                    {mensajeDeError(error, 'No se pudieron buscar los insumos.')}
+                  </p>
                 ) : !data?.results.length ? (
                   <p className="text-sm text-muted-foreground text-center py-4">
                     {search ? 'Sin resultados' : 'Escribe para buscar un insumo'}
@@ -176,6 +181,8 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
   // Sin permiso de recibir, "Registrar y recibir" creaba el borrador y fallaba
   // al recibir: cada reintento dejaba otra compra duplicada.
   const puedeRecibir = hasPermission(user, PERM.PROVEEDORES_ORDENES_RECIBIR)
+  // "Crear proveedor" solo con el permiso de gestionar proveedores (M7-19).
+  const puedeCrearProveedor = hasPermission(user, PERM.PROVEEDORES_GESTIONAR)
   const esInmutable = !!compraExistente && compraExistente.estado !== 'borrador'
 
   const [proveedor, setProveedor] = useState(compraExistente?.proveedor ?? '')
@@ -240,13 +247,14 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
     }
   }
 
-  function validar(): boolean {
+  // El borrador se guarda sin factura; recibir la exige (M7-21).
+  function validar(paraRecibir = false): boolean {
     if (!proveedor || !sede || !fecha) {
       setError('Proveedor, sede y fecha son obligatorios.')
       return false
     }
-    if (!numeroFactura.trim()) {
-      setError('El N.° de factura del proveedor es obligatorio.')
+    if (paraRecibir && !numeroFactura.trim()) {
+      setError('El N.° de factura del proveedor es obligatorio para recibir la compra.')
       return false
     }
     if (items.length === 0) {
@@ -324,7 +332,7 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
                 selected={proveedorSeleccionado}
                 onSelect={(p) => setProveedor(p.id)}
                 onClear={() => setProveedor('')}
-                onCreateNew={() => setNuevoProvOpen(true)}
+                onCreateNew={puedeCrearProveedor ? () => setNuevoProvOpen(true) : undefined}
                 disabled={esInmutable}
               />
             </div>
@@ -428,7 +436,9 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
           <Lock className="h-3.5 w-3.5 shrink-0" />
           {compraExistente?.estado === 'cancelada'
             ? 'Esta compra fue cancelada y no se puede modificar.'
-            : 'Esta compra ya fue recibida y quedó inmutable — el stock ya se actualizó.'}
+            : compraExistente?.estado === 'enviada'
+              ? 'Esta compra ya se envió al proveedor y no se puede editar.'
+              : 'Esta compra ya fue recibida y quedó inmutable — el stock ya se actualizó.'}
         </div>
       ) : (
         <div className="flex justify-end gap-2">
@@ -445,7 +455,7 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
             <Button
               type="button"
               disabled={guardando}
-              onClick={() => { if (validar()) recibirMutation.mutate() }}
+              onClick={() => { if (validar(true)) recibirMutation.mutate() }}
             >
               {recibirMutation.isPending && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
               {recibirMutation.isPending ? 'Registrando…' : 'Registrar y recibir'}

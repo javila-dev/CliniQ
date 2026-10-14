@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -34,7 +34,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
-import { cn, todayISO } from '@/lib/utils'
+import { cn, formatTime, todayISO } from '@/lib/utils'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
 type ModoCita = 'cotizacion' | 'servicio' | 'libre'
@@ -58,6 +58,9 @@ interface NuevaCitaModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   defaultFecha?: string
+  /** Clic en un hueco de la agenda: hora (0-23) y profesional de la columna (M3-30). */
+  defaultHora?: number
+  defaultProfesional?: string
   /** Pre-carga el modal para agendar una sesión concreta de una cotización. */
   defaultPaciente?: BusquedaPaciente | null
   defaultModo?: ModoCita
@@ -69,6 +72,7 @@ interface NuevaCitaModalProps {
 }
 
 type DeudaError = { cuotas: number; total: string; cuotaIds: string[]; pacienteId: string }
+type CitaCruzada = { id: string; fecha_inicio: string; servicio: string; profesional: string }
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
@@ -76,6 +80,8 @@ export function NuevaCitaModal({
   open,
   onOpenChange,
   defaultFecha,
+  defaultHora,
+  defaultProfesional,
   defaultPaciente = null,
   defaultModo = 'servicio',
   defaultItemCotizacion = null,
@@ -106,6 +112,9 @@ export function NuevaCitaModal({
   // Errores de servidor
   const [serverError, setServerError] = useState<string | null>(null)
   const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
+  // El paciente ya tiene otra cita a esa hora: se avisa y se puede agendar igual (M3-30).
+  const [cruce, setCruce] = useState<CitaCruzada[] | null>(null)
+  const confirmarCruce = useRef(false)
 
   // Creación de paciente inline
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
@@ -147,13 +156,14 @@ export function NuevaCitaModal({
     if (!open) return
     setValue('fecha', defaultFecha ?? todayISO())
     setValue('slot', '')
+    if (defaultProfesional) setValue('profesional', defaultProfesional)
     setPaciente(defaultPaciente)
     setModo(defaultModo)
     setItemCotizacion(defaultItemCotizacion)
     setItemCotizacionTipo(defaultItemCotizacionTipo)
     setSesionEjecutada(defaultSesionEjecutada)
   }, [
-    open, defaultFecha, defaultPaciente, defaultModo, defaultItemCotizacion,
+    open, defaultFecha, defaultProfesional, defaultPaciente, defaultModo, defaultItemCotizacion,
     defaultItemCotizacionTipo, defaultSesionEjecutada, setValue,
   ])
 
@@ -250,6 +260,7 @@ export function NuevaCitaModal({
 
   const handleClose = () => {
     reset()
+    setCruce(null)
     setPaciente(null)
     setPacienteError(false)
     setModo('servicio')
@@ -302,8 +313,12 @@ export function NuevaCitaModal({
     setDuracionError(false)
     setServerError(null)
     setDeudaError(null)
+    setCruce(null)
+    const confirmoCruce = confirmarCruce.current
+    confirmarCruce.current = false
 
     const base = {
+      ...(confirmoCruce ? { confirmar_cruce_paciente: true } : {}),
       paciente:       paciente.id,
       sede:           values.sede,
       profesional:    values.profesional,
@@ -331,6 +346,10 @@ export function NuevaCitaModal({
     } catch (err: any) {
       const data = err?.response?.data
       if (data) {
+        if (data.code === 'PACIENTE_CON_OTRA_CITA') {
+          setCruce(Array.isArray(data.citas) ? data.citas : [])
+          return
+        }
         if (data.code === 'PACIENTE_CON_DEUDA') {
           setDeudaError({
             cuotas:     data.detalle?.cuotas_vencidas ?? 0,
@@ -704,6 +723,7 @@ export function NuevaCitaModal({
                 fecha={fecha ?? ''}
                 value={slot ?? ''}
                 onSelect={(s) => setValue('slot', s)}
+                horaPreferida={defaultHora}
                 {...slotPickerProps}
               />
             </div>
@@ -724,6 +744,37 @@ export function NuevaCitaModal({
           {serverError && (
             <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
               <p className="text-sm text-destructive">{serverError}</p>
+            </div>
+          )}
+
+          {cruce && (
+            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium text-amber-900">El paciente ya tiene otra cita a esa hora</p>
+                  <ul className="text-sm text-amber-800 space-y-0.5">
+                    {cruce.map((c) => (
+                      <li key={c.id}>
+                        {formatTime(c.fecha_inicio)} · {c.servicio || 'Cita'}{c.profesional ? ` con ${c.profesional}` : ''}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" size="sm" variant="outline" onClick={() => setCruce(null)}>
+                  Elegir otro horario
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={isPending}
+                  onClick={() => { confirmarCruce.current = true; handleSubmit(onSubmit)() }}
+                >
+                  Agendar de todas formas
+                </Button>
+              </div>
             </div>
           )}
 

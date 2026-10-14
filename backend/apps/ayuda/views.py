@@ -1,7 +1,9 @@
 import os
 import uuid
 
-from django.db.models import Count, F, Q
+from django.core.cache import cache
+from django.db.models import Count, F, Q, Value
+from django.db.models.functions import Greatest
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -160,8 +162,18 @@ class ArticuloAyudaViewSet(viewsets.ModelViewSet):
         instance = self.get_object()
         serializer = FeedbackSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Un voto por usuario y artículo (30 días); si cambia de opinión, el voto
+        # se mueve. Antes se podía inflar el contador sin límite (M7-25).
+        clave = f"ayuda:voto:{request.user.pk}:{instance.pk}"
         campo = "util_si" if serializer.validated_data["util"] else "util_no"
-        ArticuloAyuda.objects.filter(pk=instance.pk).update(**{campo: F(campo) + 1})
+        anterior = cache.get(clave)
+        if anterior == campo:
+            return Response({"ok": True, "ya_votado": True})
+        cambios = {campo: F(campo) + 1}
+        if anterior in ("util_si", "util_no"):
+            cambios[anterior] = Greatest(F(anterior) - 1, Value(0))
+        ArticuloAyuda.objects.filter(pk=instance.pk).update(**cambios)
+        cache.set(clave, campo, timeout=60 * 60 * 24 * 30)
         return Response({"ok": True})
 
     @action(detail=True, methods=["post"], url_path="duplicar")

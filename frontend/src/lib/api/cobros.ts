@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import type {
-  Cobro, CreateCobroRequest, AgregarItemRequest, PagoRecibido, RegistrarPagoRequest, ResumenIngresos,
+  Cobro, CreateCobroRequest, AgregarItemRequest, ItemCobro, PagoRecibido, RegistrarPagoRequest, ResumenIngresos,
 } from '@/types/cobros'
 import type { Paginated } from '@/types/common'
 
@@ -37,8 +37,9 @@ export const cobrosApi = {
     await apiClient.delete(`/cobros/cobros/${id}/`)
   },
 
-  agregarItem: async (id: string, data: AgregarItemRequest): Promise<Cobro> => {
-    const res = await apiClient.post<Cobro>(`/cobros/cobros/${id}/agregar_item/`, data)
+  // El backend responde el ítem creado y el cobro actualizado (M6-27).
+  agregarItem: async (id: string, data: AgregarItemRequest): Promise<{ item: ItemCobro; cobro: Cobro }> => {
+    const res = await apiClient.post<{ item: ItemCobro; cobro: Cobro }>(`/cobros/cobros/${id}/agregar_item/`, data)
     return res.data
   },
 

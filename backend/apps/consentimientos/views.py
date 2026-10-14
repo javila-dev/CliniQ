@@ -169,10 +169,21 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
         consentimiento = self.get_object()
         serializer = RevocarConsentimientoSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        # Se revoca una sola vez (pendiente o firmado) y queda en el log (M4-25).
+        if consentimiento.estado == Consentimiento.Estado.REVOCADO:
+            return Response(
+                {"error": "Este consentimiento ya está revocado.", "code": "CONSENTIMIENTO_YA_REVOCADO"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         consentimiento.estado = Consentimiento.Estado.REVOCADO
         consentimiento.revocado_en = timezone.now()
         consentimiento.motivo_revocacion = serializer.validated_data["motivo_revocacion"]
         consentimiento.save()
+        registrar_accion(request, "consentimiento.revocar", consentimiento, {
+            "resumen": "Consentimiento revocado",
+            "motivo": consentimiento.motivo_revocacion,
+            "paciente_id": str(consentimiento.paciente_id) if consentimiento.paciente_id else None,
+        })
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
 
@@ -187,7 +198,14 @@ class FirmarConsentimientoPublicoView(APIView):
             return Response({"ok": False, "error": "Token de firma inválido."}, status=status.HTTP_404_NOT_FOUND)
         if consentimiento.estado == Consentimiento.Estado.PENDIENTE and not consentimiento.token_vigente:
             return Response({"ok": False, "error": "El enlace de firma ya expiró."}, status=status.HTTP_404_NOT_FOUND)
-        return Response(ConsentimientoSerializer(consentimiento).data, status=status.HTTP_200_OK)
+        data = ConsentimientoSerializer(consentimiento).data
+        # Página pública: nunca la IP ni el navegador de quien firmó, y el token
+        # de Documenso solo mientras falta firmar (M4-25).
+        for campo in ("firma_ip", "firma_user_agent", "link_enviado_a"):
+            data.pop(campo, None)
+        if consentimiento.estado != Consentimiento.Estado.PENDIENTE:
+            data.pop("documenso_signing_token", None)
+        return Response(data, status=status.HTTP_200_OK)
 
     def post(self, request, token, *args, **kwargs):
         try:

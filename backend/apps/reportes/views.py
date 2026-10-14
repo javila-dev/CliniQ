@@ -42,11 +42,20 @@ from apps.users.models import User
 from apps.users.permissions import RequirePermission, get_clinica_activa
 
 
-def _clinica_scope(user):
-    """Returns a dict of filter kwargs to scope querysets to the user's clinica."""
+def _clinica_activa_o_propia(user, request):
+    """El superadmin que opera una clínica ve solo esa (antes veía todas, M6-24);
+    sin clínica activa, ve todas. El resto, su clínica."""
     if user.rol == "superadmin":
+        return get_clinica_activa(request) if request is not None else None
+    return user.clinica
+
+
+def _clinica_scope(user, request=None):
+    """Returns a dict of filter kwargs to scope querysets to the user's clinica."""
+    clinica = _clinica_activa_o_propia(user, request)
+    if clinica is None and user.rol == "superadmin":
         return {}
-    return {"sede__clinica": user.clinica}
+    return {"sede__clinica": clinica}
 
 
 def _pagos_del_periodo(cobro_qs, desde, hasta):
@@ -79,10 +88,11 @@ def _facturado(cobro_qs, desde, hasta):
     return Decimal(directos) + Decimal(abonos)
 
 
-def _cita_clinica_scope(user):
-    if user.rol == "superadmin":
+def _cita_clinica_scope(user, request=None):
+    clinica = _clinica_activa_o_propia(user, request)
+    if clinica is None and user.rol == "superadmin":
         return {}
-    return {"sede__clinica": user.clinica}
+    return {"sede__clinica": clinica}
 
 
 def _parse_date(value, default):
@@ -134,7 +144,7 @@ class DashboardView(APIView):
         rango_ini = _parse_date(rango_ini_raw, date.today())
         rango_fin = _parse_date(rango_fin_raw, date.today())
 
-        cita_qs = Cita.objects.filter(**_cita_clinica_scope(user))
+        cita_qs = Cita.objects.filter(**_cita_clinica_scope(user, request))
         if sede_ids is not None:
             cita_qs = cita_qs.filter(sede_id__in=sede_ids)
 
@@ -186,7 +196,7 @@ class DashboardView(APIView):
         if user_has_permission(user, "reportes.ver_financieros", request=request):
             # Los datos previos cargados por el asistente de puesta en marcha no
             # son ingresos del periodo.
-            cobro_qs = Cobro.objects.filter(**_clinica_scope(user)).exclude(es_migracion=True)
+            cobro_qs = Cobro.objects.filter(**_clinica_scope(user, request)).exclude(es_migracion=True)
             if sede_ids is not None:
                 cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
 
@@ -251,7 +261,7 @@ class IngresosView(APIView):
         periodo_format = {"semana": "%G-W%V", "mes": "%Y-%m"}.get(agrupar_por)
 
         cobro_qs = (
-            Cobro.objects.filter(**_clinica_scope(user)).exclude(estado="anulado").exclude(es_migracion=True)
+            Cobro.objects.filter(**_clinica_scope(user, request)).exclude(estado="anulado").exclude(es_migracion=True)
         )
         if sede_ids is not None:
             cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
@@ -269,7 +279,7 @@ class IngresosView(APIView):
             gasto_qs = GastoCaja.objects.filter(
                 fecha__gte=fecha_inicio,
                 fecha__lte=fecha_fin,
-                **_clinica_scope(user),
+                **_clinica_scope(user, request),
             )
             if sede_ids is not None:
                 gasto_qs = gasto_qs.filter(sede_id__in=sede_ids)
@@ -310,7 +320,7 @@ class ServiciosView(APIView):
         fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
         fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
 
-        scope = _clinica_scope(user)
+        scope = _clinica_scope(user, request)
         cobro_filter = Q(
             cobro__fecha__date__gte=fecha_inicio,
             cobro__fecha__date__lte=fecha_fin,
@@ -765,7 +775,7 @@ class OcupacionView(APIView):
         cita_qs = Cita.objects.filter(
             fecha_inicio__date__gte=fecha_inicio,
             fecha_inicio__date__lte=fecha_fin,
-            **_cita_clinica_scope(user),
+            **_cita_clinica_scope(user, request),
         )
         if sede_ids is not None:
             cita_qs = cita_qs.filter(sede_id__in=sede_ids)

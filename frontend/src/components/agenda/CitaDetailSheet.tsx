@@ -151,6 +151,8 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
 
   const handleConfirmarModal = (medio: MedioConfirmacion | '', nota: string) => {
     if (!selectedAccion) return
+    // El motivo es obligatorio para cancelar: antes se podía enviar vacío (M3-27).
+    if (selectedAccion.kind === 'estado' && selectedAccion.estado === 'cancelada' && !motivo.trim()) return
     if (selectedAccion.kind === 'manual') {
       confirmarManual({ medio, nota })
     } else {
@@ -169,6 +171,20 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
   }
 
   const isPasada = cita ? new Date(cita.fecha_inicio) < new Date() : false
+  const esHoy = cita ? new Date(cita.fecha_inicio).toDateString() === new Date().toDateString() : false
+
+  // "Llegó" con la cita sin confirmar: la confirma como presencial y abre el
+  // asistente de llegada, en vez de obligar a confirmar primero (M3-26).
+  const { mutate: registrarLlegadaSinConfirmar, isPending: registrandoLlegada } = useMutation({
+    mutationFn: () => agendaApi.citas.cambiarEstado(citaId!, {
+      estado: 'confirmada', medio: 'presencial', nota: 'Llegó sin haber confirmado.',
+    }),
+    onSuccess: (actualizada) => {
+      queryClient.invalidateQueries({ queryKey: ['citas'] })
+      queryClient.invalidateQueries({ queryKey: ['registros-confirmacion', citaId] })
+      setWizardCitaId(actualizada.id)
+    },
+  })
 
   const { data: sesionesData } = useQuery({
     queryKey: ['cotizacion-sesiones', cita?.cotizacion_resumen?.cotizacion_id],
@@ -446,11 +462,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 ]
                 const tieneEnEspera = transiciones.includes('en_espera')
                 const tieneEnCurso = transiciones.includes('en_curso')
+                const puedeLlegarSinConfirmar = cita.estado === 'pendiente' && esHoy
+                  && transiciones.includes('confirmada') && puedeCambiarEstado
                 // Con la atención en curso (o cerrada) ya no hay nada que hacer desde la agenda.
                 const necesitaAccion = tieneEnEspera || tieneEnCurso
                 // El recordatorio solo sirve antes de que el paciente llegue.
                 const tieneRecordatorio = ['pendiente', 'confirmada'].includes(cita.estado) && !isPasada && puedeEditar
-                if (!necesitaAccion && accionesModal.length === 0 && !tieneRecordatorio) return null
+                if (!necesitaAccion && !puedeLlegarSinConfirmar && accionesModal.length === 0 && !tieneRecordatorio) return null
                 // Desde 'confirmada' el asistente solo checkea la llegada (→ en_espera): el
                 // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
                 // no dar a entender que recepción "inicia la atención".
@@ -480,6 +498,12 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 return (
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
+                      {puedeLlegarSinConfirmar && (
+                        <Button size="sm" disabled={registrandoLlegada} onClick={() => registrarLlegadaSinConfirmar()}>
+                          <UserCheck className="h-3.5 w-3.5 mr-1.5" />
+                          {registrandoLlegada ? 'Registrando…' : 'Llegó'}
+                        </Button>
+                      )}
                       {necesitaAccion && (
                         <Button size="sm" onClick={() => setWizardCitaId(cita.id)}>
                           <UserCheck className="h-3.5 w-3.5 mr-1.5" />

@@ -26,6 +26,8 @@ from apps.cotizaciones.models import (
     ESTADOS_COMERCIALES_FILTRO,
     Cotizacion,
     CotizacionEnvio,
+    FormaPagoCotizacion,
+    ItemCotizacion,
     con_estado_comercial,
     filtrar_estado_comercial,
 )
@@ -33,6 +35,7 @@ from apps.cotizaciones.pdf import render_consolidado_asistencia_pdf, render_coti
 from apps.cotizaciones.serializers import (
     CambiarEstadoCotizacionSerializer,
     CotizacionEnvioSerializer,
+    CotizacionListSerializer,
     CotizacionSerializer,
     EntregarObsequioSerializer,
     EnviarCotizacionEmailSerializer,
@@ -128,6 +131,24 @@ class CotizacionViewSet(ModelViewSet):
         # otra sede también se agenda y se cobra aquí.
         if self.action == "list" and not self.request.query_params.get("paciente"):
             queryset = self._acotar_por_sede(queryset, self.request.query_params.get("sede"))
+            # Los datos previos (asistente de puesta en marcha) no son ventas ni
+            # propuestas del embudo: Ventas y los KPI ya los excluyen, y "Vendidas"
+            # los contaba (M5-30). En las pantallas del paciente sí aparecen: sus
+            # sesiones se agendan y su saldo se cobra.
+            queryset = queryset.filter(es_migracion=False)
+        if self.action == "list":
+            # Lo que lee CotizacionListSerializer, precargado: el número de
+            # consultas no crece con las filas (M5-19).
+            queryset = queryset.select_related("cartera").prefetch_related(
+                Prefetch(
+                    "items", queryset=ItemCotizacion.objects.filter(activo=True), to_attr="_items_activos",
+                ),
+                Prefetch(
+                    "formas_pago",
+                    queryset=FormaPagoCotizacion.objects.filter(activo=True).select_related("tipo"),
+                    to_attr="_formas_pago_activas",
+                ),
+            )
         activo = self.request.query_params.get("activo")
         if activo is None:
             queryset = queryset.filter(activo=True)
@@ -162,11 +183,24 @@ class CotizacionViewSet(ModelViewSet):
             filtro |= Q(sede__isnull=True)
         return queryset.filter(filtro)
 
+    def get_serializer_class(self):
+        if self.action == "list":
+            return CotizacionListSerializer
+        return super().get_serializer_class()
+
     def get_object(self):
         cotizacion = super().get_object()
         if self.action in self.ACCIONES_EN_SU_SEDE and cotizacion.sede_id:
             if not sede_ids_para_filtro(self.request.user, cotizacion.sede_id):
                 raise PermissionDenied("Esta cotización es de otra sede.")
+        # Quien solo ve su actividad comercial abre por id la de otro (paciente,
+        # cartera…), pero no la cambia: el mismo alcance del listado (M5-29).
+        if (
+            self.action in self.ACCIONES_EN_SU_SEDE
+            and cotizacion.profesional_id != self.request.user.id
+            and ve_solo_su_actividad_comercial(self.request.user, self.request)
+        ):
+            raise PermissionDenied("Esta cotización es de otro profesional: solo puedes cambiar las tuyas.")
         return cotizacion
 
     def _filtrar_por_fecha(self, queryset):
@@ -587,9 +621,32 @@ class CotizacionViewSet(ModelViewSet):
         response["Content-Disposition"] = f'attachment; filename="consolidado-asistencia-{cotizacion.id}.pdf"'
         return response
 
+    @staticmethod
+    def _validar_enviable(cotizacion):
+        """Solo se envía una propuesta abierta y vigente (M5-17).
+
+        Enviar mueve el seguimiento a "Cotizado": una descartada lo reactivaba. Una
+        aceptada ya es venta (no hay propuesta que enviar) y una vencida se renueva
+        antes, para que el paciente no reciba una fecha de vigencia que ya pasó.
+        """
+        if cotizacion.estado != Cotizacion.Estado.BORRADOR:
+            raise ValidationError({
+                "error": "Solo se pueden enviar cotizaciones en borrador.",
+                "code": "COTIZACION_NO_ENVIABLE",
+            })
+        if cotizacion.esta_vencida:
+            raise ValidationError({
+                "error": (
+                    f"Esta cotización venció el {cotizacion.fecha_vencimiento:%d/%m/%Y}. "
+                    "Renueva su vigencia antes de enviarla."
+                ),
+                "code": "COTIZACION_VENCIDA",
+            })
+
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")
     def enviar_whatsapp(self, request, pk=None):
         cotizacion = self.get_object()
+        self._validar_enviable(cotizacion)
         if not (cotizacion.paciente.telefono or "").strip():
             return Response(
                 {
@@ -650,6 +707,7 @@ class CotizacionViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="enviar_email")
     def enviar_email_action(self, request, pk=None):
         cotizacion = self.get_object()
+        self._validar_enviable(cotizacion)
         serializer = EnviarCotizacionEmailSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         config = email_provider_config()
@@ -693,6 +751,7 @@ class CotizacionViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="registrar_envio")
     def registrar_envio(self, request, pk=None):
         cotizacion = self.get_object()
+        self._validar_enviable(cotizacion)
         serializer = RegistrarEnvioCotizacionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         envio = CotizacionEnvio.objects.create(

@@ -1,3 +1,4 @@
+from django.db import IntegrityError, transaction
 from django.db.models import Sum
 from django.utils import timezone
 from rest_framework import status
@@ -215,12 +216,18 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
         if monto is None:
             monto = caja.monto_apertura_sugerido
 
-        sesion = SesionCaja.objects.create(
-            caja=caja,
-            estado=SesionCaja.Estado.ABIERTA,
-            monto_apertura=monto,
-            abierta_por=request.user,
-        )
+        # Abrir en dos pestañas a la vez chocaba con la restricción de una sola
+        # sesión abierta por caja y respondía 500 (M6-25).
+        try:
+            with transaction.atomic():
+                sesion = SesionCaja.objects.create(
+                    caja=caja,
+                    estado=SesionCaja.Estado.ABIERTA,
+                    monto_apertura=monto,
+                    abierta_por=request.user,
+                )
+        except IntegrityError:
+            raise ValidationError({"caja": "La caja ya tiene una sesión abierta.", "code": "CAJA_YA_ABIERTA"})
         return Response(SesionCajaSerializer(sesion).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["post"], url_path="cerrar")

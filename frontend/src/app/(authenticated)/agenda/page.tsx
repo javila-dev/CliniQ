@@ -494,9 +494,8 @@ function DayColumn({
               pasada ? 'cursor-default' : 'cursor-pointer hover:bg-primary/[0.03]'
             )}
             onClick={pasada ? undefined : () => {
-              const d = new Date(fecha + 'T12:00:00')
-              d.setHours(h, 0, 0, 0)
-              onClickSlot(d.toISOString())
+              // Fecha y hora locales: con toISOString un hueco de la noche caía al día siguiente (UTC).
+              onClickSlot(`${fecha}T${String(h).padStart(2, '0')}:00:00`)
             }}
           >
             {!pasada && (
@@ -775,12 +774,24 @@ function AgendaError({ error, onRetry }: { error: unknown; onRetry: () => void }
   )
 }
 
+/** En las vistas de una sola columna (Clásica y Semana) el bloqueo de un
+ *  profesional no debe sombrear la agenda de todos: solo se muestran los de
+ *  sede o clínica, y los del profesional si es el que se está filtrando (M3-28). */
+function bloqueoEnColumnaUnica(
+  b: BloqueoAgenda, filterProfesional: string[], profesionales: ColaboradorProfesional[],
+): boolean {
+  if (!b.profesional) return true
+  if (filterProfesional.length === 0) return false
+  return profesionales.some((p) => filterProfesional.includes(p.id)
+    && (b.profesional === p.id || (!!p.colaborador_id && b.profesional === p.colaborador_id)))
+}
+
 function DayView({
   fecha, selectedId, onSelectCita, onClickSlot, filterSede, filterProfesional, filterPaciente,
   profesionales, mode, density,
 }: {
   fecha: string; selectedId: string | null
-  onSelectCita: (id: string) => void; onClickSlot: (iso: string) => void
+  onSelectCita: (id: string) => void; onClickSlot: (iso: string, profesionalId?: string) => void
   filterSede: string; filterProfesional: string[]; filterPaciente: string
   profesionales: ColaboradorProfesional[]; mode: AgendaMode; density: AgendaDensity
 }) {
@@ -855,7 +866,7 @@ function DayView({
             onSelectCita={onSelectCita}
             onClickSlot={onClickSlot}
             showNowLine={isToday}
-            bloqueos={bloqueos}
+            bloqueos={bloqueos?.filter((b) => bloqueoEnColumnaUnica(b, filterProfesional, profesionales))}
             hourPx={hourPx}
             density={density}
           />
@@ -915,7 +926,7 @@ function DayView({
               fecha={fecha}
               selectedId={selectedId}
               onSelectCita={onSelectCita}
-              onClickSlot={onClickSlot}
+              onClickSlot={(iso) => onClickSlot(iso, professional.id || undefined)}
               showNowLine={isToday}
               bloqueos={bloqueos?.filter((bloqueo) => !bloqueo.profesional || bloqueo.profesional === professional.id || (!!professional.colaborador_id && bloqueo.profesional === professional.colaborador_id))}
               hourPx={hourPx}
@@ -1098,7 +1109,7 @@ function ProfessionalMatrixView({
 // ─── VIEW: Semana ─────────────────────────────────────────────
 function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede, filterProfesional, filterPaciente, profesionales, mode, density }: {
   weekStart: string; selectedId: string | null
-  onSelectCita: (id: string) => void; onClickSlot: (iso: string) => void
+  onSelectCita: (id: string) => void; onClickSlot: (iso: string, profesionalId?: string) => void
   filterSede: string; filterProfesional: string[]; filterPaciente: string
   profesionales: ColaboradorProfesional[]
   mode: AgendaMode; density: AgendaDensity
@@ -1231,6 +1242,7 @@ function WeekView({ weekStart, selectedId, onSelectCita, onClickSlot, filterSede
                   const dStart = new Date(`${d}T${String(START_HOUR).padStart(2, '0')}:00:00`)
                   const dEnd   = new Date(`${d}T${String(END_HOUR).padStart(2, '0')}:00:00`)
                   return new Date(b.fecha_fin) > dStart && new Date(b.fecha_inicio) < dEnd
+                    && bloqueoEnColumnaUnica(b, filterProfesional, profesionales)
                 })}
                 hourPx={hourPx}
                 density={density}
@@ -1401,6 +1413,8 @@ function AgendaContent() {
   const [fecha, setFecha] = useState(todayISO)
   const [showNuevaCita, setShowNuevaCita] = useState(false)
   const [defaultSlot, setDefaultSlot] = useState<string | undefined>()
+  const [defaultHora, setDefaultHora] = useState<number | undefined>()
+  const [defaultProfesional, setDefaultProfesional] = useState<string | undefined>()
   const [selectedCitaId, setSelectedCitaId] = useState<string | null>(null)
   const [filterSede, setFilterSede] = useState(() => user?.sede_id ?? '')
   const [filterProfesional, setFilterProfesional] = useState<string[]>([])
@@ -1593,11 +1607,16 @@ function AgendaContent() {
     else setFecha(f => addMonths(f, 1))
   }
 
-  const handleClickSlot = (iso: string) => {
+  // `iso` llega como fecha y hora locales (YYYY-MM-DDTHH:mm:ss). La hora y el
+  // profesional de la columna se precargan en la cita nueva (M3-30).
+  const handleClickSlot = (iso: string, profesionalId?: string) => {
     if (!canCrearCita) return
-    const dia = iso.split('T')[0]
+    const dia = iso.slice(0, 10)
     if (dia < todayISO()) return
+    const hora = Number(iso.slice(11, 13))
     setDefaultSlot(dia)
+    setDefaultHora(Number.isNaN(hora) ? undefined : hora)
+    setDefaultProfesional(profesionalId)
     setShowNuevaCita(true)
   }
 
@@ -2033,8 +2052,13 @@ function AgendaContent() {
       />
       <NuevaCitaModal
         open={showNuevaCita}
-        onOpenChange={(o) => { setShowNuevaCita(o); if (!o) setDefaultSlot(undefined) }}
+        onOpenChange={(o) => {
+          setShowNuevaCita(o)
+          if (!o) { setDefaultSlot(undefined); setDefaultHora(undefined); setDefaultProfesional(undefined) }
+        }}
         defaultFecha={defaultSlot ?? (fecha < todayISO() ? todayISO() : fecha)}
+        defaultHora={defaultHora}
+        defaultProfesional={defaultProfesional}
       />
       <CitaDetailSheet
         citaId={selectedCitaId}

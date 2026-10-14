@@ -97,28 +97,28 @@
 - **Qué ve el usuario:** se edita un borrador con compromiso pendiente, el paciente firma y **la venta queda con cuotas que no suman el total**.
 - **Arreglo:** validar el plan de pagos al editar o al aceptar por firma.
 
-**M5-17 · Bajo · previsible** · confirmado
+**✅ M5-17 · Bajo · previsible** · confirmado
 - **Dónde:** `CotizacionForm.tsx:1148`; `views.py:563,615`.
 - **Qué ve el usuario:** "Enviar" aparece en cotizaciones descartadas, y enviarlas reactiva el seguimiento.
 - **Arreglo:** permitir enviar solo borradores, en el frontend y en el backend.
 
-**M5-18 · Bajo · permisos** · confirmado
+**✅ M5-18 · Bajo · permisos** · confirmado
 - **Dónde:** `serializers.py:257-343`.
 - **Qué pasa:** `cotizaciones.cambiar_precio` no permite bajar más allá del descuento máximo. Si el máximo es 0%, el permiso no sirve para nada, y eso confunde al configurar roles.
 - **Arreglo:** decidir qué significa el permiso.
 
-**M5-19 · Bajo · carga** · probable
+**✅ M5-19 · Bajo · carga** · probable
 - **Dónde:** `views.py:81-96`; `ventas.py:109-119`.
 - **Qué ve el usuario:** los listados cargan lento.
 - **Causa:** el listado usa el serializer completo, con varias consultas por ítem.
 - **Arreglo:** un serializer liviano con prefetch.
 
-**M5-20 · Bajo · API (campos)** · confirmado
+**✅ M5-20 · Bajo · API (campos)** · confirmado
 - **Dónde:** `cotizaciones/page.tsx:262`.
 - **Qué ve el usuario:** el listado no muestra la sede.
 - **Causa:** el serializer no devuelve `sede_nombre`.
 
-**M5-21 · Bajo · errores** · confirmado
+**✅ M5-21 · Bajo · errores** · confirmado
 - **Dónde:** `CotizacionForm.tsx:938-971`; `SesionesCotizacionPanel.tsx`.
 - **Qué ve el usuario:** si falla la descarga del PDF, no pasa nada. Además, el botón no muestra que está cargando y cada clic registra otro envío.
 
@@ -131,15 +131,15 @@
 - **Qué ve el usuario:** al borrar la fecha de una forma de pago sale "Fecha con formato erróneo… YYYY-MM-DD".
 - **Arreglo:** convertir `''` en `null`.
 
-**M5-24 · Bajo · textos** · confirmado
+**✅ M5-24 · Bajo · textos** · confirmado
 - **Dónde:** `seguimiento/page.tsx:246-247`.
 - **Qué pasa:** el aviso "Volverá a aparecer el día después de su cita" solo aplica a "Agendó". Hoy no tiene impacto, pero es frágil.
 
-**M5-25 · Bajo · faltante** · confirmado
+**✅ M5-25 · Bajo · faltante** · confirmado
 - **Dónde:** `seguimiento/page.tsx:268-289`.
 - **Qué ve el usuario:** no puede vincular un interesado a un paciente que ya existe, solo crear otra ficha.
 
-**M5-26 · Bajo · errores** · confirmado
+**✅ M5-26 · Bajo · errores** · confirmado
 - **Dónde:** `seguimiento/page.tsx:235-238`.
 - **Qué ve el usuario:** aparece "X ya está en seguimiento", sin enlace para abrirlo, aunque el backend devuelve `oportunidad_id`.
 
@@ -148,16 +148,16 @@
 - **Qué pasa:** el frontend decide "solo lo suyo" con `rol` o `es_profesional`, mientras el backend usa `comercial.ver_sede`.
 - **Arreglo:** que `/me` exponga `ve_solo_su_actividad_comercial`.
 
-**M5-28 · Bajo · permisos** · confirmado
+**✅ M5-28 · Bajo · permisos** · confirmado
 - **Dónde:** `seguimiento/views.py:159`.
 - **Qué pasa:** `ActualizarOportunidadSerializer` se crea sin `context`, así que se salta la validación de sede.
 - **Arreglo:** pasar `context={"request": request}`.
 
-**M5-29 · Bajo · permisos** · confirmado
+**✅ M5-29 · Bajo · permisos** · confirmado
 - **Dónde:** `cotizaciones/views.py:123`.
 - **Qué pasa:** un profesional limitado a "solo lo suyo" puede editar, aceptar o descartar, conociendo el id, la cotización de otro profesional.
 
-**M5-30 · Bajo · varios** · confirmado
+**✅ M5-30 · Bajo · varios** · confirmado
 - **Qué pasa:**
   - Queda un `console.log('[PATCH payload]')` en `CotizacionForm.tsx:707`.
   - El PDF muestra "$1,500,000.00", mientras la interfaz muestra "$ 1.500.000" (`pdf.py:13-15`).

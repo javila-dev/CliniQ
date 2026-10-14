@@ -1,8 +1,12 @@
 'use client'
 
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
-import { Loader2, Lock } from 'lucide-react'
+import { AlertTriangle, Loader2, Lock } from 'lucide-react'
+import { pacientesApi } from '@/lib/api/pacientes'
+import { useDebounce } from '@/hooks/useDebounce'
+import { useAuthStore } from '@/store/authStore'
 import { useForm, Controller, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -205,6 +209,35 @@ export function PacienteForm({
   const tipoDoc = watch('tipo_documento')
   const autorizaDatos = watch('autoriza_datos')
 
+  // Aviso de posible duplicado por teléfono o correo (M2-20). No bloquea: los
+  // familiares comparten teléfono; el duplicado real es el documento. Solo con
+  // sesión iniciada: el autorregistro público no debe revelar quién es paciente.
+  const autenticado = useAuthStore((s) => s.isAuthenticated)
+  const telDigitos = useDebounce(watch('telefono') ?? '', 500).replace(/\D/g, '')
+  const emailDebounced = useDebounce(watch('email') ?? '', 500).trim()
+  const telCompleto = '+' + dialCode + telDigitos
+  const buscarTel = telDigitos.length >= 7 && telCompleto !== defaultValues?.telefono
+  const buscarEmail = /^\S+@\S+\.\S+$/.test(emailDebounced)
+    && emailDebounced.toLowerCase() !== (defaultValues?.email ?? '').toLowerCase()
+  const { data: posiblesDuplicados } = useQuery({
+    queryKey: ['pacientes', 'posibles-duplicados', buscarTel ? telCompleto : '', buscarEmail ? emailDebounced : '', defaultValues?.id],
+    queryFn: () => pacientesApi.posiblesDuplicados({
+      telefono: buscarTel ? telCompleto : undefined,
+      email: buscarEmail ? emailDebounced : undefined,
+      excluir: defaultValues?.id,
+    }),
+    enabled: autenticado && !lockSensitive && (buscarTel || buscarEmail),
+    staleTime: 30_000,
+  })
+  const avisoDuplicados = (['telefono', 'email'] as const).map((campo) => {
+    const nombres = (posiblesDuplicados ?? [])
+      .filter((p) => (campo === 'telefono' ? p.coincide_telefono : p.coincide_email))
+      .map((p) => p.nombre_completo)
+    if (!nombres.length) return null
+    const dato = campo === 'telefono' ? 'este teléfono' : 'este correo'
+    return `Ya hay ${nombres.length} paciente${nombres.length > 1 ? 's' : ''} con ${dato}: ${nombres.join(', ')}.`
+  }).filter(Boolean) as string[]
+
   const tabsConError = new Set(
     (Object.keys(errors) as (keyof FormValues)[]).map((k) => CAMPOS_TAB[k]).filter(Boolean) as TabKey[],
   )
@@ -375,6 +408,17 @@ export function PacienteForm({
           )} />
         </Field>
       </div>
+
+      {avisoDuplicados.length > 0 && (
+        <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2" role="status">
+          <AlertTriangle className="h-3.5 w-3.5 text-amber-600 mt-0.5 shrink-0" />
+          <div className="text-xs text-amber-800 space-y-0.5">
+            <p className="font-medium">Posible paciente duplicado</p>
+            {avisoDuplicados.map((texto) => <p key={texto}>{texto}</p>)}
+            <p>Si es otra persona (por ejemplo, un familiar), puedes guardar igual.</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 

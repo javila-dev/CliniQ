@@ -731,14 +731,15 @@ class ObsequiosCotizacionTests(TestCase):
         self.assertEqual(
             [(o["descripcion"], o["etiqueta"], o["cantidad"], o["valor_referencia"]) for o in contexto["obsequios"]],
             [
-                ("Limpieza facial", "Sesión adicional", "1", "$120,000.00"),
-                ("Serum hidratante", "Producto", "5 ml", "$90,000.00"),
-                ("Consulta de valoracion", "Cortesía", "1", "$80,000.00"),
+                ("Limpieza facial", "Sesión adicional", "1", "$120.000"),
+                ("Serum hidratante", "Producto", "5 ml", "$90.000"),
+                ("Consulta de valoracion", "Cortesía", "1", "$80.000"),
             ],
         )
-        self.assertEqual(contexto["subtotal_bruto"], "$350,000.00")
-        self.assertEqual(contexto["total_descuentos"], "$0.00")
-        self.assertEqual(contexto["total"], "$350,000.00")
+        # Pesos como en la interfaz (M5-30).
+        self.assertEqual(contexto["subtotal_bruto"], "$350.000")
+        self.assertEqual(contexto["total_descuentos"], "$0")
+        self.assertEqual(contexto["total"], "$350.000")
 
         html = build_cotizacion_pdf_html(cotizacion)
         self.assertIn("Valor de referencia", html)

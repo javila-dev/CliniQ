@@ -131,7 +131,7 @@
 - **Dónde:** `backend/apps/migracion/views.py:32,68`.
 - **Qué ve el usuario:** cualquier usuario puede revertir una carga de migración completa.
 
-**M1-22 · Bajo · previsible** · confirmado
+**✅ M1-22 · Bajo · previsible** · confirmado
 - **Dónde:** `configuracion/campanas/page.tsx:35-43,295-297`.
 - **Qué ve el usuario:** una promoción que termina hoy aparece "Vencida" desde las 7 p. m.
 - **Causa:** usa la fecha en UTC (ver T-04).
@@ -150,28 +150,28 @@
 - **Qué ve el usuario:** quien edita la clínica pero no ve seguimiento se queda en "Cargando…" para siempre en Configuración → Seguimiento.
 - **Arreglo:** permitir el GET con `clinicas.editar` y mostrar el error.
 
-**M1-26 · Bajo · previsible** · probable
+**✅ M1-26 · Bajo · previsible** · probable
 - **Dónde:** `configuracion/sedes/page.tsx:175-198`.
 - **Qué ve el usuario:** después de editar una sede, "Nueva sede" puede abrir con los datos de la anterior.
 
-**M1-27 · Bajo · previsible** · confirmado
+**✅ M1-27 · Bajo · previsible** · confirmado
 - **Dónde:** `clinicas/views.py:627-642`.
 - **Qué ve el usuario:** reactivando sedes se puede superar el límite del plan.
 
-**M1-28 · Bajo · errores** · confirmado
+**✅ M1-28 · Bajo · errores** · confirmado
 - **Dónde:** `campanas/page.tsx:836-842,1010-1016`; `clinicas/views.py:1454-1456`.
 - **Qué ve el usuario:** pulsa "Eliminar", ve "Promoción eliminada", y la promoción sigue en la lista como "Inactiva".
 - **Arreglo:** cambiar el texto a "Desactivar" o filtrar la lista.
 
-**M1-29 · Bajo · faltante** · confirmado
+**✅ M1-29 · Bajo · faltante** · confirmado
 - **Dónde:** `preparar-clinica/page.tsx:121`.
 - **Qué ve el usuario:** si eligió por error "Procedimientos sueltos" en "¿Qué vendes?", no puede cambiar la respuesta.
 
-**M1-30 · Bajo · textos** · confirmado
+**✅ M1-30 · Bajo · textos** · confirmado
 - **Dónde:** `puesta-en-marcha/page.tsx:94,111`.
 - **Qué ve el usuario:** textos con voseo ("Podés revertir… mientras revisás").
 
-**M1-31 · Bajo · API (código muerto)** · confirmado
+**✅ M1-31 · Bajo · API (código muerto)** · confirmado
 - **Qué pasa:**
   - `POST …/pasos/reordenar/` y `…/consentimientos/reordenar/` dan 405 porque DRF ordena las acciones por nombre: `paso_detalle` y `eliminar_consentimiento` capturan la URL antes.
   - `DELETE …/tratamientos/{id}/tipos/{tipo}/` cae en `editar_tipo`.

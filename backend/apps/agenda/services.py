@@ -417,8 +417,37 @@ def validar_horario_cita(*, sede, profesional, fecha_inicio, fecha_fin, excluir_
         raise ValidationError({"error": "El profesional no está disponible en ese horario.", "code": "HORARIO_OCUPADO"})
 
 
+def avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin, excluir_cita_id=None):
+    """Avisa (400 `PACIENTE_CON_OTRA_CITA`) si el paciente ya tiene una cita
+    activa que se cruza con ese horario. Es un aviso, no una regla: quien agenda
+    puede confirmarlo (dos procedimientos a la vez con personas distintas) (M3-30)."""
+    cruces = (
+        Cita.objects.filter(paciente=paciente, fecha_inicio__lt=fecha_fin, fecha_fin__gt=fecha_inicio)
+        .exclude(estado__in=[Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO])
+        .exclude(pk=excluir_cita_id)
+        .select_related("profesional")
+        .order_by("fecha_inicio")[:5]
+    )
+    cruces = list(cruces)
+    if not cruces:
+        return
+    raise ValidationError({
+        "error": "El paciente ya tiene otra cita en ese horario.",
+        "code": "PACIENTE_CON_OTRA_CITA",
+        "citas": [
+            {
+                "id": str(c.id),
+                "fecha_inicio": timezone.localtime(c.fecha_inicio).isoformat(),
+                "servicio": c.servicio_nombre,
+                "profesional": c.profesional.nombre_completo if c.profesional_id else "",
+            }
+            for c in cruces
+        ],
+    })
+
+
 @transaction.atomic
-def crear_cita(data: dict, created_by) -> Cita:
+def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -> Cita:
     data = dict(data)
     servicio = data.get("servicio")
     item_cotizacion = data.get("item_cotizacion")
@@ -445,6 +474,8 @@ def crear_cita(data: dict, created_by) -> Cita:
         raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
     _bloquear_agenda_del_profesional(profesional.id)
     validar_horario_cita(sede=sede, profesional=profesional, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
+    if avisar_cruce_paciente:
+        avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin)
 
     _validar_deuda_paciente(paciente, sede.clinica)
 

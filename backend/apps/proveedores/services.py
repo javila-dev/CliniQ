@@ -36,6 +36,13 @@ def recibir_orden(
         raise ValidationError(
             {"error": "La orden ya fue recibida totalmente.", "code": "ORDEN_RECIBIDA_TOTAL"}
         )
+    # El borrador se puede guardar sin factura, pero recibir mueve stock y costo:
+    # ahí la factura es obligatoria (M7-21).
+    if not (numero_factura_proveedor or orden.numero_factura_proveedor or "").strip():
+        raise ValidationError({
+            "numero_factura_proveedor": ["Escribe el N.° de factura del proveedor para recibir la compra."],
+            "code": "FACTURA_REQUERIDA",
+        })
 
     items_por_id = {
         str(item.id): item

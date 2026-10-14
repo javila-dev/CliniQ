@@ -6,6 +6,7 @@ import { CheckCircle2, Loader2, RotateCcw, Smartphone, XCircle } from 'lucide-re
 import { firmaProfesionalApi } from '@/lib/api/firmaProfesional'
 import { LienzoFirma, type LienzoFirmaHandle } from '@/components/firma/LienzoFirma'
 import { Button } from '@/components/ui/button'
+import { mensajeDeError } from '@/lib/errores'
 
 interface Props {
   params: Promise<{ token: string }>
@@ -40,7 +41,12 @@ export default function FirmaMovilPage({ params }: Props) {
     )
   }
 
-  if (isError || !data || enviar.isError) {
+  // Solo un rechazo del servidor (4xx) significa que el enlace ya no sirve. Un
+  // fallo de red o del servidor se puede reintentar sin perder la firma (M4-23).
+  const statusEnvio = (enviar.error as { response?: { status?: number } } | null)?.response?.status
+  const enlaceRechazado = enviar.isError && statusEnvio !== undefined && statusEnvio >= 400 && statusEnvio < 500
+
+  if (isError || !data || enlaceRechazado) {
     return (
       <div className="min-h-dvh flex flex-col items-center justify-center gap-3 bg-gray-50 px-6 text-center">
         <XCircle className="h-10 w-10 text-destructive" />
@@ -74,6 +80,12 @@ export default function FirmaMovilPage({ params }: Props) {
       </header>
 
       <LienzoFirma ref={lienzoRef} alto={260} onCambio={setVacio} />
+
+      {enviar.isError && !enlaceRechazado && (
+        <p className="rounded-md bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {mensajeDeError(enviar.error, 'No se pudo guardar la firma.')} Revisa la conexión y toca "Guardar firma" de nuevo.
+        </p>
+      )}
 
       <div className="grid grid-cols-2 gap-3">
         <Button variant="outline" size="lg" onClick={() => lienzoRef.current?.limpiar()} disabled={enviar.isPending}>

@@ -298,9 +298,12 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
         # Tope de descuento del catálogo: el precio efectivo del ítem
         # (valor_unitario ya con el descuento aplicado) no puede bajar de
-        # precio_lista * (1 - descuento_maximo_pct/100). Es un tope DURO: no lo
-        # levanta ningún permiso; para descontar más hay que subir el tope en el
-        # catálogo o usar una campaña activa.
+        # precio_lista * (1 - descuento_maximo_pct/100). Por decisión del
+        # usuario, `cotizaciones.cambiar_precio` lo salta (dueño o gerente ponen
+        # cualquier precio); sin el permiso el tope es duro (M5-18).
+        puede_cambiar_precio = bool(
+            request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
+        )
         precio_lista = None
         desc_max = Decimal("0")
         if tratamiento is not None and tratamiento.precio_estimado is not None:
@@ -331,7 +334,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                 and valor_unit_dec >= Decimal(precio_campana) - Decimal("0.01")
             )
             # tolerancia de 1 centavo por redondeo
-            if not permite_por_campana and precio_efectivo < piso - Decimal("0.01"):
+            if not permite_por_campana and not puede_cambiar_precio and precio_efectivo < piso - Decimal("0.01"):
                 if desc_max <= 0:
                     msg = (
                         "Este ítem no admite descuento. El precio no puede bajar del "
@@ -659,6 +662,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
     paciente_telefono = serializers.SerializerMethodField()
     paciente_email = serializers.SerializerMethodField()
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
+    # El listado muestra la sede cuando la clínica tiene varias (M5-20).
+    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True, default=None)
     fecha_vencimiento = serializers.DateField(read_only=True)
     estado_comercial = serializers.CharField(read_only=True)
     enviada = serializers.BooleanField(read_only=True)
@@ -680,6 +685,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "profesional",
             "profesional_nombre",
             "sede",
+            "sede_nombre",
             "estado",
             "estado_comercial",
             "enviada",
@@ -826,6 +832,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"paciente": "El paciente no pertenece a tu clinica."})
         if request.user.rol != "superadmin" and sede and sede.clinica_id != request.user.clinica_id:
             raise serializers.ValidationError({"sede": "La sede no pertenece a tu clinica."})
+        profesional = attrs.get("profesional")
+        if profesional and clinica and profesional.clinica_id != clinica.id:
+            raise serializers.ValidationError({"profesional": "El profesional no pertenece a la clinica de la cotizacion."})
         if sede and clinica and sede.clinica_id != clinica.id:
             raise serializers.ValidationError({"sede": "La sede no pertenece a la clinica de la cotizacion."})
         # Toda cotización es de una sede: de ella salen los precios de campaña, el
@@ -948,11 +957,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
         clinica = get_clinica_activa(request) or validated_data["paciente"].clinica
         if not validated_data.get("sede"):
             validated_data["sede"] = clinica.sedes.filter(activo=True).order_by("created_at").first()
-        cotizacion = Cotizacion.objects.create(
-            **validated_data,
-            clinica=clinica,
-            profesional=validated_data.get("profesional") or request.user,
-        )
+        # pop, no get: con "profesional" en el payload, create() lo recibía dos veces (500).
+        profesional = validated_data.pop("profesional", None) or request.user
+        cotizacion = Cotizacion.objects.create(**validated_data, clinica=clinica, profesional=profesional)
         self._crear_items(cotizacion, items_data)
         FormaPagoCotizacion.objects.bulk_create(
             [FormaPagoCotizacion(cotizacion=cotizacion, **forma) for forma in formas_pago_data]
@@ -993,6 +1000,54 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
         instance.refresh_from_db()
         return instance
+
+
+class ItemCotizacionListaSerializer(serializers.ModelSerializer):
+    """Ítem resumido para el listado: sin campañas, citas ni stock (consultas por ítem)."""
+
+    subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = ItemCotizacion
+        fields = (
+            "id", "tipo", "tratamiento", "procedimiento", "descripcion", "num_citas",
+            "valor_unitario", "descuento_porcentaje", "subtotal", "es_obsequio",
+        )
+        read_only_fields = fields
+
+
+class CotizacionListSerializer(CotizacionSerializer):
+    """Listado de cotizaciones con un número fijo de consultas (M5-19).
+
+    Mismos campos que el detalle, pero los ítems van resumidos y todo sale de lo
+    que precarga el viewset (``_items_activos``, ``_formas_pago_activas``): antes
+    cada fila consultaba ítems, campañas, citas y stock.
+    """
+
+    items = serializers.SerializerMethodField()
+    formas_pago = serializers.SerializerMethodField()
+    total = serializers.SerializerMethodField()
+
+    def _items_activos(self, obj):
+        items = getattr(obj, "_items_activos", None)
+        return items if items is not None else list(obj.items.filter(activo=True))
+
+    def get_items(self, obj):
+        return ItemCotizacionListaSerializer(self._items_activos(obj), many=True, context=self.context).data
+
+    def get_formas_pago(self, obj):
+        formas = getattr(obj, "_formas_pago_activas", None)
+        if formas is None:
+            formas = obj.formas_pago.filter(activo=True).select_related("tipo")
+        return FormaPagoCotizacionSerializer(formas, many=True, context=self.context).data
+
+    def get_total(self, obj):
+        total = sum((item.subtotal for item in self._items_activos(obj)), Decimal("0.00"))
+        return f"{total:.2f}"
+
+    def to_representation(self, instance):
+        # Se salta el to_representation del detalle, que vuelve a consultar los ítems.
+        return serializers.ModelSerializer.to_representation(self, instance)
 
 
 class EntregarObsequioSerializer(serializers.Serializer):

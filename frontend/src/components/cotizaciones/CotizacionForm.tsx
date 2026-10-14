@@ -44,6 +44,7 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { useFormasPago } from '@/hooks/useFormasPago'
 import { toast } from '@/hooks/use-toast'
 import { hasPermission, PERM } from '@/lib/permissions'
+import { mensajeDeError } from '@/lib/errores'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
 import type { Cotizacion, EstadoCotizacion, MotivoDescarte, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento, PrecioSede } from '@/types/clinicas'
@@ -365,14 +366,19 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     item.precio_bloqueado && !canEditPrice
       ? getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
       : null
-  const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  const tienePermisoGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  // Quien solo ve su actividad comercial puede abrir la cotización de otro
+  // profesional (desde el paciente o la cartera), pero no cambiarla: el backend
+  // responde 403 (M5-29). Se muestra como de solo lectura.
+  const esAjena = !!cotizacion && !!user?.ve_solo_su_actividad_comercial && (cotizacion.profesional ?? null) !== user?.id
+  const canGestionar = tienePermisoGestionar && !esAjena
   // Sin cobros.ver el panel decía "Sin cobros registrados" aunque los hubiera.
   const canVerCobros = hasPermission(user, PERM.COBROS_VER)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
   // Quien puede gestionar la cotización puede dejar la mini-atención (motivo,
   // seguimiento, fotos) aunque su rol no tenga permisos clínicos generales —
   // el backend acepta lo mismo (cotizaciones.gestionar) para estas notas.
-  const puedeDatosClinicos = canGestionar || hasPermission(user, 'historia.notas.crear')
+  const puedeDatosClinicos = tienePermisoGestionar || hasPermission(user, 'historia.notas.crear')
   // Sin cotizaciones.gestionar el formulario es de solo lectura (p. ej. recepción,
   // que tiene cotizaciones.ver pero no puede crear/editar). El backend responde 403
   // a create/patch/cambiar_estado, así que aquí evitamos la UI editable + submit fallido.
@@ -383,6 +389,8 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   const [crearPacienteNombre, setCrearPacienteNombre] = useState('')
   const [crearPacienteLoading, setCrearPacienteLoading] = useState(false)
   const [enviarOpen, setEnviarOpen] = useState(false)
+  const [descargandoPdf, setDescargandoPdf] = useState(false)
+  const pdfRegistradoRef = useRef(false)
   const [cobrosOpen, setCobrosOpen] = useState(false)
   const [datosClinicosOpen, setDatosClinicosOpen] = useState(false)
   const [detalleSesiones, setDetalleSesiones] = useState<TratamientoCatalogo | null>(null)
@@ -736,7 +744,6 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       }),
       formas_pago: values.formas_pago.map((p) => ({ ...p, fecha: p.fecha || null })),
     }
-    console.log('[PATCH payload]', JSON.stringify(payload, null, 2))
     return payload
   }
 
@@ -912,6 +919,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   /** Tope de descuento del catálogo: avisa y devuelve true si algún ítem lo supera.
    * Guardar y Aprobar comparten la regla para que el aviso del campo y el bloqueo coincidan. */
   function avisarDescuentoExcedido(items: FormValues['items']): boolean {
+    // Con "cambiar precio" el tope del catálogo no aplica (decisión del usuario, M5-18).
+    if (canEditPrice) return false
     const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
       const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
       if (!info) return false
@@ -968,7 +977,17 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   }
 
   async function descargarPdf() {
-    if (!cotizacion) return
+    // Un clic a la vez: antes cada clic descargaba y registraba otro envío (M5-21).
+    if (!cotizacion || descargandoPdf) return
+    setDescargandoPdf(true)
+    try {
+      await descargarYRegistrarPdf(cotizacion)
+    } finally {
+      setDescargandoPdf(false)
+    }
+  }
+
+  async function descargarYRegistrarPdf(cotizacion: Cotizacion) {
     // El PDF sale de lo guardado: si hay cambios en pantalla, se guardan antes
     // para que el paciente reciba lo mismo que se ve (y no se pierdan al recargar).
     const enBorrador = cotizacion.estado === 'borrador'
@@ -979,7 +998,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         return
       }
     }
-    const blob = await cotizacionesApi.descargarPdf(cotizacion.id)
+    let blob: Blob
+    try {
+      blob = await cotizacionesApi.descargarPdf(cotizacion.id)
+    } catch (err) {
+      // Antes un fallo no mostraba nada (M5-21).
+      toast.error('No se pudo descargar el PDF', mensajeDeError(err))
+      return
+    }
     const url = URL.createObjectURL(blob)
     Object.assign(document.createElement('a'), {
       href: url,
@@ -989,7 +1015,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     // Descargar el PDF de una propuesta cuenta como enviarla: se suele compartir
     // por el WhatsApp de la clínica. Queda en el historial de envíos y marca la
     // cotización como enviada. Sin bloquear la descarga si el registro falla.
-    if (enBorrador) {
+    // Solo propuestas abiertas y vigentes (el backend rechaza las demás, M5-17),
+    // y una vez por visita: volver a descargar no es otro envío (M5-21).
+    if (cotizacion.estado_comercial === 'borrador' && canGestionar && !pdfRegistradoRef.current) {
+      pdfRegistradoRef.current = true
       cotizacionesApi.registrarEnvioPdf(cotizacion.id)
         .then(() => {
           if (!cotizacion.enviada_en) toast.success('PDF descargado', 'La cotización quedó marcada como enviada.')
@@ -998,7 +1027,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
           queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
         })
-        .catch(() => null)
+        .catch(() => { pdfRegistradoRef.current = false })
     }
   }
 
@@ -1143,8 +1172,10 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           {/* Acciones topbar */}
           <div className="flex items-center gap-2 shrink-0">
             {cotizacion && (
-              <Button variant="outline" size="sm" onClick={descargarPdf}>
-                <Download className="h-3.5 w-3.5 mr-1.5" />
+              <Button variant="outline" size="sm" onClick={descargarPdf} disabled={descargandoPdf}>
+                {descargandoPdf
+                  ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                  : <Download className="h-3.5 w-3.5 mr-1.5" />}
                 PDF
               </Button>
             )}
@@ -1177,7 +1208,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Renovar vigencia
               </Button>
             )}
-            {cotizacion && canGestionar && cotizacion.estado !== 'aceptada' && (
+            {/* Solo propuestas abiertas y vigentes: enviar una descartada reactivaba el
+                seguimiento, y una vencida se renueva antes (M5-17, igual que el backend). */}
+            {cotizacion && canGestionar && cotizacion.estado_comercial === 'borrador' && (
               <Button
                 size="sm"
                 variant="outline"
@@ -1541,7 +1574,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
                     // Tope de descuento del catálogo: el precio efectivo por unidad
                     // no puede bajar de precioLista * (1 - descMaxPct/100).
-                    const descMaxInfo = soloLectura ? null : getDescMaxItem(
+                    const descMaxInfo = soloLectura || canEditPrice ? null : getDescMaxItem(
                       items[idx]?.tipo, items[idx]?.procedimiento, items[idx]?.tratamiento,
                       procedimientos ?? [], tratamientos ?? [], sedeSeleccionada,
                     )

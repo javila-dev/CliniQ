@@ -166,12 +166,18 @@ class CentroAyudaTests(TestCase):
         self.assertEqual(self.publicado.orden, 1)
 
     def test_feedback_incrementa_contadores(self):
+        from django.core.cache import cache
+
+        cache.clear()
         self.client.force_authenticate(self.recepcion)
-        self.client.post(f"/api/v1/ayuda/articulos/{self.publicado.slug}/feedback/", {"util": True}, format="json")
-        self.client.post(f"/api/v1/ayuda/articulos/{self.publicado.slug}/feedback/", {"util": False}, format="json")
+        url = f"/api/v1/ayuda/articulos/{self.publicado.slug}/feedback/"
+        self.client.post(url, {"util": True}, format="json")
         self.publicado.refresh_from_db()
-        self.assertEqual(self.publicado.util_si, 1)
-        self.assertEqual(self.publicado.util_no, 1)
+        self.assertEqual((self.publicado.util_si, self.publicado.util_no), (1, 0))
+        # Un voto por usuario (M7-25): si cambia de opinión, el voto se mueve.
+        self.client.post(url, {"util": False}, format="json")
+        self.publicado.refresh_from_db()
+        self.assertEqual((self.publicado.util_si, self.publicado.util_no), (0, 1))
 
     def test_duplicar_crea_borrador(self):
         self.client.force_authenticate(self.interno)

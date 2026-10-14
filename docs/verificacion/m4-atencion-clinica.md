@@ -132,15 +132,15 @@
 - **Qué ve el usuario:** el paciente ve etiquetas HTML crudas (`<p>`, `<strong>`).
 - **Arreglo:** mostrar el HTML saneado con DOMPurify.
 
-**M4-23 · Bajo · errores** · confirmado
+**✅ M4-23 · Bajo · errores** · confirmado
 - **Dónde:** `firma-movil/[token]/page.tsx:43`.
 - **Qué ve el usuario:** si el envío falla por la red, ve "Este enlace ya no sirve" y no puede reintentar.
 
-**M4-24 · Bajo · previsible** · confirmado
+**✅ M4-24 · Bajo · previsible** · confirmado
 - **Dónde:** `consentimientos/serializers.py:124,127,138`.
 - **Problema:** una plantilla, cita o cotización inexistente produce un 500.
 
-**M4-25 · Bajo · privacidad** · confirmado
+**✅ M4-25 · Bajo · privacidad** · confirmado
 - **Dónde:** `consentimientos/views.py` (`FirmarConsentimientoPublicoView.get`, revocar).
 - **Problema:**
   - el GET público expone el `signing_token`, la IP y el user agent, aun después de firmado;
@@ -150,14 +150,14 @@
 - **Dónde:** `historiaClinica.ts` (exámenes, órdenes, consumos); `obesidad.ts`.
 - **Qué ve el usuario:** desde el registro 26, los más viejos dejan de verse sin aviso (T-01).
 
-**M4-27 · Bajo · faltante** · confirmado
+**✅ M4-27 · Bajo · faltante** · confirmado
 - **Problemas:**
   - *Rutas sin pantalla:* `evolucion-signos`, `ordenes-medicas/{id}`, `protocolos/sesiones/{id}` y `configuracion/signos-vitales`.
   - *Componentes huérfanos:* `ProtocoloPanelAtencion`, `TratamientoCard`, `CheckinSheet`, `ConsentimientosSesionCheck`, `AntecedentesSheet` y `ConsentimientoFirmaSheet`.
   - *Campos faltantes:* `NotaClinica.servicio_nombre` y `anamnesis` se esperan en el frontend, pero el serializer no los devuelve.
   - *Archivos huérfanos:* el webhook del consentimiento informado vuelve a guardar el PDF en cada reintento.
 
-**M4-28 · Bajo · permisos** · confirmado
+**✅ M4-28 · Bajo · permisos** · confirmado
 - **Dónde:** `protocolos/views.py` (listado de tratamientos, consentimientos de sesión, check-in, OTP).
 - **Problema:** solo exige `IsAuthenticated`. Además, `marcar_inasistencia` puede pisar una sesión ya completada.
 

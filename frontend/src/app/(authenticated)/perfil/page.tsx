@@ -14,6 +14,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { cn } from '@/lib/utils'
+import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import { CapturaFirmaProfesional } from '@/components/firma/CapturaFirmaProfesional'
 
@@ -101,6 +102,8 @@ export default function PerfilPage() {
         telefono: updated.telefono ?? '',
       })
     },
+    // Errores por campo (p. ej. teléfono inválido) van a su campo (M0-19).
+    onError: err => { aplicarErroresDeCampo(err, datosForm.setError, ['first_name', 'last_name', 'telefono']) },
   })
 
   const passwordForm = useForm({ resolver: zodResolver(passwordSchema) })
@@ -132,7 +135,9 @@ export default function PerfilPage() {
   if (!user) return null
 
   const initials = `${user.first_name?.[0] ?? ''}${user.last_name?.[0] ?? ''}`.toUpperCase() || '?'
-  const rolCfg = ROL_CONFIG[user.rol ?? ''] ?? { label: user.rol ?? '', className: 'bg-gray-50 text-gray-700 ring-1 ring-gray-200' }
+  // El nombre visible del rol (personalizado o de sistema), no su slug (M0-27).
+  const rolBase = ROL_CONFIG[user.rol ?? ''] ?? { label: user.rol ?? '', className: 'bg-gray-50 text-gray-700 ring-1 ring-gray-200' }
+  const rolCfg = { ...rolBase, label: user.role_nombre || rolBase.label }
   const miembroDesde = user.created_at
     ? new Date(user.created_at).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })
     : '—'
@@ -189,7 +194,7 @@ export default function PerfilPage() {
             </div>
 
             <div className="flex items-center justify-end gap-3 pt-1">
-              {datosMut.isError && <p className="text-xs text-red-600 mr-auto">No se pudieron guardar los cambios.</p>}
+              {datosMut.isError && <p className="text-xs text-red-600 mr-auto">{mensajeDeError(datosMut.error, 'No se pudieron guardar los cambios.')}</p>}
               {datosMut.isSuccess && !isDirty && (
                 <p className="flex items-center gap-1 text-xs text-emerald-700 mr-auto">
                   <Check className="h-3.5 w-3.5" /> Cambios guardados
@@ -238,8 +243,7 @@ export default function PerfilPage() {
                 <div className="sm:col-span-2 flex items-center justify-end gap-3">
                   {passwordMut.isError && (
                     <p className="text-xs text-red-600 mr-auto">
-                      {(passwordMut.error as { response?: { data?: { error?: string } } })?.response?.data?.error
-                        ?? 'No se pudo cambiar la contraseña.'}
+                      {mensajeDeError(passwordMut.error, 'No se pudo cambiar la contraseña.')}
                     </p>
                   )}
                   <Button type="submit" size="sm" disabled={passwordMut.isPending}>
@@ -308,7 +312,7 @@ export default function PerfilPage() {
               {firmaGuardada && (
                 <p className="flex items-center gap-1.5 text-xs text-emerald-700"><Check className="h-3.5 w-3.5" /> Firma guardada</p>
               )}
-              {eliminarFirma.isError && <p className="text-xs text-red-600">No se pudo eliminar la firma.</p>}
+              {eliminarFirma.isError && <p className="text-xs text-red-600">{mensajeDeError(eliminarFirma.error, 'No se pudo eliminar la firma.')}</p>}
             </div>
           </div>
         )}
@@ -330,7 +334,7 @@ export default function PerfilPage() {
                 {tpMut.isPending ? 'Guardando…' : tpMut.isSuccess ? <><Check className="h-3.5 w-3.5 mr-1" />Guardado</> : 'Guardar'}
               </Button>
             </form>
-            {tpMut.isError && <p className="px-6 pb-4 -mt-2 text-xs text-red-600">No se pudo guardar la tarjeta profesional.</p>}
+            {tpMut.isError && <p className="px-6 pb-4 -mt-2 text-xs text-red-600">{mensajeDeError(tpMut.error, 'No se pudo guardar la tarjeta profesional.')}</p>}
           </div>
         )}
         </div>

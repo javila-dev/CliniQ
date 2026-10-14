@@ -313,8 +313,8 @@ CAPABILITY_CATALOG = [
             },
             {
                 "clave": "cotizaciones.cambiar_precio",
-                "titulo": "Cambiar precios bloqueados en cotizaciones",
-                "descripcion": "Modificar items cuyo precio esta bloqueado.",
+                "titulo": "Cambiar precios en cotizaciones",
+                "descripcion": "Poner cualquier precio, aunque sea menor al de catálogo o supere el descuento máximo.",
                 "permisos": ["cotizaciones.cambiar_precio"],
             },
             {

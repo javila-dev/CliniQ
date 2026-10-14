@@ -11,8 +11,13 @@ from apps.cotizaciones.models import Cotizacion
 
 
 def format_currency(value: Decimal) -> str:
-    normalized = Decimal(value or "0.00")
-    return f"${normalized:,.2f}"
+    """Pesos como en la interfaz y el compromiso de pago: "$1.500.000" (M5-30).
+
+    Antes salía "$1,500,000.00" (formato en inglés, con centavos).
+    """
+    from apps.consentimientos.services import formatear_moneda
+
+    return formatear_moneda(value)
 
 
 def format_date(value) -> str:

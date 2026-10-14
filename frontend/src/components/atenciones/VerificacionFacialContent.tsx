@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils'
 import { apiClient } from '@/lib/api/client'
 import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
 import { resolveMediaUrl } from '@/lib/utils/media'
+import { mensajeDeError } from '@/lib/errores'
 
 interface Props {
   pacienteId: string
@@ -35,6 +36,7 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
   const [enrollErrors, setEnrollErrors] = useState<string[]>([])
   const [enrollWarnings, setEnrollWarnings] = useState<string[]>([])
   const [badgeVisible, setBadgeVisible] = useState(false)
+  const [verificacionFallida, setVerificacionFallida] = useState(false)
 
   const { data: paciente, isLoading: cargandoPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
@@ -83,7 +85,7 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
       if (e?.response?.status === 428 || e?.response?.data?.code === 'ENROLLMENT_REQUIRED') {
         setState('sin_enrollment')
       } else {
-        setError(e?.response?.data?.error ?? 'Error al verificar la identidad. Intenta de nuevo.')
+        setError(mensajeDeError(err, 'Error al verificar la identidad. Intenta de nuevo.'))
         setState('camara')
       }
     }
@@ -107,8 +109,12 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
           })
           setResultado(res.data)
           setState('resultado')
-        } catch {
-          onCompletado()
+        } catch (err) {
+          // Antes el flujo se cerraba sin decir nada (M2-24). La foto de control
+          // ya quedó guardada: se puede reintentar la verificación o seguir.
+          setError(`La foto de control quedó registrada, pero no se pudo verificar la identidad. ${mensajeDeError(err, 'Intenta de nuevo.')}`)
+          setVerificacionFallida(true)
+          setState('camara')
         }
       }, 1200)
     } catch (err: unknown) {
@@ -320,6 +326,11 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
       </div>
       {error && <p className="text-xs text-red-500 text-center">{error}</p>}
       <CamaraCaptura onCaptura={enviarFoto} labelCapturar="Capturar y verificar" />
+      {verificacionFallida && (
+        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={onCompletado}>
+          Continuar sin verificar
+        </Button>
+      )}
     </div>
   )
 }

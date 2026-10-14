@@ -20,21 +20,21 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | `84f0e36` |
 | 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | `472b176` |
-| 7b | Los medios, módulo por módulo (M0 a M7) | Hecho: M0 a M7 (M3-19 y M3-20 en espera por decisión) | `dee5046` (M0 y M1), `9066544` (M2 a M4), M5 a M7 en el commit siguiente |
-| 7c | Los bajos | Pendiente | — |
+| 7b | Los medios, módulo por módulo (M0 a M7) | ✅ Hecho (M3-19 y M3-20 en espera por decisión) | `dee5046` (M0 y M1), `9066544` (M2 a M4), `f1f4b15` (M5 a M7) |
+| 7c | Los bajos | ✅ Hecho | pendiente de commit |
 
-**Hallazgos:** 172 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 225 de 227 corregidos. Los 2 que quedan (M3-19 y M3-20) están en espera por decisión del usuario.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
-| M0 Acceso y roles | 26 | 4 | 0 |
-| M1 Configuración y catálogo | 24 | 7 | 0 |
-| M2 Pacientes | 18 | 8 | 0 |
-| M3 Agenda | 23 | 7 | 0 |
-| M4 Atención clínica | 23 | 5 | 0 |
-| M5 Comercial | 19 | 11 | 0 |
-| M6 Dinero | 22 | 5 | 0 |
-| M7 Inventario y plataforma | 17 | 8 | 0 |
+| M0 Acceso y roles | 30 | 0 | 0 |
+| M1 Configuración y catálogo | 31 | 0 | 0 |
+| M2 Pacientes | 26 | 0 | 0 |
+| M3 Agenda | 28 | 2 (en espera) | 0 |
+| M4 Atención clínica | 28 | 0 | 0 |
+| M5 Comercial | 30 | 0 | 0 |
+| M6 Dinero | 27 | 0 | 0 |
+| M7 Inventario y plataforma | 25 | 0 | 0 |
 
 **Decisiones del usuario (10/10/2026)**
 
@@ -46,6 +46,8 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | ¿El Profesional ve reportes financieros por defecto? | **No el rol de sistema Profesional. El Admin sí.** | M6-12 y M0-21: quitar `reportes.ver_financieros` del default del Profesional, migrar los roles de sistema existentes y que la pestaña Resumen/P&L se rija por ese permiso (paso 4). |
 | ¿Quién puede pedir un bloqueo de agenda? (13/10/2026) | **Quien ve la agenda lo solicita; solo quien tiene "aprobar bloqueos" lo acepta.** | M3-25: crear un bloqueo pide `agenda.citas.ver` (o `agenda.crear_bloqueo`); sin permiso de aprobar queda pendiente (paso 6). |
 | ¿Las ventas aceptadas antes de activar el compromiso de pago deben firmarlo? (13/10/2026) | **No.** Solo las que se acepten después de activarlo. | M5-13: abrir el detalle de una venta ya no genera el compromiso (paso 7b). |
+| ¿Qué permite "cambiar precio" en cotizaciones (M5-18)? (14/10/2026) | **Salta el tope.** Quien lo tiene pone cualquier precio, aunque supere el descuento máximo del catálogo; sin él, el tope es duro. | Backend y formulario de cotización; texto del permiso actualizado. |
+| ¿Un paciente puede tener dos citas a la misma hora (M3-30)? (14/10/2026) | **Se avisa, no se bloquea.** "Agendar de todas formas" (dos procedimientos con personas distintas). | Aviso `PACIENTE_CON_OTRA_CITA` al crear o mover la cita. |
 | ¿Las categorías de insumos tienen pantalla? (14/10/2026) | **No.** Agregan configuración sobre configuración. | M7-07: se quitaron de toda la UI, incluida la pantalla de roles. |
 | ¿Se hace el listado liviano de la agenda (M3-19)? (14/10/2026) | **En espera.** Se mide primero con datos reales de una clínica grande; si la agenda abre rápido, no se toca. | M3-19 queda abierto. |
 | ¿Se hace la zona horaria por clínica (M3-20)? (14/10/2026) | **En espera.** Se hace cuando entre la primera clínica fuera de Colombia, aparte y con su propia revisión. | M3-20 queda abierto. |
@@ -531,6 +533,23 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 
 - **Pruebas:** 9 nuevas en `test_verificacion_paso7.py`.
 - **Sin probar en el navegador:** las pantallas nuevas de M7-07 y el cobro con varios medios de M6-14.
+
+**Paso 7c — los bajos (14/10/2026)**
+
+| Módulo | Ítems | Resumen |
+|---|---|---|
+| M0 | 19, 26, 27, 29 | Errores del perfil por campo; Equipo cuenta profesionales por el check "atiende pacientes"; el perfil muestra el nombre del rol; entrar a una clínica inactiva ya no cierra la sesión abierta en otro equipo. |
+| M1 | 22, 26, 27, 28, 29, 30, 31 | "Nueva sede" abre vacía; reactivar una sede respeta el límite del plan; "Eliminar" promoción pasa a "Desactivar"; se puede cambiar la respuesta de "¿Qué vendes?"; rutas de reordenar pasos/consentimientos y quitar tipos de sesión ya no chocan. M1-22 y M1-30 ya estaban resueltos por T-04 y T-09. |
+| M2 | 19 a 26 | Duplicados con la clínica activa y sin 500 en carreras; aviso no bloqueante de posible duplicado por teléfono o correo; buscador por teléfono, sin tildes y por palabras (extensión `unaccent`, migración `pacientes/0010`); carga masiva normaliza teléfono y documento; verificación facial y foto de control sin quedar atrapado; contadores reales, desactivar paciente y vencimiento de consentimientos sin desfase. |
+| M3 | 26 a 30 | Botón "Llegó" para una cita pendiente del día; el motivo de cancelación es obligatorio en la pantalla; bloqueos de profesional no sombrean toda la vista Clásica/Semana, los de clínica se ven al filtrar por sede y se rotulan "Toda la clínica"; borrar una cita con cobro da 400; el listado no expone el token de firma; clic en un hueco precarga hora y profesional; aviso si el paciente ya tiene otra cita a esa hora. |
+| M4 | 23, 24, 25, 27, 28 | Firma desde el celular reintentable si falla la red; ids inexistentes en consentimientos dan 400; la página pública no expone IP, navegador ni token después de firmar; revocar se registra y no se repite; la nota trae `servicio_nombre`; el webhook no vuelve a subir el mismo PDF; protocolos exigen ver pacientes, agenda o historia; una sesión completada no pasa a inasistencia. Los componentes y rutas sin pantalla de M4-27 se dejaron (no hacen daño). |
+| M5 | 17 a 21, 24 a 26, 28 a 30 | Solo se envían borradores vigentes; listados sin consultas por fila y con sede; descarga de PDF con carga y error; avisos de seguimiento correctos; vincular un interesado a un paciente existente y abrir el seguimiento duplicado; validación de sede al editar oportunidades; "solo lo suyo" no modifica cotizaciones ajenas; PDF con formato colombiano; filtro "En mora" en Ventas; las migradas fuera de la lista comercial. M5-18 por decisión del usuario. |
+| M6 | 23 a 27 | Fechas dd/mm en Ingresos; el dashboard del superadmin se acota a la clínica activa; abrir caja dos veces a la vez da 400; una cuota no baja de lo abonado y el total de la cartera se recalcula; código sin uso eliminado y tipos corregidos. Quedan: la app vacía `comisiones` y el cobro anulado de una cita (no se puede volver a cobrar). |
+| M7 | 18 a 25 | Kardex y órdenes acotados a la clínica activa; buscador de insumos y "Crear proveedor" según permisos; borrador de compra sin factura (se exige al recibir, migración `proveedores/0004`); consecutivo de órdenes y stock sin 500 en concurrencia; `ajustarStock` bien tipado; el kardex no muestra pacientes sin `pacientes.ver`; un voto por artículo de ayuda; los reintentos de n8n no duplican avisos de fallo. M7-20 ya estaba resuelto. |
+
+- **Pruebas:** 13 nuevas en `test_verificacion_paso7c.py`; 8 (M2) y 9 (M5) en `test_verificacion_paso7.py`.
+- **Sin probar en el navegador:** todo lo de este paso.
+- **Producción:** la migración `pacientes/0010` crea la extensión `unaccent` de PostgreSQL (confiable desde PG 13).
 
 ## Orden de corrección sugerido
 

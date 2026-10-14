@@ -94,11 +94,14 @@ export function MovimientoDetalleModal({
           {ctx?.tipo === 'nota_clinica' && (
             <div className="rounded-lg border p-3 space-y-1.5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Atención</p>
-              <Fila label="Paciente">
-                <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
-                  {ctx.paciente_nombre}
-                </Link>
-              </Fila>
+              {/* Sin "ver pacientes" el backend no manda el paciente (M7-24). */}
+              {ctx.paciente_id && (
+                <Fila label="Paciente">
+                  <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
+                    {ctx.paciente_nombre}
+                  </Link>
+                </Fila>
+              )}
               {ctx.servicio_nombre && (
                 <Fila label="Procedimiento / tratamiento"><span className="font-medium">{ctx.servicio_nombre}</span></Fila>
               )}
@@ -111,11 +114,14 @@ export function MovimientoDetalleModal({
           {ctx?.tipo === 'cobro' && (
             <div className="rounded-lg border p-3 space-y-1.5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Venta</p>
-              <Fila label="Paciente">
-                <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
-                  {ctx.paciente_nombre}
-                </Link>
-              </Fila>
+              {/* Sin "ver pacientes" el backend no manda el paciente (M7-24). */}
+              {ctx.paciente_id && (
+                <Fila label="Paciente">
+                  <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
+                    {ctx.paciente_nombre}
+                  </Link>
+                </Fila>
+              )}
               <Fila label="Origen del cobro"><span>{ORIGEN_COBRO_LABEL[ctx.origen] ?? ctx.origen}</span></Fila>
               {ctx.cotizacion_numero && (
                 <Fila label="Cotización"><span className="font-medium">#{ctx.cotizacion_numero}</span></Fila>
@@ -126,11 +132,14 @@ export function MovimientoDetalleModal({
           {ctx?.tipo === 'obsequio' && (
             <div className="rounded-lg border p-3 space-y-1.5">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Obsequio</p>
-              <Fila label="Paciente">
-                <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
-                  {ctx.paciente_nombre}
-                </Link>
-              </Fila>
+              {/* Sin "ver pacientes" el backend no manda el paciente (M7-24). */}
+              {ctx.paciente_id && (
+                <Fila label="Paciente">
+                  <Link href={`/pacientes/${ctx.paciente_id}/historia`} className="text-primary hover:underline font-medium">
+                    {ctx.paciente_nombre}
+                  </Link>
+                </Fila>
+              )}
               <Fila label="Cotización">
                 <Link href={`/cotizaciones/${ctx.cotizacion_id}`} className="text-primary hover:underline font-medium">
                   #{ctx.cotizacion_referencia}

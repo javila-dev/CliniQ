@@ -145,27 +145,27 @@
 - **Dónde:** `BloqueosPanel.tsx:70`
 - **Qué ve el usuario:** quien solo puede "aprobar" ve "Nuevo bloqueo". Recepción y Profesional no tienen `crear_bloqueo`, así que el flujo de solicitud no se usa nunca.
 
-**M3-26 · Bajo · UX** · confirmado
+**✅ M3-26 · Bajo · UX** · confirmado
 - **Dónde:** `CitaDetailSheet.tsx:179-185,428-431`
 - **Qué ve el usuario:** si llega un paciente con la cita pendiente, no hay "Registrar llegada"; hay que confirmar primero.
 - **Arreglo:** un botón "Llegó" que confirme y haga el check-in en un solo paso.
 
-**M3-27 · Bajo · errores** · confirmado
+**✅ M3-27 · Bajo · errores** · confirmado
 - **Dónde:** `CitaDetailSheet.tsx:599-627`
 - **Qué ve el usuario:** el motivo de cancelación dice "Requerido", pero se puede cancelar sin escribirlo.
 
-**M3-28 · Bajo · visual** · confirmado
+**✅ M3-28 · Bajo · visual** · confirmado
 - **Dónde:** `agenda/page.tsx:798-809,840`; `BloqueosPanel.tsx:335-339`
 - **Qué ve el usuario:**
   - en la vista Clásica, el bloqueo de un profesional sombrea todo el día;
   - los bloqueos de clínica desaparecen al filtrar por sede;
   - un bloqueo de clínica aparece rotulado "Toda la sede".
 
-**M3-29 · Bajo · previsible** · confirmado
+**✅ M3-29 · Bajo · previsible** · confirmado
 - **Dónde:** `agenda/views.py:697`; `destroy`
 - **Qué pasa:** `slots_disponibles?fecha=mal` responde 500. `DELETE` de una cita que tiene cobro también da 500. "Eliminar citas" no tiene botón.
 
-**M3-30 · Bajo · seguridad/UX** · confirmado
+**✅ M3-30 · Bajo · seguridad/UX** · confirmado
 - **Dónde:** `serializers.py:241-242`; `agenda/page.tsx:1550-1555`
 - **Qué pasa:**
   - el listado expone `firma_asistencia_signing_token`;

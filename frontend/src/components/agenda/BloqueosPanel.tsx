@@ -283,10 +283,11 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
                 <Label>Profesional (opcional)</Label>
                 <Select value={formProfesional || 'none'} onValueChange={(v) => setFormProfesional(v === 'none' ? '' : v)}>
                   <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Toda la sede" />
+                    <SelectValue placeholder={formSede ? 'Toda la sede' : 'Toda la clínica'} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Toda la sede</SelectItem>
+                    {/* Sin sede el bloqueo es de toda la clínica (M3-28). */}
+                    <SelectItem value="none">{formSede ? 'Toda la sede' : 'Toda la clínica'}</SelectItem>
                     {formProfesionales?.map((p) => (
                       // El backend BloqueoAgenda.profesional es FK a User → usar p.id (user.id),
                       // NO p.colaborador_id (que es el id del perfil Colaborador).

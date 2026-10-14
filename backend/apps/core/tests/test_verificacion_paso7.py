@@ -757,3 +757,404 @@ class VerificacionPaso7MediosM7Tests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(self.client.delete(f"/api/v1/proveedores/ordenes-compra/{borrador.id}/").status_code, 204)
         borrador.refresh_from_db()
         self.assertEqual(borrador.estado, OrdenCompra.Estado.CANCELADA)
+
+
+class VerificacionPaso7cM2Tests(ClinicaFixtureMixin, TestCase):
+    """Bajos de M2 (pacientes)."""
+
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _paciente(self, clinica=None, **kwargs):
+        from apps.pacientes.models import Paciente
+
+        datos = {
+            "clinica": clinica or self.clinica, "tipo_documento": Paciente.TipoDocumento.CC,
+            "numero_documento": "555000111", "nombres": "Ana", "apellidos": "Gómez",
+            "fecha_nacimiento": timezone.localdate() - timedelta(days=25 * 365),
+            "sexo": Paciente.Sexo.FEMENINO, "telefono": "+573104445566",
+            "canal_confirmacion": Paciente.CanalConfirmacion.WHATSAPP, "autoriza_datos": True,
+        }
+        datos.update(kwargs)
+        return Paciente.objects.create(**datos)
+
+    def _otra_clinica(self):
+        from apps.clinicas.models import Clinica
+
+        return Clinica.objects.create(nombre="Otra", nit="900000999")
+
+    def _payload_nuevo(self, **kwargs):
+        datos = {
+            "tipo_documento": "CC", "numero_documento": "777888999", "nombres": "Luz", "apellidos": "Rojas",
+            "fecha_nacimiento": "1990-05-10", "sexo": "F", "telefono": "+573001112233",
+            "canal_confirmacion": "whatsapp", "autoriza_datos": True,
+        }
+        datos.update(kwargs)
+        return datos
+
+    # ── M2-19: duplicados con superadmin y carrera de guardado ─────────────
+    def test_m219_superadmin_no_duplica_el_documento(self):
+        self.crear_superadmin()
+        self.client.force_authenticate(self.superadmin)
+        response = self.client.post(
+            "/api/v1/pacientes/", self._payload_nuevo(numero_documento=self.paciente.numero_documento),
+            format="json", HTTP_X_ACTIVE_CLINICA=str(self.clinica.id),
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("numero_documento", response.json())
+
+    def test_m219_la_carrera_de_guardado_responde_400_y_no_500(self):
+        from rest_framework.exceptions import ValidationError
+
+        from apps.pacientes.serializers import PacienteSerializer
+
+        # Simula el segundo guardado de una carrera: validate() ya pasó.
+        datos = self._payload_nuevo(numero_documento=self.paciente.numero_documento)
+        datos["clinica"] = self.clinica
+        datos["fecha_nacimiento"] = timezone.localdate() - timedelta(days=30 * 365)
+        with self.assertRaises(ValidationError) as ctx:
+            PacienteSerializer(context={}).create(datos)
+        self.assertIn("numero_documento", ctx.exception.detail)
+
+    # ── M2-20: aviso de posible duplicado por teléfono o correo ────────────
+    def test_m220_posibles_duplicados_por_telefono_y_correo(self):
+        familiar = self._paciente(email="ana@example.com")
+        self._paciente(clinica=self._otra_clinica(), numero_documento="1", email="ana@example.com")
+        url = "/api/v1/pacientes/posibles_duplicados/"
+
+        por_tel = self.client.get(url, {"telefono": "+57 310 444 5566"}).json()
+        self.assertEqual([p["id"] for p in por_tel], [str(familiar.id)])
+        self.assertTrue(por_tel[0]["coincide_telefono"])
+        # El fixture guardó el teléfono sin +57 (como la carga masiva antigua).
+        self.assertEqual(len(self.client.get(url, {"telefono": "+573001112233"}).json()), 1)
+        por_correo = self.client.get(url, {"email": "ANA@example.com"}).json()
+        self.assertEqual([p["id"] for p in por_correo], [str(familiar.id)])  # no la de otra clínica
+        self.assertEqual(self.client.get(url, {"email": "ana@example.com", "excluir": str(familiar.id)}).json(), [])
+        self.assertEqual(self.client.get(url, {"telefono": "12"}).json(), [])
+
+        # No bloquea: el mismo teléfono se puede registrar (familiares).
+        response = self.client.post(
+            "/api/v1/pacientes/", self._payload_nuevo(telefono="+573104445566"), format="json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+
+    # ── M2-21: buscador rápido ─────────────────────────────────────────────
+    def test_m221_busca_por_palabras_sin_tildes_y_por_telefono(self):
+        ana = self._paciente()
+
+        def ids(q):
+            response = self.client.get("/api/v1/pacientes/buscar/", {"q": q})
+            self.assertEqual(response.status_code, 200, response.content)
+            return {p["id"] for p in response.json()}
+
+        self.assertEqual(ids("Gómez Ana"), {str(ana.id)})
+        self.assertEqual(ids("gomez"), {str(ana.id)})
+        self.assertEqual(ids("ana gom"), {str(ana.id)})
+        self.assertEqual(ids("310 444 5566"), {str(ana.id)})
+        self.assertEqual(ids("+57 300 111 2233"), {str(self.paciente.id)})  # guardado sin +57
+        self.assertEqual(ids("555000"), {str(ana.id)})
+        self.assertEqual(ids("Ana Perez"), set())
+
+    # ── M2-22: carga masiva normaliza teléfono y documento ─────────────────
+    def test_m222_carga_masiva_normaliza_telefono_y_documento(self):
+        import io
+
+        import openpyxl
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        from apps.pacientes.carga_masiva import normalizar_documento, normalizar_telefono
+        from apps.pacientes.models import Paciente
+
+        self.assertEqual(normalizar_telefono(3001234567.0), "+573001234567")
+        self.assertEqual(normalizar_telefono("300 123 4567"), "+573001234567")
+        self.assertEqual(normalizar_telefono("573001234567"), "+573001234567")
+        self.assertEqual(normalizar_telefono("+1 305 555 0101"), "+13055550101")
+        self.assertEqual(normalizar_documento("1020304050.0", "CC"), "1020304050")
+        self.assertEqual(normalizar_documento("1.020.304.050", "CC"), "1020304050")
+        self.assertEqual(normalizar_documento(" AB 123 ", "PA"), "AB123")
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Pacientes"
+        ws.append(["tipo", "numero", "nombres", "apellidos", "fecha", "sexo", "telefono", "email"])
+        ws.append(["CC", 1020304050.0, "Eva", "Luna", "10/05/1990", "F", 3009998877, ""])
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        archivo = SimpleUploadedFile("carga.xlsx", buffer.getvalue())
+        response = self.client.post("/api/v1/pacientes/carga_masiva/", {"archivo": archivo}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["creados"], 1, response.content)
+        eva = Paciente.objects.get(clinica=self.clinica, nombres="Eva")
+        self.assertEqual((eva.numero_documento, eva.telefono), ("1020304050", "+573009998877"))
+
+    # ── M2-23: verificar consentimientos de un tratamiento ─────────────────
+    def test_m223_verificar_consentimientos_valida_el_tratamiento(self):
+        from apps.clinicas.models import TratamientoCatalogo
+
+        url = f"/api/v1/pacientes/{self.paciente.id}/consentimientos/verificar/"
+        self.assertEqual(self.client.get(url, {"tratamiento": "no-es-uuid"}).status_code, 400)
+        ajeno = TratamientoCatalogo.objects.create(clinica=self._otra_clinica(), nombre="Ajeno")
+        self.assertEqual(self.client.get(url, {"tratamiento": str(ajeno.id)}).status_code, 404)
+        propio = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="Propio")
+        self.assertEqual(self.client.get(url, {"tratamiento": str(propio.id)}).status_code, 200)
+
+    # ── M2-26: resumen de activos/inactivos y desactivar un paciente ───────
+    def test_m226_resumen_cuenta_activos_e_inactivos_de_la_clinica(self):
+        self._paciente(activo=False)
+        self._paciente(clinica=self._otra_clinica(), numero_documento="2")
+        response = self.client.get("/api/v1/pacientes/resumen/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json(), {"total": 2, "activos": 1, "inactivos": 1})
+
+    def test_m226_desactivar_y_reactivar_con_permiso_de_editar(self):
+        url = f"/api/v1/pacientes/{self.paciente.id}/"
+        self.assertEqual(self.client.patch(url, {"activo": False}, format="json").status_code, 200)
+        self.paciente.refresh_from_db()
+        self.assertFalse(self.paciente.activo)
+
+        rol = Rol.objects.create(clinica=self.clinica, slug="solo_ver", nombre="Solo ver")
+        RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave="pacientes.ver"))
+        usuario = User.objects.create_user(
+            email="ver@test.com", password="Secret123!", first_name="Ve", last_name="R",
+            rol=User.Role.RECEPCION, clinica=self.clinica, rol_dinamico=rol,
+        )
+        self.client.force_authenticate(usuario)
+        self.assertEqual(self.client.patch(url, {"activo": True}, format="json").status_code, 403)
+
+
+class VerificacionPaso7cM5Tests(ClinicaFixtureMixin, TestCase):
+    """Bajos de M5 (cotizaciones, ventas y seguimiento)."""
+
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _cotizacion(self, *, estado=Cotizacion.Estado.BORRADOR, profesional=None, **extra):
+        from apps.clinicas.models import FormaDePago
+
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=profesional or self.admin,
+            sede=self.sede, estado=estado, **extra,
+        )
+        cotizacion.items.create(
+            descripcion="Sesión", num_citas=1, valor_unitario="1500000.00", descuento_porcentaje="0.00",
+        )
+        forma = FormaDePago.objects.filter(clinica=self.clinica).first()
+        if forma:
+            cotizacion.formas_pago.create(tipo=forma, descripcion="Contado", valor="1500000.00")
+        return cotizacion
+
+    def _usuario_con_rol(self, permisos, *, es_profesional=False, sedes=None):
+        import uuid
+
+        rol = Rol.objects.create(clinica=self.clinica, slug=f"rol-{uuid.uuid4().hex[:6]}", nombre="Rol prueba")
+        for clave in permisos:
+            RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave=clave))
+        usuario = User.objects.create_user(
+            email=f"u-{uuid.uuid4().hex[:8]}@test.com", password="Secret123!",
+            first_name="Ana", last_name="Paz", rol=User.Role.RECEPCION, clinica=self.clinica,
+            rol_dinamico=rol, es_profesional=es_profesional,
+        )
+        if sedes:
+            colab = Colaborador.objects.create(
+                user=usuario, sede_principal=sedes[0], tipo_contrato=Colaborador.TipoContrato.EMPLEADO,
+                fecha_ingreso=timezone.localdate(), numero_documento=uuid.uuid4().hex[:10],
+            )
+            colab.sedes.set(sedes)
+        return usuario
+
+    def _num_consultas(self, url):
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        with CaptureQueriesContext(connection) as contexto:
+            response = self.client.get(url)
+        self.assertEqual(response.status_code, 200, response.content)
+        return len(contexto.captured_queries), response.json()
+
+    # ── M5-17: solo se envían propuestas abiertas y vigentes ───────────────
+    def test_m517_no_se_envia_una_cotizacion_descartada_ni_vencida(self):
+        from apps.cotizaciones.models import CotizacionEnvio
+
+        descartada = self._cotizacion(estado=Cotizacion.Estado.DESCARTADA)
+        for accion in ("enviar_whatsapp", "enviar_email", "registrar_envio"):
+            response = self.client.post(
+                f"/api/v1/cotizaciones/{descartada.id}/{accion}/", {"canal": "pdf"}, format="json",
+            )
+            self.assertEqual(response.status_code, 400, (accion, response.content))
+            self.assertEqual(response.json()["code"], "COTIZACION_NO_ENVIABLE")
+
+        vencida = self._cotizacion(validez_dias=1)
+        Cotizacion.objects.filter(pk=vencida.pk).update(vigente_desde=timezone.localdate() - timedelta(days=10))
+        response = self.client.post(f"/api/v1/cotizaciones/{vencida.id}/registrar_envio/", {"canal": "pdf"}, format="json")
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "COTIZACION_VENCIDA")
+        self.assertFalse(CotizacionEnvio.objects.exists())
+
+        abierta = self._cotizacion()
+        response = self.client.post(f"/api/v1/cotizaciones/{abierta.id}/registrar_envio/", {"canal": "pdf"}, format="json")
+        self.assertEqual(response.status_code, 201, response.content)
+
+    # ── M5-19: el listado no hace más consultas por cada fila ──────────────
+    def test_m519_listado_de_cotizaciones_con_consultas_fijas(self):
+        from apps.cotizaciones.models import CotizacionEnvio
+
+        def crear():
+            cotizacion = self._cotizacion()
+            cotizacion.items.create(
+                descripcion="Obsequio", num_citas=1, valor_unitario="0", es_obsequio=True,
+                valor_referencia="50000", descuento_porcentaje="0.00",
+            )
+            CotizacionEnvio.objects.create(cotizacion=cotizacion, canal="pdf", enviado_por=self.admin)
+
+        crear()
+        con_una, datos = self._num_consultas("/api/v1/cotizaciones/?estado_comercial=borrador")
+        self.assertEqual(datos["results"][0]["total"], "1500000.00")
+        self.assertEqual(len(datos["results"][0]["items"]), 2)
+        self.assertIsNotNone(datos["results"][0]["enviada_en"])
+        for _ in range(4):
+            crear()
+        con_cinco, datos = self._num_consultas("/api/v1/cotizaciones/?estado_comercial=borrador")
+        self.assertEqual(datos["count"], 5)
+        self.assertEqual(con_una, con_cinco)
+
+    def test_m519_listado_de_ventas_con_consultas_fijas(self):
+        from apps.clinicas.models import TipoSesion, TratamientoCatalogo
+
+        tratamiento = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="Paquete")
+        TipoSesion.objects.create(tratamiento=tratamiento, nombre="Sesión", cantidad=4)
+
+        def crear():
+            venta = self._cotizacion(estado=Cotizacion.Estado.ACEPTADA, aceptada_en=timezone.now())
+            origen = venta.items.create(
+                tipo="tratamiento", tratamiento=tratamiento, descripcion="Paquete", num_citas=1,
+                valor_unitario="900000.00", descuento_porcentaje="0.00",
+            )
+            venta.items.create(
+                tipo="tratamiento", descripcion="Sesión extra", num_citas=1, valor_unitario="0",
+                es_obsequio=True, agendable=True, item_origen=origen, descuento_porcentaje="0.00",
+            )
+
+        crear()
+        con_una, datos = self._num_consultas("/api/v1/ventas/")
+        # 1 del ítem libre + 4 del catálogo + 1 obsequiada.
+        self.assertEqual(datos["results"][0]["sesiones"], {"completadas": 0, "total": 6})
+        for _ in range(4):
+            crear()
+        con_cinco, datos = self._num_consultas("/api/v1/ventas/")
+        self.assertEqual(datos["count"], 5)
+        self.assertEqual(con_una, con_cinco)
+
+    # ── M5-20: el listado trae el nombre de la sede ────────────────────────
+    def test_m520_listado_trae_sede_nombre(self):
+        self._cotizacion()
+        fila = self.client.get("/api/v1/cotizaciones/").json()["results"][0]
+        self.assertEqual(fila["sede_nombre"], self.sede.nombre)
+
+    # ── M5-25: vincular un interesado a un paciente que ya existe ──────────
+    def test_m525_vincular_interesado_a_paciente_existente(self):
+        from apps.seguimiento.models import Oportunidad
+
+        interesado = Oportunidad.objects.create(
+            clinica=self.clinica, contacto_nombre="Juana", contacto_telefono="3110000000",
+            proximo_contacto=timezone.localdate(),
+        )
+        url = f"/api/v1/seguimiento/oportunidades/{interesado.id}/vincular_paciente/"
+        self.assertEqual(self.client.post(url, {"paciente": "no-es-uuid"}, format="json").status_code, 400)
+
+        response = self.client.post(url, {"paciente": str(self.paciente.id)}, format="json")
+        self.assertEqual(response.status_code, 200, response.content)
+        interesado.refresh_from_db()
+        self.assertEqual(interesado.paciente_id, self.paciente.id)
+
+        # Si el paciente ya tiene su propio seguimiento abierto, no se duplica.
+        otro = Oportunidad.objects.create(
+            clinica=self.clinica, contacto_nombre="Otra", contacto_telefono="3120000000",
+            proximo_contacto=timezone.localdate(),
+        )
+        response = self.client.post(
+            f"/api/v1/seguimiento/oportunidades/{otro.id}/vincular_paciente/",
+            {"paciente": str(self.paciente.id)}, format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "OPORTUNIDAD_ABIERTA")
+        self.assertEqual(response.json()["oportunidad_id"], str(interesado.id))
+
+    # ── M5-28: al editar una oportunidad se valida la sede del usuario ─────
+    def test_m528_no_mueve_una_oportunidad_a_una_sede_ajena(self):
+        from apps.seguimiento.models import Oportunidad
+
+        sede_b = Sede.objects.create(
+            clinica=self.clinica, nombre="Norte", ciudad="Bogota",
+            direccion="Calle 20", telefono="3000000001", horario={},
+        )
+        usuario = self._usuario_con_rol(
+            ["seguimiento.oportunidades.ver", "seguimiento.oportunidades.gestionar"], sedes=[self.sede],
+        )
+        oportunidad = Oportunidad.objects.create(
+            clinica=self.clinica, sede=self.sede, contacto_nombre="Juana", responsable=usuario,
+            proximo_contacto=timezone.localdate(),
+        )
+        self.client.force_authenticate(usuario)
+        response = self.client.patch(
+            f"/api/v1/seguimiento/oportunidades/{oportunidad.id}/", {"sede": str(sede_b.id)}, format="json",
+        )
+        self.assertEqual(response.status_code, 400, response.content)
+        oportunidad.refresh_from_db()
+        self.assertEqual(oportunidad.sede_id, self.sede.id)
+
+    # ── M5-29: "solo lo suyo" tampoco cambia la cotización de otro ─────────
+    def test_m529_profesional_limitado_no_cambia_cotizacion_ajena(self):
+        profesional = self._usuario_con_rol(["cotizaciones.ver", "cotizaciones.gestionar"], es_profesional=True)
+        ajena = self._cotizacion()
+        propia = self._cotizacion(profesional=profesional)
+        self.client.force_authenticate(profesional)
+
+        # La abre por id (paciente, cartera…), pero no la cambia.
+        self.assertEqual(self.client.get(f"/api/v1/cotizaciones/{ajena.id}/").status_code, 200)
+        for metodo, sufijo, datos in (
+            ("patch", "", {"notas": "x"}),
+            ("post", "cambiar_estado/", {"estado": "descartada"}),
+            ("post", "renovar/", {}),
+            ("delete", "", None),
+        ):
+            response = getattr(self.client, metodo)(f"/api/v1/cotizaciones/{ajena.id}/{sufijo}", datos, format="json")
+            self.assertEqual(response.status_code, 403, (metodo, sufijo, response.content))
+        ajena.refresh_from_db()
+        self.assertEqual(ajena.estado, Cotizacion.Estado.BORRADOR)
+        self.assertTrue(ajena.activo)
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{propia.id}/cambiar_estado/", {"estado": "descartada"}, format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+    # ── M5-30: PDF en pesos y migradas fuera de "Vendidas" ─────────────────
+    def test_m530_pdf_con_pesos_como_en_la_interfaz(self):
+        from apps.cotizaciones.pdf import build_cotizacion_pdf_context
+
+        contexto = build_cotizacion_pdf_context(self._cotizacion())
+        self.assertEqual(contexto["total"], "$1.500.000")
+
+    def test_m530_vendidas_excluye_migradas_como_ventas(self):
+        venta = self._cotizacion(estado=Cotizacion.Estado.ACEPTADA, aceptada_en=timezone.now())
+        migrada = self._cotizacion(estado=Cotizacion.Estado.ACEPTADA, aceptada_en=timezone.now(), es_migracion=True)
+
+        vendidas = {f["id"] for f in self.client.get("/api/v1/cotizaciones/?estado_comercial=aceptada").json()["results"]}
+        ventas = {f["id"] for f in self.client.get("/api/v1/ventas/").json()["results"]}
+        self.assertEqual(vendidas, {str(venta.id)})
+        self.assertEqual(vendidas, ventas)
+        # En la ficha del paciente sí aparece: sus sesiones se agendan y su saldo se cobra.
+        url = f"/api/v1/cotizaciones/?estado=aceptada&paciente={self.paciente.id}"
+        self.assertIn(str(migrada.id), {f["id"] for f in self.client.get(url).json()["results"]})

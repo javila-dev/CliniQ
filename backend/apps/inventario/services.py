@@ -1,11 +1,16 @@
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from rest_framework.exceptions import ValidationError
 
 from apps.inventario.models import Insumo, MovimientoInventario, StockInsumoSede
 
 
 def get_or_crear_stock(insumo: Insumo, sede) -> StockInsumoSede:
-    stock, _ = StockInsumoSede.objects.select_for_update().get_or_create(insumo=insumo, sede=sede)
+    # Si otro proceso crea la fila al mismo tiempo, se lee la suya (M7-22).
+    try:
+        with transaction.atomic():
+            stock, _ = StockInsumoSede.objects.select_for_update().get_or_create(insumo=insumo, sede=sede)
+    except IntegrityError:
+        stock = StockInsumoSede.objects.select_for_update().get(insumo=insumo, sede=sede)
     return stock
 
 

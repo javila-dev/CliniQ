@@ -14,6 +14,19 @@ export interface CargaMasivaResultado {
   errores: CargaMasivaError[]
 }
 
+export interface PosibleDuplicado {
+  id: string
+  nombre_completo: string
+  coincide_telefono: boolean
+  coincide_email: boolean
+}
+
+export interface ResumenPacientes {
+  total: number
+  activos: number
+  inactivos: number
+}
+
 export interface PacientesFilter {
   search?: string
   activo?: boolean
@@ -39,7 +52,7 @@ export const pacientesApi = {
     return res.data
   },
 
-  update: async (id: string, data: Partial<CreatePacienteRequest>): Promise<Paciente> => {
+  update: async (id: string, data: Partial<CreatePacienteRequest> & { activo?: boolean }): Promise<Paciente> => {
     const res = await apiClient.patch<Paciente>(`/pacientes/${id}/`, data)
     return res.data
   },
@@ -60,6 +73,17 @@ export const pacientesApi = {
   buscar: async (q: string): Promise<BusquedaPaciente[]> => {
     if (q.length < 3) return []
     const res = await apiClient.get<BusquedaPaciente[]>('/pacientes/buscar/', { params: { q } })
+    return res.data
+  },
+
+  /** Pacientes con el mismo teléfono o correo: aviso no bloqueante (M2-20). */
+  posiblesDuplicados: async (params: { telefono?: string; email?: string; excluir?: string }): Promise<PosibleDuplicado[]> => {
+    const res = await apiClient.get<PosibleDuplicado[]>('/pacientes/posibles_duplicados/', { params })
+    return res.data
+  },
+
+  resumen: async (): Promise<ResumenPacientes> => {
+    const res = await apiClient.get<ResumenPacientes>('/pacientes/resumen/')
     return res.data
   },
 

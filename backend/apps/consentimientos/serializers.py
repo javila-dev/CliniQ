@@ -121,11 +121,16 @@ class GenerarConsentimientoSerializer(serializers.Serializer):
         if bool(cita_id) == bool(cotizacion_id):
             raise serializers.ValidationError("Debes indicar exactamente uno: cita_id o cotizacion_id.")
 
-        plantilla = PlantillaConsentimiento.objects.select_related("clinica", "servicio").get(id=attrs["plantilla_id"])
+        # Un id inexistente responde 400, no 500 (M4-24).
+        plantilla = PlantillaConsentimiento.objects.select_related("clinica", "servicio").filter(id=attrs["plantilla_id"]).first()
+        if plantilla is None:
+            raise serializers.ValidationError({"plantilla_id": "La plantilla no existe."})
         request = self.context["request"]
 
         if cita_id:
-            cita = Cita.objects.select_related("paciente", "sede", "servicio", "profesional").get(id=cita_id)
+            cita = Cita.objects.select_related("paciente", "sede", "servicio", "profesional").filter(id=cita_id).first()
+            if cita is None:
+                raise serializers.ValidationError({"cita_id": "La cita no existe."})
             if request.user.rol != "superadmin" and cita.sede.clinica_id != request.user.clinica_id:
                 raise serializers.ValidationError({"cita_id": "La cita no pertenece a tu clinica."})
             if plantilla.clinica_id != cita.sede.clinica_id:
@@ -137,7 +142,9 @@ class GenerarConsentimientoSerializer(serializers.Serializer):
             attrs["cita"] = cita
             attrs["cotizacion"] = None
         else:
-            cotizacion = Cotizacion.objects.select_related("paciente", "clinica").get(id=cotizacion_id)
+            cotizacion = Cotizacion.objects.select_related("paciente", "clinica").filter(id=cotizacion_id).first()
+            if cotizacion is None:
+                raise serializers.ValidationError({"cotizacion_id": "La cotización no existe."})
             if request.user.rol != "superadmin" and cotizacion.clinica_id != request.user.clinica_id:
                 raise serializers.ValidationError({"cotizacion_id": "La cotizacion no pertenece a tu clinica."})
             if plantilla.clinica_id != cotizacion.clinica_id:

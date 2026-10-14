@@ -1,6 +1,9 @@
 import asyncio
+import re
+import unicodedata
+import uuid
 
-from django.db.models import Q, Value
+from django.db.models import CharField, Count, Func, Q, Value
 from django.db.models.functions import Concat
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -26,10 +29,30 @@ from apps.historia_clinica.serializers import ConsentimientoInformadoSerializer
 from apps.protocolos.models import ConsentimientoPaciente
 from apps.protocolos.serializers import ConsentimientoPacienteSerializer
 from apps.users.authorization import atiende_solo_lo_propio
-from apps.users.permissions import HasClinicamente, RequirePermission, get_clinica_activa
+from apps.users.permissions import HasClinicamente, RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
 MAX_PDF_CONSENTIMIENTO = 20 * 1024 * 1024
+
+
+class Unaccent(Func):
+    """unaccent() de Postgres (extensión creada en la migración 0010)."""
+
+    function = "unaccent"
+    output_field = CharField()
+
+
+def sin_tildes(texto: str) -> str:
+    """Mismo criterio que unaccent(): "Gómez" -> "Gomez", "Muñoz" -> "Munoz"."""
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+
+
+def es_uuid(valor) -> bool:
+    try:
+        uuid.UUID(str(valor))
+    except (TypeError, ValueError):
+        return False
+    return True
 
 
 def validar_archivo_pdf(archivo):
@@ -69,6 +92,11 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             permission_classes = (RequirePermission("historia.consentimientos.gestionar"),)
         elif self.action == "verificar_consentimientos":
             permission_classes = (RequirePermission("pacientes.ver"),)
+        elif self.action == "posibles_duplicados":
+            # Lo consulta el formulario de crear/editar paciente.
+            permission_classes = (
+                RequireAnyPermission("pacientes.crear", "pacientes.editar", "pacientes.ver"),
+            )
         elif self.action == "enrollment":
             permission_classes = (RequirePermission("pacientes.foto_control.cambiar"),)
         elif self.action == "eliminar_foto_control":
@@ -142,18 +170,77 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         if len(query) < 3:
             return Response([], status=status.HTTP_200_OK)
 
-        # nombre_completo_busqueda cubre "nombre apellido" escrito junto, que
-        # nombres/apellidos por separado no encuentran (ninguno lo contiene entero).
-        queryset = self.get_queryset().annotate(
-            nombre_completo_busqueda=Concat("nombres", Value(" "), "apellidos"),
-        ).filter(
-            Q(nombre_completo_busqueda__icontains=query)
-            | Q(numero_documento__icontains=query)
-        )[:20]
+        queryset = self.get_queryset()
+        compacto = re.sub(r"[\s+()\-.]", "", query)
+        if compacto.isdigit():
+            # Documento o teléfono ("300 123 4567", "+57 300..."): antes el
+            # teléfono no se buscaba (M2-21). Los 10 últimos dígitos encuentran
+            # también los teléfonos guardados sin indicativo.
+            queryset = queryset.filter(
+                Q(numero_documento__contains=compacto)
+                | Q(telefono__contains=compacto)
+                | Q(telefono__contains=compacto[-10:])
+            )
+        else:
+            # Palabra por palabra y sin tildes: "Gómez Ana" o "Gomez" no
+            # encontraban a "Ana Gómez" (M2-21). Cada palabra debe aparecer en
+            # nombres, apellidos, documento o teléfono.
+            queryset = queryset.annotate(
+                texto_busqueda=Unaccent(
+                    Concat("nombres", Value(" "), "apellidos", Value(" "), "numero_documento", Value(" "), "telefono")
+                ),
+            )
+            for palabra in query.split():
+                queryset = queryset.filter(texto_busqueda__icontains=sin_tildes(palabra))
+        queryset = queryset[:20]
         serializer = BusquedaPacienteSerializer(
             queryset, many=True, context=self.get_serializer_context()
         )
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="posibles_duplicados", pagination_class=None)
+    def posibles_duplicados(self, request):
+        """Pacientes con el mismo teléfono o correo. Es solo un aviso: los
+        familiares comparten teléfono y el duplicado real es el documento (M2-20)."""
+        digitos = re.sub(r"\D", "", request.query_params.get("telefono", ""))
+        email = request.query_params.get("email", "").strip()
+        condicion = Q()
+        if len(digitos) >= 7:
+            # Los 10 últimos dígitos: algunos teléfonos quedaron sin +57.
+            condicion |= Q(telefono__endswith=digitos[-10:])
+        if "@" in email:
+            condicion |= Q(email__iexact=email)
+        if not condicion:
+            return Response([], status=status.HTTP_200_OK)
+
+        queryset = self.get_queryset().filter(condicion)
+        excluir = request.query_params.get("excluir")
+        if excluir and es_uuid(excluir):
+            queryset = queryset.exclude(pk=excluir)
+        payload = [
+            {
+                "id": str(p.id),
+                "nombre_completo": p.nombre_completo,
+                "coincide_telefono": len(digitos) >= 7 and p.telefono.endswith(digitos[-10:]),
+                "coincide_email": "@" in email and (p.email or "").lower() == email.lower(),
+            }
+            for p in queryset[:5]
+        ]
+        return Response(payload, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=["get"], url_path="resumen", pagination_class=None)
+    def resumen(self, request):
+        """Totales de la clínica para las tarjetas del listado: antes Activos e
+        Inactivos mostraban siempre "—" (M2-26)."""
+        # Sin los filtros de get_queryset (activo, sexo...): son totales de la clínica.
+        clinica = get_clinica_activa(request)
+        totales = Paciente.objects.filter(clinica=clinica).aggregate(
+            total=Count("id"),
+            activos=Count("id", filter=Q(activo=True)),
+        )
+        total = totales["total"] or 0
+        activos = totales["activos"] or 0
+        return Response({"total": total, "activos": activos, "inactivos": total - activos})
 
     @action(detail=True, methods=["get", "put", "patch"], url_path="antecedentes")
     def antecedentes(self, request, pk=None):
@@ -247,7 +334,10 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         tratamiento_id = request.query_params.get("tratamiento")
         if not tratamiento_id:
             raise ValidationError({"tratamiento": "Este query param es obligatorio."})
-        tratamiento = get_object_or_404(TratamientoCatalogo, id=tratamiento_id)
+        # Antes no se filtraba por clínica y un id mal formado daba 500 (M2-23).
+        if not es_uuid(tratamiento_id):
+            raise ValidationError({"tratamiento": "El tratamiento no es válido."})
+        tratamiento = get_object_or_404(TratamientoCatalogo, id=tratamiento_id, clinica=paciente.clinica)
         payload = []
         for tipo in tratamiento.tipos_sesion.filter(activo=True).order_by("orden"):
             for tp in tipo.procedimientos.filter(activo=True).select_related("procedimiento"):

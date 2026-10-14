@@ -433,6 +433,11 @@ class CuotaCarteraViewSet(GenericViewSet):
                 modificado_por=request.user,
             ))
             cuota.fecha_esperada = datos["fecha_vencimiento"]
+        if "monto" in datos and Decimal(datos["monto"]) < Decimal(cuota.valor_pagado or 0):
+            # La cuota no puede valer menos de lo que ya se abonó (M6-26).
+            raise ValidationError({
+                "monto": [f"No puede ser menor a lo ya abonado (${Decimal(cuota.valor_pagado):,.0f}).".replace(",", ".")],
+            })
         if "monto" in datos:
             logs.append(CuotaCarteraLog(
                 cuota=cuota,
@@ -448,6 +453,14 @@ class CuotaCarteraViewSet(GenericViewSet):
         if "monto" in datos:
             update_fields.append("valor_esperado")
         cuota.save(update_fields=update_fields)
+        if "monto" in datos:
+            # El total de la cartera es la suma de sus cuotas vigentes: si no se
+            # recalcula, el saldo queda desfasado del plan (M6-26).
+            cartera = cuota.cartera
+            cartera.total = (
+                cartera.cuotas.filter(anulada=False).aggregate(t=Sum("valor_esperado"))["t"] or Decimal("0")
+            )
+            cartera.save(update_fields=["total", "updated_at"])
         CuotaCarteraLog.objects.bulk_create(logs)
         registrar_accion(request, "cuota.modificar_plazo", cuota, {k: str(v) for k, v in datos.items()})
         return Response(CuotaCarteraSerializer(cuota).data, status=status.HTTP_200_OK)

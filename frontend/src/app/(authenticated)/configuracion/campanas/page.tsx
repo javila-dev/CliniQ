@@ -842,9 +842,9 @@ export default function CampanasPage() {
     mutationFn: (id: string) => campanasApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['campanas'] })
-      toast.success('Promoción eliminada')
+      toast.success('Promoción desactivada', 'Puedes reactivarla desde Editar.')
     },
-    onError: () => toast.error('No se pudo eliminar la promoción'),
+    onError: (err) => toast.error('No se pudo desactivar la promoción', mensajeDeError(err)),
   })
 
   function openCreate() {
@@ -1009,18 +1009,23 @@ export default function CampanasPage() {
                               <Pencil className="h-3.5 w-3.5 mr-2" />
                               Editar
                             </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem
-                              className="text-destructive focus:text-destructive"
-                              onClick={() => {
-                                if (confirm(`¿Eliminar la promoción "${c.nombre}"?`)) {
-                                  deleteMutation.mutate(c.id)
-                                }
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5 mr-2" />
-                              Eliminar
-                            </DropdownMenuItem>
+                            {/* El backend la desactiva (no la borra): conserva su historial de ventas (M1-28). */}
+                            {c.activo && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  className="text-destructive focus:text-destructive"
+                                  onClick={() => {
+                                    if (confirm(`¿Desactivar la promoción "${c.nombre}"? Deja de aplicarse en cotizaciones nuevas.`)) {
+                                      deleteMutation.mutate(c.id)
+                                    }
+                                  }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5 mr-2" />
+                                  Desactivar
+                                </DropdownMenuItem>
+                              </>
+                            )}
                           </DropdownMenuContent>
                         </DropdownMenu>
                       </td>

@@ -643,14 +643,24 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
                 raise ValidationError({"clinica": "No se pudo determinar la clinica."})
             clinica = get_object_or_404(Clinica, pk=clinica_id)
         if clinica and clinica.pk:
-            c = Clinica.objects.select_related("plan").filter(pk=clinica.pk).first()
-            if c and c.plan and c.plan.max_sedes > 0:
-                total_activas = c.sedes.filter(activo=True).count()
-                if total_activas >= c.plan.max_sedes:
-                    raise ValidationError(
-                        f"La clinica ha alcanzado el limite de {c.plan.max_sedes} sedes de su plan '{c.plan.nombre}'."
-                    )
+            self._validar_limite_de_sedes(clinica.pk)
         serializer.save(clinica=clinica)
+
+    def perform_update(self, serializer):
+        # Reactivar una sede también ocupa cupo del plan (M1-27).
+        if serializer.validated_data.get("activo") is True and not serializer.instance.activo:
+            self._validar_limite_de_sedes(serializer.instance.clinica_id)
+        serializer.save()
+
+    @staticmethod
+    def _validar_limite_de_sedes(clinica_id):
+        c = Clinica.objects.select_related("plan").filter(pk=clinica_id).first()
+        if c and c.plan and c.plan.max_sedes > 0:
+            total_activas = c.sedes.filter(activo=True).count()
+            if total_activas >= c.plan.max_sedes:
+                raise ValidationError(
+                    f"La clínica alcanzó el límite de {c.plan.max_sedes} sedes de su plan '{c.plan.nombre}'."
+                )
 
     def perform_destroy(self, instance):
         if sede_tiene_citas(instance):
@@ -1023,7 +1033,8 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         )
         return Response(ServicioConsentimientoSerializer(relacion).data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
-    @action(detail=True, methods=["delete"], url_path=r"consentimientos/(?P<template_id>[^/.]+)")
+    # Solo un UUID: con `[^/.]+` esta ruta capturaba "consentimientos/reordenar" (M1-31).
+    @action(detail=True, methods=["delete"], url_path=r"consentimientos/(?P<template_id>[0-9a-fA-F-]{36})")
     def eliminar_consentimiento(self, request, pk=None, template_id=None):
         servicio = self.get_object()
         parsed_template_id = self._parse_template_uuid(template_id)
@@ -1076,7 +1087,8 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         serializer.save()
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["patch", "delete"], url_path=r"pasos/(?P<paso_id>[^/.]+)")
+    # Solo un UUID: con `[^/.]+` esta ruta capturaba "pasos/reordenar" (M1-31).
+    @action(detail=True, methods=["patch", "delete"], url_path=r"pasos/(?P<paso_id>[0-9a-fA-F-]{36})")
     def paso_detalle(self, request, pk=None, paso_id=None):
         servicio = self.get_object()
         paso = get_object_or_404(PasoProtocolo.objects.filter(servicio=servicio), id=paso_id)
@@ -1273,7 +1285,7 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
     ).all().order_by("nombre")
 
     def get_permissions(self):
-        if self.action in {"create", "update", "partial_update", "destroy", "agregar_tipo", "editar_tipo", "eliminar_tipo"}:
+        if self.action in {"create", "update", "partial_update", "destroy", "agregar_tipo", "tipo_detalle"}:
             permission_classes = (RequirePermission("servicios.gestionar"),)
         else:
             # Catálogo de referencia para los selectores de agenda, cotizaciones y
@@ -1389,22 +1401,20 @@ class TratamientoCatalogoViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSe
         tipo = serializer.save(tratamiento=tratamiento)
         return Response(TipoSesionSerializer(tipo).data, status=status.HTTP_201_CREATED)
 
-    @action(detail=True, methods=["patch"], url_path=r"tipos/(?P<tipo_id>[^/.]+)")
-    def editar_tipo(self, request, pk=None, tipo_id=None):
+    # PATCH edita y DELETE desactiva. Eran dos acciones con la misma ruta y el
+    # DELETE caía en la de editar (M1-31).
+    @action(detail=True, methods=["patch", "delete"], url_path=r"tipos/(?P<tipo_id>[^/.]+)")
+    def tipo_detalle(self, request, pk=None, tipo_id=None):
         tratamiento = self.get_object()
         tipo = get_object_or_404(TipoSesion.objects.filter(tratamiento=tratamiento, activo=True), id=tipo_id)
+        if request.method == "DELETE":
+            tipo.activo = False
+            tipo.save(update_fields=["activo", "updated_at"])
+            return Response(status=status.HTTP_204_NO_CONTENT)
         serializer = TipoSesionSerializer(tipo, data=request.data, partial=True, context={"request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(TipoSesionSerializer(tipo).data, status=status.HTTP_200_OK)
-
-    @action(detail=True, methods=["delete"], url_path=r"tipos/(?P<tipo_id>[^/.]+)")
-    def eliminar_tipo(self, request, pk=None, tipo_id=None):
-        tratamiento = self.get_object()
-        tipo = get_object_or_404(TipoSesion.objects.filter(tratamiento=tratamiento, activo=True), id=tipo_id)
-        tipo.activo = False
-        tipo.save(update_fields=["activo", "updated_at"])
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 # ─── Campañas ─────────────────────────────────────────────────────────────────

@@ -16,6 +16,7 @@ import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
 import type { CreatePacienteRequest } from '@/types/pacientes'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { hasPermission, PERM } from '@/lib/permissions'
+import { mensajeDeError } from '@/lib/errores'
 
 function NuevoPacienteContent() {
   const router = useRouter()
@@ -153,7 +154,9 @@ function EnrollmentFotoDialog({
         setEnrollWarnings(warns)
         setErrorMsg(null)
       } else {
-        setErrorMsg(e?.response?.data?.error ?? 'La foto no pudo procesarse. Intenta con otra.')
+        // 503 (servicio facial caído) u otro error que no es de la foto: el
+        // texto técnico no le sirve al usuario (M2-25).
+        setErrorMsg(mensajeDeError(err, 'La foto no pudo procesarse. Intenta con otra.'))
         setEnrollErrors([])
         setEnrollWarnings([])
       }
@@ -230,9 +233,21 @@ function EnrollmentFotoDialog({
               <p className="text-xs text-red-700">{errorMsg}</p>
             </div>
           )}
+          {obligatoria && errorMsg && (
+            <p className="text-xs text-muted-foreground">
+              El paciente ya quedó registrado. Si el problema continúa, puedes tomar la foto de control más tarde desde su ficha.
+            </p>
+          )}
           <Button variant="outline" className="w-full gap-2" onClick={() => setState('camara')}>
             <Camera className="h-4 w-4" />Reintentar
           </Button>
+          {obligatoria && errorMsg && (
+            // Con la foto obligatoria y el servicio caído, el diálogo no se podía
+            // cerrar: el usuario quedaba atrapado (M2-25).
+            <Button variant="ghost" size="sm" className="w-full text-muted-foreground gap-1.5" onClick={onDone}>
+              <X className="h-3.5 w-3.5" />Continuar sin foto por ahora
+            </Button>
+          )}
           {!obligatoria && (
             <Button variant="ghost" size="sm" className="w-full text-muted-foreground gap-1.5" onClick={onDone}>
               <X className="h-3.5 w-3.5" />Omitir por ahora

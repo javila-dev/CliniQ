@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, Check, Loader2, RotateCcw } from 'lucide-react'
@@ -11,6 +12,7 @@ import { hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 
 const QUERY_KEY = ['setup-checklist']
 
@@ -39,9 +41,15 @@ export default function PrepararClinicaPage() {
     staleTime: 0,
   })
 
+  // Permite corregir la respuesta de "¿Qué vendes?" si se eligió mal (M1-29).
+  const [cambiandoModelo, setCambiandoModelo] = useState(false)
+
   const guardar = useMutation({
     mutationFn: (cambios: GuardarPreparacionRequest) => clinicasApi.guardarPreparacion(cambios),
-    onSuccess: (nuevo) => qc.setQueryData<SetupChecklist>(QUERY_KEY, nuevo),
+    onSuccess: (nuevo) => {
+      qc.setQueryData<SetupChecklist>(QUERY_KEY, nuevo)
+      setCambiandoModelo(false)
+    },
   })
 
   const yoAtiendo = useMutation({
@@ -118,7 +126,16 @@ export default function PrepararClinicaPage() {
           </div>
 
           {/* Qué vende la clínica */}
-          {!data.modelo && (
+          {data.modelo && !cambiandoModelo && (
+            <p className="text-xs text-gray-500">
+              Vendes: <span className="font-medium text-gray-700">{MODELOS.find((m) => m.value === data.modelo)?.titulo ?? data.modelo}</span>
+              {' · '}
+              <button type="button" className="text-primary hover:underline" onClick={() => setCambiandoModelo(true)}>
+                Cambiar
+              </button>
+            </p>
+          )}
+          {(!data.modelo || cambiandoModelo) && (
             <div className="rounded-xl border bg-white p-5 space-y-3">
               <div>
                 <p className="text-sm font-semibold text-gray-900">¿Qué vendes en tu clínica?</p>
@@ -131,7 +148,10 @@ export default function PrepararClinicaPage() {
                     type="button"
                     disabled={guardar.isPending}
                     onClick={() => guardar.mutate({ modelo: modelo.value })}
-                    className="rounded-lg border p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
+                    className={cn(
+                      'rounded-lg border p-3 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60',
+                      data.modelo === modelo.value && 'border-primary/50 bg-primary/5',
+                    )}
                   >
                     <p className="text-sm font-medium text-gray-900">{modelo.titulo}</p>
                     <p className="text-xs text-gray-400 mt-0.5 leading-snug">{modelo.descripcion}</p>
@@ -158,7 +178,7 @@ export default function PrepararClinicaPage() {
 
           {(guardar.isError || yoAtiendo.isError) && (
             <p className="text-sm text-red-500">
-              {(yoAtiendo.error as any)?.response?.data?.error ?? 'No se pudo guardar el cambio. Intenta de nuevo.'}
+              {mensajeDeError(yoAtiendo.error ?? guardar.error, 'No se pudo guardar el cambio. Intenta de nuevo.')}
             </p>
           )}
 

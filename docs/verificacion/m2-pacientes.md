@@ -129,17 +129,17 @@
 - **Qué ve el usuario:** "Registrarme" no muestra spinner y permite el doble envío; el segundo da 500.
 - **Arreglo:** pasar `isLoading` al formulario.
 
-**M2-19 · Bajo · errores** · confirmado / probable
+**✅ M2-19 · Bajo · errores** · confirmado / probable
 - **Dónde:** `backend/apps/pacientes/serializers.py:151,232-233`; `nuevo/page.tsx:56-59`; `editar/page.tsx:51-55`
 - **Causa:** el chequeo de duplicados usa `request.user.clinica`, que es null para el superadmin. Una carrera termina en `IntegrityError` 500, y con un 500 en HTML el mensaje que se muestra es "<".
 - **Arreglo:** usar `get_clinica_activa`, capturar `IntegrityError` y mostrar un mensaje genérico.
 
-**M2-20 · Bajo · previsible** · confirmado
+**✅ M2-20 · Bajo · previsible** · confirmado
 - **Dónde:** `serializers.py:238-249`
 - **Qué ve el usuario:** Recepción puede crear dos fichas con el mismo teléfono o correo sin ningún aviso.
 - **Arreglo:** mostrar un aviso no bloqueante de "posible duplicado".
 
-**M2-21 · Bajo · previsible** · confirmado
+**✅ M2-21 · Bajo · previsible** · confirmado
 - **Dónde:** `views.py:117-134`; `components/pacientes/PacienteSearchInput.tsx:34-38,100`
 - **Qué ve el usuario:** el buscador rápido no encuentra:
   - por teléfono;
@@ -149,24 +149,24 @@
   Además, al buscar por documento y luego crear, el número queda precargado en "Nombres".
 - **Arreglo:** buscar por teléfono, usar `unaccent`, buscar por palabras sueltas y manejar `isError`.
 
-**M2-22 · Bajo · previsible** · probable
+**✅ M2-22 · Bajo · previsible** · probable
 - **Dónde:** `backend/apps/pacientes/carga_masiva.py:69,73`
 - **Qué ve el usuario:** los teléfonos cargados por Excel quedan sin `+57`, y un documento como `1020304050.0` falla.
 - **Arreglo:** normalizar el teléfono y el documento.
 
-**M2-23 · Bajo · permisos** · confirmado
+**✅ M2-23 · Bajo · permisos** · confirmado
 - **Dónde:** `views.py:225`
 - **Causa:** `verificar_consentimientos` no filtra el tratamiento por clínica, y con un UUID inválido responde 500.
 
-**M2-24 · Bajo · previsible** · probable
+**✅ M2-24 · Bajo · previsible** · probable
 - **Dónde:** `components/atenciones/VerificacionFacialContent.tsx:108-110`
 - **Qué ve el usuario:** si falla la verificación posterior a la foto, el flujo se cierra sin mensaje.
 
-**M2-25 · Bajo · previsible** · probable
+**✅ M2-25 · Bajo · previsible** · probable
 - **Dónde:** `nuevo/page.tsx:110-126,241`
 - **Qué ve el usuario:** con la foto de control obligatoria y el servicio facial caído (503), queda atrapado en un diálogo que no se puede cerrar.
 
-**M2-26 · Bajo · faltante** · confirmado
+**✅ M2-26 · Bajo · faltante** · confirmado
 - **Dónde:** `pacientes/page.tsx:169,316-325`; `[id]/page.tsx:79-82,232-234,622-623,765`
 - **Qué ve el usuario:**
   - las tarjetas Activos e Inactivos siempre muestran "—";

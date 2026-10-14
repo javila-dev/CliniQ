@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import models, transaction
+from django.db import IntegrityError, models, transaction
 
 from apps.core.models import BaseModel
 
@@ -66,7 +66,8 @@ class OrdenCompra(BaseModel):
         default=Estado.BORRADOR,
     )
     notas = models.TextField(blank=True)
-    numero_factura_proveedor = models.CharField(max_length=50)
+    # Opcional en el borrador; se exige al recibir la compra (M7-21).
+    numero_factura_proveedor = models.CharField(max_length=50, blank=True, default="")
     fecha_factura_proveedor = models.DateField(null=True, blank=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -93,9 +94,20 @@ class OrdenCompra(BaseModel):
         return self.proveedor.clinica_id
 
     def save(self, *args, **kwargs):
-        if not self.numero:
+        if self.numero:
+            return super().save(*args, **kwargs)
+        # Dos órdenes creadas a la vez pueden calcular el mismo consecutivo (el
+        # bloqueo de la última fila no impide insertar): se reintenta con el
+        # siguiente en vez de responder 500 (M7-22).
+        for intento in range(5):
             self.numero = self._generar_numero()
-        super().save(*args, **kwargs)
+            try:
+                with transaction.atomic():
+                    return super().save(*args, **kwargs)
+            except IntegrityError:
+                self.numero = ""
+                if intento == 4:
+                    raise
 
     def _generar_numero(self) -> str:
         year = self.fecha.year

@@ -321,6 +321,16 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
         except Exception:
             return None
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # El token de firma de asistencia permite firmar a nombre del paciente:
+        # solo va en el detalle (lo usa el asistente de llegada), no en el
+        # listado de la agenda (M3-30).
+        view = self.context.get("view")
+        if getattr(view, "action", None) == "list":
+            data.pop("firma_asistencia_signing_token", None)
+        return data
+
     def get_cobro_estado(self, obj):
         # El asistente de llegada marca "Pago" según el estado, no según que
         # exista el cobro: uno creado cuyo pago falló sigue pendiente (M6-13).

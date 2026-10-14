@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 import openpyxl
@@ -29,6 +30,42 @@ def _parse_fecha(valor):
         except ValueError:
             continue
     return None, f"fecha '{texto}' invalida, usa el formato DD/MM/AAAA"
+
+
+def _texto_celda(valor) -> str:
+    """Excel entrega los números como float: 1020304050 llega 1020304050.0 (M2-22)."""
+    if valor is None:
+        return ""
+    if isinstance(valor, float) and valor.is_integer():
+        return str(int(valor))
+    if isinstance(valor, int):
+        return str(valor)
+    texto = str(valor).strip()
+    if re.fullmatch(r"\d+\.0+", texto):
+        return texto.split(".")[0]
+    return texto
+
+
+def normalizar_documento(valor, tipo_documento: str) -> str:
+    texto = re.sub(r"\s+", "", _texto_celda(valor))
+    if tipo_documento in {"CC", "TI"}:
+        # "1.020.304.050" o "1,020,304,050": separadores de miles de Excel.
+        texto = texto.replace(".", "").replace(",", "")
+    return texto
+
+
+def normalizar_telefono(valor) -> str:
+    """Mismo formato que el formulario de pacientes (+ indicativo + número):
+    sin el +57 los envíos por WhatsApp no salían (M2-22)."""
+    texto = _texto_celda(valor)
+    digitos = re.sub(r"\D", "", texto)
+    if not digitos:
+        return ""
+    if texto.startswith("+"):
+        return f"+{digitos}"
+    if len(digitos) == 12 and digitos.startswith("57"):
+        return f"+{digitos}"
+    return f"+57{digitos}"
 
 
 def procesar_carga_masiva_pacientes(archivo, *, clinica, context: dict) -> dict:
@@ -66,11 +103,11 @@ def procesar_carga_masiva_pacientes(archivo, *, clinica, context: dict) -> dict:
         ) = valores
 
         tipo_documento = str(tipo_documento_raw).strip().upper() if tipo_documento_raw else ""
-        numero_documento = str(numero_documento_raw).strip() if numero_documento_raw else ""
+        numero_documento = normalizar_documento(numero_documento_raw, tipo_documento)
         nombres = str(nombres_raw).strip() if nombres_raw else ""
         apellidos = str(apellidos_raw).strip() if apellidos_raw else ""
         sexo = str(sexo_raw).strip().upper() if sexo_raw else ""
-        telefono = str(telefono_raw).strip() if telefono_raw else ""
+        telefono = normalizar_telefono(telefono_raw)
         email = str(email_raw).strip() if email_raw else ""
 
         fila_errores = []

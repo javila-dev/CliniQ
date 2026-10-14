@@ -90,6 +90,8 @@ export default function VentasPage() {
   const [hasta, setHasta] = useState('')
   const [sede, setSede] = useState(TODAS)
   const [vendedor, setVendedor] = useState(TODAS)
+  // El backend ya filtraba ?con_mora=1; faltaba en la pantalla (M5-30).
+  const [pagos, setPagos] = useState<typeof TODAS | 'mora'>(TODAS)
   const [orden, setOrden] = useState<Orden>(ORDEN_INICIAL)
   const [page, setPage] = useState(1)
   const [abriendo, setAbriendo] = useState<string | null>(null)
@@ -111,6 +113,7 @@ export default function VentasPage() {
   if (hasta) params.aceptada_hasta = hasta
   if (sede !== TODAS) params.sede = sede
   if (vendedor !== TODAS) params.vendedor = vendedor
+  if (pagos === 'mora') params.con_mora = '1'
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['ventas', params],
@@ -118,7 +121,7 @@ export default function VentasPage() {
   })
 
   const total = data?.count ?? 0
-  const hayFiltros = Boolean(debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS)
+  const hayFiltros = Boolean(debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS || pagos !== TODAS)
 
   function conReinicio<T>(set: (v: T) => void) {
     return (v: T) => {
@@ -141,6 +144,7 @@ export default function VentasPage() {
     setHasta('')
     setSede(TODAS)
     setVendedor(TODAS)
+    setPagos(TODAS)
     setPage(1)
   }
 
@@ -251,6 +255,16 @@ export default function VentasPage() {
             </Select>
           </div>
         )}
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Pagos</label>
+          <Select value={pagos} onValueChange={(v) => conReinicio(setPagos)(v as typeof pagos)}>
+            <SelectTrigger className="w-36 h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODAS}>Todas</SelectItem>
+              <SelectItem value="mora">En mora</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
         {hayFiltros && (
           <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
             <X className="h-3.5 w-3.5 mr-1.5" />

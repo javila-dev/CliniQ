@@ -23,7 +23,7 @@ export function PacienteSearchInput({
   selected,
   onClear,
   onCreateNew,
-  placeholder = 'Buscar paciente por nombre o documento...',
+  placeholder = 'Buscar paciente por nombre, documento o teléfono...',
   className,
 }: PacienteSearchInputProps) {
   const [query, setQuery] = useState('')
@@ -31,11 +31,16 @@ export function PacienteSearchInput({
   const containerRef = useRef<HTMLDivElement>(null)
   const debouncedQuery = useDebounce(query, 350)
 
-  const { data: results, isFetching } = useQuery({
+  const { data: results, isFetching, isError, refetch } = useQuery({
     queryKey: ['pacientes', 'buscar', debouncedQuery],
     queryFn: () => pacientesApi.buscar(debouncedQuery),
     enabled: debouncedQuery.length >= 3,
   })
+
+  // Si buscó un documento o teléfono, ese número no es un nombre: antes quedaba
+  // precargado en "Nombres" al crear el paciente (M2-21).
+  const esNumero = /^[\d\s+().-]+$/.test(query.trim())
+  const nombreParaCrear = esNumero ? '' : query
 
   // Close on outside click
   useEffect(() => {
@@ -97,7 +102,16 @@ export function PacienteSearchInput({
               {isFetching && (
                 <p className="px-3 py-3 text-sm text-muted-foreground text-center">Buscando...</p>
               )}
-              {!isFetching && results?.length === 0 && (
+              {!isFetching && isError && (
+                // Antes un error se veía como "Sin resultados" (M2-21).
+                <div className="px-3 py-3 text-sm text-center">
+                  <p className="text-destructive">No se pudo buscar. Revisa tu conexión.</p>
+                  <button type="button" className="text-primary hover:underline text-xs mt-1" onClick={() => refetch()}>
+                    Reintentar
+                  </button>
+                </div>
+              )}
+              {!isFetching && !isError && results?.length === 0 && (
                 <p className="px-3 py-3 text-sm text-muted-foreground text-center">Sin resultados</p>
               )}
               {!isFetching && !!results?.length && (
@@ -129,12 +143,12 @@ export function PacienteSearchInput({
               type="button"
               className="w-full flex items-center gap-2.5 px-3 py-2.5 text-sm text-primary font-medium hover:bg-primary/5 border-t transition-colors"
               onClick={() => {
-                onCreateNew(query)
+                onCreateNew(nombreParaCrear || undefined)
                 setOpen(false)
               }}
             >
               <UserPlus className="h-4 w-4 shrink-0" />
-              Crear nuevo paciente{query.length >= 2 ? ` "${query}"` : ''}
+              Crear nuevo paciente{nombreParaCrear.length >= 2 ? ` "${nombreParaCrear}"` : ''}
             </button>
           )}
         </div>

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertCircle, CheckCircle2, Columns3, LayoutGrid, List, Plus, Search, UserPlus,
+  AlertCircle, CheckCircle2, Columns3, LayoutGrid, Link2, List, Loader2, Plus, Search, UserPlus,
 } from 'lucide-react'
 import { seguimientoApi } from '@/lib/api/seguimiento'
 import { pacientesApi } from '@/lib/api/pacientes'
@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
 import { NuevaCitaModal } from '@/components/agenda/NuevaCitaModal'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
+import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import {
   GestionDialog, NuevoInteresadoDialog, PerderDialog, PosponerDialog,
 } from '@/components/seguimiento/SeguimientoDialogs'
@@ -27,6 +28,7 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { toast } from '@/hooks/use-toast'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
+import { mensajeDeError } from '@/lib/errores'
 import { cn, formatFechaLocal } from '@/lib/utils'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
@@ -196,7 +198,9 @@ export default function SeguimientoPage() {
   const sedeParam = sede !== TODAS ? sede : undefined
 
   const [nuevoOpen, setNuevoOpen] = useState(false)
-  const [nuevoError, setNuevoError] = useState<string | null>(null)
+  // oportunidadId: "X ya está en seguimiento" trae la suya para abrirla (M5-26).
+  const [nuevoError, setNuevoError] = useState<{ mensaje: string; oportunidadId?: string } | null>(null)
+  const [abriendoExistente, setAbriendoExistente] = useState(false)
   const [gestion, setGestion] = useState<{ op: Oportunidad; canal: CanalGestion; resultado: ResultadoGestion | null } | null>(null)
   const [posponer, setPosponer] = useState<Oportunidad | null>(null)
   const [perder, setPerder] = useState<Oportunidad | null>(null)
@@ -235,21 +239,45 @@ export default function SeguimientoPage() {
       toast.success('Interesado registrado', op.paciente ? `Ya era paciente: quedó vinculado a ${op.nombre}. ${cuando}` : cuando)
     },
     onError: (err: unknown) => {
-      const data = (err as { response?: { data?: { error?: string } } })?.response?.data
-      setNuevoError(data?.error ?? 'No se pudo guardar. Revisa los datos.')
+      const data = (err as { response?: { data?: { oportunidad_id?: string } } })?.response?.data
+      setNuevoError({
+        mensaje: mensajeDeError(err, 'No se pudo guardar. Revisa los datos.'),
+        oportunidadId: data?.oportunidad_id,
+      })
     },
   })
+
+  // Abre el seguimiento que ya existe en lugar de duplicarlo (M5-26).
+  async function abrirExistente(id: string) {
+    setAbriendoExistente(true)
+    try {
+      const op = await seguimientoApi.obtener(id)
+      setNuevoOpen(false)
+      setNuevoError(null)
+      setGestion({ op, canal: 'llamada', resultado: null })
+    } catch (err) {
+      toast.error('No se pudo abrir el seguimiento', mensajeDeError(err))
+    } finally {
+      setAbriendoExistente(false)
+    }
+  }
   const registrar = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof seguimientoApi.registrarGestion>[1] }) =>
       seguimientoApi.registrarGestion(id, data),
-    onSuccess: (_res, { data }) => {
+    onSuccess: (op, { data }) => {
       refrescar()
       setGestion(null)
-      toast.success('Guardado', !data.proximo_contacto
-        ? 'Volverá a aparecer el día después de su cita (o mañana si aún no la tiene).'
-        : data.proximo_contacto > hoyIso()
-          ? `Volverá a aparecer en "Para hoy" el ${formatFechaLocal(data.proximo_contacto)}.`
-          : 'Sigue en "Para hoy".')
+      // La fecha la decide el backend si no se eligió una. "El día después de su
+      // cita" solo aplica a "Agendó" con cita; antes salía con cualquier resultado (M5-24).
+      const fecha = data.proximo_contacto || op.proximo_contacto
+      const trasLaCita = !data.proximo_contacto && data.resultado === 'agendo' && !!op.cita_fecha
+      toast.success('Guardado', !fecha
+        ? 'Salió de la lista de seguimiento.'
+        : fecha <= hoyIso()
+          ? 'Sigue en "Para hoy".'
+          : trasLaCita
+            ? `Volverá a aparecer el día después de su cita (${formatFechaLocal(fecha)}).`
+            : `Volverá a aparecer en "Para hoy" el ${formatFechaLocal(fecha)}.`)
     },
     onError: (err) => errorDe(err, 'No se pudo guardar'),
   })
@@ -307,6 +335,44 @@ export default function SeguimientoPage() {
       errorDe(err, 'No se pudo crear la ficha')
     } finally {
       setCreandoFicha(false)
+    }
+  }
+
+  // Interesado que ya tiene ficha: se vincula al paciente existente (M5-25).
+  const [pacienteExistente, setPacienteExistente] = useState<BusquedaPaciente | null>(null)
+  const [vinculando, setVinculando] = useState(false)
+
+  async function vincularExistente() {
+    if (!fichaPara || !pacienteExistente || vinculando) return
+    setVinculando(true)
+    try {
+      await seguimientoApi.vincularPaciente(fichaPara.id, pacienteExistente.id)
+      refrescar()
+      setFichaPara(null)
+      setPacienteExistente(null)
+      toast.success('Vinculado', `Quedó en la ficha de ${pacienteExistente.nombre_completo}. Ahora elige el horario de la cita.`)
+      setCitaPara({ paciente: pacienteExistente })
+    } catch (err) {
+      // Si ese paciente ya tiene su propio seguimiento, se ofrece abrirlo.
+      const existenteId = (err as { response?: { data?: { oportunidad_id?: string } } })?.response?.data?.oportunidad_id
+      toast({
+        variant: 'destructive',
+        title: 'No se pudo vincular',
+        description: existenteId ? (
+          <span>
+            {mensajeDeError(err)}{' '}
+            <button
+              type="button"
+              className="font-medium underline underline-offset-2"
+              onClick={() => { setFichaPara(null); setPacienteExistente(null); abrirExistente(existenteId) }}
+            >
+              Abrir su seguimiento
+            </button>
+          </span>
+        ) : mensajeDeError(err),
+      })
+    } finally {
+      setVinculando(false)
     }
   }
 
@@ -469,7 +535,22 @@ export default function SeguimientoPage() {
         open={nuevoOpen}
         onOpenChange={setNuevoOpen}
         loading={crear.isPending}
-        error={nuevoError}
+        error={nuevoError && (
+          <>
+            <p>{nuevoError.mensaje}</p>
+            {nuevoError.oportunidadId && (
+              <button
+                type="button"
+                className="mt-1 inline-flex items-center gap-1 font-medium underline underline-offset-2 disabled:opacity-60"
+                disabled={abriendoExistente}
+                onClick={() => nuevoError.oportunidadId && abrirExistente(nuevoError.oportunidadId)}
+              >
+                {abriendoExistente && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                Abrir su seguimiento
+              </button>
+            )}
+          </>
+        )}
         onConfirm={(d) => { setNuevoError(null); crear.mutate(d) }}
       />
       <GestionDialog
@@ -499,15 +580,40 @@ export default function SeguimientoPage() {
       />
 
       {/* Interesado sin ficha: se completa antes de agendar la valoración */}
-      <Dialog open={fichaPara !== null} onOpenChange={(v) => { if (!v && !creandoFicha) setFichaPara(null) }}>
+      <Dialog
+        open={fichaPara !== null}
+        onOpenChange={(v) => { if (!v && !creandoFicha && !vinculando) { setFichaPara(null); setPacienteExistente(null) } }}
+      >
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Completa la ficha para agendar</DialogTitle>
             <DialogDescription>
-              Para darle una cita, {fichaPara?.nombre.split(' ')[0]} necesita ficha de paciente. Después eliges el horario.
+              Para darle una cita, {fichaPara?.nombre.split(' ')[0]} necesita ficha de paciente. Si ya la tiene, búscala; si no, créala. Después eliges el horario.
             </DialogDescription>
           </DialogHeader>
+          {/* Si ya es paciente se vincula a su ficha en lugar de crear otra (M5-25). */}
           {fichaPara && (
+            <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+              <p className="text-sm font-medium">¿Ya es paciente? Vincúlalo a su ficha</p>
+              <PacienteSearchInput
+                selected={pacienteExistente}
+                onSelect={setPacienteExistente}
+                onClear={() => setPacienteExistente(null)}
+              />
+              {pacienteExistente && (
+                <div className="flex justify-end">
+                  <Button size="sm" disabled={vinculando || creandoFicha} onClick={vincularExistente}>
+                    {vinculando ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5 mr-1.5" />}
+                    Vincular y agendar
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
+          {fichaPara && !pacienteExistente && (
+            <p className="text-sm font-medium">O crea una ficha nueva</p>
+          )}
+          {fichaPara && !pacienteExistente && (
             <PacienteForm
               onSubmit={crearFicha}
               isLoading={creandoFicha}

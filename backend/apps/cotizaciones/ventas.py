@@ -10,7 +10,9 @@ import uuid
 from datetime import date
 from decimal import Decimal
 
-from django.db.models import DecimalField, Exists, ExpressionWrapper, F, OuterRef, Prefetch, Subquery, Sum, Value
+from django.db.models import (
+    Count, DecimalField, Exists, ExpressionWrapper, F, OuterRef, Prefetch, Q, Subquery, Sum, Value,
+)
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from rest_framework import serializers
@@ -135,7 +137,9 @@ class VentaViewSet(ReadOnlyModelViewSet):
     def get_queryset(self):
         from apps.agenda.models import Cita
         from apps.cartera.models import CUOTA_PENDIENTE_EXPR, CuotaCartera
+        from apps.clinicas.models import TipoSesion
         from apps.cobros.models import Cobro, PagoRecibido
+        from apps.protocolos.models import TratamientoPaciente
 
         user = self.request.user
         queryset = ventas_queryset(get_clinica_activa(self.request))
@@ -188,11 +192,27 @@ class VentaViewSet(ReadOnlyModelViewSet):
         if params.get("con_mora") in {"1", "true"}:
             queryset = queryset.filter(_en_mora=True)
 
+        # Lo que leen get_sesiones / num_sesiones_efectivas, precargado: antes cada
+        # ítem tratamiento consultaba su seguimiento, sus obsequios y el catálogo (M5-19).
+        seguimientos = TratamientoPaciente.objects.annotate(
+            _n_sesiones_vendidas=Count("sesiones", filter=Q(sesiones__item_obsequio__isnull=True)),
+        ).order_by("created_at")
         return queryset.select_related("paciente", "profesional", "sede", "cartera").prefetch_related(
             Prefetch(
                 "items",
                 queryset=ItemCotizacion.objects.select_related("tratamiento").prefetch_related(
                     Prefetch("citas", queryset=Cita.objects.exclude(estado=Cita.Estado.CANCELADA)),
+                    Prefetch(
+                        "obsequios",
+                        queryset=ItemCotizacion.objects.filter(activo=True, es_obsequio=True, agendable=True),
+                        to_attr="_obsequios_agendables",
+                    ),
+                    Prefetch("tratamientos_paciente", queryset=seguimientos, to_attr="_seguimientos_vendidos"),
+                    Prefetch(
+                        "tratamiento__tipos_sesion",
+                        queryset=TipoSesion.objects.filter(es_compromiso=True, activo=True),
+                        to_attr="_tipos_sesion_compromiso",
+                    ),
                 ),
             ),
         )

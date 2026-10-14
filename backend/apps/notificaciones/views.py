@@ -1,6 +1,7 @@
 import hashlib
 import hmac
 import json
+from datetime import timedelta
 
 from django.conf import settings
 from django.core.serializers.json import DjangoJSONEncoder
@@ -95,13 +96,21 @@ class NotificacionFallidaCallbackView(APIView):
         if data.get("paciente_id"):
             paciente = Paciente.objects.filter(id=data["paciente_id"], clinica=clinica).first()
 
-        notificacion = NotificacionFallida.objects.create(
-            clinica=clinica,
-            paciente=paciente,
-            tipo_notificacion=data["tipo_notificacion"],
-            telefono=data.get("telefono", ""),
-            motivo=data.get("motivo", "")[:2000],
-        )
+        campos = {
+            "clinica": clinica,
+            "paciente": paciente,
+            "tipo_notificacion": data["tipo_notificacion"],
+            "telefono": data.get("telefono", ""),
+            "motivo": data.get("motivo", "")[:2000],
+        }
+        # n8n reintenta el callback: el mismo aviso sin resolver de la última
+        # hora no se duplica (M7-25).
+        repetida = NotificacionFallida.objects.filter(
+            **campos, resuelta=False, created_at__gte=timezone.now() - timedelta(hours=1),
+        ).first()
+        if repetida is not None:
+            return Response({"ok": True, "id": str(repetida.id)}, status=status.HTTP_200_OK)
+        notificacion = NotificacionFallida.objects.create(**campos)
         return Response({"ok": True, "id": str(notificacion.id)}, status=status.HTTP_201_CREATED)
 
 

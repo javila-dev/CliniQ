@@ -292,14 +292,16 @@ function SkeletonRow() {
 function StatsBar({ data }: { data: Colaborador[] }) {
   const total        = data.length
   const activos      = data.filter((c) => c.activo).length
-  const profesionales = data.filter((c) => c.rol === 'profesional').length
-  const recepcion    = data.filter((c) => c.rol === 'recepcion').length
+  // Por el check "atiende pacientes", no por el rol fijo: cuenta también a
+  // admins y roles personalizados que atienden (M0-26).
+  const profesionales = data.filter((c) => c.es_profesional).length
+  const administrativos = total - profesionales
 
   const stats = [
     { label: 'Total',         value: total,         icon: Users,       color: 'text-foreground', bg: 'bg-gray-50'  },
     { label: 'Activos',       value: activos,       icon: Users,       color: 'text-green-600',  bg: 'bg-green-50' },
     { label: 'Profesionales', value: profesionales, icon: Stethoscope, color: 'text-rose-600',   bg: 'bg-rose-50'  },
-    { label: 'Recepción',     value: recepcion,     icon: PhoneCall,   color: 'text-sky-600',    bg: 'bg-sky-50'   },
+    { label: 'Administrativos', value: administrativos, icon: PhoneCall, color: 'text-sky-600',  bg: 'bg-sky-50'   },
   ]
 
   return (
@@ -411,7 +413,7 @@ export default function PersonalPage() {
   const allColaboradores = data?.results ?? []
   const colaboradores = filtroRol === 'todos'
     ? allColaboradores
-    : allColaboradores.filter((c) => c.rol === filtroRol)
+    : allColaboradores.filter((c) => (filtroRol === 'profesional' ? !!c.es_profesional : !c.es_profesional))
 
   const handleEdit = (c: Colaborador) => { setEditTarget(c); setDialogOpen(true) }
   const handleNew  = () => { setEditTarget(null); setDialogOpen(true) }
@@ -474,7 +476,7 @@ export default function PersonalPage() {
           <SelectContent>
             <SelectItem value="todos">Todos los roles</SelectItem>
             <SelectItem value="profesional">Profesionales</SelectItem>
-            <SelectItem value="recepcion">Recepción</SelectItem>
+            <SelectItem value="administrativo">Administrativos</SelectItem>
           </SelectContent>
         </Select>
         <Select value={filtroEstado} onValueChange={setFiltroEstado}>

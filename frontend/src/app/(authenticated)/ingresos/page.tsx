@@ -57,11 +57,11 @@ function fmtDateTime(d: string) {
   })
 }
 
-// mm/dd/YYYY HH:mm (para la tabla)
+// dd/mm/aaaa HH:mm (para la tabla): "03/10" es 3 de octubre, como se lee en Colombia (M6-23).
 function fmtFechaTabla(d: string) {
   const x = new Date(d)
   const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(x.getMonth() + 1)}/${p(x.getDate())}/${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`
+  return `${p(x.getDate())}/${p(x.getMonth() + 1)}/${x.getFullYear()} ${p(x.getHours())}:${p(x.getMinutes())}`
 }
 
 // Mensaje del backend: `error`, `detail` o el primer error de campo.

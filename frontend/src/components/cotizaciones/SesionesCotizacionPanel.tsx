@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button'
 import { NuevaCitaModal } from '@/components/agenda/NuevaCitaModal'
 import { SesionTimeline } from './SesionTimeline'
 import { formatDateTime } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import type { HistorialSesion, RitmoPaquete, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { BusquedaPaciente } from '@/types/pacientes'
 import type { GrupoSesiones, SesionEjecutada } from '@/types/protocolos'
@@ -263,6 +265,7 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
   }), [pacienteId, data?.paciente_nombre])
 
   async function descargarConsolidado() {
+    if (descargando) return
     setDescargando(true)
     try {
       const blob = await cotizacionesApi.descargarConsolidadoAsistencia(cotizacionId)
@@ -272,6 +275,9 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
         download: `consolidado-asistencia-${cotizacionId.slice(0, 8)}.pdf`,
       }).click()
       URL.revokeObjectURL(url)
+    } catch (err) {
+      // Antes un fallo no mostraba nada (M5-21).
+      toast.error('No se pudo descargar el consolidado', mensajeDeError(err))
     } finally {
       setDescargando(false)
     }

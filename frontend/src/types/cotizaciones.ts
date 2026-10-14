@@ -151,6 +151,7 @@ export interface Cotizacion {
   paciente_nombre: string
   paciente_telefono?: string
   paciente_email?: string
+  profesional?: string | null      // id de quien la creó (vendedor)
   profesional_nombre: string | null
   sede: string | null
   sede_nombre?: string | null

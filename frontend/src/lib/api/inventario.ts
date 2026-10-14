@@ -51,8 +51,9 @@ export const inventarioApi = {
     return res.data
   },
 
-  ajustarStock: async (id: string, data: AjusteStockRequest): Promise<{ movimiento: MovimientoInventario; stock_resultante: string; costo_promedio_resultante: string }> => {
-    const res = await apiClient.post(`/inventario/insumos/${id}/ajustar_stock/`, data)
+  // El backend responde el movimiento creado, plano (M7-23).
+  ajustarStock: async (id: string, data: AjusteStockRequest): Promise<MovimientoInventario> => {
+    const res = await apiClient.post<MovimientoInventario>(`/inventario/insumos/${id}/ajustar_stock/`, data)
     return res.data
   },
 

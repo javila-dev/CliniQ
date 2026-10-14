@@ -1,5 +1,6 @@
 from datetime import date, timedelta
 
+from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
 from apps.clinicas.models import Clinica
@@ -196,13 +197,29 @@ class PacienteSerializer(serializers.ModelSerializer):
         data["fecha_nacimiento"] = None
         return data
 
+    # Dos guardados simultáneos con el mismo documento pasan el chequeo de
+    # validate() y el segundo chocaba con el unique de la base: un 500 que el
+    # front mostraba como "<". Ahora es un 400 legible (M2-19).
+    MENSAJE_DOCUMENTO_DUPLICADO = "Ya existe un paciente con ese documento en la clínica."
+
+    def create(self, validated_data):
+        try:
+            with transaction.atomic():
+                return super().create(validated_data)
+        except IntegrityError:
+            raise serializers.ValidationError({"numero_documento": self.MENSAJE_DOCUMENTO_DUPLICADO})
+
     def update(self, instance, validated_data):
         # Un usuario sin permiso ve los valores enmascarados: si el front reenvía
         # el formulario, esos campos no deben sobrescribir el dato real.
         if not usuario_ve_datos_sensibles(self.context):
             for campo in CAMPOS_SENSIBLES_PACIENTE:
                 validated_data.pop(campo, None)
-        return super().update(instance, validated_data)
+        try:
+            with transaction.atomic():
+                return super().update(instance, validated_data)
+        except IntegrityError:
+            raise serializers.ValidationError({"numero_documento": self.MENSAJE_DOCUMENTO_DUPLICADO})
 
     def validate_numero_documento(self, value):
         tipo_documento = self.initial_data.get("tipo_documento")
@@ -241,7 +258,11 @@ class PacienteSerializer(serializers.ModelSerializer):
             if self.instance is not None:
                 clinica = self.instance.clinica
             elif request and request.user.is_authenticated:
-                clinica = request.user.clinica
+                # request.user.clinica es null para el superadmin: el chequeo de
+                # duplicados se saltaba (M2-19).
+                from apps.users.permissions import get_clinica_activa
+
+                clinica = get_clinica_activa(request)
 
         tipo_documento = attrs.get("tipo_documento", getattr(self.instance, "tipo_documento", None))
         numero_documento = attrs.get("numero_documento", getattr(self.instance, "numero_documento", None))

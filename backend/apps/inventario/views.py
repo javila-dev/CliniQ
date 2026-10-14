@@ -152,8 +152,12 @@ class KardexViewSet(ReadOnlyModelViewSet):
             "insumo", "sede", "realizado_por"
         ).order_by("-fecha")
         user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(insumo__clinica=user.clinica)
+        # El superadmin que opera una clínica ve solo esa (M7-18).
+        clinica = get_clinica_activa(self.request)
+        if clinica is not None:
+            qs = qs.filter(insumo__clinica=clinica)
+        elif user.rol != "superadmin":
+            qs = qs.none()
         sede_ids = sede_ids_para_filtro(user)
         if sede_ids is not None:
             qs = qs.filter(sede_id__in=sede_ids)

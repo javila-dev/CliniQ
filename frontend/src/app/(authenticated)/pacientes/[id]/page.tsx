@@ -6,7 +6,7 @@ import {
   ArrowLeft, Pencil, FileText, Calendar, ClipboardList, Plus,
   ChevronRight, Receipt, ShieldCheck, ExternalLink, CheckCircle,
   Loader2, ClipboardCheck, Wallet, ShieldCheck as ShieldCheckIcon,
-  Camera, AlertTriangle, X, RefreshCw, Lock,
+  Camera, AlertTriangle, X, RefreshCw, Lock, UserCheck, UserX,
 } from 'lucide-react'
 import type { CheckInRecord } from '@/lib/api/pacientes'
 import { CamaraCaptura } from '@/components/shared/CamaraCaptura'
@@ -26,7 +26,10 @@ import { EtiquetaSeguimientoPaciente } from '@/components/seguimiento/EtiquetaSe
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { CotizacionEnviadaChip, CotizacionEstadoBadge } from '@/components/cotizaciones/CotizacionEstadoBadge'
-import { formatDate, cn, edadPaciente } from '@/lib/utils'
+import { formatDate, formatFechaLocal, todayISO, cn, edadPaciente } from '@/lib/utils'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
@@ -68,10 +71,15 @@ const CONSENT_ESTADO: Record<string, { label: string; className: string }> = {
   faltante: { label: 'Faltante', className: 'bg-red-50 text-red-500 ring-1 ring-red-200'         },
 }
 
+// Las fechas del consentimiento son "solo día" (YYYY-MM-DD): con new Date() se
+// leían como medianoche UTC y en Colombia se mostraban un día antes (M2-26).
 function getConsentEstado(vencimiento: string | null | undefined): 'vigente' | 'vencido' {
   if (!vencimiento) return 'vigente'
-  return new Date(vencimiento) >= new Date() ? 'vigente' : 'vencido'
+  return vencimiento.slice(0, 10) >= todayISO() ? 'vigente' : 'vencido'
 }
+
+// Mismo formato que toLocaleDateString('es-CO') que se usaba antes (dd/mm/aaaa).
+const FECHA_CORTA: Intl.DateTimeFormatOptions = { year: 'numeric', month: 'numeric', day: 'numeric' }
 
 const COBRO_ESTADO_STYLE: Record<EstadoCobro, string> = {
   pendiente:      'bg-amber-50 text-amber-600 ring-1 ring-amber-200',
@@ -228,13 +236,21 @@ export default function PacienteDetailPage({ params }: Props) {
 
   const asistenciasQ = useQuery({
     queryKey: ['citas-asistencias', id],
-    queryFn: async () => {
-      const res = await agendaApi.citas.list({ paciente: id, firma_asistencia_estado: 'firmada' })
-      return res.results ?? []
-    },
+    queryFn: () => agendaApi.citas.list({ paciente: id, firma_asistencia_estado: 'firmada' }),
     enabled: !!id && canVerAgenda,
   })
-  const citasFirmadas = asistenciasQ.data
+  const citasFirmadas = asistenciasQ.data?.results
+
+  const [confirmarActivo, setConfirmarActivo] = useState(false)
+  const activoMut = useMutation({
+    mutationFn: (activo: boolean) => pacientesApi.update(id, { activo }),
+    onSuccess: (actualizado) => {
+      qc.invalidateQueries({ queryKey: ['pacientes'] })
+      setConfirmarActivo(false)
+      toast.success(actualizado.activo ? 'Paciente reactivado' : 'Paciente desactivado')
+    },
+    onError: (err) => toast.error('No se pudo cambiar el estado del paciente', mensajeDeError(err)),
+  })
 
   if (isLoading) return <LoadingState rows={4} />
   if (isError || !p) return <ErrorState onRetry={refetch} />
@@ -244,9 +260,10 @@ export default function PacienteDetailPage({ params }: Props) {
   const edad = edadPaciente(p)
   const direccionCompleta = [p.direccion, p.barrio, p.ciudad].filter(Boolean).join(', ')
 
-  const cotCount = cotizacionesData?.results?.length ?? 0
+  // El total real (count), no las filas de la primera página (máx. 25) (M2-26).
+  const cotCount = cotizacionesData?.count ?? 0
   const cobrosCount = cobrosData?.count ?? 0
-  const asistenciasCount = citasFirmadas?.length ?? 0
+  const asistenciasCount = asistenciasQ.data?.count ?? 0
   const consentCount = consentimientos?.length ?? 0
 
   return (
@@ -299,8 +316,29 @@ export default function PacienteDetailPage({ params }: Props) {
               <Link href={`/pacientes/${id}/editar`}><Pencil className="h-4 w-4 mr-2" />Editar</Link>
             </Button>
           )}
+          {/* No había forma de desactivar a un paciente (M2-26). */}
+          {canEditar && (
+            <Button variant="outline" onClick={() => setConfirmarActivo(true)}>
+              {p.activo
+                ? <><UserX className="h-4 w-4 mr-2" />Desactivar</>
+                : <><UserCheck className="h-4 w-4 mr-2" />Reactivar</>}
+            </Button>
+          )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmarActivo}
+        onOpenChange={(v) => { if (!v && !activoMut.isPending) setConfirmarActivo(false) }}
+        title={p.activo ? 'Desactivar paciente' : 'Reactivar paciente'}
+        description={p.activo
+          ? 'El paciente quedará como inactivo en el listado. Su historia, citas y cobros se conservan, y puedes reactivarlo cuando quieras.'
+          : 'El paciente volverá a figurar como activo en el listado.'}
+        confirmLabel={p.activo ? 'Desactivar' : 'Reactivar'}
+        variant={p.activo ? 'destructive' : 'default'}
+        loading={activoMut.isPending}
+        onConfirm={() => activoMut.mutate(!p.activo)}
+      />
 
       {/* ── Banner foto de control faltante ──────────────────────────────── */}
       {wizardConfig?.paso_verificacion_facial && !p.tiene_foto_control && canCambiarFotoControl && (
@@ -560,6 +598,11 @@ export default function PacienteDetailPage({ params }: Props) {
                     <ChevronRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 shrink-0 transition-colors" />
                   </Link>
                 ))}
+                {cotCount > cotizacionesData!.results.length && (
+                  <p className="text-xs text-muted-foreground px-6 py-3">
+                    Se muestran {cotizacionesData!.results.length} de {cotCount} cotizaciones.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -582,6 +625,11 @@ export default function PacienteDetailPage({ params }: Props) {
                 {citasFirmadas!.map((c) => (
                   <AsistenciaFila key={c.id} cita={c} pacienteId={id} />
                 ))}
+                {asistenciasCount > citasFirmadas!.length && (
+                  <p className="text-xs text-muted-foreground px-5 py-3">
+                    Se muestran {citasFirmadas!.length} de {asistenciasCount} asistencias.
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -653,9 +701,9 @@ export default function PacienteDetailPage({ params }: Props) {
                         <p className="text-sm font-medium truncate">{c.template_nombre}</p>
                         <p className="text-xs text-muted-foreground">
                           {c.procedimiento_nombre && `${c.procedimiento_nombre} · `}
-                          {c.fecha_firma && `Firmado ${new Date(c.fecha_firma).toLocaleDateString('es-CO')}`}
+                          {c.fecha_firma && `Firmado ${formatFechaLocal(c.fecha_firma, FECHA_CORTA)}`}
                           {c.fecha_firma && c.vigencia_hasta && ' · '}
-                          {c.vigencia_hasta && `Vence ${new Date(c.vigencia_hasta).toLocaleDateString('es-CO')}`}
+                          {c.vigencia_hasta && `Vence ${formatFechaLocal(c.vigencia_hasta, FECHA_CORTA)}`}
                         </p>
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
@@ -801,126 +849,6 @@ const CONFIDENCE_CONFIG = {
   alta:  { label: 'Alta',  cls: 'bg-green-100 text-green-700 border-green-200' },
   media: { label: 'Media', cls: 'bg-amber-100 text-amber-700 border-amber-200' },
   baja:  { label: 'Baja',  cls: 'bg-red-100 text-red-700 border-red-200'       },
-}
-
-function VerificacionFacialSeccion({
-  pacienteId, fotoControlUrl, tieneFoto, onReenrollar,
-}: {
-  pacienteId: string
-  fotoControlUrl: string | null
-  tieneFoto: boolean
-  onReenrollar: () => void
-}) {
-  const { data: checkins = [], isLoading } = useQuery<CheckInRecord[]>({
-    queryKey: ['checkins', pacienteId],
-    queryFn: () => pacientesApi.checkins(pacienteId),
-    enabled: tieneFoto,
-  })
-
-  return (
-    <div className="rounded-xl border bg-white p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <ShieldCheckIcon className="h-4 w-4 text-primary" />
-          <h3 className="text-sm font-semibold text-gray-900">Verificación facial</h3>
-        </div>
-        <Button size="sm" variant="outline" className="gap-1.5 text-xs h-7" onClick={onReenrollar}>
-          <RefreshCw className="h-3 w-3" />
-          {tieneFoto ? 'Actualizar foto' : 'Registrar foto'}
-        </Button>
-      </div>
-
-      {/* Foto de control */}
-      <div className="flex items-start gap-4">
-        <div className="shrink-0">
-          <p className="text-xs text-muted-foreground mb-1.5">Foto de control</p>
-          {fotoControlUrl ? (
-            <div className="h-24 w-24 rounded-lg overflow-hidden border bg-gray-50">
-              <img src={fotoControlUrl} alt="Foto de control" className="w-full h-full object-cover" />
-            </div>
-          ) : (
-            <div className="h-24 w-24 rounded-lg border border-dashed bg-gray-50 flex items-center justify-center">
-              <Camera className="h-6 w-6 text-muted-foreground/40" />
-            </div>
-          )}
-        </div>
-
-        {/* Estadísticas rápidas */}
-        {tieneFoto && checkins.length > 0 && (
-          <div className="flex-1 grid grid-cols-3 gap-2 pt-1">
-            {(['alta', 'media', 'baja'] as const).map(c => {
-              const count = checkins.filter(ch => ch.confidence === c).length
-              const cfg = CONFIDENCE_CONFIG[c]
-              return (
-                <div key={c} className={`rounded-lg border px-3 py-2 text-center ${cfg.cls}`}>
-                  <p className="text-lg font-bold">{count}</p>
-                  <p className="text-[10px] font-medium">{cfg.label}</p>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Historial de verificaciones */}
-      {tieneFoto && (
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-2">
-            Historial de verificaciones {checkins.length > 0 && `(${checkins.length})`}
-          </p>
-          {isLoading ? (
-            <div className="flex justify-center py-4">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            </div>
-          ) : checkins.length === 0 ? (
-            <p className="text-xs text-muted-foreground text-center py-4">
-              Aún no hay verificaciones registradas.
-            </p>
-          ) : (
-            <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-              {checkins.map(ch => {
-                const cfg = CONFIDENCE_CONFIG[ch.confidence]
-                return (
-                  <div key={ch.id} className="flex items-center gap-3 rounded-lg border bg-gray-50/50 p-2.5">
-                    {/* Foto live */}
-                    <div className="h-12 w-12 rounded-md overflow-hidden border bg-gray-100 shrink-0">
-                      {ch.foto_live_url ? (
-                        <img src={ch.foto_live_url} alt="Foto verificación" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Camera className="h-4 w-4 text-muted-foreground/30" />
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold ${cfg.cls}`}>
-                          {cfg.label}
-                        </span>
-                        <span className="text-xs text-muted-foreground">
-                          {Math.round(ch.score * 100)}% similitud
-                        </span>
-                        {!ch.match && (
-                          <span className="text-[10px] text-red-500 font-medium">No coincide</span>
-                        )}
-                      </div>
-                      <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                        {new Date(ch.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}
-                        {ch.realizado_por_nombre && ` · ${ch.realizado_por_nombre}`}
-                        {ch.cita_fecha && ` · Cita ${new Date(ch.cita_fecha).toLocaleDateString('es-CO')}`}
-                      </p>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
 }
 
 function EnrollmentFotoDialog({ pacienteId, onDone, onCancelar }: { pacienteId: string; onDone: () => void; onCancelar?: () => void }) {

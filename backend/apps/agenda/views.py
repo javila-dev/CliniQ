@@ -224,8 +224,14 @@ class CitaViewSet(ModelViewSet):
 
         return queryset.order_by("fecha_inicio")
 
+    def _confirmo_cruce_paciente(self):
+        return str(self.request.data.get("confirmar_cruce_paciente", "")).lower() in {"true", "1"}
+
     def perform_create(self, serializer):
-        cita = services.crear_cita(serializer.validated_data, self.request.user)
+        cita = services.crear_cita(
+            serializer.validated_data, self.request.user,
+            avisar_cruce_paciente=not self._confirmo_cruce_paciente(),
+        )
         serializer.instance = cita
         registrar_accion(self.request, "cita.crear", cita, {"estado": cita.estado})
 
@@ -251,6 +257,19 @@ class CitaViewSet(ModelViewSet):
     ESTADOS_CERRADOS = {Cita.Estado.COMPLETADA, Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO}
 
     @transaction.atomic
+    def perform_destroy(self, instance):
+        # Una cita con cobro o atención registrada no se borra (respondía 500 por
+        # la relación protegida): se cancela (M3-29).
+        from django.db.models import ProtectedError
+
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                "error": "Esta cita tiene cobros o una atención registrada y no se puede eliminar. Cancélala en su lugar.",
+                "code": "CITA_CON_REGISTROS",
+            })
+
     def perform_update(self, serializer):
         instance = self.get_object()
         if instance.estado in self.ESTADOS_CERRADOS:
@@ -302,6 +321,8 @@ class CitaViewSet(ModelViewSet):
             fecha_fin=fecha_fin,
             excluir_cita_id=instance.id,
         )
+        if (fecha_inicio != instance.fecha_inicio or fecha_fin != instance.fecha_fin) and not self._confirmo_cruce_paciente():
+            services.avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin, excluir_cita_id=instance.id)
 
         fecha_anterior = instance.fecha_inicio
         extra = {}
@@ -1241,12 +1262,13 @@ class BloqueoAgendaViewSet(ModelViewSet):
             queryset = queryset.filter(profesional_id=profesional)
         sede_ids = sede_ids_para_filtro(user, sede)
         if sede_ids is not None:
-            # Sin filtro explicito, un usuario acotado ve sus sedes y ademas los
-            # bloqueos sin sede (aplican a toda la clinica).
-            filtro = Q(sede_id__in=sede_ids)
-            if not sede:
-                filtro |= Q(sede__isnull=True)
-            queryset = queryset.filter(filtro)
+            # Los bloqueos sin sede aplican a toda la clinica: se incluyen
+            # tambien al filtrar por una sede (antes desaparecian, M3-28). Una
+            # sede sin acceso no devuelve nada.
+            if sede_ids:
+                queryset = queryset.filter(Q(sede_id__in=sede_ids) | Q(sede__isnull=True))
+            else:
+                queryset = queryset.none()
         if fecha_inicio_date:
             queryset = queryset.filter(fecha_inicio__date=fecha_inicio_date)
         # Rango de días (YYYY-MM-DD, ambos incluidos): trae todo bloqueo que se

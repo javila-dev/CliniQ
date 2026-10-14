@@ -99,8 +99,9 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   const clinicaId = sedesData?.results.find((s) => s.id === sedeId)?.clinica ?? user?.clinica_id ?? undefined
 
   const { mutate, isPending, error } = useMutation({
-    mutationFn: (values: FormValues) =>
+    mutationFn: ({ values, confirmarCruce = false }: { values: FormValues; confirmarCruce?: boolean }) =>
       agendaApi.citas.update(cita.id, {
+        ...(confirmarCruce && { confirmar_cruce_paciente: true }),
         sede: values.sede,
         profesional: values.profesional,
         ...(conProcedimiento && { servicio: values.servicio }),
@@ -157,7 +158,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   }
 
   return (
-    <form onSubmit={handleSubmit((v) => mutate(v))} className="space-y-4">
+    <form onSubmit={handleSubmit((v) => mutate({ values: v }))} className="space-y-4">
       <div className="space-y-1.5">
         <Label>Sede *</Label>
         <Controller
@@ -282,8 +283,20 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
       </div>
 
       {serverError && (
-        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
+        <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 space-y-2">
           <p className="text-sm text-destructive">{serverError}</p>
+          {/* El paciente ya tiene otra cita a esa hora: es un aviso, se puede guardar igual (M3-30). */}
+          {(error as any)?.response?.data?.code === 'PACIENTE_CON_OTRA_CITA' && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={isPending}
+              onClick={handleSubmit((v) => mutate({ values: v, confirmarCruce: true }))}
+            >
+              Guardar de todas formas
+            </Button>
+          )}
         </div>
       )}
 

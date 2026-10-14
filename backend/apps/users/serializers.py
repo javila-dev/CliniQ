@@ -476,6 +476,13 @@ class LoginSerializer(TokenObtainPairSerializer):
     def validate(self, attrs):
         data = super().validate(attrs)
 
+        # Con la clinica inactiva el login se rechaza (lo responde la vista):
+        # no se rota la sesion unica, que cerraba la abierta en otro equipo (M0-29).
+        from apps.clinicas.models import Clinica
+
+        if self.user.clinica_id and not Clinica.objects.filter(id=self.user.clinica_id, activo=True).exists():
+            return data
+
         # Sesion unica + re-emision del token con el nuevo 'sid' (get_token ya
         # corrio una vez arriba, pero con el sid todavia viejo). Camino
         # compartido con el login de Google, ver issue_login_tokens.

@@ -37,6 +37,11 @@ export const seguimientoApi = {
     return res.data
   },
 
+  obtener: async (id: string): Promise<Oportunidad> => {
+    const res = await apiClient.get<Oportunidad>(`${BASE}${id}/`)
+    return res.data
+  },
+
   crear: async (data: CrearInteresadoRequest): Promise<Oportunidad> => {
     const res = await apiClient.post<Oportunidad>(BASE, data)
     return res.data

@@ -35,8 +35,8 @@ export interface ContextoOrdenCompra {
 
 export interface ContextoNotaClinica {
   tipo: 'nota_clinica'
-  paciente_id: string
-  paciente_nombre: string
+  paciente_id?: string
+  paciente_nombre?: string
   cita_id: string | null
   cita_fecha: string | null
   servicio_nombre: string | null
@@ -45,8 +45,8 @@ export interface ContextoNotaClinica {
 export interface ContextoCobro {
   tipo: 'cobro'
   cobro_id: string
-  paciente_id: string
-  paciente_nombre: string
+  paciente_id?: string
+  paciente_nombre?: string
   origen: 'cita' | 'cotizacion' | 'libre'
   cotizacion_id: string | null
   cotizacion_numero: string | null
@@ -56,8 +56,8 @@ export interface ContextoObsequio {
   tipo: 'obsequio'
   cotizacion_id: string
   cotizacion_referencia: string
-  paciente_id: string
-  paciente_nombre: string
+  paciente_id?: string
+  paciente_nombre?: string
 }
 
 export type MovimientoContexto = ContextoOrdenCompra | ContextoNotaClinica | ContextoCobro | ContextoObsequio

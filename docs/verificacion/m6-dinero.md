@@ -35,11 +35,11 @@
 | ✅ M6-20 | Medio | previsible | `dashboard/page.tsx:1419-1431`; `reportes/views.py:166-176` | En "Cobros de hoy por medio", las filas suman pagos, pero el Total es lo facturado (Efectivo $50.000, Total $150.000). | — | Calcular el Total desde los pagos. | Confirmado |
 | ✅ M6-21 | Medio | parámetros | `backend/apps/caja/views.py:247-253` | "Buscar descripción…" en Egresos no filtra. | Falta `search_fields`. | Agregarlo. | Confirmado |
 | ✅ M6-22 | Medio | previsible | `frontend/src/lib/api/cartera.ts:86-117` | El modal "Cuotas vencidas" es lento (hasta 500 peticiones), se corta en 500 carteras y marca como vencida la cuota que vence hoy. | Recorre las carteras en el cliente, y `new Date('YYYY-MM-DD')` se interpreta en UTC. | Endpoint de cuotas vencidas en el backend. | Confirmado |
-| M6-23 | Bajo | previsible | `ingresos/page.tsx:54-58` | Las fechas salen como mm/dd/aaaa: "03/10" se lee 3 de marzo. | — | Usar `formatFechaDMY`. | Confirmado |
-| M6-24 | Bajo | permisos | `reportes/views.py:45-55` | El superadmin con una clínica activa ve en el dashboard los datos de todas las clínicas. | Usa `user.clinica` en vez de `get_clinica_activa`. | Corregirlo. | Confirmado |
-| M6-25 | Bajo | errores | `backend/apps/caja/views.py:209` | Abrir la caja en dos pestañas a la vez da un error 500. | Choque con la `UniqueConstraint`. | Capturar el error y responder "ya está abierta". | Probable |
-| M6-26 | Bajo | previsible | `backend/apps/cartera/views.py:376-390` | Por API, el monto de una cuota puede quedar por debajo de lo abonado, y el total de la cartera no se recalcula. | — | Validar el monto y recalcular el total. | Confirmado |
-| M6-27 | Bajo | faltante | varios | Código muerto: `apps/comisiones` vacía, `IniciarPagoSheet.tsx` sin uso, `_pagos_queryset` y `_resumen_periodo` sin uso. `registrarPago` y `agregarItem` están mal tipados (devuelven `{pago\|item, cobro}`). `crear` devuelve un cobro existente aunque esté anulado. | — | Limpiar y corregir los tipos. | Confirmado |
+| ✅ M6-23 | Bajo | previsible | `ingresos/page.tsx:54-58` | Las fechas salen como mm/dd/aaaa: "03/10" se lee 3 de marzo. | — | Usar `formatFechaDMY`. | Confirmado |
+| ✅ M6-24 | Bajo | permisos | `reportes/views.py:45-55` | El superadmin con una clínica activa ve en el dashboard los datos de todas las clínicas. | Usa `user.clinica` en vez de `get_clinica_activa`. | Corregirlo. | Confirmado |
+| ✅ M6-25 | Bajo | errores | `backend/apps/caja/views.py:209` | Abrir la caja en dos pestañas a la vez da un error 500. | Choque con la `UniqueConstraint`. | Capturar el error y responder "ya está abierta". | Probable |
+| ✅ M6-26 | Bajo | previsible | `backend/apps/cartera/views.py:376-390` | Por API, el monto de una cuota puede quedar por debajo de lo abonado, y el total de la cartera no se recalcula. | — | Validar el monto y recalcular el total. | Confirmado |
+| ✅ M6-27 | Bajo | faltante | varios | Código muerto: `apps/comisiones` vacía, `IniciarPagoSheet.tsx` sin uso, `_pagos_queryset` y `_resumen_periodo` sin uso. `registrarPago` y `agregarItem` están mal tipados (devuelven `{pago\|item, cobro}`). `crear` devuelve un cobro existente aunque esté anulado. | — | Limpiar y corregir los tipos. | Confirmado |
 
 ## Pruebas no técnicas
 

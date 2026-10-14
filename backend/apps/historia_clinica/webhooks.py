@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 
 from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.services import (
+    archivo_tiene_el_mismo_contenido,
     descargar_pdf_documenso,
     guardar_pdf_firmado,
     marcar_consentimiento_firmado,
@@ -81,8 +82,12 @@ def _handle_consentimiento_informado(consentimiento, document_id: str | None) ->
         consentimiento.save(update_fields=["fecha_firma_profesional", "updated_at"])
 
     pdf_bytes = descargar_pdf_documenso(document_id) if document_id is not None else None
-    if pdf_bytes:
+    # Documenso reintenta el webhook: si el PDF guardado ya es este, no se
+    # vuelve a subir (cada reintento dejaba un archivo huérfano, M4-27).
+    if pdf_bytes and not archivo_tiene_el_mismo_contenido(consentimiento.archivo, pdf_bytes):
         try:
+            if consentimiento.archivo:
+                consentimiento.archivo.delete(save=False)
             guardar_pdf_firmado(
                 consentimiento,
                 pdf_bytes,

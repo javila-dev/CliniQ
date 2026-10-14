@@ -93,7 +93,8 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
   open: boolean
   onOpenChange: (v: boolean) => void
   loading?: boolean
-  error?: string | null
+  // Puede traer un enlace (p. ej. "Abrir su seguimiento", M5-26).
+  error?: React.ReactNode
   onConfirm: (data: CrearInteresadoRequest) => void
 }) {
   const [nombre, setNombre] = useState('')
@@ -175,7 +176,7 @@ export function NuevoInteresadoDialog({ open, onOpenChange, loading, error, onCo
             </button>
           )}
 
-          {error && <p className="text-sm text-destructive">{error}</p>}
+          {error && <div className="text-sm text-destructive">{error}</div>}
         </div>
 
         <Botones

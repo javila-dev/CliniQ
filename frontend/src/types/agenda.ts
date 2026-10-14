@@ -101,6 +101,8 @@ export interface DeudaInfo {
 }
 
 export interface CreateCitaRequest {
+  /** El paciente ya tiene otra cita en ese horario y quien agenda lo confirmó. */
+  confirmar_cruce_paciente?: boolean
   paciente: string
   sede: string
   profesional: string

@@ -329,27 +329,3 @@ class CobroViewSet(ModelViewSet):
             "total_pagados":    total_pagados,
             "total_pendientes": total_pendientes,
         }, status=status.HTTP_200_OK)
-
-    def _pagos_queryset(self):
-        qs = PagoRecibido.objects.select_related("cobro", "cobro__sede")
-        user = self.request.user
-        if user.rol != "superadmin":
-            qs = qs.filter(cobro__sede__clinica=user.clinica)
-        return qs.exclude(cobro__estado=Cobro.Estado.ANULADO)
-
-    def _money(self, value):
-        return f"{Decimal(value or '0.00'):.2f}"
-
-    def _resumen_periodo(self, fecha_desde, fecha_hasta):
-        pagos = self._pagos_queryset().filter(fecha__date__gte=fecha_desde, fecha__date__lte=fecha_hasta)
-        total = pagos.aggregate(total=Sum("valor"))["total"] or Decimal("0.00")
-        por_origen = {
-            row["cobro__origen"]: row["total"]
-            for row in pagos.values("cobro__origen").annotate(total=Sum("valor"))
-        }
-        return {
-            "total": self._money(total),
-            "por_cita": self._money(por_origen.get(Cobro.Origen.CITA)),
-            "por_cotizacion": self._money(por_origen.get(Cobro.Origen.COTIZACION)),
-            "por_libre": self._money(por_origen.get(Cobro.Origen.LIBRE)),
-        }

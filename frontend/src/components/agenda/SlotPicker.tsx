@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { agendaApi } from '@/lib/api/agenda'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -17,6 +18,9 @@ interface SlotPickerProps {
   duracionMin?: number
   /** Al editar una cita: no cuenta su propio horario como ocupado. */
   citaId?: string
+  /** Hora (0-23) del hueco en que se hizo clic en la agenda: se elige el
+   *  primer horario libre de esa hora (M3-30). */
+  horaPreferida?: number
 }
 
 const PLACEHOLDER: Record<string, string> = {
@@ -36,6 +40,7 @@ export function SlotPicker({
   itemCotizacionId,
   duracionMin,
   citaId,
+  horaPreferida,
 }: SlotPickerProps) {
   const tieneFuente = Boolean(servicioId || itemCotizacionId || (duracionMin && duracionMin > 0))
   const enabled = Boolean(profesionalId && sedeId && fecha && tieneFuente)
@@ -54,6 +59,20 @@ export function SlotPicker({
     queryFn: () => agendaApi.citas.slotsDisponibles(slotParams),
     enabled,
   })
+
+  // Solo una vez por hora preferida: si la persona elige otro horario, no se pisa.
+  const preferidaAplicada = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (horaPreferida === undefined || value || !slots?.length) return
+    if (preferidaAplicada.current === horaPreferida) return
+    const ahora = new Date()
+    const elegido = slots.find((s) => {
+      const d = new Date(s)
+      return d.getHours() === horaPreferida && d > ahora
+    })
+    preferidaAplicada.current = horaPreferida
+    if (elegido) onSelect(elegido)
+  }, [horaPreferida, slots, value, onSelect])
 
   if (!enabled) {
     const falta = !profesionalId ? PLACEHOLDER.profesional
