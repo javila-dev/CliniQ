@@ -8,7 +8,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.generics import ListAPIView
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -21,7 +21,7 @@ from apps.notificaciones.serializers import (
     WhatsappConectarSerializer,
     WhatsappPropioConfigSerializer,
 )
-from apps.users.permissions import IsSuperAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions import IsSuperAdmin, RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
 def firma_lyvio_valida(cuerpo: bytes, timestamp: str, firma: str, *, ahora=None) -> bool:
@@ -105,9 +105,15 @@ class NotificacionFallidaCallbackView(APIView):
         return Response({"ok": True, "id": str(notificacion.id)}, status=status.HTTP_201_CREATED)
 
 
+# Los envíos fallidos son de pacientes (recordatorios, documentos): los ve y los
+# marca quien ve pacientes o la agenda (M7-10). El teléfono va enmascarado sin
+# `pacientes.datos_sensibles.ver`.
+PERMISOS_ENVIOS_FALLIDOS = ("pacientes.ver", "agenda.citas.ver")
+
+
 class NotificacionFallidaListView(ListAPIView):
     serializer_class = NotificacionFallidaSerializer
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (RequireAnyPermission(*PERMISOS_ENVIOS_FALLIDOS),)
 
     def get_queryset(self):
         clinica = get_clinica_activa(self.request)
@@ -120,7 +126,7 @@ class NotificacionFallidaListView(ListAPIView):
 
 
 class NotificacionFallidaResolverView(APIView):
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (RequireAnyPermission(*PERMISOS_ENVIOS_FALLIDOS),)
 
     def post(self, request, pk=None, *args, **kwargs):
         clinica = get_clinica_activa(request)
@@ -132,7 +138,9 @@ class NotificacionFallidaResolverView(APIView):
         notificacion.resuelta_en = timezone.now()
         notificacion.resuelta_por = request.user
         notificacion.save(update_fields=["resuelta", "resuelta_en", "resuelta_por"])
-        return Response(NotificacionFallidaSerializer(notificacion).data, status=status.HTTP_200_OK)
+        return Response(
+            NotificacionFallidaSerializer(notificacion, context={"request": request}).data, status=status.HTTP_200_OK,
+        )
 
 
 class _NumeroPropioBaseView(APIView):

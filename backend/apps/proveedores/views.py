@@ -80,6 +80,13 @@ class OrdenCompraViewSet(ModelViewSet):
         return queryset
 
     def perform_destroy(self, instance):
+        # Solo se cancela lo que aún no entró al inventario: una orden recibida
+        # ya movió stock y cancelarla no lo devolvía.
+        if instance.estado not in (OrdenCompra.Estado.BORRADOR, OrdenCompra.Estado.ENVIADA):
+            raise ValidationError({
+                "error": "Solo se puede cancelar una compra en borrador o enviada. Esta ya se recibió.",
+                "code": "ORDEN_NO_CANCELABLE",
+            })
         instance.activo = False
         if instance.estado != OrdenCompra.Estado.CANCELADA:
             instance.estado = OrdenCompra.Estado.CANCELADA

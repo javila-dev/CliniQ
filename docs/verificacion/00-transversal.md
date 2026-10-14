@@ -20,10 +20,10 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | 5 | Manejo de errores y carga: mensajes comunes, "no hay datos" cuando hubo error, guardados que fallan en silencio | ✅ Hecho | `03c7e93` |
 | 6 | Agenda: bloqueos que no se ven o no bloquean, reprogramar citas confirmadas, estado editable por API, zona horaria, recordatorio al reprogramar | ✅ Hecho | `84f0e36` |
 | 7a | Los 12 hallazgos altos que quedaban | ✅ Hecho | `472b176` |
-| 7b | Los medios, módulo por módulo (M0 a M7) | En curso: M0 a M4 hechos (M3 con 2 pendientes de decisión) | `dee5046` (M0 y M1); M2 a M4 pendientes de commit |
+| 7b | Los medios, módulo por módulo (M0 a M7) | Hecho: M0 a M7 (M3-19 y M3-20 en espera por decisión) | `dee5046` (M0 y M1), `9066544` (M2 a M4), M5 a M7 en el commit siguiente |
 | 7c | Los bajos | Pendiente | — |
 
-**Hallazgos:** 149 de 227 corregidos. No queda ningún crítico pendiente.
+**Hallazgos:** 172 de 227 corregidos. No queda ningún crítico pendiente.
 
 | Módulo | Corregidos | Pendientes | Críticos pendientes |
 |---|---|---|---|
@@ -32,9 +32,9 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | M2 Pacientes | 18 | 8 | 0 |
 | M3 Agenda | 23 | 7 | 0 |
 | M4 Atención clínica | 23 | 5 | 0 |
-| M5 Comercial | 10 | 20 | 0 |
-| M6 Dinero | 17 | 10 | 0 |
-| M7 Inventario y plataforma | 8 | 17 | 0 |
+| M5 Comercial | 19 | 11 | 0 |
+| M6 Dinero | 22 | 5 | 0 |
+| M7 Inventario y plataforma | 17 | 8 | 0 |
 
 **Decisiones del usuario (10/10/2026)**
 
@@ -45,6 +45,9 @@ El detalle de cada hallazgo está en el archivo de su módulo (m0 a m7), marcado
 | ¿La historia clínica se acota por sede? | **No.** La historia es del paciente, no de la sede. | Se mantiene el alcance por clínica (nota de M4). |
 | ¿El Profesional ve reportes financieros por defecto? | **No el rol de sistema Profesional. El Admin sí.** | M6-12 y M0-21: quitar `reportes.ver_financieros` del default del Profesional, migrar los roles de sistema existentes y que la pestaña Resumen/P&L se rija por ese permiso (paso 4). |
 | ¿Quién puede pedir un bloqueo de agenda? (13/10/2026) | **Quien ve la agenda lo solicita; solo quien tiene "aprobar bloqueos" lo acepta.** | M3-25: crear un bloqueo pide `agenda.citas.ver` (o `agenda.crear_bloqueo`); sin permiso de aprobar queda pendiente (paso 6). |
+| ¿Las ventas aceptadas antes de activar el compromiso de pago deben firmarlo? (13/10/2026) | **No.** Solo las que se acepten después de activarlo. | M5-13: abrir el detalle de una venta ya no genera el compromiso (paso 7b). |
+| ¿Se hace el listado liviano de la agenda (M3-19)? (14/10/2026) | **En espera.** Se mide primero con datos reales de una clínica grande; si la agenda abre rápido, no se toca. | M3-19 queda abierto. |
+| ¿Se hace la zona horaria por clínica (M3-20)? (14/10/2026) | **En espera.** Se hace cuando entre la primera clínica fuera de Colombia, aparte y con su propia revisión. | M3-20 queda abierto. |
 | ¿Quién entrega los obsequios de producto? | **Quien atiende pacientes.** | M5-15 (segunda parte): ya funciona así, porque la entrega exige `inventario.consumo.registrar`, que da el check "atiende pacientes". Solo falta que la pantalla lo explique a quien no puede (paso 5). |
 
 ## Resumen en números
@@ -463,7 +466,7 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 | M3-18 | Crear un bloqueo encima de citas pendientes, confirmadas o en espera muestra la lista de esas citas y pide "Crear de todas formas" (el bloqueo no las cancela; quedan para reprogramar). Si se cambian las fechas, el aviso se recalcula. |
 | M3-21 | La confirmación por enlace (aún no se envía a los pacientes: ningún flujo genera el token) quedó lista para activarse: no confirma citas canceladas, cerradas o ya pasadas, no falla con citas sin procedimiento y la pantalla muestra el motivo real. |
 
-- **Pendientes que necesitan decisión:**
+- **En espera por decisión del usuario (14/10/2026):**
   - **M3-19** (listado de la agenda pesado): la descarga de Documenso ya salió (M4-08). Falta un serializer liviano para el listado, que cambia lo que muestra cada tarjeta de cita; conviene hacerlo midiendo con datos reales.
   - **M3-20** (zona horaria por clínica, T-04): exige guardar la zona de cada clínica y activarla en cada petición. Todas las clínicas actuales están en Colombia, así que hoy no afecta; es un cambio delicado para las horas de las citas y conviene hacerlo aparte, con su propia revisión.
 - **Pruebas:** 4 nuevas en `test_verificacion_paso6.py`.
@@ -482,6 +485,51 @@ grep -rnE "\b(podés|tenés|querés|revisá|configurá|corregí|cargaste|revisá
 | M4-22 | El texto del consentimiento que ve el paciente al firmar se muestra legible (párrafos y viñetas), sin etiquetas HTML crudas y sin ejecutar nada (`htmlATexto`). |
 
 - **Pruebas:** 3 nuevas en `test_verificacion_paso7.py`.
+
+**Paso 7b — medios de M5 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M5-03 | Con una promoción activa, el backend acepta cualquier valor unitario entre la promoción y la lista (como deja la pantalla), sin pedir "cambiar precio". Un descuento porcentual encima sigue sujeto al tope del catálogo. |
+| M5-08 | La cotización trae `paciente_telefono` y `paciente_email` (enmascarados para quien no ve datos sensibles). "Enviar por correo" precarga el correo, y si está oculto se puede dejar vacío para usar el registrado; WhatsApp muestra "Se enviará al número…". |
+| M5-09 | Sacar a alguien de Seguimiento muestra "Deshacer" (reabre la oportunidad). Al registrar un contacto se ven los contactos anteriores (quién, cuándo, qué pasó). |
+| M5-10 | "Para hoy" trae hasta 500 y, si hay más, dice "Mostrando X de N" y sugiere filtrar. |
+| M5-12 | "Cobros" en la venta solo aparece con `cobros.ver`, y si no carga dice "No se pudieron cargar · Reintentar". |
+| M5-14 | Aceptar una cotización bloquea su fila: dos aceptaciones a la vez ya no duplican las cuotas ni dan error. |
+| M5-15 | Por decisión del usuario, Recepción no cotiza por defecto y los obsequios los entrega quien atiende. La venta lo explica a quien no puede entregar: "Pendiente de entrega · lo entrega quien atiende". |
+| M5-16 | Si el borrador se editó y el plan de pagos ya no suma el total, la firma del compromiso no acepta la venta: queda en borrador para corregir el plan. |
+| M5-13 | Por decisión del usuario, abrir una venta ya no genera el compromiso de pago: las ventas aceptadas antes de activarlo no quedan "Pendiente de firma". Solo lo firman las cotizaciones que se acepten después. La prueba `test_retrieve_genera_compromiso_pago_retroactivo_si_falta` se reemplazó por `test_retrieve_no_genera_compromiso_en_ventas_anteriores`. |
+
+- **Pruebas:** 3 nuevas en `test_verificacion_paso7.py` y 1 en `cotizaciones/tests.py`; `tests_precios_sede` se ajustó a la nueva regla (300.000 con promoción de 280.000 se acepta; 270.000 no).
+
+**Paso 7b — medios de M6 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M6-13 | El cobro de la cita y sus pagos se crean en una sola petición: si un pago falla no queda nada. La cita trae `cobro_estado`, y el paso "Pago" del asistente (y la cola de espera) solo se marca con el cobro pagado o con abono, no con que exista. Un cobro que quedó sin pagar se paga al reintentar; uno ya pagado responde "Esta cita ya tiene un cobro registrado". |
+| M6-14 | Al cobrar una cita se puede repartir el pago entre varios medios ("Pagar con otro medio") y registrar un pago parcial: el saldo queda por cobrar en Ingresos. Ya no se puede cobrar de más (ningún pago supera el saldo, salvo una cita sin procedimiento, que no tiene valor). Quien tiene `cobros.cambiar_precio` puede cambiar el valor de la cita; sin el permiso el precio fijo queda bloqueado y lo dice. |
+| M6-17 | Un gasto debe ser mayor a $0 y el fondo de apertura no puede ser negativo (backend y pantallas). Los errores del gasto se muestran con su texto. |
+| M6-21 | "Buscar descripción…" en Egresos filtra por descripción y categoría. |
+| M6-22 | "Cuotas vencidas" sale de un solo endpoint (`/cartera/cuotas-vencidas/`): sin límite de 500 carteras, sin cientos de peticiones, y la cuota que vence hoy ya no aparece como vencida. Muestra el nombre de la forma de pago en vez de su ID. |
+
+- **Pruebas:** 9 nuevas en `test_verificacion_paso7.py`.
+
+**Paso 7b — medios de M7 (13/10/2026)**
+
+| Ítem | Qué se hizo |
+|---|---|
+| M7-05 | "Insumos" de la atención muestra el stock de la sede de la cita y envía esa sede al registrar el consumo. Los errores del backend se muestran con su texto. |
+| M7-07 | Insumos: editar (con categoría), desactivar y reactivar, y ver los inactivos. Nueva gestión de categorías (crear, renombrar, desactivar). Proveedores: editar, desactivar y reactivar. Compras: "Cancelar compra" en borrador o enviada, y quitar ítems de un borrador. En el backend: una compra ya recibida no se puede cancelar (`ORDEN_NO_CANCELABLE`), los ítems quitados de un borrador no se devuelven, una categoría repetida da 400 (antes 500) y las categorías se filtran por `activo`. |
+| M7-10 | "Envíos fallidos" exige `pacientes.ver` o `agenda.citas.ver` (ver y marcar como resuelto) y enmascara el teléfono sin `pacientes.datos_sensibles.ver`. El dashboard y la pantalla de consumo de WhatsApp solo los piden con ese permiso. |
+| M7-12 | Si la dueña verificó el correo y cerró antes de crear la contraseña, al volver a abrir el enlace (mientras no venza) recibe una invitación nueva. "Olvidé mi contraseña" le reenvía la invitación a un administrador que nunca la activó. |
+| M7-13 | Un usuario del equipo de ayuda (`is_staff` sin ser superadmin) en /console solo ve y entra al Centro de ayuda. |
+| M7-14 | La lista de clínicas de la consola tiene paginador, y los filtros Activas e Inactivas filtran (`filterset_fields = activo`). |
+| M7-15 | `formatCantidad` compartido en `lib/utils`: compras, insumos de la atención, ingresos e inventario muestran "5", no "5.000". |
+| M7-16 | Enviar por WhatsApp a un paciente sin teléfono responde "El paciente no tiene teléfono registrado" sin crear el envío ni descontar cupo (en la cotización y en el servicio común). Los 502/503 de servicios externos se traducen por código (`WEBHOOK_ERROR`, `WEBHOOK_NOT_CONFIGURED`, `DOCUMENSO_ERROR`) en vez de "El sistema tuvo un problema". |
+| M7-17 | Los PDF que se envían por WhatsApp van al bucket privado con una URL firmada que vence en un día. |
+
+- **Pruebas:** 9 nuevas en `test_verificacion_paso7.py`.
+- **Sin probar en el navegador:** las pantallas nuevas de M7-07 y el cobro con varios medios de M6-14.
 
 ## Orden de corrección sugerido
 

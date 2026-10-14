@@ -15,6 +15,7 @@ export const adminApi = {
       search?: string
       activo?: boolean
       ordering?: string
+      page?: number
     }): Promise<Paginated<AdminTenant>> => {
       const res = await apiClient.get<Paginated<AdminTenant>>('/admin/tenants/', { params })
       return res.data

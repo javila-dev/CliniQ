@@ -82,7 +82,7 @@ interface CobrosCotizacionModalProps {
 }
 
 export function CobrosCotizacionModal({ cotizacionId, open, onClose }: CobrosCotizacionModalProps) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['cobros-cotizacion', cotizacionId],
     queryFn: () => cobrosApi.list({ cotizacion: cotizacionId, origen: 'cotizacion' }),
     enabled: open,
@@ -124,6 +124,13 @@ export function CobrosCotizacionModal({ cotizacionId, open, onClose }: CobrosCot
               <Skeleton className="h-24 w-full" />
               <Skeleton className="h-24 w-full" />
             </>
+          ) : isError ? (
+            <div className="py-4 text-center text-sm">
+              <p className="text-destructive">No se pudieron cargar los cobros.</p>
+              <button type="button" onClick={() => refetch()} className="mt-1 text-xs font-medium underline-offset-2 hover:underline">
+                Reintentar
+              </button>
+            </div>
           ) : cobros.length === 0 ? (
             <p className="text-sm text-muted-foreground italic py-4 text-center">Sin cobros registrados</p>
           ) : (

@@ -27,9 +27,9 @@ function fmtDate(d: string) {
   return new Date(d + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
 }
 
-// Solo "borrador" y "recibida_total" se producen desde este flujo. Los demás
-// estados (enviada, recibida_parcial, cancelada) quedan mapeados por si hay
-// datos históricos, pero no son alcanzables desde esta UI.
+// Desde esta UI se producen "borrador", "recibida_total" y "cancelada" (desde
+// el detalle de la compra). Enviada y recibida_parcial quedan mapeados por si
+// hay datos históricos, pero no son alcanzables desde aquí.
 const ESTADO_CONFIG: Record<EstadoOrdenCompra, { label: string; icon: React.ElementType; className: string }> = {
   borrador:         { label: 'Borrador',  icon: Clock,        className: 'bg-gray-50 text-gray-600 ring-gray-200' },
   enviada:          { label: 'Enviada',   icon: Clock,        className: 'bg-blue-50 text-blue-600 ring-blue-200' },

@@ -1,6 +1,8 @@
 'use client'
 
 import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import { seguimientoApi } from '@/lib/api/seguimiento'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -205,10 +207,42 @@ const CANALES: { value: CanalGestion; label: string }[] = [
   { value: 'nota', label: 'Solo una nota' },
 ]
 
-export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llamada', resultadoInicial = null, loading, onConfirm, onPerder, onAgendar }: {
+/** Últimas gestiones del interesado: quién lo contactó, cuándo y qué pasó. */
+function HistorialGestiones({ oportunidadId }: { oportunidadId: string }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['seguimiento', 'gestiones', oportunidadId],
+    queryFn: () => seguimientoApi.gestiones(oportunidadId),
+  })
+  if (isLoading) return <p className="text-xs text-muted-foreground">Cargando contactos anteriores…</p>
+  if (isError) return <p className="text-xs text-muted-foreground">No se pudieron cargar los contactos anteriores.</p>
+  if (!data?.length) return <p className="text-xs text-muted-foreground">Es el primer contacto.</p>
+  return (
+    <details className="rounded-md border bg-muted/30 px-3 py-2 text-xs">
+      <summary className="cursor-pointer select-none font-medium">
+        {data.length} contacto{data.length !== 1 ? 's' : ''} anterior{data.length !== 1 ? 'es' : ''}
+      </summary>
+      <ul className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+        {data.slice(0, 20).map((g) => (
+          <li key={g.id}>
+            <span className="text-muted-foreground">
+              {new Date(g.created_at).toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })}
+              {g.usuario_nombre ? ` · ${g.usuario_nombre}` : ''} · {g.canal_nombre}:
+            </span>{' '}
+            <span className="font-medium">{g.resultado_nombre}</span>
+            {g.nota && <span className="text-muted-foreground"> — {g.nota}</span>}
+          </li>
+        ))}
+      </ul>
+    </details>
+  )
+}
+
+export function GestionDialog({ open, onOpenChange, nombre, oportunidadId, canalInicial = 'llamada', resultadoInicial = null, loading, onConfirm, onPerder, onAgendar }: {
   open: boolean
   onOpenChange: (v: boolean) => void
   nombre: string
+  /** Para mostrar las gestiones anteriores (antes no se veían en ningún lado). */
+  oportunidadId?: string
   canalInicial?: CanalGestion
   resultadoInicial?: ResultadoGestion | null
   loading?: boolean
@@ -250,6 +284,7 @@ export function GestionDialog({ open, onOpenChange, nombre, canalInicial = 'llam
         </DialogHeader>
 
         <div className="space-y-4">
+          {open && oportunidadId && <HistorialGestiones oportunidadId={oportunidadId} />}
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Por dónde</Label>
             <Chips<CanalGestion> opciones={CANALES} valor={canal} onChange={(v) => v && setCanal(v)} size="sm" />

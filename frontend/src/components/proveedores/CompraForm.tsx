@@ -20,7 +20,7 @@ import { ProveedorSearchInput } from '@/components/proveedores/ProveedorSearchIn
 import { NuevoProveedorDialog } from '@/components/proveedores/NuevoProveedorDialog'
 import { toast } from '@/hooks/use-toast'
 import type { OrdenCompra } from '@/types/proveedores'
-import { todayISO } from '@/lib/utils'
+import { formatCantidad, todayISO } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 
@@ -109,7 +109,7 @@ function AgregarItemModal({
                       className="w-full text-left px-3 py-2 hover:bg-muted/50 transition-colors"
                     >
                       <p className="text-sm font-medium">{i.nombre}</p>
-                      <p className="text-xs text-muted-foreground">Stock actual: {i.stock_actual}</p>
+                      <p className="text-xs text-muted-foreground">Stock actual: {formatCantidad(i.stock_actual)}</p>
                     </button>
                   ))
                 )}
@@ -184,8 +184,9 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
   const [numeroFactura, setNumeroFactura] = useState(compraExistente?.numero_factura_proveedor ?? '')
   const [fechaFactura, setFechaFactura] = useState(compraExistente?.fecha_factura_proveedor ?? '')
   const [notas, setNotas] = useState(compraExistente?.notas ?? '')
+  // Los ítems quitados de un borrador vuelven del backend con activo=false.
   const [items, setItems] = useState<ItemLocal[]>(
-    compraExistente?.items.map((i) => ({
+    compraExistente?.items.filter((i) => i.activo !== false).map((i) => ({
       id: i.id, insumo: i.insumo, insumo_nombre: i.insumo_nombre ?? i.insumo,
       cantidad: i.cantidad, precio_unitario: i.precio_unitario,
     })) ?? []
@@ -276,7 +277,9 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
         : await proveedoresApi.updateOrden(compraExistente!.id, payloadHeader())
       try {
         return await proveedoresApi.recibirOrden(orden.id, {
-          items_recibidos: orden.items.map((i) => ({ item_id: i.id, cantidad: i.cantidad })),
+          items_recibidos: orden.items
+            .filter((i) => i.activo !== false)
+            .map((i) => ({ item_id: i.id, cantidad: i.cantidad })),
           numero_factura_proveedor: numeroFactura || undefined,
           fecha_factura_proveedor: fechaFactura || undefined,
         })
@@ -381,13 +384,20 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
               {items.map((item, idx) => (
                 <div key={item.id ?? `${item.insumo}-${idx}`} className="grid grid-cols-[1fr_90px_110px_110px_32px] gap-2 px-3 py-2.5 border-t items-center text-sm">
                   <span className="truncate">{item.insumo_nombre}</span>
-                  <span className="text-right tabular-nums">{item.cantidad}</span>
+                  <span className="text-right tabular-nums">{formatCantidad(item.cantidad)}</span>
                   <span className="text-right tabular-nums">{COP.format(Number(item.precio_unitario))}</span>
                   <span className="text-right tabular-nums font-medium">
                     {COP.format(Number(item.cantidad) * Number(item.precio_unitario))}
                   </span>
-                  {!esInmutable && !item.id ? (
-                    <button type="button" onClick={() => quitarItem(idx)} className="text-muted-foreground hover:text-red-500 transition-colors justify-self-center">
+                  {/* En un borrador también se quitan los ítems ya guardados: al
+                      guardar, el backend desactiva los que no vienen en la lista. */}
+                  {!esInmutable ? (
+                    <button
+                      type="button"
+                      onClick={() => quitarItem(idx)}
+                      className="text-muted-foreground hover:text-red-500 transition-colors justify-self-center"
+                      aria-label={`Quitar ${item.insumo_nombre}`}
+                    >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
                   ) : <span />}
@@ -416,7 +426,9 @@ export function CompraForm({ compraExistente }: { compraExistente?: OrdenCompra 
       {esInmutable ? (
         <div className="flex items-center gap-2 rounded-lg bg-muted/40 px-4 py-3 text-sm text-muted-foreground">
           <Lock className="h-3.5 w-3.5 shrink-0" />
-          Esta compra ya fue recibida y quedó inmutable — el stock ya se actualizó.
+          {compraExistente?.estado === 'cancelada'
+            ? 'Esta compra fue cancelada y no se puede modificar.'
+            : 'Esta compra ya fue recibida y quedó inmutable — el stock ya se actualizó.'}
         </div>
       ) : (
         <div className="flex justify-end gap-2">

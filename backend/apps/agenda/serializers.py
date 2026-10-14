@@ -201,6 +201,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     servicio_precio_base = serializers.SerializerMethodField()
     firma_asistencia_archivo_url = serializers.SerializerMethodField()
     cobro_id = serializers.SerializerMethodField()
+    cobro_estado = serializers.SerializerMethodField()
     deuda_info = serializers.SerializerMethodField()
 
     class Meta:
@@ -248,6 +249,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "servicio_precio",
             "servicio_precio_base",
             "cobro_id",
+            "cobro_estado",
             "deuda_info",
             "created_by",
             "created_at",
@@ -280,6 +282,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "servicio_precio",
             "servicio_precio_base",
             "cobro_id",
+            "cobro_estado",
             "deuda_info",
             "created_by",
             "created_at",
@@ -315,6 +318,14 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     def get_cobro_id(self, obj):
         try:
             return str(obj.cobro.id)
+        except Exception:
+            return None
+
+    def get_cobro_estado(self, obj):
+        # El asistente de llegada marca "Pago" según el estado, no según que
+        # exista el cobro: uno creado cuyo pago falló sigue pendiente (M6-13).
+        try:
+            return obj.cobro.estado
         except Exception:
             return None
 

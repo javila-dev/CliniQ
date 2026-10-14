@@ -16,7 +16,7 @@ import {
 import { reportesApi } from '@/lib/api/reportes'
 import { carteraApi } from '@/lib/api/cartera'
 import { agendaApi } from '@/lib/api/agenda'
-import { notificacionesFallidasApi } from '@/lib/api/notificaciones'
+import { notificacionesFallidasApi, veEnviosFallidos } from '@/lib/api/notificaciones'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useAuthStore } from '@/store/authStore'
 import { ParaHoyResumen } from '@/components/seguimiento/ParaHoyResumen'
@@ -834,6 +834,7 @@ function DashboardContent() {
   const { data: notificacionesFallidasData } = useQuery({
     queryKey: ['notificaciones', 'fallidas'],
     queryFn: () => notificacionesFallidasApi.list({ resuelta: false }),
+    enabled: veEnviosFallidos(user),
     staleTime: STALE,
     refetchInterval: STALE,
   })

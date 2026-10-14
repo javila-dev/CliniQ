@@ -110,6 +110,12 @@ class OrdenCompraSerializer(serializers.ModelSerializer):
             "updated_at",
         )
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # Los ítems quitados de un borrador quedan inactivos: no se devuelven.
+        data["items"] = [item for item in data["items"] if item.get("activo", True)]
+        return data
+
     def validate(self, attrs):
         request = self.context.get("request")
         proveedor = attrs.get("proveedor") or getattr(self.instance, "proveedor", None)

@@ -26,6 +26,14 @@ function ConsoleGuard({ children }: { children: React.ReactNode }) {
   }, [hasCheckedAuth, loadUser])
 
   const allowed = !!user && canAccess.console(user)
+  const pathname = usePathname()
+  // El equipo de ayuda (is_staff sin ser superadmin) solo gestiona el Centro de
+  // ayuda: el resto de la consola lo exige el backend para superadmin (M7-13).
+  const fueraDeSuAlcance = allowed && !isSuperAdmin(user) && !pathname.startsWith(RUTA_AYUDA)
+
+  useEffect(() => {
+    if (fueraDeSuAlcance) router.replace(RUTA_AYUDA)
+  }, [fueraDeSuAlcance, router])
 
   useEffect(() => {
     if (!hasCheckedAuth || isLoading) return
@@ -36,7 +44,7 @@ function ConsoleGuard({ children }: { children: React.ReactNode }) {
     }
   }, [hasCheckedAuth, isLoading, isAuthenticated, user, allowed, router])
 
-  if (!hasCheckedAuth || isLoading || !isAuthenticated || !allowed) {
+  if (!hasCheckedAuth || isLoading || !isAuthenticated || !allowed || fueraDeSuAlcance) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <div className="w-64 space-y-3">
@@ -50,12 +58,14 @@ function ConsoleGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>
 }
 
+const RUTA_AYUDA = '/console/ayuda'
+
 const NAV = [
-  { href: '/console/clinicas',      label: 'Clínicas',        icon: Building2 },
-  { href: '/console/planes',        label: 'Planes',          icon: CreditCard },
-  { href: '/console/diagramas',     label: 'Diagramas y zonas', icon: PersonStanding },
-  { href: '/console/usuarios',      label: 'Usuarios',        icon: Users },
-  { href: '/console/ayuda',         label: 'Centro de ayuda', icon: LifeBuoy },
+  { href: '/console/clinicas',      label: 'Clínicas',        icon: Building2,      soloSuperadmin: true },
+  { href: '/console/planes',        label: 'Planes',          icon: CreditCard,     soloSuperadmin: true },
+  { href: '/console/diagramas',     label: 'Diagramas y zonas', icon: PersonStanding, soloSuperadmin: true },
+  { href: '/console/usuarios',      label: 'Usuarios',        icon: Users,          soloSuperadmin: true },
+  { href: RUTA_AYUDA,               label: 'Centro de ayuda', icon: LifeBuoy,       soloSuperadmin: false },
 ]
 
 function ConsoleTopBar() {
@@ -72,7 +82,7 @@ function ConsoleTopBar() {
   return (
     <header className="sticky top-0 z-30 border-b border-slate-800 bg-[#0b0d12]">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-6 px-4 sm:px-6">
-        <Link href="/console/clinicas" className="flex shrink-0 items-center gap-2.5">
+        <Link href={isSuperAdmin(user) ? '/console/clinicas' : RUTA_AYUDA} className="flex shrink-0 items-center gap-2.5">
           <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={96} height={30} className="h-auto w-[96px] object-contain" />
           <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-300">
             Console
@@ -80,7 +90,7 @@ function ConsoleTopBar() {
         </Link>
 
         <nav className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
-          {NAV.map((item) => {
+          {NAV.filter((item) => !item.soloSuperadmin || isSuperAdmin(user)).map((item) => {
             const active = pathname === item.href || pathname.startsWith(item.href + '/')
             return (
               <Link

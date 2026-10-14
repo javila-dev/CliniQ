@@ -3,14 +3,15 @@
 import { use, useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, TrendingUp, TrendingDown, ArrowUpCircle, ArrowDownCircle,
-  ChevronLeft, ChevronRight, Search,
+  ChevronLeft, ChevronRight, Search, Pencil, Power,
 } from 'lucide-react'
 import { inventarioApi } from '@/lib/api/inventario'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -20,11 +21,14 @@ import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { AjusteStockSheet } from '@/components/inventario/AjusteStockSheet'
 import { MovimientoDetalleModal } from '@/components/inventario/MovimientoDetalleModal'
+import { InsumoSheet } from '@/components/inventario/InsumoSheet'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
 import { useDebounce } from '@/hooks/useDebounce'
 import { UNIDAD_LABEL } from '@/lib/inventarioLabels'
-import { cn } from '@/lib/utils'
+import { cn, formatCantidad } from '@/lib/utils'
 import type { MovimientoInventario, TipoMovimiento } from '@/types/inventario'
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
@@ -34,11 +38,6 @@ function fmtDateTime(d: string) {
   return new Date(d).toLocaleString('es-CO', {
     day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
   })
-}
-
-function formatCantidad(value: string): string {
-  const n = Number(value)
-  return isNaN(n) ? value : n.toLocaleString('es-CO', { maximumFractionDigits: 2 })
 }
 
 const TIPO_CONFIG: Record<TipoMovimiento, { label: string; icon: React.ElementType; className: string; signo: '+' | '-' }> = {
@@ -77,12 +76,16 @@ function InsumoDetalleContent({ id }: { id: string }) {
   const { user } = useAuthStore()
   const puedeAjustarStock = hasPermission(user, PERM.INVENTARIO_AJUSTAR_STOCK)
   const puedeVerKardex = hasPermission(user, PERM.INVENTARIO_KARDEX_VER)
+  const puedeGestionarInsumos = hasPermission(user, PERM.INVENTARIO_INSUMOS_GESTIONAR)
+  const qc = useQueryClient()
 
   const [sede, setSede] = useState(searchParams.get('sede') ?? '')
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
   const [ajustarOpen, setAjustarOpen] = useState(false)
   const [movimientoSel, setMovimientoSel] = useState<MovimientoInventario | null>(null)
+  const [editarOpen, setEditarOpen] = useState(false)
+  const [confirmarEstadoOpen, setConfirmarEstadoOpen] = useState(false)
   const debouncedSearch = useDebounce(search, 350)
 
   const { data: sedesData } = useQuery({
@@ -112,6 +115,21 @@ function InsumoDetalleContent({ id }: { id: string }) {
     enabled: !!sede && puedeVerKardex,
   })
 
+  const estadoMut = useMutation({
+    mutationFn: (activo: boolean) => inventarioApi.updateInsumo(id, { activo }),
+    onSuccess: (actualizado) => {
+      qc.invalidateQueries({ queryKey: ['insumo', id] })
+      qc.invalidateQueries({ queryKey: ['insumos'] })
+      qc.invalidateQueries({ queryKey: ['alertas-stock'] })
+      qc.invalidateQueries({ queryKey: ['insumos-consumo-interno'] })
+      qc.invalidateQueries({ queryKey: ['insumos-obsequio'] })
+      qc.invalidateQueries({ queryKey: ['insumos-quick-search'] })
+      setConfirmarEstadoOpen(false)
+      toast.success(actualizado.activo ? 'Insumo reactivado' : 'Insumo desactivado')
+    },
+    onError: (err) => toast.error('No se pudo cambiar el estado del insumo', mensajeDeError(err)),
+  })
+
   if (isLoading || !sede) return <LoadingState rows={5} />
   if (isError || !insumo) return <ErrorState onRetry={refetch} />
 
@@ -124,11 +142,34 @@ function InsumoDetalleContent({ id }: { id: string }) {
         title={insumo.nombre}
         description={usoLabel(insumo.es_consumo_interno, insumo.es_venta_retail)}
         action={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/inventario"><ArrowLeft className="h-4 w-4 mr-1.5" />Inventario</Link>
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap justify-end">
+            {puedeGestionarInsumos && (
+              <>
+                <Button variant="outline" size="sm" onClick={() => setEditarOpen(true)}>
+                  <Pencil className="h-4 w-4 mr-1.5" />Editar
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={insumo.activo ? 'text-red-600 hover:text-red-600' : 'text-green-600 hover:text-green-600'}
+                  onClick={() => setConfirmarEstadoOpen(true)}
+                >
+                  <Power className="h-4 w-4 mr-1.5" />{insumo.activo ? 'Desactivar' : 'Reactivar'}
+                </Button>
+              </>
+            )}
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/inventario"><ArrowLeft className="h-4 w-4 mr-1.5" />Inventario</Link>
+            </Button>
+          </div>
         }
       />
+
+      {!insumo.activo && (
+        <div className="rounded-md bg-muted/60 border px-3 py-2 text-sm text-muted-foreground">
+          Este insumo está inactivo: no aparece para registrar consumo, obsequios ni compras. Su historial se conserva.
+        </div>
+      )}
 
       {/* Ficha general */}
       <Card>
@@ -310,6 +351,21 @@ function InsumoDetalleContent({ id }: { id: string }) {
         movimiento={movimientoSel}
         open={!!movimientoSel}
         onClose={() => setMovimientoSel(null)}
+      />
+      <InsumoSheet insumo={insumo} open={editarOpen} onClose={() => setEditarOpen(false)} />
+      <ConfirmDialog
+        open={confirmarEstadoOpen}
+        onOpenChange={(v) => { if (!v && !estadoMut.isPending) setConfirmarEstadoOpen(false) }}
+        title={insumo.activo ? 'Desactivar insumo' : 'Reactivar insumo'}
+        description={
+          insumo.activo
+            ? `${insumo.nombre} dejará de aparecer para registrar consumo en atención, obsequios y compras. Su stock, kardex e historial se conservan, y puedes reactivarlo cuando quieras.`
+            : `${insumo.nombre} volverá a estar disponible para consumo, obsequios y compras.`
+        }
+        confirmLabel={insumo.activo ? 'Desactivar' : 'Reactivar'}
+        variant={insumo.activo ? 'destructive' : 'default'}
+        loading={estadoMut.isPending}
+        onConfirm={() => estadoMut.mutate(!insumo.activo)}
       />
     </div>
   )

@@ -360,6 +360,7 @@ class AdminTenantViewSet(ModelViewSet):
     http_method_names = ["get", "post", "patch", "head", "options"]
     permission_classes = [IsSuperAdmin]
     search_fields = ("nombre", "nit", "email")
+    filterset_fields = ("activo",)
     ordering_fields = ("nombre", "created_at")
 
     def get_queryset(self):

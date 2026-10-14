@@ -891,10 +891,10 @@ class CotizacionFlowTests(TestCase):
         )
         self.assertEqual(str(segundo.id), str(Consentimiento.objects.get(cotizacion_id=cotizacion_id).id))
 
-    def test_retrieve_genera_compromiso_pago_retroactivo_si_falta(self):
-        """Cotizacion aceptada antes de que existiera la generacion automatica:
-        al abrir el detalle se crea el compromiso de pago pendiente y viaja en
-        la respuesta."""
+    def test_retrieve_no_genera_compromiso_en_ventas_anteriores(self):
+        """Venta aceptada antes de activar el compromiso de pago: abrir el
+        detalle no la deja "Pendiente de firma" (decisión del usuario, M5-13).
+        Solo firman las cotizaciones que se acepten después de activarlo."""
         from apps.configuracion.models import ConfiguracionCartera
         from apps.consentimientos.models import Consentimiento
 
@@ -904,29 +904,13 @@ class CotizacionFlowTests(TestCase):
             profesional=self.superadmin,
             estado=Cotizacion.Estado.ACEPTADA,
         )
-        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
-
-        # Sin el requisito activo: no se genera nada.
-        detalle = self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
-        self.assertEqual(detalle.status_code, 200)
-        self.assertIsNone(detalle.json()["compromiso_pago"])
-        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
-
-        # Con el requisito activo: el GET del detalle lo genera (una sola vez).
         ConfiguracionCartera.objects.create(
             clinica=self.clinica, requiere_consentimiento_promocional=True,
         )
         detalle = self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
         self.assertEqual(detalle.status_code, 200)
-        compromiso = detalle.json()["compromiso_pago"]
-        self.assertIsNotNone(compromiso)
-        self.assertEqual(compromiso["estado"], Consentimiento.Estado.PENDIENTE)
-
-        self.client.get(f"/api/v1/cotizaciones/{cotizacion.id}/")
-        self.assertEqual(
-            Consentimiento.objects.filter(cotizacion=cotizacion, plantilla__isnull=True).count(),
-            1,
-        )
+        self.assertIsNone(detalle.json()["compromiso_pago"])
+        self.assertFalse(Consentimiento.objects.filter(cotizacion=cotizacion).exists())
 
     def test_no_pasa_a_aceptada_sin_firma_del_compromiso_si_la_clinica_lo_exige(self):
         from apps.configuracion.models import ConfiguracionCartera
@@ -1353,6 +1337,29 @@ class CotizacionPrecioCampanaTests(TestCase):
         item = create.json()["items"][0]
         self.assertTrue(item["precio_bloqueado"])
         self.assertEqual(item["valor_unitario"], "400000.00")
+
+    def test_sin_permiso_acepta_un_precio_entre_la_promocion_y_la_lista(self):
+        # M5-03: con la promoción en 280.000 y la lista en 350.000, la pantalla
+        # deja 300.000; antes el backend respondía "No tienes permiso".
+        profesional = User.objects.create_user(
+            email=f"prof-cot-medio-{uuid.uuid4().hex[:8]}@test.com",
+            password="Secret123!", first_name="Prof", last_name="Medio",
+            rol=User.Role.PROFESIONAL, clinica=self.clinica, es_profesional=True,
+        )
+        self.client.force_authenticate(profesional)
+        datos = {
+            "paciente": str(self.paciente.id),
+            "sede": str(self.sede.id),
+            "items": [{"tipo": "procedimiento", "procedimiento": str(self.procedimiento.id), "valor_unitario": "300000.00"}],
+            "formas_pago": [{"tipo": forma_pago_id(self.clinica, "transferencia"), "descripcion": "Total", "valor": "300000.00"}],
+        }
+        create = self.client.post("/api/v1/cotizaciones/", datos, format="json")
+        self.assertEqual(create.status_code, 201, create.content)
+
+        datos["items"][0]["valor_unitario"] = "250000.00"
+        datos["formas_pago"][0]["valor"] = "250000.00"
+        debajo = self.client.post("/api/v1/cotizaciones/", datos, format="json")
+        self.assertEqual(debajo.status_code, 400, debajo.content)
 
     def test_patch_tratamiento_acepta_precio_campana_con_precio_bloqueado(self):
         create = self.client.post(

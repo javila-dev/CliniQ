@@ -278,12 +278,22 @@ def send_invitation_email(user: User) -> None:
     )
 
 
+def admin_con_invitacion_pendiente(user: User) -> bool:
+    """Administrador que nunca creó su contraseña (p. ej. la dueña que verificó
+    el correo del registro y cerró la pestaña antes de terminar)."""
+    es_admin = user.rol == "admin" or getattr(user.rol_dinamico, "slug", None) == "admin"
+    return es_admin and not user.activo and user.last_login is None and not user.has_usable_password()
+
+
 def request_password_reset(email: str) -> None:
-    try:
-        user = User.objects.get(email__iexact=email.strip(), activo=True)
-    except User.DoesNotExist:
+    user = User.objects.filter(email__iexact=email.strip()).select_related("rol_dinamico").first()
+    if user is None:
         return
-    send_password_reset_email(user)
+    if user.activo:
+        send_password_reset_email(user)
+    elif admin_con_invitacion_pendiente(user):
+        # "Olvidé mi contraseña" le reenvía la invitación para terminar el registro (M7-12).
+        send_invitation_email(user)
 
 
 def _describir_dispositivo(user_agent: str) -> str:

@@ -259,6 +259,7 @@ class GastoCajaViewSet(ModelViewSet):
     ).all()
     serializer_class = GastoCajaSerializer
     filterset_fields = ("fecha", "categoria", "sede", "sesion")
+    search_fields = ("descripcion", "categoria__nombre")
     ordering_fields = ("fecha", "valor", "created_at")
 
     def get_permissions(self):

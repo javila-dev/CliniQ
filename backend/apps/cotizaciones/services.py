@@ -73,6 +73,7 @@ def validar_plan_de_pagos(cotizacion) -> None:
         )
 
 
+@transaction.atomic
 def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
     """Transiciona la cotización a ACEPTADA y crea su cartera + cuotas.
 
@@ -82,7 +83,14 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
     from apps.cartera.models import Cartera, CuotaCartera
     from apps.protocolos.services import consentimientos_pendientes_cotizacion
 
-    if cotizacion.estado == Cotizacion.Estado.ACEPTADA:
+    # Bloqueo de la fila: si dos personas (o la firma y una persona) aceptan a
+    # la vez, la segunda espera y ve que ya está aceptada. Antes quedaban
+    # cuotas duplicadas en la cartera o un error 500.
+    estado_actual = (
+        Cotizacion.objects.select_for_update().filter(pk=cotizacion.pk).values_list("estado", flat=True).first()
+    )
+    if estado_actual == Cotizacion.Estado.ACEPTADA or cotizacion.estado == Cotizacion.Estado.ACEPTADA:
+        cotizacion.refresh_from_db()
         return consentimientos_pendientes_cotizacion(cotizacion)
 
     cotizacion.estado = Cotizacion.Estado.ACEPTADA
@@ -248,6 +256,18 @@ def aceptar_cotizacion_por_firma_compromiso(consentimiento) -> None:
     if cotizacion.estado != Cotizacion.Estado.BORRADOR or not cotizacion.activo:
         return
     if not clinica_exige_compromiso_pago(cotizacion):
+        return
+    # Si el borrador se editó y el plan de pagos ya no suma el total, aceptar
+    # dejaría una venta con cuotas que no cuadran: queda en borrador para que
+    # la clínica corrija el plan y la acepte.
+    try:
+        validar_plan_de_pagos(cotizacion)
+    except ValidationError:
+        logger.warning(
+            "[aceptar_cotizacion_por_firma_compromiso] plan de pagos no cuadra; no se acepta"
+            " | cotizacion_id=%s | consentimiento_id=%s",
+            cotizacion.id, consentimiento.id,
+        )
         return
 
     logger.info(

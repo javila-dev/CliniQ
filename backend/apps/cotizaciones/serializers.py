@@ -269,7 +269,10 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                     procedimiento=procedimiento,
                     tratamiento=tratamiento,
                 )
-                permite_por_campana = precio_campana is not None and valor_unitario == precio_campana
+                # Con una promoción activa se acepta cualquier valor entre la
+                # promoción y la lista (como deja la pantalla); antes solo el
+                # precio exacto de la promoción.
+                permite_por_campana = precio_campana is not None and valor_unitario >= precio_campana
                 if not permite_por_campana and not (
                     request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
                 ):
@@ -319,12 +322,13 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             precio_campana = lookup_precio_campana(
                 clinica=clinica, sede=sede, procedimiento=procedimiento, tratamiento=tratamiento,
             )
-            # Excepción: el ítem está a precio exacto de campaña activa y sin
-            # descuento adicional encima (así funciona "aplicar precio de campaña").
+            # Excepción: con una campaña activa, un valor unitario entre la
+            # promoción y la lista, sin descuento porcentual encima (el % sigue
+            # sujeto al tope). Antes solo valía el precio exacto de la promoción.
             permite_por_campana = (
                 precio_campana is not None
                 and descuento_dec == 0
-                and valor_unit_dec.quantize(Decimal("0.01")) == Decimal(precio_campana).quantize(Decimal("0.01"))
+                and valor_unit_dec >= Decimal(precio_campana) - Decimal("0.01")
             )
             # tolerancia de 1 centavo por redondeo
             if not permite_por_campana and precio_efectivo < piso - Decimal("0.01"):
@@ -650,6 +654,10 @@ class CotizacionSerializer(serializers.ModelSerializer):
     formas_pago = FormaPagoCotizacionSerializer(many=True)
     envios = CotizacionEnvioSerializer(many=True, read_only=True)
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
+    # Para "Enviar" (WhatsApp o correo): antes no venían y el correo salía
+    # vacío. Respetan el enmascarado de datos sensibles.
+    paciente_telefono = serializers.SerializerMethodField()
+    paciente_email = serializers.SerializerMethodField()
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     fecha_vencimiento = serializers.DateField(read_only=True)
     estado_comercial = serializers.CharField(read_only=True)
@@ -667,6 +675,8 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "id",
             "paciente",
             "paciente_nombre",
+            "paciente_telefono",
+            "paciente_email",
             "profesional",
             "profesional_nombre",
             "sede",
@@ -750,6 +760,18 @@ class CotizacionSerializer(serializers.ModelSerializer):
     def get_cartera_id(self, obj):
         cartera = getattr(obj, "cartera", None)
         return str(cartera.id) if cartera else None
+
+    def get_paciente_telefono(self, obj):
+        from apps.pacientes.serializers import enmascarar_cola, usuario_ve_datos_sensibles
+
+        telefono = obj.paciente.telefono if obj.paciente_id else ""
+        return telefono if usuario_ve_datos_sensibles(self.context) else enmascarar_cola(telefono)
+
+    def get_paciente_email(self, obj):
+        from apps.pacientes.serializers import enmascarar_email, usuario_ve_datos_sensibles
+
+        email = obj.paciente.email if obj.paciente_id else ""
+        return email if usuario_ve_datos_sensibles(self.context) else enmascarar_email(email)
 
     def to_representation(self, instance):
         ret = super().to_representation(instance)

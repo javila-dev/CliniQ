@@ -240,15 +240,14 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
       setSede(''); setCategoria(''); setDescripcion(''); setValor(''); setFoto(null); setErr(null)
       onClose()
     },
-    onError: (e: any) => setErr(
-      e?.response?.data?.error ?? e?.response?.data?.soporte_foto ?? e?.response?.data?.detail ?? 'No se pudo registrar el gasto',
-    ),
+    onError: (e) => setErr(mensajeDeError(e, 'No se pudo registrar el gasto')),
   })
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
     setErr(null)
     if (!sedeSel || !categoria || !descripcion || !valor) { setErr('Completa todos los campos.'); return }
+    if (!(Number(valor) > 0)) { setErr('El valor del gasto debe ser mayor a $0.'); return }
     if (necesitaFoto && !foto) { setErr('Para gastos mayores a $50.000 el soporte fotográfico es obligatorio.'); return }
     mut.mutate()
   }

@@ -83,37 +83,9 @@ export const carteraApi = {
     return res.data
   },
 
+  /** Cuotas con saldo y fecha ya pasada, calculadas en el servidor (la que vence hoy no cuenta). */
   cuotasVencidas: async (desde?: string): Promise<CuotaVencida[]> => {
-    const { results: lista } = await carteraApi.list({ page_size: 500 })
-    const pendientes = lista.filter(
-      (c) => c.cuotas_pagadas < c.cuotas_total && (!desde || c.created_at.slice(0, 10) >= desde),
-    )
-    const detalles = await Promise.all(pendientes.map((c) => carteraApi.get(c.id)))
-    const hoy = new Date()
-    const vencidas: CuotaVencida[] = []
-    for (const cartera of detalles) {
-      const cuotasCartera = cartera.cuotas ?? []
-      cuotasCartera.forEach((cuota, idx) => {
-        const saldo = Number(cuota.saldo_pendiente ?? cuota.valor_esperado)
-        if (saldo <= 0 || !cuota.fecha_esperada) return
-        const fechaEsperada = new Date(cuota.fecha_esperada)
-        if (fechaEsperada >= hoy) return
-        const dias = Math.floor((hoy.getTime() - fechaEsperada.getTime()) / 86_400_000)
-        vencidas.push({
-          id: cuota.id,
-          cartera_id: cartera.id,
-          paciente_nombre: cartera.paciente_nombre,
-          cotizacion_id: cartera.cotizacion_id,
-          tipo: cuota.tipo,
-          descripcion: cuota.descripcion,
-          valor_esperado: String(saldo),
-          fecha_esperada: cuota.fecha_esperada,
-          dias_vencida: dias,
-          numero_cuota: idx + 1,
-          total_cuotas: cuotasCartera.length,
-        })
-      })
-    }
-    return vencidas.sort((a, b) => b.dias_vencida - a.dias_vencida)
+    const res = await apiClient.get<CuotaVencida[]>('/cartera/cuotas-vencidas/', { params: desde ? { desde } : undefined })
+    return res.data
   },
 }

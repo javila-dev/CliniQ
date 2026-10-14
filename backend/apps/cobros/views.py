@@ -91,12 +91,42 @@ class CobroViewSet(ModelViewSet):
             qs = qs.filter(fecha__date__lte=fecha_hasta)
         return qs
 
+    def _pagos_del_request(self, request):
+        """Pagos opcionales que llegan junto con el cobro (`pagos: [{medio_pago, valor}]`).
+
+        Cobrar una cita crea el cobro y sus pagos en una sola transacción: si un
+        pago falla no queda un cobro sin pagar que el asistente tome por hecho
+        (M6-13), y se puede repartir entre varios medios (M6-14)."""
+        datos = request.data.get("pagos")
+        if not datos:
+            return []
+        if not isinstance(datos, list):
+            raise ValidationError({"pagos": ["Formato inválido."]})
+        serializer = PagoCreateSerializer(data=datos, many=True, context={"request": request})
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    def _registrar_pagos(self, cobro, pagos, user):
+        for pago_data in pagos:
+            registrar_pago(cobro=cobro, pago_data=pago_data, user=user)
+
     @transaction.atomic
     def create(self, request, *args, **kwargs):
+        pagos = self._pagos_del_request(request)
         cita_id = request.data.get("cita")
         if cita_id:
             existing = Cobro.objects.filter(cita_id=cita_id).first()
             if existing:
+                if pagos:
+                    # Reintento de un cobro que quedó sin pagar: se pagan los mismos
+                    # medios. Si ya tiene pagos, se revisa en Ingresos.
+                    if existing.estado != Cobro.Estado.PENDIENTE:
+                        raise ValidationError({
+                            "error": "Esta cita ya tiene un cobro registrado. Revísalo en Ingresos.",
+                            "code": "COBRO_YA_REGISTRADO",
+                        })
+                    self._registrar_pagos(existing, pagos, request.user)
+                    existing.refresh_from_db()
                 return Response(CobroSerializer(existing, context={"request": request}).data, status=status.HTTP_200_OK)
 
         serializer = CobroCreateSerializer(data=request.data, context={"request": request})
@@ -130,6 +160,9 @@ class CobroViewSet(ModelViewSet):
                     raise ValidationError({"items": {"insumo": "Insumo no encontrado."}})
             agregar_item_cobro(cobro=cobro, item_data=item_data, user=request.user)
 
+        if pagos:
+            cobro.refresh_from_db()
+            self._registrar_pagos(cobro, pagos, request.user)
         cobro.refresh_from_db()
         return Response(CobroSerializer(cobro, context={"request": request}).data, status=status.HTTP_201_CREATED)
 

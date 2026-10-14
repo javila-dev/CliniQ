@@ -12,18 +12,21 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
-import { formatDateTime } from '@/lib/utils'
+import { formatCantidad, formatDateTime } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import { useToast } from '@/hooks/use-toast'
 
 interface Props {
   notaId: string
+  /** Sede de la cita: el stock y el descuento son de esa sede, no de la primera. */
+  sedeId?: string | null
 }
 
 const UNIDAD_LABEL: Record<string, string> = {
   unidad: 'Unidad', ml: 'ml', gr: 'gr', cm: 'cm', par: 'Par', caja: 'Caja',
 }
 
-export function TabInsumos({ notaId }: Props) {
+export function TabInsumos({ notaId, sedeId }: Props) {
   const { user } = useAuthStore()
   const qc = useQueryClient()
   const { toast } = useToast()
@@ -50,14 +53,14 @@ export function TabInsumos({ notaId }: Props) {
   })
 
   const { data: insumos } = useQuery({
-    queryKey: ['insumos-consumo-interno'],
-    queryFn: () => inventarioApi.listInsumos({ es_consumo_interno: true, activo: true, page_size: 200 }),
-    enabled: puedeRegistrar,
+    queryKey: ['insumos-consumo-interno', sedeId ?? null],
+    queryFn: () => inventarioApi.listInsumos({ es_consumo_interno: true, activo: true, page_size: 200, sede: sedeId ?? undefined }),
+    enabled: puedeRegistrar && !!sedeId,
     staleTime: 60_000,
   })
 
   const createMut = useMutation({
-    mutationFn: () => historiaClinicaApi.consumosInsumo.create({ nota: notaId, insumo: insumoId, cantidad: Number(cantidad), notas }),
+    mutationFn: () => historiaClinicaApi.consumosInsumo.create({ nota: notaId, insumo: insumoId, cantidad: Number(cantidad), notas, sede: sedeId ?? undefined }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: qKey })
       qc.invalidateQueries({ queryKey: ['insumos-consumo-interno'] })
@@ -66,9 +69,7 @@ export function TabInsumos({ notaId }: Props) {
       toast({ title: 'Consumo registrado', description: 'El insumo quedó descontado del inventario.' })
     },
     onError: (err: unknown) => {
-      const description = (err as { response?: { data?: { error?: string } } })?.response?.data?.error
-        ?? 'No se pudo registrar el consumo. Intenta de nuevo.'
-      toast({ title: 'Error al registrar', description, variant: 'destructive' })
+      toast({ title: 'Error al registrar', description: mensajeDeError(err, 'No se pudo registrar el consumo. Intenta de nuevo.'), variant: 'destructive' })
     },
   })
 
@@ -79,8 +80,8 @@ export function TabInsumos({ notaId }: Props) {
       qc.invalidateQueries({ queryKey: ['insumos-consumo-interno'] })
       toast({ title: 'Consumo eliminado', description: 'El stock del insumo fue devuelto al inventario.' })
     },
-    onError: () => {
-      toast({ title: 'Error al eliminar', description: 'No se pudo revertir el consumo. Intenta de nuevo.', variant: 'destructive' })
+    onError: (err: unknown) => {
+      toast({ title: 'Error al eliminar', description: mensajeDeError(err, 'No se pudo revertir el consumo. Intenta de nuevo.'), variant: 'destructive' })
     },
   })
 
@@ -101,7 +102,7 @@ export function TabInsumos({ notaId }: Props) {
             {consumos?.length ?? 0} registro{consumos?.length !== 1 ? 's' : ''}
           </p>
         </div>
-        {puedeRegistrar && (
+        {puedeRegistrar && sedeId && (
           <Button size="sm" onClick={() => setOpen(true)}>
             <Plus className="h-3.5 w-3.5 mr-1.5" />
             Nuevo insumo
@@ -130,7 +131,7 @@ export function TabInsumos({ notaId }: Props) {
           <div key={c.id} className="flex items-center justify-between rounded-lg border px-3 py-2">
             <div>
               <p className="text-sm font-medium">
-                {c.insumo_nombre} — {c.cantidad} {UNIDAD_LABEL[c.unidad_medida] ?? c.unidad_medida}
+                {c.insumo_nombre} — {formatCantidad(c.cantidad)} {UNIDAD_LABEL[c.unidad_medida] ?? c.unidad_medida}
               </p>
               {c.notas && <p className="text-xs text-muted-foreground">{c.notas}</p>}
               <p className="text-[10px] text-muted-foreground">{formatDateTime(c.created_at)}</p>
@@ -171,7 +172,7 @@ export function TabInsumos({ notaId }: Props) {
                 <SelectContent>
                   {insumos?.results.map((i) => (
                     <SelectItem key={i.id} value={i.id}>
-                      {i.nombre} — stock {i.stock_actual} {UNIDAD_LABEL[i.unidad_medida]}
+                      {i.nombre} — stock {formatCantidad(i.stock_actual)} {UNIDAD_LABEL[i.unidad_medida]}
                     </SelectItem>
                   ))}
                 </SelectContent>

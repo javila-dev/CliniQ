@@ -366,6 +366,8 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
       ? getPrecioMinimoItem(item.tipo, item.procedimiento, item.tratamiento, item.precio_campana_disponible, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
       : null
   const canGestionar = hasPermission(user, PERM.COTIZACIONES_GESTIONAR)
+  // Sin cobros.ver el panel decía "Sin cobros registrados" aunque los hubiera.
+  const canVerCobros = hasPermission(user, PERM.COBROS_VER)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
   // Quien puede gestionar la cotización puede dejar la mini-atención (motivo,
   // seguimiento, fotos) aunque su rol no tenga permisos clínicos generales —
@@ -1152,7 +1154,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 Datos clínicos
               </Button>
             )}
-            {cotizacion?.estado === 'aceptada' && (
+            {cotizacion?.estado === 'aceptada' && canVerCobros && (
               <Button
                 size="sm"
                 variant="outline"

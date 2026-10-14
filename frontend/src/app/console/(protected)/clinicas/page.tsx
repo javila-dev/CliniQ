@@ -22,6 +22,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
+import { Paginacion } from '@/components/shared/TablaDatos'
 import type { AdminTenant } from '@/types/admin'
 import { serverErrorMessage } from './_shared'
 
@@ -38,6 +39,9 @@ const nuevaClinicaSchema = z.object({
 type NuevaClinicaValues = z.infer<typeof nuevaClinicaSchema>
 
 type FiltroActivo = 'todos' | 'activos' | 'inactivos'
+
+// Tamaño de página por defecto del backend (PAGE_SIZE).
+const PAGE_SIZE = 25
 
 // ─── Sheet crear clínica ────────────────────────────────────────
 // Editar los datos de una clínica ya existente (incluidos los add-ons) vive
@@ -280,11 +284,13 @@ export default function TenantsPage() {
   const router = useRouter()
   const [search, setSearch] = useState('')
   const [filtro, setFiltro] = useState<FiltroActivo>('todos')
+  const [page, setPage] = useState(1)
   const [sheetOpen, setSheetOpen] = useState(false)
 
   const params = {
     search:  search || undefined,
     activo:  filtro === 'todos' ? undefined : filtro === 'activos',
+    page,
   }
 
   const { data, isLoading } = useQuery({
@@ -318,7 +324,7 @@ export default function TenantsPage() {
           <Input
             placeholder="Buscar por nombre, NIT o email…"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => { setSearch(e.target.value); setPage(1) }}
             className="pl-9 bg-white"
           />
         </div>
@@ -327,7 +333,7 @@ export default function TenantsPage() {
           {FILTROS.map(f => (
             <button
               key={f.key}
-              onClick={() => setFiltro(f.key)}
+              onClick={() => { setFiltro(f.key); setPage(1) }}
               className={cn(
                 'px-3 py-1.5 text-xs font-medium transition-colors',
                 filtro === f.key
@@ -384,6 +390,11 @@ export default function TenantsPage() {
             )}
           </TableBody>
         </Table>
+        {(data?.count ?? 0) > PAGE_SIZE && (
+          <div className="border-t px-4 py-2.5">
+            <Paginacion page={page} total={data?.count ?? 0} pageSize={PAGE_SIZE} onPage={setPage} />
+          </div>
+        )}
       </div>
 
       <NuevaClinicaSheet

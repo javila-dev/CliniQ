@@ -87,6 +87,8 @@ export interface Cita {
   firma_asistencia_signing_token?: string | null
   firma_asistencia_archivo_url?: string | null
   cobro_id?: string | null
+  /** Estado del cobro de la cita: el paso "Pago" solo está hecho si tiene pagos. */
+  cobro_estado?: 'pendiente' | 'pagado_parcial' | 'pagado' | 'anulado' | null
   /** Presente solo si la clínica bloquea por deuda y el paciente tiene cuotas vencidas. */
   deuda_info?: DeudaInfo | null
   created_at: string

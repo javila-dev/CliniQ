@@ -107,13 +107,17 @@ const CHANNELS: {
 export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTelefono, pacienteEmail }: Props) {
   const qc = useQueryClient()
   const [canal, setCanal] = useState<CanalModal>('whatsapp')
-  const [emailDest, setEmailDest] = useState(pacienteEmail ?? '')
+  // Con el correo enmascarado (sin permiso de datos sensibles) no se precarga:
+  // si se deja vacío, el backend usa el correo registrado del paciente.
+  const emailOculto = Boolean(pacienteEmail?.includes('•'))
+  const emailInicial = emailOculto ? '' : (pacienteEmail ?? '')
+  const [emailDest, setEmailDest] = useState(emailInicial)
   const [loading, setLoading] = useState(false)
   const [feedback, setFeedback] = useState<FeedbackState>(null)
 
   function resetAndClose() {
     setCanal('whatsapp')
-    setEmailDest(pacienteEmail ?? '')
+    setEmailDest(emailInicial)
     setFeedback(null)
     setLoading(false)
     onClose()
@@ -129,13 +133,13 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
         setFeedback({ type: 'success', message: 'Cotización enviada por WhatsApp correctamente.' })
 
       } else {
-        if (!emailDest.trim()) {
+        if (!emailDest.trim() && !emailOculto) {
           setFeedback({ type: 'error', message: 'Ingresa el correo electrónico del destinatario.' })
           setLoading(false)
           return
         }
-        await cotizacionesApi.enviarEmail(cotizacionId, { destinatario: emailDest.trim() })
-        setFeedback({ type: 'success', message: `Cotización enviada a ${emailDest.trim()}.` })
+        await cotizacionesApi.enviarEmail(cotizacionId, emailDest.trim() ? { destinatario: emailDest.trim() } : {})
+        setFeedback({ type: 'success', message: `Cotización enviada a ${emailDest.trim() || pacienteEmail}.` })
       }
 
       qc.invalidateQueries({ queryKey: ['cotizacion', cotizacionId] })
@@ -145,7 +149,7 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
 
     } catch (err) {
       const porDefecto: Record<CanalModal, string> = {
-        whatsapp: 'No se pudo enviar por WhatsApp. Verifica que el paciente tenga un teléfono registrado.',
+        whatsapp: 'No se pudo enviar por WhatsApp. Intenta de nuevo.',
         email: 'No se pudo enviar el correo. Revisa la configuración de email.',
       }
       setFeedback({ type: 'error', message: mensajeDeError(err, porDefecto[canal]) })
@@ -182,15 +186,18 @@ export function EnviarCotizacionModal({ open, onClose, cotizacionId, pacienteTel
             <div className="space-y-1.5">
               <Label className="text-sm">
                 Correo del destinatario
-                {pacienteTelefono && <span className="text-muted-foreground font-normal ml-1">(paciente)</span>}
+                {pacienteEmail && <span className="text-muted-foreground font-normal ml-1">(paciente)</span>}
               </Label>
               <Input
                 type="email"
-                placeholder="correo@ejemplo.com"
+                placeholder={emailOculto ? 'Déjalo vacío para usar el del paciente' : 'correo@ejemplo.com'}
                 value={emailDest}
                 onChange={(e) => setEmailDest(e.target.value)}
                 autoFocus
               />
+              {emailOculto && !emailDest.trim() && (
+                <p className="text-xs text-muted-foreground">Se enviará al correo registrado: {pacienteEmail}</p>
+              )}
             </div>
           )}
 

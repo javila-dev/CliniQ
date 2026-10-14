@@ -69,6 +69,8 @@ export interface CreateCobroRequest {
   sede: string
   notas?: string
   items?: AgregarItemRequest[]
+  /** Pagos que se registran junto con el cobro, en la misma transacción. */
+  pagos?: { medio_pago: string; valor: string }[]
 }
 
 export interface AgregarItemRequest {

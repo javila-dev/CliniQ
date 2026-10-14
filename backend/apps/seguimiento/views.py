@@ -33,10 +33,10 @@ PERM_GESTIONAR = "seguimiento.oportunidades.gestionar"
 
 
 class OportunidadPagination(PageNumberPagination):
-    # El tablero del embudo pide más de una página de una vez (?page_size=200).
+    # El tablero del embudo y "Para hoy" piden más de una página de una vez.
     page_size = 25
     page_size_query_param = "page_size"
-    max_page_size = 200
+    max_page_size = 500
 
 
 class OportunidadViewSet(

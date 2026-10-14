@@ -39,7 +39,7 @@
 - **Contexto:** no se usa en ninguna pantalla. Los helpers de bienvenida que lo llaman son código muerto y arman HTML con la contraseña en texto plano.
 - **Arreglo:** eliminar el endpoint, o dejarlo solo para superadmin; quitar `from_email` y borrar esos helpers.
 
-**M7-05 · Medio · faltante/previsible** · confirmado
+**✅ M7-05 · Medio · faltante/previsible** · confirmado
 - **Dónde:** `TabInsumos.tsx:52-61`; `historia_clinica/services.py:616-625`
 - **Qué ve el usuario:**
   - En una nota sin cita, "Registrar consumo" siempre falla.
@@ -54,7 +54,7 @@
   - En una clínica recién registrada, sin sedes, la pantalla se queda cargando para siempre.
 - **Arreglo:** mostrar un estado de error y, sin sedes, un aviso "Crea una sede primero".
 
-**M7-07 · Medio · faltante** · confirmado
+**✅ M7-07 · Medio · faltante** · confirmado
 - **Qué ve el usuario:** no puede editar ni desactivar insumos o proveedores, ni cancelar órdenes, ni quitar ítems de un borrador. No existe pantalla de categorías.
 - **Causa:** las funciones del API existen, pero no hay pantalla que las use.
 
@@ -70,7 +70,7 @@
 - **Qué ve el usuario:** nada. Por API se puede ajustar stock en la sede de otra clínica, asignar una categoría ajena o registrar un consumo en una sede ajena.
 - **Arreglo:** validar que la sede y la categoría sean de la misma clínica que el insumo.
 
-**M7-10 · Medio · permisos/privacidad** · confirmado
+**✅ M7-10 · Medio · permisos/privacidad** · confirmado
 - **Dónde:** `notificaciones/views.py:111-138`; `dashboard/page.tsx:603,798-803`; `configuracion/whatsapp/consumo/page.tsx:121`
 - **Qué ve el usuario:** cualquier usuario ve en el Dashboard los "envíos fallidos" **con el teléfono completo del paciente**, y puede marcarlos como resueltos.
 - **Arreglo:** exigir un permiso y enmascarar el teléfono.
@@ -83,7 +83,7 @@
   - Un error 500 devuelve `str(exc)`.
 - **Arreglo:** límite por IP, captcha u honeypot, y respuestas neutras.
 
-**M7-12 · Medio · previsible** · confirmado
+**✅ M7-12 · Medio · previsible** · confirmado
 - **Dónde:** `clinicas/services.py:82-132`; `users/services.py:272-277`
 - **Qué ve el usuario:** la dueña verifica su correo, cierra la pestaña antes de crear la contraseña y **queda bloqueada**:
   - el enlace ya fue usado;
@@ -91,29 +91,29 @@
   - volver a registrarse falla.
 - **Arreglo:** reemitir la invitación y permitir el reset para administradores con la invitación pendiente.
 
-**M7-13 · Medio · permisos/carga** · confirmado
+**✅ M7-13 · Medio · permisos/carga** · confirmado
 - **Dónde:** `lib/permissions.ts:184-185`; `console/(protected)/clinicas/page.tsx:290-381`
 - **Qué ve el usuario:** un usuario del equipo de ayuda (`is_staff`) entra a /console y ve "No hay clínicas" y pantallas vacías.
 - **Causa:** el backend exige superadmin.
 - **Arreglo:** a ese usuario mostrarle solo el Centro de ayuda.
 
-**M7-14 · Medio · faltante** · confirmado
+**✅ M7-14 · Medio · faltante** · confirmado
 - **Dónde:** `console/(protected)/clinicas/page.tsx:285-381`; `clinicas/views.py:349-378`
 - **Qué ve el usuario:** "N clínicas" pero solo 25 en la lista, sin paginador. Los filtros Activas e Inactivas no filtran.
 
-**M7-15 · Medio · decimales** · confirmado
+**✅ M7-15 · Medio · decimales** · confirmado
 - **Dónde:** `CompraForm.tsx:108,358`; `TabInsumos.tsx`
 - **Qué ve el usuario:** "Stock actual: 5.000", que en Colombia se lee como cinco mil.
 - **Arreglo:** usar `formatCantidad` en todos los lugares.
 
-**M7-16 · Medio · errores** · confirmado (mensaje) / probable (cupo)
+**✅ M7-16 · Medio · errores** · confirmado (mensaje) / probable (cupo)
 - **Dónde:** `EnviarCotizacionModal.tsx:145-151`; `cotizaciones/views.py:563-611`
 - **Qué ve el usuario:**
   - Cualquier fallo de WhatsApp dice "Verifica el teléfono".
   - Si el paciente no tiene teléfono, la ruta compartida igual responde "enviada" y descuenta cupo.
 - **Arreglo:** mostrar el error real y validar el teléfono antes de enviar.
 
-**M7-17 · Medio · privacidad** · probable
+**✅ M7-17 · Medio · privacidad** · probable
 - **Dónde:** `notificaciones/services.py:142-147`
 - **Qué pasa:** los PDF que se envían por WhatsApp quedan en el bucket público con una URL permanente.
 - **Arreglo:** URL firmada de corta duración, o limpieza programada.

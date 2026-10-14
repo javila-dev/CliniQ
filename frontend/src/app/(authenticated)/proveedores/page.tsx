@@ -1,21 +1,30 @@
 'use client'
 
 import { useState } from 'react'
-import { useQuery, keepPreviousData } from '@tanstack/react-query'
-import { Plus, Search, Truck, ChevronLeft, ChevronRight } from 'lucide-react'
+import { useQuery, useMutation, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import {
+  Plus, Search, Truck, ChevronLeft, ChevronRight, MoreHorizontal, Pencil, Power,
+} from 'lucide-react'
 import { proveedoresApi } from '@/lib/api/proveedores'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { useDebounce } from '@/hooks/useDebounce'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { cn } from '@/lib/utils'
 import { NuevoProveedorDialog, CATEGORIA_LABEL } from '@/components/proveedores/NuevoProveedorDialog'
+import type { Proveedor } from '@/types/proveedores'
 
 const PAGE_SIZE = 25
 
@@ -34,7 +43,23 @@ function ProveedoresContent() {
   const [filtroEstado, setFiltroEstado] = useState('todos')
   const [page, setPage] = useState(1)
   const [nuevoProvOpen, setNuevoProvOpen] = useState(false)
+  const [editando, setEditando] = useState<Proveedor | null>(null)
+  const [toggleTarget, setToggleTarget] = useState<Proveedor | null>(null)
   const debouncedSearch = useDebounce(search, 350)
+  const qc = useQueryClient()
+
+  // Se desactiva con PATCH `activo` (no DELETE) para poder reactivarlo.
+  const toggleMut = useMutation({
+    mutationFn: ({ id, activo }: { id: string; activo: boolean }) =>
+      proveedoresApi.updateProveedor(id, { activo }),
+    onSuccess: (p) => {
+      qc.invalidateQueries({ queryKey: ['proveedores'] })
+      qc.invalidateQueries({ queryKey: ['proveedores-select'] })
+      setToggleTarget(null)
+      toast.success(p.activo ? 'Proveedor reactivado' : 'Proveedor desactivado')
+    },
+    onError: (err) => toast.error('No se pudo cambiar el estado del proveedor', mensajeDeError(err)),
+  })
 
   const reset = (fn: () => void) => { fn(); setPage(1) }
 
@@ -121,6 +146,7 @@ function ProveedoresContent() {
                 <th className="text-left px-5 py-2.5 hidden md:table-cell">Contacto</th>
                 <th className="text-left px-5 py-2.5 hidden lg:table-cell">Categoría</th>
                 <th className="text-left px-5 py-2.5">Estado</th>
+                {puedeGestionarProveedores && <th className="w-12 px-3 py-2.5"><span className="sr-only">Acciones</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -147,6 +173,37 @@ function ProveedoresContent() {
                       {p.activo ? 'Activo' : 'Inactivo'}
                     </span>
                   </td>
+                  {puedeGestionarProveedores && (
+                    <td className="px-3 py-3 text-right">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8 text-muted-foreground"
+                            aria-label={`Acciones para ${p.nombre}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48">
+                          <DropdownMenuItem onClick={() => setEditando(p)}>
+                            <Pencil className="mr-2 h-3.5 w-3.5" />Editar
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          {p.activo ? (
+                            <DropdownMenuItem onClick={() => setToggleTarget(p)} className="text-red-600 focus:text-red-600">
+                              <Power className="mr-2 h-3.5 w-3.5" />Desactivar
+                            </DropdownMenuItem>
+                          ) : (
+                            <DropdownMenuItem onClick={() => setToggleTarget(p)} className="text-green-600 focus:text-green-600">
+                              <Power className="mr-2 h-3.5 w-3.5" />Reactivar
+                            </DropdownMenuItem>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -167,6 +224,21 @@ function ProveedoresContent() {
       )}
 
       <NuevoProveedorDialog open={nuevoProvOpen} onClose={() => setNuevoProvOpen(false)} />
+      <NuevoProveedorDialog open={!!editando} proveedor={editando} onClose={() => setEditando(null)} />
+      <ConfirmDialog
+        open={!!toggleTarget}
+        onOpenChange={(v) => { if (!v && !toggleMut.isPending) setToggleTarget(null) }}
+        title={toggleTarget?.activo ? 'Desactivar proveedor' : 'Reactivar proveedor'}
+        description={
+          toggleTarget?.activo
+            ? `${toggleTarget?.nombre} dejará de aparecer al registrar compras. Las compras ya registradas no cambian y puedes reactivarlo cuando quieras.`
+            : `${toggleTarget?.nombre} volverá a estar disponible al registrar compras.`
+        }
+        confirmLabel={toggleTarget?.activo ? 'Desactivar' : 'Reactivar'}
+        variant={toggleTarget?.activo ? 'destructive' : 'default'}
+        loading={toggleMut.isPending}
+        onConfirm={() => toggleTarget && toggleMut.mutate({ id: toggleTarget.id, activo: !toggleTarget.activo })}
+      />
     </div>
   )
 }

@@ -33,6 +33,7 @@ class CategoriaInsumoViewSet(HasClinicamente, ModelViewSet):
     serializer_class = CategoriaInsumoSerializer
     queryset = CategoriaInsumo.objects.select_related("clinica").all()
     search_fields = ("nombre",)
+    filterset_fields = ("activo",)
     ordering_fields = ("nombre", "created_at")
 
     def get_permissions(self):

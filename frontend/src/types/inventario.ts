@@ -2,6 +2,16 @@ export type UnidadMedida = 'unidad' | 'ml' | 'gr' | 'cm' | 'par' | 'caja'
 export type TipoMovimiento = 'entrada' | 'salida' | 'ajuste_positivo' | 'ajuste_negativo' | 'baja'
 export type OrigenMovimiento = 'compra' | 'consumo_cita' | 'venta_retail' | 'obsequio' | 'ajuste_manual' | 'baja_vencimiento'
 
+export interface CategoriaInsumo {
+  id: string
+  clinica: string
+  nombre: string
+  descripcion: string
+  activo: boolean
+  created_at: string
+  updated_at: string
+}
+
 export interface Insumo {
   id: string
   clinica: string
@@ -93,6 +103,18 @@ export interface CreateInsumoRequest {
   precio_venta?: string
   requiere_lote?: boolean
   permite_stock_negativo?: boolean
+  categoria?: string | null
+}
+
+export interface UpdateInsumoRequest extends Partial<Omit<CreateInsumoRequest, 'precio_venta'>> {
+  precio_venta?: string | null
+  activo?: boolean
+}
+
+export interface CategoriaInsumoRequest {
+  nombre?: string
+  descripcion?: string
+  activo?: boolean
 }
 
 export interface AjusteStockRequest {

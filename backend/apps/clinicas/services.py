@@ -90,12 +90,19 @@ def confirmar_registro_clinica(token: str) -> str:
     except RegistroPendiente.DoesNotExist:
         raise ValueError("El enlace de verificación no es válido.")
 
-    if not registro.is_valid():
-        raise ValueError("El enlace de verificación ya fue usado o expiró.")
-
     from apps.users.models import PasswordResetToken
     from apps.users.rbac import ensure_default_roles_for_clinica
-    from apps.users.services import create_password_reset_token
+    from apps.users.services import admin_con_invitacion_pendiente, create_password_reset_token
+
+    if registro.usado_at is not None and registro.expires_at > timezone.now():
+        # Verificó el correo pero cerró antes de crear la contraseña: al volver a
+        # abrir el enlace se le da una invitación nueva en vez de dejarla
+        # bloqueada (M7-12).
+        admin = User.objects.filter(email__iexact=registro.email, clinica__nit=registro.nit).first()
+        if admin is not None and admin_con_invitacion_pendiente(admin):
+            return create_password_reset_token(admin, purpose=PasswordResetToken.Purpose.INVITE).token
+    if not registro.is_valid():
+        raise ValueError("El enlace de verificación ya fue usado o expiró.")
 
     with transaction.atomic():
         registro.usado_at = timezone.now()

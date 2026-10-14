@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.mail import EmailMultiAlternatives, get_connection
 from django.utils import timezone
 
-from apps.core.storage import get_public_url, upload_public_file
+from apps.core.storage import get_signed_url, upload_private_file
 from apps.notificaciones.models import EnvioWhatsApp
 
 
@@ -139,12 +139,20 @@ def enviar_otp_checkin_webhook(*, paciente, codigo: str) -> dict:
     return payload
 
 
+# Tiempo que vive el enlace del PDF que se adjunta por WhatsApp: n8n/Lyvio o
+# Meta lo descargan al enviar; un día cubre reintentos y el respaldo.
+WHATSAPP_PDF_URL_TTL_SEGUNDOS = 24 * 3600
+
+
 def subir_pdf_whatsapp(pdf_bytes: bytes, nombre_archivo_pdf: str) -> str:
-    """Sube el PDF a una URL publica para que n8n/Lyvio lo adjunten."""
+    """Sube el PDF al bucket privado y devuelve una URL firmada que vence en un
+    día, para que n8n/Lyvio (o Meta) lo adjunten. Antes quedaba en el bucket
+    público con un enlace permanente: cotizaciones y fórmulas del paciente
+    accesibles para quien tuviera la URL (M7-17)."""
     hoy = timezone.now()
     storage_path = f"whatsapp_docs/{hoy.year}/{hoy.month:02d}/{uuid.uuid4().hex}/{nombre_archivo_pdf}"
-    upload_public_file(pdf_bytes, storage_path, content_type="application/pdf")
-    return get_public_url(storage_path)
+    upload_private_file(pdf_bytes, storage_path, content_type="application/pdf")
+    return get_signed_url(storage_path, expires_in=WHATSAPP_PDF_URL_TTL_SEGUNDOS)
 
 
 def enviar_documento_whatsapp_webhook(
@@ -304,6 +312,14 @@ def enviar_whatsapp(
     configurado) y requests.RequestException (fallo del webhook). En la ruta
     compartida, si falla no se registra nada; en la propia, un fallo levanta
     NumeroPropioNoDisponibleError (ver numero_propio.enviar_por_numero_propio)."""
+    # Sin teléfono el envío no puede llegar: antes la ruta compartida igual lo
+    # daba por enviado y descontaba cupo (M7-16). El recordatorio lleva el
+    # teléfono en su payload.
+    if tipo != EnvioWhatsApp.Tipo.RECORDATORIO_CITA and paciente is not None and not (paciente.telefono or "").strip():
+        raise WhatsAppNoDisponibleError(
+            "El paciente no tiene teléfono registrado. Agrégalo en su ficha para enviarle WhatsApp.",
+            code="PACIENTE_SIN_TELEFONO",
+        )
     if ruta is None:
         ruta = resolver_ruta_whatsapp(
             clinica, sede, tipo=tipo, paciente=paciente, cita=cita, usar_numero_cliniq=usar_numero_cliniq,

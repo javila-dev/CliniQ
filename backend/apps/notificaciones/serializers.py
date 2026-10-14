@@ -26,6 +26,15 @@ class NotificacionFallidaSerializer(serializers.ModelSerializer):
     def get_paciente_nombre(self, obj):
         return obj.paciente.nombre_completo if obj.paciente_id else ""
 
+    def to_representation(self, instance):
+        from apps.pacientes.serializers import enmascarar_cola, usuario_ve_datos_sensibles
+
+        data = super().to_representation(instance)
+        # El teléfono es un dato sensible del paciente (M7-10).
+        if not usuario_ve_datos_sensibles(self.context):
+            data["telefono"] = enmascarar_cola(data.get("telefono"))
+        return data
+
 
 class NotificacionFallidaCallbackSerializer(serializers.Serializer):
     clinica_id = serializers.UUIDField()

@@ -96,9 +96,9 @@ def registrar_pago(cobro: Cobro, pago_data: dict, user) -> PagoRecibido:
             raise ValidationError(
                 {"error": "Este ingreso ya está pagado por completo.", "code": "COBRO_YA_PAGADO"}
             )
-        # El primer pago puede superar el total (cobro de cita con "valor cobrado"
-        # mayor al costo, M6-14); los siguientes no pueden pasarse del saldo.
-        if tiene_pagos and valor > saldo:
+        # Ningún pago se pasa del saldo. La única excepción es un cobro sin valor
+        # (cita sin procedimiento, total $0): ahí el primer pago fija lo cobrado.
+        if (tiene_pagos or cobro.total > 0) and valor > saldo:
             raise ValidationError(
                 {
                     "valor": [f"El valor supera el saldo pendiente (${saldo:,.0f}).".replace(",", ".")],

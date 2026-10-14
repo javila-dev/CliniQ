@@ -207,7 +207,8 @@ export default function SeguimientoPage() {
   const params = { para_hoy: '1' as const, sede: sedeParam, ...(mias ? { mias: '1' as const } : {}), ...(q ? { q } : {}) }
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['seguimiento', 'oportunidades', 'hoy', params],
-    queryFn: () => seguimientoApi.list({ ...params, page_size: 100 }),
+    // Antes 100 sin aviso: "Para hoy 140" mostraba 100.
+    queryFn: () => seguimientoApi.list({ ...params, page_size: 500 }),
     enabled: tab === 'hoy',
   })
   const { data: resumen } = useQuery({
@@ -259,8 +260,28 @@ export default function SeguimientoPage() {
   })
   const pierde = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof seguimientoApi.perder>[1] }) => seguimientoApi.perder(id, data),
-    onSuccess: () => { refrescar(); setPerder(null); setGestion(null); toast.success('Listo', 'Salió de la lista de seguimiento.') },
+    onSuccess: (_res, { id }) => {
+      refrescar(); setPerder(null); setGestion(null)
+      // Si se sacó por error, se puede deshacer (antes no había cómo reabrirlo).
+      toast({
+        variant: 'success',
+        title: 'Listo',
+        description: (
+          <span>
+            Salió de la lista de seguimiento.{' '}
+            <button type="button" className="font-medium underline underline-offset-2" onClick={() => reabre.mutate(id)}>
+              Deshacer
+            </button>
+          </span>
+        ),
+      })
+    },
     onError: (err) => errorDe(err, 'No se pudo guardar'),
+  })
+  const reabre = useMutation({
+    mutationFn: (id: string) => seguimientoApi.reabrir(id),
+    onSuccess: () => { refrescar(); toast.success('Listo', 'Volvió a la lista de seguimiento.') },
+    onError: (err) => errorDe(err, 'No se pudo reabrir'),
   })
   const [creandoFicha, setCreandoFicha] = useState(false)
   // Ficha ya creada para este interesado: si falla el vínculo, reintentar no la duplica.
@@ -423,6 +444,12 @@ export default function SeguimientoPage() {
           )}
         </div>
       ) : (
+        <>
+        {(data?.count ?? 0) > lista.length && (
+          <p className="text-xs text-muted-foreground">
+            Mostrando {lista.length} de {data?.count}. Usa la búsqueda o el filtro de sede para encontrar a los demás.
+          </p>
+        )}
         <ParaHoyLista
           lista={lista}
           vista={vista}
@@ -435,6 +462,7 @@ export default function SeguimientoPage() {
             onPerder: setPerder,
           }}
         />
+        </>
       )}
 
       <NuevoInteresadoDialog
@@ -448,6 +476,7 @@ export default function SeguimientoPage() {
         open={gestion !== null}
         onOpenChange={(v) => { if (!v) setGestion(null) }}
         nombre={gestion?.op.nombre ?? ''}
+        oportunidadId={gestion?.op.id}
         canalInicial={gestion?.canal}
         resultadoInicial={gestion?.resultado ?? null}
         loading={registrar.isPending}

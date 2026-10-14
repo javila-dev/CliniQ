@@ -28,6 +28,8 @@ export interface ItemOrdenCompra {
   cantidad_recibida: string
   subtotal: string
   pendiente_recibir: string
+  // El backend devuelve también los ítems quitados de un borrador (activo=false).
+  activo: boolean
 }
 
 export interface OrdenCompra {
@@ -61,6 +63,10 @@ export interface CreateProveedorRequest {
   telefono?: string
   email?: string
   categoria: CategoriaProveedor
+}
+
+export interface UpdateProveedorRequest extends Partial<CreateProveedorRequest> {
+  activo?: boolean
 }
 
 export interface CreateOrdenCompraRequest {

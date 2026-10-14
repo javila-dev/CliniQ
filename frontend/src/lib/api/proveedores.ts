@@ -1,7 +1,7 @@
 import { apiClient } from './client'
 import type {
   Proveedor, OrdenCompra,
-  CreateProveedorRequest, CreateOrdenCompraRequest, RecibirOrdenRequest,
+  CreateProveedorRequest, UpdateProveedorRequest, CreateOrdenCompraRequest, RecibirOrdenRequest,
 } from '@/types/proveedores'
 import type { Paginated } from '@/types/common'
 
@@ -40,7 +40,7 @@ export const proveedoresApi = {
     return res.data
   },
 
-  updateProveedor: async (id: string, data: Partial<CreateProveedorRequest>): Promise<Proveedor> => {
+  updateProveedor: async (id: string, data: UpdateProveedorRequest): Promise<Proveedor> => {
     const res = await apiClient.patch<Proveedor>(`/proveedores/proveedores/${id}/`, data)
     return res.data
   },
@@ -69,6 +69,7 @@ export const proveedoresApi = {
     return res.data
   },
 
+  // DELETE no borra: el backend marca la orden como cancelada (y activo=false).
   cancelarOrden: async (id: string): Promise<void> => {
     await apiClient.delete(`/proveedores/ordenes-compra/${id}/`)
   },

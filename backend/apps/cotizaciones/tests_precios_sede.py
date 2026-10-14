@@ -55,8 +55,12 @@ class PreciosPorSedeTests(TestCase):
         response = self._cotizar(self.norte, "300000.00", usuario)
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(response.json()["items"][0]["precio_lista"], "300000.00")
-        # En la sede principal, 300.000 sí está por debajo del precio (350.000).
+        # En la sede principal (lista 350.000, promoción 280.000) se acepta un
+        # valor entre la promoción y la lista (M5-03), pero no uno por debajo
+        # de la promoción.
         response = self._cotizar(self.sede, "300000.00", usuario)
+        self.assertEqual(response.status_code, 201, response.content)
+        response = self._cotizar(self.sede, "270000.00", usuario)
         self.assertEqual(response.status_code, 400)
 
     def test_promocion_fija_no_se_ofrece_si_la_sede_ya_es_mas_barata(self):

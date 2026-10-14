@@ -1,7 +1,7 @@
 import { apiClient } from './client'
 import type {
-  Insumo, MovimientoInventario,
-  CreateInsumoRequest, AjusteStockRequest,
+  Insumo, MovimientoInventario, CategoriaInsumo,
+  CreateInsumoRequest, UpdateInsumoRequest, AjusteStockRequest, CategoriaInsumoRequest,
 } from '@/types/inventario'
 import type { Paginated } from '@/types/common'
 
@@ -41,7 +41,7 @@ export const inventarioApi = {
     return res.data
   },
 
-  updateInsumo: async (id: string, data: Partial<CreateInsumoRequest>): Promise<Insumo> => {
+  updateInsumo: async (id: string, data: UpdateInsumoRequest): Promise<Insumo> => {
     const res = await apiClient.patch<Insumo>(`/inventario/insumos/${id}/`, data)
     return res.data
   },
@@ -53,6 +53,22 @@ export const inventarioApi = {
 
   ajustarStock: async (id: string, data: AjusteStockRequest): Promise<{ movimiento: MovimientoInventario; stock_resultante: string; costo_promedio_resultante: string }> => {
     const res = await apiClient.post(`/inventario/insumos/${id}/ajustar_stock/`, data)
+    return res.data
+  },
+
+  // Categorías: el backend devuelve activas e inactivas (no filtra por `activo`).
+  listCategorias: async (params?: { search?: string; page_size?: number }): Promise<Paginated<CategoriaInsumo>> => {
+    const res = await apiClient.get<Paginated<CategoriaInsumo>>('/inventario/categorias/', { params })
+    return res.data
+  },
+
+  createCategoria: async (data: CategoriaInsumoRequest): Promise<CategoriaInsumo> => {
+    const res = await apiClient.post<CategoriaInsumo>('/inventario/categorias/', data)
+    return res.data
+  },
+
+  updateCategoria: async (id: string, data: CategoriaInsumoRequest): Promise<CategoriaInsumo> => {
+    const res = await apiClient.patch<CategoriaInsumo>(`/inventario/categorias/${id}/`, data)
     return res.data
   },
 

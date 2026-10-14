@@ -21,6 +21,22 @@ class CategoriaInsumoSerializer(serializers.ModelSerializer):
         )
         read_only_fields = ("id", "clinica", "created_at", "updated_at")
 
+    def validate_nombre(self, value):
+        # `unique_together (clinica, nombre)` no genera validador porque `clinica`
+        # es de solo lectura: sin esto un nombre repetido daba un error 500.
+        from apps.users.permissions import get_clinica_activa
+
+        nombre = value.strip()
+        request = self.context.get("request")
+        clinica = self.instance.clinica if self.instance else (get_clinica_activa(request) if request else None)
+        if clinica is not None:
+            repetidas = CategoriaInsumo.objects.filter(clinica=clinica, nombre__iexact=nombre)
+            if self.instance is not None:
+                repetidas = repetidas.exclude(pk=self.instance.pk)
+            if repetidas.exists():
+                raise serializers.ValidationError("Ya existe una categoría con ese nombre.")
+        return nombre
+
 
 class InsumoSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     """El insumo (catalogo) se comparte entre sedes; el stock no.

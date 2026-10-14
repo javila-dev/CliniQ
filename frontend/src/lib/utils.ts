@@ -179,3 +179,11 @@ export function addDaysISO(iso: string, days: number): string {
   const [y, m, d] = iso.slice(0, 10).split('-').map(Number)
   return new Date(y, m - 1, d + days).toLocaleDateString('en-CA')
 }
+
+/** Cantidad de inventario legible. El backend manda 3 decimales fijos ("5.000"),
+ *  que en Colombia se lee como cinco mil: se recorta a lo necesario ("5"). */
+export function formatCantidad(value: string | number | null | undefined): string {
+  if (value === null || value === undefined || value === '') return '0'
+  const n = Number(value)
+  return isNaN(n) ? String(value) : n.toLocaleString('es-CO', { maximumFractionDigits: 2 })
+}

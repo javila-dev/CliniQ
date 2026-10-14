@@ -256,6 +256,51 @@ class CarteraViewSet(ReadOnlyModelViewSet):
             })
         return self.get_paginated_response(salida)
 
+    @action(detail=False, methods=["get"], url_path="cuotas-vencidas", pagination_class=None)
+    def cuotas_vencidas(self, request, *args, **kwargs):
+        """Cuotas con saldo cuya fecha ya pasó (la que vence hoy aún no está vencida).
+
+        Antes el navegador pedía cada cartera por separado (hasta 500 peticiones),
+        se cortaba en 500 carteras y leía la fecha en UTC (M6-22)."""
+        hoy = timezone.localdate()
+        carteras = self.get_queryset().select_related(None).select_related("paciente")
+        desde = request.query_params.get("desde")
+        if desde:
+            try:
+                carteras = carteras.filter(created_at__date__gte=date.fromisoformat(desde))
+            except ValueError:
+                raise ValidationError({"desde": ["Fecha inválida. Usa el formato AAAA-MM-DD."]})
+        con_vencidas = (
+            CuotaCartera.objects.filter(anulada=False, fecha_esperada__lt=hoy)
+            .annotate(pendiente=CUOTA_PENDIENTE_EXPR)
+            .filter(pendiente__gt=0)
+            .values("cartera_id")
+        )
+        carteras = carteras.filter(id__in=Subquery(con_vencidas)).prefetch_related("cuotas__tipo")
+
+        resultado = []
+        for cartera in carteras:
+            cuotas = list(cartera.cuotas.all())  # sin anuladas, en orden de fecha
+            for numero, cuota in enumerate(cuotas, start=1):
+                saldo = cuota.saldo_pendiente
+                if saldo <= 0 or cuota.fecha_esperada is None or cuota.fecha_esperada >= hoy:
+                    continue
+                resultado.append({
+                    "id": str(cuota.id),
+                    "cartera_id": str(cartera.id),
+                    "paciente_nombre": cartera.paciente.nombre_completo,
+                    "cotizacion_id": str(cartera.cotizacion_id),
+                    "tipo": cuota.tipo.nombre if cuota.tipo_id else "",
+                    "descripcion": cuota.descripcion,
+                    "valor_esperado": f"{saldo:.2f}",
+                    "fecha_esperada": cuota.fecha_esperada.isoformat(),
+                    "dias_vencida": (hoy - cuota.fecha_esperada).days,
+                    "numero_cuota": numero,
+                    "total_cuotas": len(cuotas),
+                })
+        resultado.sort(key=lambda c: -c["dias_vencida"])
+        return Response(resultado)
+
     @action(detail=False, methods=["get"], url_path="resumen", pagination_class=None)
     def resumen(self, request, *args, **kwargs):
         queryset = self.get_queryset()

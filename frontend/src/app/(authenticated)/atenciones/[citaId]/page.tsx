@@ -651,7 +651,7 @@ export default function AtencionCitaPage({ params }: Props) {
             {/* Insumos consumidos */}
             {(tabsActivos.insumos ?? true) && notaId && (
               <TabsContent value="insumos" className="flex-1 overflow-y-auto mt-0">
-                <TabInsumos notaId={notaId} />
+                <TabInsumos notaId={notaId} sedeId={cita?.sede} />
               </TabsContent>
             )}
 

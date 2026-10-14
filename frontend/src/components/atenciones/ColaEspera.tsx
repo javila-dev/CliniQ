@@ -19,6 +19,7 @@ import { formatTime } from '@/lib/utils'
 import { mensajeErrorDeuda } from '@/lib/deuda'
 import { toast } from '@/hooks/use-toast'
 import type { Cita } from '@/types/agenda'
+import { cobroConPagos } from './PagoContent'
 import {
   FirmaProfesionalModal,
   citaRequiereFirmaProfesional,
@@ -58,7 +59,7 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     const doneMap = {
       llegada:        cita.estado !== 'confirmada',
       consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-      pago:           cita.item_cotizacion_id != null || cita.cobro_id != null || cita.estado === 'en_curso' || cita.estado === 'completada',
+      pago:           cita.item_cotizacion_id != null || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada',
       firma:          cita.firma_asistencia_estado === 'firmada',
     }
     const activeSteps = (['llegada', 'consentimiento', 'pago', 'firma'] as const).filter((step) => {

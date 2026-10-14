@@ -365,3 +365,381 @@ class VerificacionPaso7MediosM4Tests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertTrue(response.json()["rechazado"])
         self.assertFalse(response.json()["firmado"])
+
+
+class VerificacionPaso7MediosM5Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _cotizacion(self, *, total="100000.00", plan=("100000.00",)):
+        from apps.clinicas.models import FormaDePago
+
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.admin, sede=self.sede,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        cotizacion.items.create(descripcion="Sesión", num_citas=1, valor_unitario=total, descuento_porcentaje="0.00")
+        forma = FormaDePago.objects.filter(clinica=self.clinica).first()
+        for n, valor in enumerate(plan, start=1):
+            cotizacion.formas_pago.create(tipo=forma, descripcion=f"Cuota {n}", valor=valor)
+        return cotizacion
+
+    # ── M5-08: teléfono y correo del paciente para "Enviar" ────────────────
+    def test_m508_la_cotizacion_trae_el_contacto_del_paciente(self):
+        self.paciente.email = "juan@example.com"
+        self.paciente.save(update_fields=["email"])
+        datos = self.client.get(f"/api/v1/cotizaciones/{self._cotizacion().id}/").json()
+        self.assertEqual(datos["paciente_email"], "juan@example.com")
+        self.assertEqual(datos["paciente_telefono"], self.paciente.telefono)
+
+    # ── M5-14: aceptar dos veces no duplica la cartera ─────────────────────
+    def test_m514_aceptar_dos_veces_no_duplica_cuotas(self):
+        from apps.cartera.models import CuotaCartera
+        from apps.cotizaciones.services import aceptar_cotizacion
+
+        cotizacion = self._cotizacion(plan=("50000.00", "50000.00"))
+        aceptar_cotizacion(cotizacion, actor=self.admin)
+        aceptar_cotizacion(Cotizacion.objects.get(pk=cotizacion.pk), actor=self.admin)
+        self.assertEqual(CuotaCartera.objects.filter(cartera__cotizacion=cotizacion).count(), 2)
+
+    # ── M5-16: la firma no acepta un plan de pagos que no cuadra ───────────
+    def test_m516_firmar_con_un_plan_que_no_suma_no_acepta_la_venta(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+        from apps.cotizaciones.services import aceptar_cotizacion_por_firma_compromiso
+
+        ConfiguracionCartera.objects.update_or_create(
+            clinica=self.clinica, defaults={"requiere_consentimiento_promocional": True},
+        )
+        cotizacion = self._cotizacion(plan=("40000.00",))
+        compromiso = Consentimiento.objects.create(
+            cotizacion=cotizacion, paciente=self.paciente, contenido_snapshot="x", hash_contenido="h",
+            estado=Consentimiento.Estado.FIRMADO,
+        )
+        aceptar_cotizacion_por_firma_compromiso(compromiso)
+        cotizacion.refresh_from_db()
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.BORRADOR)
+
+
+class VerificacionPaso7MediosM6Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        from apps.caja.models import Caja, CategoriaGasto
+        from apps.clinicas.models import FormaDePago
+
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+        self.efectivo = FormaDePago.objects.filter(clinica=self.clinica, tipo_base="efectivo").first()
+        self.tarjeta = FormaDePago.objects.filter(clinica=self.clinica).exclude(tipo_base="efectivo").first()
+        self.categoria = CategoriaGasto.objects.create(clinica=self.clinica, nombre="Transporte")
+        self.caja = Caja.objects.create(sede=self.sede, saldo_inicial=Decimal("100000"))
+
+    def _cita(self):
+        from apps.agenda.models import Cita
+
+        inicio = timezone.now() + timedelta(hours=1)
+        return Cita.objects.create(
+            paciente=self.paciente, sede=self.sede, profesional=self.profesional,
+            servicio=self.servicio, servicio_nombre=self.servicio.nombre,
+            fecha_inicio=inicio, fecha_fin=inicio + timedelta(minutes=30), duracion_min=30,
+            estado=Cita.Estado.EN_ESPERA, canal_confirmacion=self.paciente.canal_confirmacion,
+            canal_origen=Cita.CanalOrigen.PRESENCIAL,
+        )
+
+    def _cobrar(self, cita, pagos, precio="200000"):
+        return self.client.post("/api/v1/cobros/cobros/", {
+            "cita": str(cita.id), "paciente": str(self.paciente.id), "sede": str(self.sede.id),
+            "items": [{"tipo": "servicio", "servicio": str(self.servicio.id), "precio_unitario": precio, "cantidad": "1"}],
+            "pagos": pagos,
+        }, format="json")
+
+    def _gasto(self, valor, descripcion="Taxi al banco"):
+        return self.client.post("/api/v1/caja/gastos/", {
+            "sede": str(self.sede.id), "categoria": str(self.categoria.id),
+            "descripcion": descripcion, "valor": valor,
+        }, format="json")
+
+    # ── M6-13 / M6-14: cobro y pagos juntos, mixto o parcial ───────────────
+    def test_m614_cobro_con_pago_mixto(self):
+        from apps.cobros.models import Cobro
+
+        cita = self._cita()
+        response = self._cobrar(cita, [
+            {"medio_pago": str(self.efectivo.id), "valor": "100000"},
+            {"medio_pago": str(self.tarjeta.id), "valor": "100000"},
+        ])
+        self.assertEqual(response.status_code, 201, response.content)
+        cobro = Cobro.objects.get(cita=cita)
+        self.assertEqual(cobro.estado, Cobro.Estado.PAGADO)
+        self.assertEqual(cobro.pagos.count(), 2)
+        datos = self.client.get(f"/api/v1/agenda/citas/{cita.id}/").json()
+        self.assertEqual(datos["cobro_estado"], "pagado")
+
+    def test_m614_pago_parcial_deja_saldo(self):
+        from apps.cobros.models import Cobro
+
+        cita = self._cita()
+        response = self._cobrar(cita, [{"medio_pago": str(self.efectivo.id), "valor": "50000"}])
+        self.assertEqual(response.status_code, 201, response.content)
+        cobro = Cobro.objects.get(cita=cita)
+        self.assertEqual(cobro.estado, Cobro.Estado.PAGADO_PARCIAL)
+        self.assertEqual(cobro.saldo_pendiente, Decimal("150000"))
+
+    def test_m614_no_se_cobra_de_mas(self):
+        from apps.cobros.models import Cobro
+
+        cita = self._cita()
+        response = self._cobrar(cita, [{"medio_pago": str(self.efectivo.id), "valor": "250000"}])
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PAGO_SUPERA_SALDO")
+        self.assertFalse(Cobro.objects.filter(cita=cita).exists())
+
+    def test_m613_si_un_pago_falla_no_queda_el_cobro_a_medias(self):
+        from apps.cobros.models import Cobro
+
+        cita = self._cita()
+        response = self._cobrar(cita, [
+            {"medio_pago": str(self.efectivo.id), "valor": "150000"},
+            {"medio_pago": str(self.tarjeta.id), "valor": "100000"},
+        ])
+        self.assertEqual(response.status_code, 400)
+        self.assertFalse(Cobro.objects.filter(cita=cita).exists())
+        datos = self.client.get(f"/api/v1/agenda/citas/{cita.id}/").json()
+        self.assertIsNone(datos["cobro_estado"])
+
+    def test_m613_reintento_paga_el_cobro_que_quedo_pendiente(self):
+        from apps.cobros.models import Cobro
+
+        cita = self._cita()
+        self.assertEqual(self._cobrar(cita, []).status_code, 201)
+        self.assertEqual(Cobro.objects.get(cita=cita).estado, Cobro.Estado.PENDIENTE)
+        response = self._cobrar(cita, [{"medio_pago": str(self.efectivo.id), "valor": "200000"}])
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(Cobro.objects.get(cita=cita).estado, Cobro.Estado.PAGADO)
+        # Una vez pagado, otro intento no duplica pagos.
+        otra = self._cobrar(cita, [{"medio_pago": str(self.efectivo.id), "valor": "200000"}])
+        self.assertEqual(otra.status_code, 400)
+        self.assertEqual(otra.json()["code"], "COBRO_YA_REGISTRADO")
+        self.assertEqual(Cobro.objects.get(cita=cita).pagos.count(), 1)
+
+    # ── M6-17: gastos y fondo de apertura negativos ────────────────────────
+    def test_m617_gasto_en_cero_o_negativo_se_rechaza(self):
+        self.client.post("/api/v1/caja/sesiones/abrir/", {"caja": str(self.caja.id)}, format="json")
+        self.assertEqual(self._gasto("-5000").status_code, 400)
+        self.assertEqual(self._gasto("0").status_code, 400)
+        self.assertEqual(self._gasto("5000").status_code, 201)
+
+    def test_m617_fondo_de_apertura_negativo_se_rechaza(self):
+        response = self.client.post(
+            "/api/v1/caja/sesiones/abrir/", {"caja": str(self.caja.id), "monto_apertura": "-100"}, format="json",
+        )
+        self.assertEqual(response.status_code, 400)
+
+    # ── M6-21: buscar en egresos ───────────────────────────────────────────
+    def test_m621_buscar_gasto_por_descripcion(self):
+        self.client.post("/api/v1/caja/sesiones/abrir/", {"caja": str(self.caja.id)}, format="json")
+        self._gasto("5000", "Taxi al banco")
+        self._gasto("8000", "Papelería")
+        datos = self.client.get("/api/v1/caja/gastos/", {"search": "taxi"}).json()
+        self.assertEqual([g["descripcion"] for g in datos["results"]], ["Taxi al banco"])
+
+    # ── M6-22: cuotas vencidas desde el servidor ───────────────────────────
+    def test_m622_cuotas_vencidas_no_incluye_la_de_hoy(self):
+        from apps.cartera.models import CuotaCartera
+
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.admin, sede=self.sede,
+            estado=Cotizacion.Estado.ACEPTADA,
+        )
+        cartera = Cartera.objects.create(cotizacion=cotizacion, paciente=self.paciente, total="300000.00")
+        hoy = timezone.localdate()
+        for dias, valor in ((-10, "100000.00"), (0, "100000.00"), (10, "100000.00")):
+            CuotaCartera.objects.create(
+                cartera=cartera, tipo=self.efectivo, valor_esperado=valor,
+                fecha_esperada=hoy + timedelta(days=dias),
+            )
+        response = self.client.get("/api/v1/cartera/cuotas-vencidas/")
+        self.assertEqual(response.status_code, 200, response.content)
+        datos = response.json()
+        self.assertEqual(len(datos), 1)
+        self.assertEqual(datos[0]["dias_vencida"], 10)
+        self.assertEqual(datos[0]["numero_cuota"], 1)
+        self.assertEqual(datos[0]["total_cuotas"], 3)
+        self.assertEqual(datos[0]["tipo"], self.efectivo.nombre)
+        self.assertEqual(self.client.get("/api/v1/cartera/cuotas-vencidas/", {"desde": "mal"}).status_code, 400)
+
+
+class VerificacionPaso7MediosM7Tests(ClinicaFixtureMixin, TestCase):
+    def setUp(self):
+        self.crear_clinica_base()
+        self.admin = User.objects.create_user(
+            email="admin@test.com", password="Secret123!", first_name="Ad", last_name="Min",
+            rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.client = APIClient()
+        self.client.force_authenticate(self.admin)
+
+    def _con_rol(self, claves, email="custom@test.com"):
+        rol = Rol.objects.create(clinica=self.clinica, slug=email.split("@")[0], nombre=email)
+        for clave in claves:
+            RolPermiso.objects.create(rol=rol, permiso=Permiso.objects.get(clave=clave))
+        usuario = User.objects.create_user(
+            email=email, password="Secret123!", first_name="Cu", last_name="Stom",
+            rol=User.Role.RECEPCION, clinica=self.clinica, rol_dinamico=rol,
+        )
+        self.client.force_authenticate(usuario)
+        return usuario
+
+    # ── M7-10: envíos fallidos con permiso y teléfono enmascarado ──────────
+    def test_m710_envios_fallidos_piden_permiso_y_enmascaran_el_telefono(self):
+        from apps.notificaciones.models import NotificacionFallida
+
+        fallida = NotificacionFallida.objects.create(
+            clinica=self.clinica, paciente=self.paciente, tipo_notificacion="recordatorio_cita",
+            telefono="3001234567", motivo="Número inválido",
+        )
+        url = "/api/v1/notificaciones/fallidas/"
+        self.assertEqual(self.client.get(url).json()["results"][0]["telefono"], "3001234567")
+
+        self._con_rol(["inventario.ver"], email="sinpacientes@test.com")
+        self.assertEqual(self.client.get(url).status_code, 403)
+        self.assertEqual(self.client.post(f"{url}{fallida.id}/resolver/").status_code, 403)
+
+        self._con_rol(["pacientes.ver"], email="conpacientes@test.com")
+        self.assertEqual(self.client.get(url).json()["results"][0]["telefono"], "••••••4567")
+
+    # ── M7-12: la dueña que no creó la contraseña no queda bloqueada ───────
+    def _registro_confirmado(self):
+        from apps.clinicas.models import RegistroPendiente
+        from apps.clinicas.services import confirmar_registro_clinica
+
+        registro = RegistroPendiente.create(
+            nombre_clinica="Clínica Nueva", nit="900111222", nombre_admin="Laura", apellido_admin="Díaz",
+            email="laura@nueva.com", telefono="3009998877",
+        )
+        primer_token = confirmar_registro_clinica(registro.token)
+        return registro, primer_token
+
+    def test_m712_volver_a_abrir_la_verificacion_reemite_la_invitacion(self):
+        from apps.clinicas.services import confirmar_registro_clinica
+
+        registro, primer_token = self._registro_confirmado()
+        segundo_token = confirmar_registro_clinica(registro.token)
+        self.assertTrue(segundo_token)
+        self.assertNotEqual(primer_token, segundo_token)
+
+        # Si ya creó la contraseña, el enlace usado ya no sirve.
+        admin = User.objects.get(email="laura@nueva.com")
+        admin.set_password("Secret123!")
+        admin.activo = True
+        admin.save()
+        with self.assertRaises(ValueError):
+            confirmar_registro_clinica(registro.token)
+
+    def test_m712_olvide_mi_contrasena_reenvia_la_invitacion_pendiente(self):
+        from unittest.mock import patch
+
+        from apps.users.services import request_password_reset
+
+        self._registro_confirmado()
+        with patch("apps.users.services.send_invitation_email") as invitacion, \
+                patch("apps.users.services.send_password_reset_email") as reset:
+            request_password_reset("laura@nueva.com")
+        invitacion.assert_called_once()
+        reset.assert_not_called()
+
+    # ── M7-14: filtro de activas en la consola ─────────────────────────────
+    def test_m714_consola_filtra_clinicas_inactivas(self):
+        from apps.clinicas.models import Clinica
+
+        Clinica.objects.create(nombre="Cerrada", nit="800000001", activo=False)
+        superadmin = User.objects.create_user(
+            email="root@test.com", password="Secret123!", first_name="Ro", last_name="Ot",
+            rol=User.Role.SUPERADMIN,
+        )
+        self.client.force_authenticate(superadmin)
+        nombres = [c["nombre"] for c in self.client.get("/api/v1/admin/tenants/", {"activo": "false"}).json()["results"]]
+        self.assertEqual(nombres, ["Cerrada"])
+
+    # ── M7-16: WhatsApp a un paciente sin teléfono ─────────────────────────
+    def test_m716_cotizacion_sin_telefono_no_se_envia(self):
+        from apps.cotizaciones.models import CotizacionEnvio
+
+        self.paciente.telefono = ""
+        self.paciente.save(update_fields=["telefono"])
+        cotizacion = Cotizacion.objects.create(
+            clinica=self.clinica, paciente=self.paciente, profesional=self.admin, sede=self.sede,
+            estado=Cotizacion.Estado.BORRADOR,
+        )
+        response = self.client.post(f"/api/v1/cotizaciones/{cotizacion.id}/enviar_whatsapp/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PACIENTE_SIN_TELEFONO")
+        self.assertFalse(CotizacionEnvio.objects.filter(cotizacion=cotizacion).exists())
+
+    def test_m716_el_servicio_no_envia_ni_cobra_cupo_sin_telefono(self):
+        from apps.notificaciones.models import EnvioWhatsApp
+        from apps.notificaciones.services import WhatsAppNoDisponibleError, enviar_whatsapp
+
+        self.paciente.telefono = ""
+        with self.assertRaises(WhatsAppNoDisponibleError) as ctx:
+            enviar_whatsapp(tipo=EnvioWhatsApp.Tipo.ENVIO_FORMULA, paciente=self.paciente, clinica=self.clinica)
+        self.assertEqual(ctx.exception.code, "PACIENTE_SIN_TELEFONO")
+        self.assertFalse(EnvioWhatsApp.objects.exists())
+
+    # ── M7-17: el PDF de WhatsApp va al bucket privado con enlace temporal ─
+    def test_m717_pdf_de_whatsapp_privado_con_enlace_temporal(self):
+        from unittest.mock import patch
+
+        from apps.notificaciones.services import WHATSAPP_PDF_URL_TTL_SEGUNDOS, subir_pdf_whatsapp
+
+        with patch("apps.notificaciones.services.upload_private_file") as subir, \
+                patch("apps.notificaciones.services.get_signed_url", return_value="https://firmada") as firmar:
+            url = subir_pdf_whatsapp(b"%PDF-1.4", "cotizacion.pdf")
+        self.assertEqual(url, "https://firmada")
+        subir.assert_called_once()
+        self.assertEqual(firmar.call_args.kwargs["expires_in"], WHATSAPP_PDF_URL_TTL_SEGUNDOS)
+
+    # ── M7-07: lo que pide la nueva pantalla de inventario y compras ───────
+    def test_m707_categoria_repetida_da_400_y_se_filtra_por_activo(self):
+        url = "/api/v1/inventario/categorias/"
+        self.assertEqual(self.client.post(url, {"nombre": "Jeringas"}, format="json").status_code, 201)
+        repetida = self.client.post(url, {"nombre": "jeringas "}, format="json")
+        self.assertEqual(repetida.status_code, 400)
+        self.assertIn("nombre", repetida.json())
+        otra = self.client.post(url, {"nombre": "Guantes"}, format="json").json()
+        self.client.patch(f"{url}{otra['id']}/", {"activo": False}, format="json")
+        activas = [c["nombre"] for c in self.client.get(url, {"activo": "true"}).json()["results"]]
+        self.assertEqual(activas, ["Jeringas"])
+
+    def test_m707_solo_se_cancela_una_compra_sin_recibir(self):
+        from apps.proveedores.models import OrdenCompra, Proveedor
+
+        proveedor = Proveedor.objects.create(
+            clinica=self.clinica, nombre="Dist", nit="900", telefono="3000000000",
+            categoria=Proveedor.Categoria.OTRO,
+        )
+
+        def orden(estado):
+            return OrdenCompra.objects.create(
+                proveedor=proveedor, sede=self.sede, fecha=timezone.localdate(), estado=estado,
+                numero_factura_proveedor="F-1", created_by=self.admin,
+            )
+
+        recibida = orden(OrdenCompra.Estado.RECIBIDA_TOTAL)
+        response = self.client.delete(f"/api/v1/proveedores/ordenes-compra/{recibida.id}/")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "ORDEN_NO_CANCELABLE")
+        borrador = orden(OrdenCompra.Estado.BORRADOR)
+        self.assertEqual(self.client.delete(f"/api/v1/proveedores/ordenes-compra/{borrador.id}/").status_code, 204)
+        borrador.refresh_from_db()
+        self.assertEqual(borrador.estado, OrdenCompra.Estado.CANCELADA)

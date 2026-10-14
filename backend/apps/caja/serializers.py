@@ -58,6 +58,14 @@ class GastoCajaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = ["id", "sesion", "registrado_por", "created_at"]
+        # Un gasto de $0 o negativo no es un gasto: uno negativo subía el
+        # efectivo esperado al cerrar la caja.
+        extra_kwargs = {
+            "valor": {
+                "min_value": Decimal("0.01"),
+                "error_messages": {"min_value": "El valor del gasto debe ser mayor a $0."},
+            },
+        }
 
     def get_registrado_por_nombre(self, obj):
         return obj.registrado_por.get_full_name() if obj.registrado_por_id else None
@@ -145,7 +153,10 @@ class SesionCajaSerializer(serializers.ModelSerializer):
 
 class AbrirSesionSerializer(serializers.Serializer):
     caja = serializers.UUIDField()
-    monto_apertura = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    monto_apertura = serializers.DecimalField(
+        max_digits=12, decimal_places=2, required=False, min_value=Decimal("0"),
+        error_messages={"min_value": "El fondo de apertura no puede ser negativo."},
+    )
 
 
 class CerrarSesionSerializer(serializers.Serializer):

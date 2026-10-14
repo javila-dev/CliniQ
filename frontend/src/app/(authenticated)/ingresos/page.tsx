@@ -29,7 +29,7 @@ import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
 import { toast } from '@/hooks/use-toast'
-import { cn, fechaLocalISO } from '@/lib/utils'
+import { cn, fechaLocalISO, formatCantidad } from '@/lib/utils'
 import type { Cobro, EstadoCobro, OrigenCobro } from '@/types/cobros'
 import { useFormasPago } from '@/hooks/useFormasPago'
 import { HelpButton } from '@/components/ayuda/HelpButton'
@@ -304,7 +304,7 @@ function IngresoDetalleSheet({ cobro: cobroFila, open, onClose }: { cobro: Cobro
                     <div>
                       <p className="font-medium text-foreground">{item.descripcion}</p>
                       <p className="text-xs text-muted-foreground">
-                        {item.cantidad} × {COP.format(Number(item.precio_unitario))}
+                        {formatCantidad(item.cantidad)} × {COP.format(Number(item.precio_unitario))}
                       </p>
                     </div>
                     <p className="font-semibold">{COP.format(Number(item.subtotal))}</p>

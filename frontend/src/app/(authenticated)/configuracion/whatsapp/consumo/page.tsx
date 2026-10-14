@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { Button } from '@/components/ui/button'
 import { useAuthStore } from '@/store/authStore'
 import { clinicasApi } from '@/lib/api/clinicas'
-import { notificacionesFallidasApi } from '@/lib/api/notificaciones'
+import { notificacionesFallidasApi, veEnviosFallidos } from '@/lib/api/notificaciones'
 import { cn } from '@/lib/utils'
 import { Bloque } from '@/components/configuracion/Bloque'
 
@@ -40,6 +40,7 @@ export default function ConsumoWhatsappPage() {
   const { data: fallidasData, isLoading: cargandoFallidas } = useQuery({
     queryKey: ['notificaciones', 'fallidas'],
     queryFn: () => notificacionesFallidasApi.list({ resuelta: false }),
+    enabled: veEnviosFallidos(user),
   })
   const resolver = useMutation({
     mutationFn: (id: string) => notificacionesFallidasApi.resolver(id),

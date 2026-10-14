@@ -1,5 +1,12 @@
 import { apiClient } from './client'
 import type { Paginated } from '@/types/common'
+import type { AuthUser } from '@/types/auth'
+import { hasPermission, PERM } from '@/lib/permissions'
+
+/** Los envíos fallidos son de pacientes: los ve quien ve pacientes o la agenda. */
+export function veEnviosFallidos(user: AuthUser | null | undefined): boolean {
+  return hasPermission(user, PERM.PACIENTES_VER) || hasPermission(user, PERM.AGENDA_VER)
+}
 
 export type TipoNotificacionFallida =
   | 'recordatorio_cita'

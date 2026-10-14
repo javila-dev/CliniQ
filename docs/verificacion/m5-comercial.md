@@ -24,7 +24,7 @@
 - **Causa:** usa `num_citas`.
 - **Arreglo:** usar `item.num_sesiones_efectivas()`.
 
-**M5-03 · Medio · parámetros** · confirmado
+**✅ M5-03 · Medio · parámetros** · confirmado
 - **Dónde:** `CotizacionForm.tsx:254-274,364-367` vs `serializers.py:264-281`.
 - **Qué ve el usuario:** con una promoción de $80 y un precio de lista de $100, escribe $90. La pantalla lo acepta, pero al guardar sale "No tienes permiso para bajar el precio".
 - **Causa:** el backend solo permite el precio exacto de la promoción, mientras el frontend acepta cualquier valor entre la promoción y la lista.
@@ -50,17 +50,17 @@
 - **Qué ve el usuario:** con cualquier fallo de WhatsApp sale "Verifica que el paciente tenga teléfono", aunque el problema sea otro.
 - **Arreglo:** mostrar `response.data.error`.
 
-**M5-08 · Medio · API (campos)** · confirmado
+**✅ M5-08 · Medio · API (campos)** · confirmado
 - **Dónde:** `CotizacionForm.tsx:2095-2096`; `types/cotizaciones.ts`; `serializers.py:665-698`.
 - **Qué ve el usuario:** al enviar por correo, el email aparece vacío aunque el paciente lo tenga. En WhatsApp nunca aparece "Se enviará al número…".
 - **Arreglo:** que el serializer devuelva `paciente_telefono` y `paciente_email`, respetando el enmascarado.
 
-**M5-09 · Medio · faltante** · confirmado
+**✅ M5-09 · Medio · faltante** · confirmado
 - **Dónde:** `lib/api/seguimiento.ts` (`reabrir`, `gestiones`); `seguimiento/views.py:166,189`.
 - **Qué ve el usuario:** si saca a alguien de la lista por error, **no puede reabrirlo**. Tampoco ve el historial de llamadas.
 - **Causa:** el backend existe, pero falta la interfaz.
 
-**M5-10 · Medio · carga** · confirmado
+**✅ M5-10 · Medio · carga** · confirmado
 - **Dónde:** `seguimiento/page.tsx:209`.
 - **Qué ve el usuario:** "Para hoy 140", pero solo ve 100, sin aviso.
 - **Arreglo:** paginar, o "Mostrando 100 de N · Cargar más".
@@ -69,30 +69,30 @@
 - **Dónde:** `CotizacionForm.tsx:642-658`.
 - **Qué ve el usuario:** crear un paciente desde la cotización con un documento duplicado no muestra ningún mensaje.
 
-**M5-12 · Medio · permisos** · confirmado
+**✅ M5-12 · Medio · permisos** · confirmado
 - **Dónde:** `CotizacionForm.tsx:1125-1134`; `CobrosCotizacionPanel.tsx:85-89`.
 - **Qué ve el usuario:** el Profesional, que no tiene `cobros.ver`, pulsa "Cobros" y ve "Sin cobros registrados" aunque los haya.
 - **Arreglo:** ocultar el botón y manejar `isError`.
 
-**M5-13 · Medio · previsible** · confirmado
+**✅ M5-13 · Medio · previsible** · confirmado
 - **Dónde:** `cotizaciones/views.py:161-171`.
 - **Qué ve el usuario:** si se activa el compromiso de pago, las ventas viejas aparecen como "Pendiente de firma".
 - **Causa:** el GET del detalle crea el documento en la base de datos.
 - **Arreglo:** no generar documentos dentro de `retrieve`.
 
-**M5-14 · Medio · concurrencia** · probable
+**✅ M5-14 · Medio · concurrencia** · probable
 - **Dónde:** `cotizaciones/services.py:76-109`; `views.py:237-288`.
 - **Qué ve el usuario:** si dos personas aceptan la misma cotización a la vez, quedan cuotas duplicadas en la cartera o sale un error 500.
 - **Arreglo:** `transaction.atomic` con `select_for_update`.
 
-**M5-15 · Medio · roles** · confirmado (la intención está por decidir)
+**✅ M5-15 · Medio · roles** · confirmado (la intención está por decidir)
 - **Dónde:** defaults de recepción en `permissions_catalog.py`; `cotizaciones/views.py:109-112`.
 - **Qué ve el usuario:**
   - Recepción gestiona el seguimiento, pero no puede crear ni enviar cotizaciones (no tiene `cotizaciones.gestionar`).
   - Entregar un obsequio de producto exige `inventario.consumo.registrar`, que no se puede asignar desde Roles.
 - **Arreglo:** decidirlo con el usuario y ajustar los defaults, o crear un permiso propio para la entrega.
 
-**M5-16 · Medio · previsible** · probable
+**✅ M5-16 · Medio · previsible** · probable
 - **Dónde:** `services.py:225-258`; `views.py:217-235`.
 - **Qué ve el usuario:** se edita un borrador con compromiso pendiente, el paciente firma y **la venta queda con cuotas que no suman el total**.
 - **Arreglo:** validar el plan de pagos al editar o al aceptar por firma.

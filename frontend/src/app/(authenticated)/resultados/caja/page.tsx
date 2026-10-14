@@ -332,11 +332,9 @@ function AbrirCajaDialog({ open, onClose, cajaId, sedeNombre, sugerido, onDone }
       toast.success('Caja abierta')
       onClose()
     },
-    onError: (e: any) => toast.error(
-      'No se pudo abrir',
-      e?.response?.data?.caja ?? e?.response?.data?.error ?? 'Intenta de nuevo.',
-    ),
+    onError: (e) => toast.error('No se pudo abrir', mensajeDeError(e, 'Intenta de nuevo.')),
   })
+  const montoNegativo = ajustando && monto !== '' && montoNum < 0
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -369,6 +367,9 @@ function AbrirCajaDialog({ open, onClose, cajaId, sedeNombre, sugerido, onDone }
               value={monto}
               onChange={(e) => setMonto(e.target.value)}
             />
+            {montoNegativo && (
+              <p className="text-[11px] text-destructive">El fondo de apertura no puede ser negativo.</p>
+            )}
             {!primeraVez && (
               <div className="flex items-center justify-between text-[11px]">
                 <button type="button" onClick={() => { setAjustando(false); setMonto(String(sugeridoNum)) }}
@@ -388,7 +389,7 @@ function AbrirCajaDialog({ open, onClose, cajaId, sedeNombre, sugerido, onDone }
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>Cancelar</Button>
-          <Button disabled={abrir.isPending || (ajustando && monto === '')} onClick={() => abrir.mutate()}>
+          <Button disabled={abrir.isPending || (ajustando && monto === '') || montoNegativo} onClick={() => abrir.mutate()}>
             {abrir.isPending ? 'Abriendo…' : 'Abrir caja'}
           </Button>
         </DialogFooter>

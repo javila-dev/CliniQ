@@ -189,12 +189,11 @@ class CotizacionViewSet(ModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         response = super().retrieve(request, *args, **kwargs)
         cotizacion = self.get_object()
+        # Solo se muestra el compromiso que ya exista. Abrir el detalle no lo
+        # genera: una venta aceptada antes de activar el compromiso de pago no
+        # queda "Pendiente de firma" (decisión del usuario, M5-13). Las nuevas
+        # lo generan al aceptarse (cambiar_estado).
         compromiso = self._compromiso_pago_existente(cotizacion)
-        if compromiso is None and cotizacion.estado == Cotizacion.Estado.ACEPTADA:
-            # Genera el compromiso de pago pendiente si la clinica lo exige y aun
-            # no existe. Cubre cotizaciones aceptadas antes de que existiera esta
-            # generacion automatica: el panel aparece al abrir el detalle.
-            compromiso = self._generar_compromiso_pago_si_aplica(cotizacion)
         response.data["compromiso_pago"] = self._serializar_compromiso_pago(compromiso)
         return response
 
@@ -591,6 +590,14 @@ class CotizacionViewSet(ModelViewSet):
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")
     def enviar_whatsapp(self, request, pk=None):
         cotizacion = self.get_object()
+        if not (cotizacion.paciente.telefono or "").strip():
+            return Response(
+                {
+                    "error": "El paciente no tiene teléfono registrado. Agrégalo en su ficha para enviarle la cotización.",
+                    "code": "PACIENTE_SIN_TELEFONO",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
             ruta = resolver_ruta_whatsapp(
                 cotizacion.clinica, cotizacion.sede,
@@ -623,12 +630,12 @@ class CotizacionViewSet(ModelViewSet):
             return Response({"error": str(exc), "code": exc.code}, status=status.HTTP_403_FORBIDDEN)
         except ValueError:
             return Response(
-                {"error": "Webhook no configurado", "code": "WEBHOOK_NOT_CONFIGURED"},
+                {"error": "El envío por WhatsApp no está configurado. Avísale al soporte de CliniQ.", "code": "WEBHOOK_NOT_CONFIGURED"},
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
-        except requests.RequestException as exc:
+        except requests.RequestException:
             return Response(
-                {"error": "No se pudo contactar el webhook", "code": "WEBHOOK_ERROR"},
+                {"error": "No se pudo conectar con el servicio de WhatsApp. Intenta de nuevo en unos minutos.", "code": "WEBHOOK_ERROR"},
                 status=status.HTTP_502_BAD_GATEWAY,
             )
         envio = CotizacionEnvio.objects.create(

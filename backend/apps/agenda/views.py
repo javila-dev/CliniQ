@@ -132,6 +132,7 @@ class CitaViewSet(ModelViewSet):
         "confirmado_por",
         "item_cotizacion",
         "item_cotizacion__cotizacion",
+        "cobro",
     ).prefetch_related(
         "registros_confirmacion",
         "servicio__consentimientos_requeridos",

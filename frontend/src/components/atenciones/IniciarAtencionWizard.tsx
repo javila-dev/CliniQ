@@ -13,7 +13,7 @@ import { cn } from '@/lib/utils'
 import { textoDeudaBloqueante } from '@/lib/deuda'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
 import { ConsentimientoFirmaContent } from './ConsentimientoFirmaContent'
-import { PagoContent } from './PagoContent'
+import { PagoContent, cobroConPagos } from './PagoContent'
 import { FirmaAsistenciaContent } from './FirmaAsistenciaContent'
 import { VerificacionFacialContent } from './VerificacionFacialContent'
 
@@ -115,7 +115,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
       llegada:        cita.estado !== 'confirmada',
       verificacion:   verificacionCompletada,
       consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-      pago:           cita.item_cotizacion_id != null || pagoRegistrado || cita.cobro_id != null || cita.estado === 'en_curso' || cita.estado === 'completada',
+      pago:           cita.item_cotizacion_id != null || pagoRegistrado || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada',
       firma:          cita.firma_asistencia_estado === 'firmada',
     }
 

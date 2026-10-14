@@ -18,6 +18,12 @@ interface ErrorHttp {
 
 const PERMISO_GENERICO = /no tienes permiso para realizar esta acci[oó]n/i
 
+const ERRORES_DE_SERVICIO: Record<string, string> = {
+  WEBHOOK_NOT_CONFIGURED: 'El envío por WhatsApp no está configurado. Avísale al soporte de CliniQ.',
+  WEBHOOK_ERROR: 'No se pudo conectar con el servicio de mensajes. Intenta de nuevo en unos minutos.',
+  DOCUMENSO_ERROR: 'El servicio de firmas no respondió. Intenta de nuevo en unos minutos.',
+}
+
 /** Primer mensaje legible de un error de campo, aunque venga anidado
  *  (p. ej. `precios_sede: [{sede: ["..."]}]`, que antes salía "[object Object]"). */
 export function primerTexto(valor: unknown): string | null {
@@ -52,9 +58,14 @@ export function mensajeDeError(
     return porDefecto
   }
   if (status === 429) return 'Demasiados intentos seguidos. Espera unos minutos e intenta de nuevo.'
-  if (status && status >= 500) return 'El sistema tuvo un problema. Intenta de nuevo en unos minutos.'
 
   const obj = data && typeof data === 'object' && !Array.isArray(data) ? (data as DatosError) : null
+
+  if (status && status >= 500) {
+    // Los 502/503 de servicios externos traen texto técnico: se traduce por código.
+    const porCodigo = typeof obj?.code === 'string' ? ERRORES_DE_SERVICIO[obj.code] : undefined
+    return porCodigo ?? 'El sistema tuvo un problema. Intenta de nuevo en unos minutos.'
+  }
   const directo = obj ? primerTexto(obj.error) ?? primerTexto(obj.detail) : null
 
   if (status === 403) {

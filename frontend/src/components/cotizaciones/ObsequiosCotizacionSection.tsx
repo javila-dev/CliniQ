@@ -405,7 +405,12 @@ export function ObsequiosCotizacionSection({
                       </Button>
                     )}
                     {!entregado && !puedeEntregar && (
-                      <span className="text-xs text-muted-foreground">Pendiente de entrega</span>
+                      <span
+                        className="text-xs text-muted-foreground"
+                        title="Lo entrega quien atiende pacientes (sale del inventario de la sede)."
+                      >
+                        Pendiente de entrega · lo entrega quien atiende
+                      </span>
                     )}
                     {entregado && puedeRevertir && (
                       <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground" onClick={() => setRevirtiendo(item)}>
