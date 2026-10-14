@@ -28,6 +28,7 @@ from apps.users.permissions import IsAdmin, IsSuperAdmin, RequireAnyPermission, 
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
     CAPABILITY_PERMISSIONS,
+    PERMISOS_SIN_PANTALLA,
     PERMISOS_SOLO_CHECK_ATIENDE,
     role_is_professional_from_keys,
 )
@@ -548,7 +549,11 @@ class PermisoListView(APIView):
     permission_classes = (RequirePermission("roles.ver"),)
 
     def get(self, request, *args, **kwargs):
-        permisos = Permiso.objects.filter(activo=True, assignable=True).order_by("modulo", "accion", "clave")
+        permisos = (
+            Permiso.objects.filter(activo=True, assignable=True)
+            .exclude(clave__in=PERMISOS_SIN_PANTALLA)
+            .order_by("modulo", "accion", "clave")
+        )
         agrupados = {}
         for permiso in permisos:
             agrupados.setdefault(permiso.modulo, []).append(PermisoSerializer(permiso).data)
@@ -575,7 +580,7 @@ class CapacidadListView(APIView):
     def get(self, request, *args, **kwargs):
         permisos = list(
             Permiso.objects.filter(activo=True)
-            .exclude(clave__in=PERMISOS_SOLO_CHECK_ATIENDE)
+            .exclude(clave__in=PERMISOS_SOLO_CHECK_ATIENDE | PERMISOS_SIN_PANTALLA)
             .order_by("modulo", "accion", "clave")
         )
         claves_validas = {p.clave for p in permisos}

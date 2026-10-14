@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -17,7 +17,6 @@ import type { Insumo } from '@/types/inventario'
 
 const insumoSchema = z.object({
   nombre: z.string().min(2, 'Mínimo 2 caracteres'),
-  categoria: z.string(),
   es_consumo_interno: z.boolean(),
   es_venta_retail: z.boolean(),
   unidad_medida: z.enum(['unidad', 'ml', 'gr', 'cm', 'par', 'caja']),
@@ -31,13 +30,12 @@ const insumoSchema = z.object({
 
 type InsumoForm = z.infer<typeof insumoSchema>
 
-const CAMPOS_FORM = ['nombre', 'categoria', 'unidad_medida', 'stock_minimo', 'precio_venta'] as const
+const CAMPOS_FORM = ['nombre', 'unidad_medida', 'stock_minimo', 'precio_venta'] as const
 
 function valoresIniciales(insumo?: Insumo | null): InsumoForm {
   if (!insumo) {
     return {
       nombre: '',
-      categoria: '',
       es_consumo_interno: true,
       es_venta_retail: false,
       unidad_medida: 'unidad',
@@ -48,7 +46,6 @@ function valoresIniciales(insumo?: Insumo | null): InsumoForm {
   }
   return {
     nombre: insumo.nombre,
-    categoria: insumo.categoria ?? '',
     es_consumo_interno: insumo.es_consumo_interno,
     es_venta_retail: insumo.es_venta_retail,
     unidad_medida: insumo.unidad_medida,
@@ -88,16 +85,6 @@ export function InsumoSheet({
     }
   }, [open, insumo?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  const { data: categoriasData } = useQuery({
-    queryKey: ['categorias-insumo'],
-    queryFn: () => inventarioApi.listCategorias({ page_size: 200 }),
-    enabled: open,
-  })
-  // Solo categorías activas, salvo la que ya tenga asignada el insumo.
-  const categorias = (categoriasData?.results ?? []).filter(
-    (c) => c.activo || c.id === insumo?.categoria,
-  )
-
   const esConsumo = watch('es_consumo_interno')
   const esRetail = watch('es_venta_retail')
 
@@ -105,7 +92,6 @@ export function InsumoSheet({
     mutationFn: (data: InsumoForm) => {
       const payload = {
         nombre: data.nombre,
-        categoria: data.categoria || null,
         es_consumo_interno: data.es_consumo_interno,
         es_venta_retail: data.es_venta_retail,
         unidad_medida: data.unidad_medida,
@@ -150,17 +136,6 @@ export function InsumoSheet({
             <Label>Nombre *</Label>
             <Input placeholder="Nombre del insumo" {...register('nombre')} className={cn(errors.nombre && 'border-red-400')} />
             {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Categoría</Label>
-            <select {...register('categoria')} className={cn('flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm', errors.categoria && 'border-red-400')}>
-              <option value="">Sin categoría</option>
-              {categorias.map((c) => (
-                <option key={c.id} value={c.id}>{c.nombre}{c.activo ? '' : ' (inactiva)'}</option>
-              ))}
-            </select>
-            {errors.categoria && <p className="text-xs text-red-500">{errors.categoria.message}</p>}
           </div>
 
           <div className="space-y-1.5">

@@ -709,6 +709,20 @@ class VerificacionPaso7MediosM7Tests(ClinicaFixtureMixin, TestCase):
         subir.assert_called_once()
         self.assertEqual(firmar.call_args.kwargs["expires_in"], WHATSAPP_PDF_URL_TTL_SEGUNDOS)
 
+    # ── Categorías de insumos fuera de la UI (decisión del usuario) ────────
+    def test_roles_no_ofrecen_el_permiso_de_categorias_de_insumos(self):
+        from apps.users.rbac import ensure_default_roles_for_clinica
+
+        ensure_default_roles_for_clinica(self.clinica)  # carga el catálogo completo de permisos
+        datos = self.client.get("/api/v1/usuarios/capacidades/").json()
+        capacidades = [p for a in datos["areas"] for c in a["capacidades"] for p in c["permisos"]]
+        tecnicos = [p["clave"] for m in datos["permisos_tecnicos"] for p in m["permisos"]]
+        catalogo = [p["clave"] for m in self.client.get("/api/v1/usuarios/permisos/").json() for p in m["permisos"]]
+        self.assertTrue(Permiso.objects.filter(clave="inventario.categorias.gestionar", activo=True).exists())
+        for lista in (capacidades, tecnicos, catalogo):
+            self.assertTrue(lista)
+            self.assertNotIn("inventario.categorias.gestionar", lista)
+
     # ── M7-07: lo que pide la nueva pantalla de inventario y compras ───────
     def test_m707_categoria_repetida_da_400_y_se_filtra_por_activo(self):
         url = "/api/v1/inventario/categorias/"

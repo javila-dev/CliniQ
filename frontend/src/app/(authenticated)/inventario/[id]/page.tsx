@@ -211,11 +211,7 @@ function InsumoDetalleContent({ id }: { id: string }) {
             </>
           )}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border-t pt-4 text-sm">
-            <div>
-              <p className="text-xs text-muted-foreground">Categoría</p>
-              <p>{insumo.categoria_nombre ?? '—'}</p>
-            </div>
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-4 border-t pt-4 text-sm">
             <div>
               <p className="text-xs text-muted-foreground">Precio de venta</p>
               <p>{insumo.precio_venta ? COP.format(Number(insumo.precio_venta)) : '—'}</p>

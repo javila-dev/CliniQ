@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import {
   Plus, Search, AlertTriangle, Package, ChevronLeft, ChevronRight,
-  TrendingDown, Layers, Tags,
+  TrendingDown, Layers,
 } from 'lucide-react'
 import { inventarioApi } from '@/lib/api/inventario'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -21,7 +21,6 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { InsumoSheet } from '@/components/inventario/InsumoSheet'
-import { CategoriasInsumoDialog } from '@/components/inventario/CategoriasInsumoDialog'
 import { mensajeDeError } from '@/lib/errores'
 import { canAccess, hasPermission, PERM } from '@/lib/permissions'
 import { useAuthStore } from '@/store/authStore'
@@ -143,7 +142,6 @@ export default function InventarioPage() {
 function InventarioContent() {
   const { user } = useAuthStore()
   const puedeGestionarInsumos = hasPermission(user, PERM.INVENTARIO_INSUMOS_GESTIONAR)
-  const puedeGestionarCategorias = hasPermission(user, PERM.INVENTARIO_CATEGORIAS_GESTIONAR)
 
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -152,7 +150,6 @@ function InventarioContent() {
   const [filtroEstado, setFiltroEstado] = useState<'activos' | 'inactivos' | 'todos'>('activos')
   const [tab, setTab] = useState<'insumos' | 'alertas'>('insumos')
   const [nuevoOpen, setNuevoOpen] = useState(false)
-  const [categoriasOpen, setCategoriasOpen] = useState(false)
   const [sede, setSede] = useState<string>('')
   const debouncedSearch = useDebounce(search, 400)
 
@@ -205,21 +202,11 @@ function InventarioContent() {
         description="Gestiona el catálogo de insumos y el stock de cada sede."
         helpSlug="inventario-de-insumos"
         action={
-          puedeGestionarInsumos || puedeGestionarCategorias ? (
-            <div className="flex items-center gap-2">
-              {puedeGestionarCategorias && (
-                <Button variant="outline" onClick={() => setCategoriasOpen(true)}>
-                  <Tags className="h-4 w-4 mr-1.5" />
-                  Categorías
-                </Button>
-              )}
-              {puedeGestionarInsumos && (
-                <Button onClick={() => setNuevoOpen(true)}>
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Nuevo insumo
-                </Button>
-              )}
-            </div>
+          puedeGestionarInsumos ? (
+            <Button onClick={() => setNuevoOpen(true)}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              Nuevo insumo
+            </Button>
           ) : undefined
         }
       />
@@ -389,7 +376,6 @@ function InventarioContent() {
       </Tabs>
 
       <InsumoSheet open={nuevoOpen} onClose={() => setNuevoOpen(false)} />
-      <CategoriasInsumoDialog open={categoriasOpen} onClose={() => setCategoriasOpen(false)} />
     </div>
   )
 }

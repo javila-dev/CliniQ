@@ -55,7 +55,7 @@
 - **Arreglo:** mostrar un estado de error y, sin sedes, un aviso "Crea una sede primero".
 
 **✅ M7-07 · Medio · faltante** · confirmado
-- **Qué ve el usuario:** no puede editar ni desactivar insumos o proveedores, ni cancelar órdenes, ni quitar ítems de un borrador. No existe pantalla de categorías.
+- **Qué ve el usuario:** no puede editar ni desactivar insumos o proveedores, ni cancelar órdenes, ni quitar ítems de un borrador. No existe pantalla de categorías. *(Por decisión del usuario, las categorías de insumos no llevan pantalla.)*
 - **Causa:** las funciones del API existen, pero no hay pantalla que las use.
 
 **✅ M7-08 · Medio · errores/parámetros** · confirmado

@@ -440,12 +440,6 @@ CAPABILITY_CATALOG = [
                 "descripcion": "Crear insumos y ajustar existencias.",
                 "permisos": ["inventario.insumos.gestionar", "inventario.ajustar_stock", "inventario.ver", "inventario.kardex.ver"],
             },
-            {
-                "clave": "inventario.categorias",
-                "titulo": "Gestionar categorias de insumos",
-                "descripcion": "Crear y editar las categorias de insumos.",
-                "permisos": ["inventario.categorias.gestionar", "inventario.ver"],
-            },
         ],
     },
     {
@@ -656,6 +650,12 @@ PERMISOS_SOLO_CHECK_ATIENDE = frozenset({
     "pacientes.antecedentes.editar",
     "inventario.consumo.registrar",
     "historia.fotos.subir",
+})
+# Permisos que existen pero no se ofrecen al armar un rol: su función no tiene
+# pantalla. Las categorías de insumos se quitaron de la UI por decisión del
+# usuario (configuración sobre configuración).
+PERMISOS_SIN_PANTALLA = frozenset({
+    "inventario.categorias.gestionar",
 })
 # Quien atiende necesita leer la historia y los antecedentes para documentar la
 # atención: sin `historia.ver` las pestañas de la atención quedan en blanco
