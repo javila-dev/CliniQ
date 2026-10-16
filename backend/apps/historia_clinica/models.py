@@ -70,6 +70,17 @@ class HistoriaClinica(BaseModel):
     def __str__(self) -> str:
         return self.numero
 
+    @classmethod
+    def del_paciente(cls, paciente) -> "HistoriaClinica":
+        """La historia del paciente, creándola si no tiene.
+
+        Normalmente la crea la señal al registrar el paciente, pero los pacientes
+        anteriores a esa señal no la tenían: no se podía documentar su atención y
+        "Datos clínicos" de su cotización respondía 500 (AT-12).
+        """
+        historia, _ = cls.objects.get_or_create(paciente=paciente, defaults={"clinica_id": paciente.clinica_id})
+        return historia
+
 
 class NotaClinica(BaseModel):
     class EstadoNota(models.TextChoices):

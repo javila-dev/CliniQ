@@ -75,6 +75,10 @@ class CarteraListSerializer(serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(
         source="cotizacion.profesional.nombre_completo", read_only=True, allow_null=True, default=None
     )
+    # Quien solo ve su actividad comercial no abre la cotización de otro profesional.
+    cotizacion_profesional_id = serializers.UUIDField(
+        source="cotizacion.profesional_id", read_only=True, allow_null=True, default=None
+    )
     total_pagado = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     saldo_pendiente = serializers.DecimalField(max_digits=14, decimal_places=2, read_only=True)
     cuotas_total = serializers.SerializerMethodField()
@@ -93,6 +97,7 @@ class CarteraListSerializer(serializers.ModelSerializer):
             "paciente_id",
             "paciente_nombre",
             "profesional_nombre",
+            "cotizacion_profesional_id",
             "total",
             "total_pagado",
             "saldo_pendiente",

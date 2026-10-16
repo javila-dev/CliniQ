@@ -121,6 +121,10 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
     fotos = FotoClinicaSerializer(many=True, read_only=True)
     examenes = ResultadoExamenEmbedSerializer(many=True, read_only=True)
     ordenes = OrdenMedicaEmbedSerializer(many=True, read_only=True)
+    # Zonas, insumos y mediciones de la nota: también cuentan como contenido al
+    # completar la atención (AT-15). Solo en el detalle, para no sumar consultas
+    # por nota en los listados.
+    otros_registros = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaClinica
@@ -137,6 +141,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "fotos",
             "examenes",
             "ordenes",
+            "otros_registros",
             "created_at",
             "updated_at",
         )
@@ -150,6 +155,16 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "ordenes",
             "created_at",
             "updated_at",
+        )
+
+    def get_otros_registros(self, obj):
+        vista = self.context.get("view")
+        if getattr(vista, "action", None) != "retrieve":
+            return None
+        return (
+            obj.anotaciones_zona.count()
+            + obj.consumos_insumo.filter(activo=True).count()
+            + obj.mediciones_antropometricas.count()
         )
 
     def get_profesional_nombre(self, obj):
@@ -528,6 +543,18 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
 
         if cita and cita.paciente_id != historia.paciente_id:
             raise serializers.ValidationError({"cita": "La cita no corresponde al paciente de la historia."})
+
+        nota = attrs.get("nota")
+        if nota is not None:
+            from apps.historia_clinica.autoria import exigir_documentable
+
+            if nota.historia_id != historia.id:
+                raise serializers.ValidationError({"nota": "La nota no es de esta historia."})
+            # Solo en sus propias atenciones (AT-02).
+            exigir_documentable(request.user, nota)
+            # Sin cita, el PDF salía con la primera sede y sin el nombre de la consulta (AT-16).
+            if cita is None and nota.cita_id:
+                attrs["cita"] = nota.cita
 
         if plantilla:
             if request.user.rol != "superadmin" and plantilla.clinica_id != request.user.clinica_id:

@@ -1121,8 +1121,8 @@ class VerificacionPaso7cM5Tests(ClinicaFixtureMixin, TestCase):
         propia = self._cotizacion(profesional=profesional)
         self.client.force_authenticate(profesional)
 
-        # La abre por id (paciente, cartera…), pero no la cambia.
-        self.assertEqual(self.client.get(f"/api/v1/cotizaciones/{ajena.id}/").status_code, 200)
+        # Tampoco la abre: la ve en el listado del paciente (decisión del 15/10/2026).
+        self.assertEqual(self.client.get(f"/api/v1/cotizaciones/{ajena.id}/").status_code, 403)
         for metodo, sufijo, datos in (
             ("patch", "", {"notas": "x"}),
             ("post", "cambiar_estado/", {"estado": "descartada"}),

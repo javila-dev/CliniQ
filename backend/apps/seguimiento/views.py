@@ -190,6 +190,16 @@ class OportunidadViewSet(
         registrar_accion(request, "seguimiento.perder", oportunidad, {"motivo": oportunidad.motivo_perdida})
         return self._respuesta(oportunidad)
 
+    @action(detail=True, methods=["post"], url_path="no_es_cliente")
+    def no_es_cliente(self, request, pk=None):
+        """Proveedor, familiar o número equivocado que escribió por WhatsApp: se cierra
+        y su teléfono no vuelve a crear interesados."""
+        from apps.seguimiento.whatsapp_entrante import marcar_no_es_cliente
+
+        oportunidad = marcar_no_es_cliente(self._oportunidad(pk), usuario=request.user)
+        registrar_accion(request, "seguimiento.no_es_cliente", oportunidad, {"telefono": oportunidad.telefono[-4:]})
+        return self._respuesta(oportunidad)
+
     @action(detail=True, methods=["post"], url_path="reabrir")
     def reabrir(self, request, pk=None):
         oportunidad = services.reabrir(self._oportunidad(pk))

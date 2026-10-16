@@ -553,10 +553,12 @@ class CitaCotizacionItemTests(TestCase):
         )
 
     def _payload(self, days=1, hours=0):
-        fecha = timezone.localtime()
+        # Primero los días y después saltar el fin de semana: al revés, un viernes
+        # "mañana" caía sábado, fuera del horario de la sede, y el test fallaba.
+        fecha = timezone.localtime() + timedelta(days=days)
         while fecha.weekday() >= 5:
             fecha += timedelta(days=1)
-        fecha = fecha.replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(days=days, hours=hours)
+        fecha = fecha.replace(hour=10, minute=0, second=0, microsecond=0) + timedelta(hours=hours)
         return {
             "paciente": str(self.paciente.id),
             "sede": str(self.sede.id),

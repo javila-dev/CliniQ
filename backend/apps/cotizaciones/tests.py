@@ -656,6 +656,30 @@ class CotizacionFlowTests(TestCase):
         self.assertEqual(cotizacion.estado, Cotizacion.Estado.BORRADOR)
         self.assertFalse(hasattr(cotizacion, "cartera"))
 
+    def test_ct01_compromiso_firmado_de_otro_valor_no_acepta_la_venta(self):
+        from apps.configuracion.models import ConfiguracionCartera
+        from apps.consentimientos.models import Consentimiento
+
+        ConfiguracionCartera.objects.create(clinica=self.clinica, requiere_consentimiento_promocional=True)
+        cotizacion_id = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json").json()["id"]
+        self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+        firmado = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
+        Consentimiento.objects.filter(id=firmado.id).update(estado=Consentimiento.Estado.FIRMADO)
+
+        # Después de la firma se cambia el precio y el plan.
+        payload = self._payload()
+        payload["items"][0]["valor_unitario"] = "300000.00"
+        payload["formas_pago"][0]["valor"] = "300000.00"
+        self.assertEqual(self.client.patch(f"/api/v1/cotizaciones/{cotizacion_id}/", payload, format="json").status_code, 200)
+
+        r = self.client.post(f"/api/v1/cotizaciones/{cotizacion_id}/cambiar_estado/", {"estado": "aceptada"}, format="json")
+        self.assertEqual(r.status_code, 200, r.content[:300])
+        self.assertEqual(Cotizacion.objects.get(id=cotizacion_id).estado, Cotizacion.Estado.BORRADOR)
+        firmado.refresh_from_db()
+        self.assertEqual(firmado.estado, Consentimiento.Estado.REVOCADO)
+        self.assertTrue(Consentimiento.objects.filter(
+            cotizacion_id=cotizacion_id, estado=Consentimiento.Estado.PENDIENTE).exists())
+
     def _crear_y_aceptar_cotizacion(self):
         create_response = self.client.post("/api/v1/cotizaciones/", self._payload(), format="json")
         cotizacion_id = create_response.json()["id"]
@@ -1098,9 +1122,12 @@ class CotizacionFlowTests(TestCase):
         ids = {row["id"] for row in listado.json()["results"]}
         self.assertEqual(ids, {str(propia.id)})
 
-        # El detalle de una cotización ajena sigue accesible por id.
+        # La de otro profesional no se abre; se ve en el listado del paciente
+        # (decisión del 15/10/2026).
         detalle = self.client.get(f"/api/v1/cotizaciones/{ajena.id}/")
-        self.assertEqual(detalle.status_code, 200)
+        self.assertEqual(detalle.status_code, 403)
+        del_paciente = self.client.get("/api/v1/cotizaciones/", {"paciente": str(self.paciente.id)})
+        self.assertIn(str(ajena.id), {row["id"] for row in del_paciente.json()["results"]})
 
     def test_no_profesional_ve_todas_las_cotizaciones_de_la_clinica(self):
         recepcion = User.objects.create_user(

@@ -27,6 +27,8 @@ class Oportunidad(BaseModel):
     class Motivo(models.TextChoices):
         MANUAL = "manual", "Registrado por la clínica"
         CAMPANA = "campana", "Respondió a una campaña"
+        # Escribió al número propio de la clínica (mensaje entrante de Chatwoot).
+        WHATSAPP = "whatsapp", "Escribió por WhatsApp"
         SESIONES_PENDIENTES = "sesiones_pendientes", "Sesiones pendientes sin agendar"
         COTIZACION_ABIERTA = "cotizacion_abierta", "Cotización sin respuesta"
         NO_ASISTIO = "no_asistio", "No asistió y no reagendó"
@@ -210,3 +212,24 @@ class ConfigSeguimiento(models.Model):
     def de(cls, clinica):
         config, _ = cls.objects.get_or_create(clinica=clinica)
         return config
+
+
+class TelefonoDescartado(models.Model):
+    """Teléfonos que la recepción marcó como "No es cliente" (proveedores,
+    familiares, números equivocados): sus mensajes por WhatsApp ya no crean
+    interesados."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    clinica = models.ForeignKey("clinicas.Clinica", on_delete=models.CASCADE, related_name="telefonos_descartados")
+    # Últimos 10 dígitos, como compara el seguimiento (ver digitos_telefono).
+    telefono = models.CharField(max_length=20)
+    creado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "seguimiento_telefonos_descartados"
+        constraints = [
+            models.UniqueConstraint(fields=["clinica", "telefono"], name="telefono_descartado_unico"),
+        ]

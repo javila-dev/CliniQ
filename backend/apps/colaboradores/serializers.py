@@ -468,7 +468,21 @@ class ColaboradorCreateSerializer(ColaboradorSerializer):
         self._apply_sedes(colaborador, sedes)
 
         if user and not user.activo:
-            send_invitation_email(user)
+            # Si el correo falla (SMTP caído o sin configurar), el colaborador
+            # igual queda creado y se avisa para reenviar la invitación desde la
+            # lista. Antes no se creaba nada (QA-12).
+            try:
+                send_invitation_email(user)
+            except Exception as exc:  # noqa: BLE001
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "[colaborador.create] no salió la invitación | user_id=%s", user.id,
+                )
+                detalle = getattr(exc, "detail", None)
+                colaborador.invitacion_error = (
+                    str(detalle[0] if isinstance(detalle, list) and detalle else detalle or exc)
+                )
         return colaborador
 
 

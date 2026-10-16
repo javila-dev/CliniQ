@@ -84,6 +84,18 @@ class ColaboradoresBaseTests(ClinicaFixtureMixin, TestCase):
 
 class ColaboradorApiTests(ColaboradoresBaseTests):
     @patch("apps.colaboradores.serializers.send_invitation_email")
+    def test_qa12_sin_correo_igual_se_crea_y_avisa(self, mocked_invite):
+        from rest_framework.exceptions import ValidationError
+
+        mocked_invite.side_effect = ValidationError("El canal de email no esta configurado.")
+        self.client.force_authenticate(self.admin)
+        payload = self._payload_crear_profesional()
+        response = self.client.post("/api/v1/colaboradores/", payload, format="json")
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertIn("email", response.json()["invitacion_error"])
+        self.assertTrue(Colaborador.objects.filter(user__email=payload["email"]).exists())
+
+    @patch("apps.colaboradores.serializers.send_invitation_email")
     def test_crear_colaborador_profesional(self, mocked_invite):
         self.client.force_authenticate(self.admin)
 

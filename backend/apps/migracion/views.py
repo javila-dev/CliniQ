@@ -14,10 +14,15 @@ from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
 
 
+PERM_CARGAR = "cotizaciones.gestionar"
+
+
 def _guard(request):
-    """El asistente exige clínica activa en modo puesta en marcha. Disponible
-    para cualquier usuario autenticado de la clínica mientras el toggle esté
-    activo — no depende de un permiso adicional."""
+    """El asistente exige clínica activa en modo puesta en marcha y poder crear
+    cotizaciones: cargar un paciente en curso arma su cotización, sus pagos y su
+    saldo, y la lista de cargas muestra lo pagado y lo que debe cada paciente."""
+    if not user_has_permission(request.user, PERM_CARGAR, request=request):
+        raise PermissionDenied("Tu rol no puede usar la puesta en marcha: necesita poder crear cotizaciones.")
     clinica = get_clinica_activa(request)
     if clinica is None:
         raise PermissionDenied("No hay una clínica activa.")
@@ -69,7 +74,7 @@ class MigracionViewSet(ListModelMixin, RetrieveModelMixin, GenericViewSet):
     def revertir(self, request, pk=None):
         _guard(request)
         # Revertir borra cobros, pagos, citas y cartera del lote: exige el permiso
-        # de puesta en marcha (cargar sigue abierto a la clínica mientras dure).
+        # de puesta en marcha (cargar basta con poder crear cotizaciones).
         if not user_has_permission(request.user, "migracion.gestionar", request=request):
             raise PermissionDenied("Tu rol no tiene permiso para revertir cargas de la puesta en marcha.")
         lote = self.get_object()

@@ -310,6 +310,95 @@ class IngresosView(APIView):
         return Response(resultado)
 
 
+ORIGENES_INGRESO = ("citas", "ventas", "cartera", "otros")
+
+
+def _origen_del_pago(origen_cobro, fecha_pago, aceptada_en):
+    """De dónde viene un pago: cita, venta (al cerrar), cuota de cartera u otro.
+
+    Los pagos de una cotización van todos al mismo cobro. Lo pagado hasta el día
+    en que se aceptó es el cierre de la venta; lo posterior, cuotas de cartera.
+    """
+    if origen_cobro == Cobro.Origen.CITA:
+        return "citas"
+    if origen_cobro == Cobro.Origen.COTIZACION:
+        if aceptada_en is not None and fecha_pago <= timezone.localdate(aceptada_en):
+            return "ventas"
+        return "cartera"
+    return "otros"
+
+
+class IngresosPorOrigenView(APIView):
+    """Dinero recibido por día y por origen, más el total del periodo anterior.
+
+    Solo pagos registrados en CliniQ (no gastos: no son la contabilidad de la
+    clínica). El dashboard lo dibuja acumulado y por secciones.
+    """
+
+    permission_classes = (RequirePermission("reportes.ver_financieros"),)
+
+    def get(self, request: Request):
+        user = request.user
+        sede_ids = sede_ids_para_filtro(user, request.query_params.get("sede_id"))
+        hoy = timezone.localdate()
+        fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
+        fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
+        if fecha_fin < fecha_inicio or (fecha_fin - fecha_inicio).days > 400:
+            return Response({"error": "Rango de fechas invalido.", "code": "FECHA_INVALIDA"}, status=400)
+
+        cobro_qs = (
+            Cobro.objects.filter(**_clinica_scope(user, request))
+            .exclude(estado=Cobro.Estado.ANULADO)
+            .exclude(es_migracion=True)
+        )
+        if sede_ids is not None:
+            cobro_qs = cobro_qs.filter(sede_id__in=sede_ids)
+
+        dias = (fecha_fin - fecha_inicio).days + 1
+        por_dia = {
+            fecha_inicio + timedelta(days=i): dict.fromkeys(ORIGENES_INGRESO, Decimal("0"))
+            for i in range(dias)
+        }
+        pagos = _pagos_del_periodo(cobro_qs, fecha_inicio, fecha_fin).values_list(
+            "fecha", "valor", "cobro__origen", "cobro__cotizacion__aceptada_en",
+        )
+        for fecha, valor, origen, aceptada_en in pagos:
+            dia = timezone.localdate(fecha)
+            if dia in por_dia:
+                por_dia[dia][_origen_del_pago(origen, dia, aceptada_en)] += valor
+
+        totales = dict.fromkeys(ORIGENES_INGRESO, Decimal("0"))
+        for valores in por_dia.values():
+            for origen, valor in valores.items():
+                totales[origen] += valor
+
+        # Rango con el que comparar: el que pida la pantalla (p. ej. el mes pasado
+        # hasta el mismo día) o, por defecto, los mismos días justo antes.
+        anterior_fin = fecha_inicio - timedelta(days=1)
+        anterior_inicio = anterior_fin - timedelta(days=dias - 1)
+        anterior_inicio = _parse_date(request.query_params.get("comparar_inicio"), anterior_inicio)
+        anterior_fin = _parse_date(request.query_params.get("comparar_fin"), anterior_fin)
+        total_anterior = (
+            _pagos_del_periodo(cobro_qs, anterior_inicio, anterior_fin).aggregate(s=Sum("valor"))["s"]
+            or Decimal("0")
+        )
+
+        return Response({
+            "fecha_inicio": fecha_inicio.isoformat(),
+            "fecha_fin": fecha_fin.isoformat(),
+            "serie": [
+                {"fecha": dia.isoformat(), **{origen: _money(v) for origen, v in valores.items()}}
+                for dia, valores in sorted(por_dia.items())
+            ],
+            "totales": {**{origen: _money(v) for origen, v in totales.items()}, "total": _money(sum(totales.values()))},
+            "anterior": {
+                "fecha_inicio": anterior_inicio.isoformat(),
+                "fecha_fin": anterior_fin.isoformat(),
+                "total": _money(total_anterior),
+            },
+        })
+
+
 class ServiciosView(APIView):
     permission_classes = (RequirePermission("reportes.ver_financieros"),)
 
@@ -710,7 +799,7 @@ class PacientesSinReagendarView(APIView):
             .annotate(
                 citas_no_canceladas=Count(
                     "citas",
-                    filter=~Q(citas__estado="cancelada"),
+                    filter=~Q(citas__estado__in=["cancelada", "no_asistio"]),
                 )
             )
         )

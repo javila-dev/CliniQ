@@ -170,6 +170,40 @@ class CanChangeAppointmentState(BasePermission):
         return bool(getattr(user, "es_profesional", False)) and getattr(obj, "profesional_id", None) == user.id
 
 
+class PuedeGestionarLlegada(BasePermission):
+    """Pasos del asistente de llegada (check-in, OTP, foto, registro de asistencia).
+
+    Los hace quien edita citas o quien atiende esa cita: el profesional que recibe
+    a su paciente marcaba "Llegó" y el asistente se cortaba en el check-in (QA-02).
+    """
+
+    message = "No tienes permiso para registrar la llegada de esta cita."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        return bool(user and user.is_authenticated)
+
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if user_has_permission(user, "agenda.citas.editar", request=request):
+            return True
+        return bool(getattr(user, "es_profesional", False)) and getattr(obj, "profesional_id", None) == user.id
+
+
+class PuedeVerCitas(BasePermission):
+    """Ver citas: con "Ver la agenda", o quien atiende pacientes (solo las suyas;
+    el viewset las acota). Sin esto, un rol que atiende sin ver la agenda tenía
+    Atenciones y su dashboard vacíos sin aviso (QA-06)."""
+
+    message = "No tienes permiso para realizar esta accion."
+
+    def has_permission(self, request, view):
+        user = getattr(request, "user", None)
+        if not (user and user.is_authenticated):
+            return False
+        return user_has_permission(user, "agenda.citas.ver", request=request) or bool(getattr(user, "es_profesional", False))
+
+
 class HasClinicamente:
     def get_queryset(self):
         qs = super().get_queryset()

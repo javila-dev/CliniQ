@@ -1,8 +1,11 @@
 from django.db import models as django_models
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 
+from apps.historia_clinica.autoria import exigir_documentable
+from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import IsAdminOrProfesional, RequirePermission
 from .models import (
     AntecedentesObesidad,
@@ -117,13 +120,29 @@ class MedicionAntropometricaViewSet(
         return qs
 
     def perform_create(self, serializer):
+        nota = serializer.validated_data.get("nota")
+        if nota is not None:
+            exigir_documentable(self.request.user, nota)
         serializer.save(tomado_por=self.request.user)
+
+    def _exigir_que_sea_suya(self, instance):
+        """Quien atiende edita o borra solo las mediciones que tomó (o las de su
+        atención); el admin, cualquiera (AT-02)."""
+        user = self.request.user
+        if not atiende_solo_lo_propio(user) or instance.tomado_por_id == user.id:
+            return
+        if instance.nota_id:
+            exigir_documentable(user, instance.nota, en_borrador=False)
+            return
+        raise PermissionDenied("Solo puedes modificar las mediciones que tomaste tú.")
 
     def perform_update(self, serializer):
         # No se reasigna tomado_por: la medición sigue perteneciendo a quien la abrió.
+        self._exigir_que_sea_suya(serializer.instance)
         serializer.save()
 
     def perform_destroy(self, instance):
+        self._exigir_que_sea_suya(instance)
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
 

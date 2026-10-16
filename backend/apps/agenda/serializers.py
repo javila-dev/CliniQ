@@ -65,15 +65,34 @@ class RegistroConfirmacionSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
 
-def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
+def _memo(cache, clave, calcular):
+    """Lo que no depende de la cita (catálogo) se calcula una vez por respuesta.
+
+    El listado de la agenda consultaba los consentimientos requeridos de cada
+    procedimiento una vez por cita (AT-18). Sin `cache` (una sola cita) calcula.
+    """
+    if cache is None:
+        return calcular()
+    if clave not in cache:
+        cache[clave] = calcular()
+    return cache[clave]
+
+
+def _relaciones_consentimiento(procedimiento, cache):
+    return _memo(cache, ("relaciones", procedimiento.id), lambda: list(
+        procedimiento.consentimientos_requeridos_set.filter(activo=True).select_related("template").order_by("orden")
+    ))
+
+
+def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None, cache=None):
     """Calcula consentimiento_info a partir de los procedimientos de una sesión pre-vinculada."""
     if sesion.tipo_sesion_id:
-        procedimientos = [
+        procedimientos = _memo(cache, ("tipo_sesion", sesion.tipo_sesion_id), lambda: [
             tp.procedimiento
             for tp in sesion.tipo_sesion.procedimientos.filter(activo=True)
             .select_related("procedimiento")
             .order_by("orden")
-        ]
+        ])
     elif sesion.procedimiento_id:
         procedimientos = [sesion.procedimiento]
     else:
@@ -84,11 +103,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
     seen_tokens = set()
 
     for procedimiento in procedimientos:
-        for relacion in (
-            procedimiento.consentimientos_requeridos_set.filter(activo=True)
-            .select_related("template")
-            .order_by("orden")
-        ):
+        for relacion in _relaciones_consentimiento(procedimiento, cache):
             token = relacion.template.template_token or str(relacion.template.id)
             if token in seen_tokens:
                 continue
@@ -118,7 +133,7 @@ def _consentimientos_desde_sesion(sesion, paciente_id, *, cita_id=None):
     return {"todos_firmados": todos_firmados, "consentimientos": resultado}
 
 
-def build_consentimiento_info(cita):
+def build_consentimiento_info(cita, cache=None):
     # Si la cita corresponde a una sesión de tratamiento (vinculada por FK, o
     # resuelta vía item_cotizacion), exigir los consentimientos de TODOS sus
     # procedimientos.
@@ -126,12 +141,12 @@ def build_consentimiento_info(cita):
 
     sesion = _sesion_vinculada_o_pendiente(cita)
     if sesion is not None and (sesion.tipo_sesion_id or sesion.procedimiento_id):
-        return _consentimientos_desde_sesion(sesion, cita.paciente_id, cita_id=cita.id)
+        return _consentimientos_desde_sesion(sesion, cita.paciente_id, cita_id=cita.id, cache=cache)
 
     if not cita.servicio_id:
         return {"todos_firmados": True, "consentimientos": []}
-    relaciones = cita.servicio.consentimientos_requeridos_set.filter(activo=True).select_related("template")
-    if not relaciones.exists():
+    relaciones = _relaciones_consentimiento(cita.servicio, cache)
+    if not relaciones:
         return {"todos_firmados": True, "consentimientos": []}
 
     resultado = []
@@ -305,7 +320,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
         return RegistroConfirmacionSerializer(registro).data
 
     def get_consentimiento_info(self, obj):
-        return build_consentimiento_info(obj)
+        return build_consentimiento_info(obj, cache=self.context.setdefault("_catalogo_consentimientos", {}))
 
     def get_checkin_foto_url(self, obj):
         path = obj.checkin_foto_url or (obj.checkin_foto.name if obj.checkin_foto else "")
@@ -377,8 +392,11 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
         return None
 
     def get_sesion_ejecutada_id(self, obj):
-        sesion = obj.sesiones_protocolo.filter(estado=SesionProcedimiento.Estado.PENDIENTE).values_list("id", flat=True).first()
-        return str(sesion) if sesion else None
+        # Sobre lo precargado: un .filter() hacía una consulta por cita (AT-18).
+        sesion = next(
+            (s for s in obj.sesiones_protocolo.all() if s.estado == SesionProcedimiento.Estado.PENDIENTE), None,
+        )
+        return str(sesion.id) if sesion else None
 
     def get_sesion_tratamiento(self, obj):
         from apps.protocolos.services import contexto_sesion_para_cita
@@ -391,6 +409,8 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             return None
         return {
             "cotizacion_id": str(item.cotizacion_id),
+            # Quien solo ve su actividad comercial no abre la cotización de otro profesional.
+            "profesional_id": str(item.cotizacion.profesional_id) if item.cotizacion.profesional_id else None,
             "descripcion": item.descripcion,
             "num_citas": item.num_sesiones_efectivas(),
             "citas_agendadas": item.citas_no_canceladas(),
@@ -464,6 +484,15 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             raise serializers.ValidationError({"servicio": "El procedimiento no pertenece a la clinica de la sede."})
         if profesional and sede and profesional.clinica_id != sede.clinica_id:
             raise serializers.ValidationError({"profesional": "El profesional no pertenece a la clinica de la sede."})
+        # Una cita de paquete no cambia de paciente: la sesión es de quien compró
+        # (por API se podía, AG-14).
+        if (
+            self.instance and item_cotizacion and "paciente" in attrs
+            and item_cotizacion.cotizacion.paciente_id != paciente.id
+        ):
+            raise serializers.ValidationError(
+                {"paciente": "Esta cita es una sesión de la venta de otro paciente: no se le puede cambiar el paciente."}
+            )
         # Al reprogramar una cita de paquete el ítem no cambia: no se vuelve a
         # exigir que la cotización siga aceptada ni que queden sesiones.
         if item_cotizacion and (not self.instance or "item_cotizacion" in attrs):
@@ -478,12 +507,14 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
                 raise serializers.ValidationError({"item_cotizacion": "El item no pertenece a la clinica de la cita."})
             if paciente and item_cotizacion.cotizacion.paciente_id != paciente.id:
                 raise serializers.ValidationError({"item_cotizacion": "El item no corresponde al paciente de la cita."})
-            if servicio and item_cotizacion.servicio_id and item_cotizacion.servicio_id != servicio.id:
+            if servicio and item_cotizacion.procedimiento_efectivo_id and item_cotizacion.procedimiento_efectivo_id != servicio.id:
                 raise serializers.ValidationError({"item_cotizacion": "El item no corresponde al procedimiento de la cita."})
             citas_usadas = item_cotizacion.citas_no_canceladas()
             if self.instance and self.instance.item_cotizacion_id == item_cotizacion.id and self.instance.estado != Cita.Estado.CANCELADA:
                 citas_usadas = max(0, citas_usadas - 1)
-            if citas_usadas >= item_cotizacion.num_sesiones_efectivas():
+            # Las sesiones previas (puesta en marcha) también cuentan como usadas:
+            # sin ellas el paquete se podía agendar de más (AG-02).
+            if citas_usadas + item_cotizacion.sesiones_previas_consumidas >= item_cotizacion.num_sesiones_efectivas():
                 raise serializers.ValidationError(
                     {"error": "Este item no tiene sesiones disponibles.", "code": "SIN_SESIONES_DISPONIBLES"}
                 )

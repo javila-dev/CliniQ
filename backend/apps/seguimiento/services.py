@@ -103,7 +103,7 @@ def _sede_por_defecto(clinica, usuario):
 @transaction.atomic
 def crear_interesado(*, clinica, usuario, nombre: str, telefono: str, interes: str = "", origen: str = "",
                      origen_detalle: str = "", valor_estimado=None, responsable=None, proximo_contacto=None,
-                     sede=None, paciente=None) -> Oportunidad:
+                     sede=None, paciente=None, motivo: str = "", tipo: str = "") -> Oportunidad:
     """Registra a alguien interesado. Si el teléfono ya es de un paciente, lo vincula.
 
     Si ese paciente ya tiene una oportunidad de venta abierta, no se duplica:
@@ -125,8 +125,8 @@ def crear_interesado(*, clinica, usuario, nombre: str, telefono: str, interes: s
         paciente=paciente,
         contacto_nombre=(nombre or "").strip() or (paciente.nombre_completo if paciente else ""),
         contacto_telefono=(telefono or "").strip(),
-        tipo=_tipo_para_paciente(paciente) if paciente else Oportunidad.Tipo.NUEVA,
-        motivo=Oportunidad.Motivo.MANUAL,
+        tipo=tipo or (_tipo_para_paciente(paciente) if paciente else Oportunidad.Tipo.NUEVA),
+        motivo=motivo or Oportunidad.Motivo.MANUAL,
         etapa=Oportunidad.Etapa.NUEVO,
         proximo_contacto=proximo_contacto or timezone.localdate(),
         origen=origen or "",
@@ -315,6 +315,13 @@ def cerrar_por_descarte(cotizacion, *, usuario):
     oportunidad = cotizacion.oportunidad
     if oportunidad is None or oportunidad.estado != Oportunidad.Estado.ABIERTA:
         return
+    # Con otra propuesta abierta la oportunidad sigue viva: antes descartar una de
+    # varias la cerraba como perdida (CT-05).
+    if (
+        oportunidad.cotizaciones.filter(estado=type(cotizacion).Estado.BORRADOR, activo=True)
+        .exclude(pk=cotizacion.pk).exists()
+    ):
+        return
     # Mismos valores en las dos listas de motivos.
     perder(oportunidad, usuario=usuario, motivo=cotizacion.motivo_descarte, nota=cotizacion.nota_descarte)
 
@@ -322,14 +329,19 @@ def cerrar_por_descarte(cotizacion, *, usuario):
 @_sin_romper
 def al_aceptar_cotizacion(cotizacion):
     oportunidad = _oportunidad_de_cotizacion(cotizacion)
-    if oportunidad is None or oportunidad.estado != Oportunidad.Estado.ABIERTA:
+    # Una venta gana la oportunidad aunque se haya dado por perdida (p. ej. al
+    # descartar otra propuesta del mismo paciente): antes quedaba perdida (CT-05).
+    if oportunidad is None or oportunidad.estado not in (Oportunidad.Estado.ABIERTA, Oportunidad.Estado.PERDIDA):
         return
     oportunidad.estado = Oportunidad.Estado.GANADA
     oportunidad.cotizacion = cotizacion
     oportunidad.valor_estimado = cotizacion.total
     oportunidad.proximo_contacto = None
+    oportunidad.motivo_perdida = ""
+    oportunidad.nota_perdida = ""
     oportunidad.cerrada_en = timezone.now()
     oportunidad.cerrada_por = cotizacion.aceptada_por
     oportunidad.save(update_fields=[
-        "estado", "cotizacion", "valor_estimado", "proximo_contacto", "cerrada_en", "cerrada_por", "updated_at",
+        "estado", "cotizacion", "valor_estimado", "proximo_contacto", "motivo_perdida", "nota_perdida",
+        "cerrada_en", "cerrada_por", "updated_at",
     ])

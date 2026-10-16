@@ -6,7 +6,14 @@ from rest_framework import serializers
 
 from apps.clinicas.models import FormaDePago, Sede
 from apps.clinicas.precios import precio_lista as precio_lista_en_sede
-from apps.cotizaciones.models import Cotizacion, CotizacionEnvio, FormaPagoCotizacion, ItemCotizacion, MotivoDescarte
+from apps.cotizaciones.models import (
+    Cotizacion,
+    CotizacionEnvio,
+    FormaPagoCotizacion,
+    ItemCotizacion,
+    MotivoDescarte,
+    SolicitudAutorizacionPrecio,
+)
 from apps.core.clinica_scope import validar_sede_del_usuario
 from apps.users.authorization import user_has_permission
 from apps.users.permissions import get_clinica_activa
@@ -86,6 +93,9 @@ def resolve_campana_for_item(*, clinica, sede, procedimiento=None, tratamiento=N
 class ItemCotizacionSerializer(serializers.ModelSerializer):
     _TIPO_WAS_PROVIDED = "_tipo_was_provided"
     _CATALOGO_WAS_PROVIDED = "_catalogo_was_provided"
+    # Precio bajo lo permitido (catálogo o tope de descuento). Lo recoge
+    # CotizacionSerializer, que decide si se guarda (permiso o autorización).
+    _FUERA_DE_REGLA = "_fuera_de_regla"
 
     id = serializers.UUIDField(required=False)
     subtotal = serializers.DecimalField(max_digits=12, decimal_places=2, read_only=True)
@@ -175,6 +185,18 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError("Debe ser mayor a 0.")
         return value
 
+    # La pantalla ya los limita; por API se aceptaban descuentos de más del 100 %
+    # o precios negativos, que dejaban totales negativos (CT-15).
+    def validate_valor_unitario(self, value):
+        if value is not None and value < 0:
+            raise serializers.ValidationError("El valor no puede ser negativo.")
+        return value
+
+    def validate_descuento_porcentaje(self, value):
+        if value is not None and not (0 <= value <= 100):
+            raise serializers.ValidationError("El descuento debe estar entre 0 y 100 %.")
+        return value
+
     def validate(self, attrs):
         attrs = super().validate(attrs)
         tipo_was_provided = attrs.pop(self._TIPO_WAS_PROVIDED, False)
@@ -248,18 +270,26 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         if attrs.get("valor_unitario", getattr(self.instance, "valor_unitario", None)) in (None, ""):
             raise serializers.ValidationError({"valor_unitario": "Este campo es obligatorio."})
 
-        # Precio bloqueado = el de catálogo es un mínimo: subirlo es libre; bajarlo requiere el
-        # permiso cotizaciones.cambiar_precio, salvo que el valor coincida con una campaña activa.
+        # Precio bloqueado = el de catálogo es un mínimo: subirlo es libre; bajarlo
+        # queda fuera de regla salvo que el valor esté dentro de una promoción activa.
+        # El ítem no se rechaza aquí: ``CotizacionSerializer`` ve todos los ítems y
+        # decide según el permiso cotizaciones.cambiar_precio y las autorizaciones
+        # de precio de la cotización (docs/plan-autorizacion-precios.md).
         precio_bloqueado = attrs.get(
             "precio_bloqueado",
             getattr(self.instance, "precio_bloqueado", False),
         )
         clinica, sede = self._resolve_clinica_sede()
+        valor_unitario = attrs.get(
+            "valor_unitario",
+            getattr(self.instance, "valor_unitario", None),
+        )
+        descuento_dec = Decimal(attrs.get(
+            "descuento_porcentaje",
+            getattr(self.instance, "descuento_porcentaje", Decimal("0")),
+        ) or Decimal("0"))
+        fuera_de_regla = None
         if precio_bloqueado:
-            valor_unitario = attrs.get(
-                "valor_unitario",
-                getattr(self.instance, "valor_unitario", None),
-            )
             # Precio de catálogo en la sede de la cotización (el propio o el general).
             catalogo_precio = precio_lista_en_sede(tratamiento or procedimiento, sede)
             if catalogo_precio is not None and valor_unitario is not None and valor_unitario < catalogo_precio:
@@ -273,21 +303,24 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                 # promoción y la lista (como deja la pantalla); antes solo el
                 # precio exacto de la promoción.
                 permite_por_campana = precio_campana is not None and valor_unitario >= precio_campana
-                if not permite_por_campana and not (
-                    request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
-                ):
-                    raise serializers.ValidationError({
-                        "valor_unitario": (
+                if not permite_por_campana:
+                    catalogo_dec = Decimal(catalogo_precio)
+                    fuera_de_regla = {
+                        "regla": "precio",
+                        "campo": "valor_unitario",
+                        "code": "PRECIO_BLOQUEADO",
+                        "mensaje": (
                             "No tienes permiso para bajar el precio de este item por debajo del "
                             f"precio de catálogo (${float(catalogo_precio):,.0f})."
                         ),
-                        "code": "PRECIO_BLOQUEADO",
-                    })
+                        "precio_lista": catalogo_dec,
+                        "minimo": catalogo_dec,
+                        "precio_pedido": Decimal(valor_unitario),
+                        # Lo que falta para llegar al catálogo, con el descuento que ya tenga.
+                        "diferencia_unitaria": (catalogo_dec - Decimal(valor_unitario))
+                        * (Decimal("1") - descuento_dec / Decimal("100")),
+                    }
 
-        valor_unitario = attrs.get(
-            "valor_unitario",
-            getattr(self.instance, "valor_unitario", None),
-        )
         attrs["campana"] = resolve_campana_for_item(
             clinica=clinica,
             sede=sede,
@@ -299,11 +332,8 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         # Tope de descuento del catálogo: el precio efectivo del ítem
         # (valor_unitario ya con el descuento aplicado) no puede bajar de
         # precio_lista * (1 - descuento_maximo_pct/100). Por decisión del
-        # usuario, `cotizaciones.cambiar_precio` lo salta (dueño o gerente ponen
-        # cualquier precio); sin el permiso el tope es duro (M5-18).
-        puede_cambiar_precio = bool(
-            request and user_has_permission(request.user, "cotizaciones.cambiar_precio", request=request)
-        )
+        # usuario, `cotizaciones.cambiar_precio` lo salta (M5-18); sin el
+        # permiso hace falta una autorización.
         precio_lista = None
         desc_max = Decimal("0")
         if tratamiento is not None and tratamiento.precio_estimado is not None:
@@ -313,14 +343,11 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             precio_lista = precio_lista_en_sede(procedimiento, sede)
             desc_max = getattr(procedimiento, "descuento_maximo_pct", None) or Decimal("0")
 
-        if precio_lista is not None and valor_unitario not in (None, ""):
-            descuento_pct = attrs.get(
-                "descuento_porcentaje",
-                getattr(self.instance, "descuento_porcentaje", Decimal("0")),
-            ) or Decimal("0")
+        precio_efectivo = None
+        if valor_unitario not in (None, ""):
+            precio_efectivo = Decimal(valor_unitario) * (Decimal("1") - descuento_dec / Decimal("100"))
+        if precio_lista is not None and precio_efectivo is not None:
             valor_unit_dec = Decimal(valor_unitario)
-            descuento_dec = Decimal(descuento_pct)
-            precio_efectivo = valor_unit_dec * (Decimal("1") - descuento_dec / Decimal("100"))
             piso = Decimal(precio_lista) * (Decimal("1") - Decimal(desc_max) / Decimal("100"))
             precio_campana = lookup_precio_campana(
                 clinica=clinica, sede=sede, procedimiento=procedimiento, tratamiento=tratamiento,
@@ -334,7 +361,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                 and valor_unit_dec >= Decimal(precio_campana) - Decimal("0.01")
             )
             # tolerancia de 1 centavo por redondeo
-            if not permite_por_campana and not puede_cambiar_precio and precio_efectivo < piso - Decimal("0.01"):
+            if not permite_por_campana and precio_efectivo < piso - Decimal("0.01"):
                 if desc_max <= 0:
                     msg = (
                         "Este ítem no admite descuento. El precio no puede bajar del "
@@ -345,10 +372,38 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
                         f"El descuento supera el máximo permitido ({float(desc_max):g}%). "
                         f"El precio del ítem no puede bajar de ${float(piso):,.0f}."
                     )
-                raise serializers.ValidationError({
-                    "descuento_porcentaje": msg,
-                    "code": "DESCUENTO_EXCEDE_MAXIMO",
-                })
+                # Las cifras salen del precio efectivo (lo que paga el paciente frente
+                # al mínimo con el descuento máximo). Si además bajó el precio de
+                # catálogo, el error sigue siendo ese, como antes.
+                cifras = {
+                    "precio_lista": Decimal(precio_lista),
+                    "minimo": piso,
+                    "precio_pedido": precio_efectivo,
+                    "diferencia_unitaria": piso - precio_efectivo,
+                }
+                if fuera_de_regla is not None:
+                    fuera_de_regla.update(cifras)
+                else:
+                    fuera_de_regla = {
+                        "regla": "descuento",
+                        "campo": "descuento_porcentaje",
+                        "code": "DESCUENTO_EXCEDE_MAXIMO",
+                        "mensaje": msg,
+                        **cifras,
+                    }
+
+        if fuera_de_regla is not None:
+            catalogo = tratamiento or procedimiento
+            fuera_de_regla.update({
+                "clave": f"{'t' if tratamiento is not None else 'p'}:{catalogo.pk}",
+                "descripcion": attrs.get("descripcion", getattr(self.instance, "descripcion", "")),
+                "num_citas": attrs.get("num_citas", getattr(self.instance, "num_citas", 1)) or 1,
+                "valor_unitario": Decimal(valor_unitario),
+                "descuento_porcentaje": descuento_dec,
+                "descuento_maximo_pct": Decimal(desc_max),
+                "precio_efectivo": precio_efectivo,
+            })
+            attrs[self._FUERA_DE_REGLA] = fuera_de_regla
 
         return attrs
 
@@ -651,10 +706,24 @@ class CotizacionEnvioSerializer(serializers.ModelSerializer):
         )
         read_only_fields = fields
 
+    def to_representation(self, instance):
+        # El destinatario es el teléfono o el correo del paciente: respeta el
+        # enmascarado de datos sensibles como el resto de la ficha (CT-04).
+        from apps.pacientes.serializers import enmascarar_cola, enmascarar_email, usuario_ve_datos_sensibles
+
+        ret = super().to_representation(instance)
+        if ret.get("destinatario") and not usuario_ve_datos_sensibles(self.context):
+            destinatario = ret["destinatario"]
+            ret["destinatario"] = enmascarar_email(destinatario) if "@" in destinatario else enmascarar_cola(destinatario)
+        return ret
+
 
 class CotizacionSerializer(serializers.ModelSerializer):
-    items = ItemCotizacionSerializer(many=True)
-    formas_pago = FormaPagoCotizacionSerializer(many=True)
+    # Solo escritura: la lectura los arma to_representation con los activos.
+    # Antes se serializaban también los inactivos (que se acumulan con cada
+    # edición) y luego se descartaban: 166 consultas con 14 ítems (CT-02).
+    items = ItemCotizacionSerializer(many=True, write_only=True)
+    formas_pago = FormaPagoCotizacionSerializer(many=True, write_only=True)
     envios = CotizacionEnvioSerializer(many=True, read_only=True)
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
     # Para "Enviar" (WhatsApp o correo): antes no venían y el correo salía
@@ -664,6 +733,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
     # El listado muestra la sede cuando la clínica tiene varias (M5-20).
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True, default=None)
+    # Otras propuestas abiertas de la misma oportunidad: al descartar esta, la
+    # oportunidad sigue abierta (CT-05).
+    oportunidad_otras_abiertas = serializers.SerializerMethodField()
     fecha_vencimiento = serializers.DateField(read_only=True)
     estado_comercial = serializers.CharField(read_only=True)
     enviada = serializers.BooleanField(read_only=True)
@@ -673,6 +745,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
     total_pagado = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
     cartera_id = serializers.SerializerMethodField()
+    # Estado de la autorización de precios (la última solicitud no cancelada).
+    autorizacion_precio = serializers.SerializerMethodField()
+    # Motivo para pedir autorización de los precios fuera de regla en este guardado.
+    solicitar_autorizacion = serializers.CharField(
+        write_only=True, required=False, allow_blank=False, max_length=1000,
+    )
 
     class Meta:
         model = Cotizacion
@@ -700,6 +778,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "motivo_descarte",
             "nota_descarte",
             "oportunidad",
+            "oportunidad_otras_abiertas",
             "notas",
             "items",
             "formas_pago",
@@ -708,6 +787,9 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total_pagado",
             "saldo_pendiente",
             "cartera_id",
+            "precio_por_autorizar",
+            "autorizacion_precio",
+            "solicitar_autorizacion",
             "es_migracion",
             "activo",
             "created_at",
@@ -728,8 +810,19 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total_pagado",
             "saldo_pendiente",
             "cartera_id",
+            "precio_por_autorizar",
             "created_at",
             "updated_at",
+        )
+
+    def get_oportunidad_otras_abiertas(self, obj):
+        if not obj.oportunidad_id:
+            return 0
+        return (
+            Cotizacion.objects
+            .filter(oportunidad_id=obj.oportunidad_id, estado=Cotizacion.Estado.BORRADOR, activo=True)
+            .exclude(pk=obj.pk)
+            .count()
         )
 
     def _total_pagado_valor(self, obj):
@@ -767,6 +860,14 @@ class CotizacionSerializer(serializers.ModelSerializer):
         cartera = getattr(obj, "cartera", None)
         return str(cartera.id) if cartera else None
 
+    def get_autorizacion_precio(self, obj):
+        from apps.cotizaciones.autorizaciones import ultima_solicitud
+
+        solicitud = ultima_solicitud(obj)
+        if solicitud is None:
+            return None
+        return SolicitudAutorizacionPrecioSerializer(solicitud, context=self.context).data
+
     def get_paciente_telefono(self, obj):
         from apps.pacientes.serializers import enmascarar_cola, usuario_ve_datos_sensibles
 
@@ -784,12 +885,13 @@ class CotizacionSerializer(serializers.ModelSerializer):
         ret["items"] = ItemCotizacionSerializer(
             instance.items.filter(activo=True).select_related(
                 "cotizacion", "insumo", "tipo_sesion_origen", "entregado_por", "movimiento_entrega__sede",
+                "tratamiento", "procedimiento", "servicio",
             ),
             many=True,
             context=self.context,
         ).data
         ret["formas_pago"] = FormaPagoCotizacionSerializer(
-            instance.formas_pago.filter(activo=True), many=True, context=self.context
+            instance.formas_pago.filter(activo=True).select_related("tipo"), many=True, context=self.context
         ).data
         return ret
 
@@ -860,6 +962,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         self._validate_items_clinica(attrs.get("items"), clinica)
         self._validate_formas_pago_clinica(attrs.get("formas_pago"), clinica)
         self._validate_obsequios(attrs.get("items"))
+        self._validate_precios_fuera_de_regla(attrs, request)
         if self.instance and self.instance.estado != Cotizacion.Estado.BORRADOR:
             raise serializers.ValidationError(
                 {
@@ -872,6 +975,35 @@ class CotizacionSerializer(serializers.ModelSerializer):
                 {"error": "El estado solo puede cambiarse desde la accion cambiar_estado.", "code": "ESTADO_INVALIDO"}
             )
         return attrs
+
+    def _validate_precios_fuera_de_regla(self, attrs, request):
+        """Precios bajo lo permitido: pasan con el permiso, con autorización o al pedirla."""
+        from apps.cotizaciones.autorizaciones import validar_fuera_de_regla
+
+        items = attrs.get("items")
+        self._fuera_de_regla = None
+        if items is None:
+            attrs.pop("solicitar_autorizacion", None)
+            return
+        self._fuera_de_regla = [
+            (indice, item.pop(ItemCotizacionSerializer._FUERA_DE_REGLA))
+            for indice, item in enumerate(items)
+            if ItemCotizacionSerializer._FUERA_DE_REGLA in item
+        ]
+        validar_fuera_de_regla(
+            self.instance,
+            self._fuera_de_regla,
+            total_items=len(items),
+            request=request,
+            solicita=bool(attrs.get("solicitar_autorizacion")),
+        )
+
+    def _aplicar_precios_fuera_de_regla(self, cotizacion, motivo):
+        from apps.cotizaciones.autorizaciones import aplicar_fuera_de_regla
+
+        if getattr(self, "_fuera_de_regla", None) is None:
+            return
+        aplicar_fuera_de_regla(cotizacion, self._fuera_de_regla, request=self.context["request"], motivo=motivo)
 
     def _validate_obsequios(self, items):
         """Reglas que cruzan ítems: al menos un ítem pagado y origen de las sesiones clonadas."""
@@ -953,6 +1085,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         items_data = validated_data.pop("items")
         formas_pago_data = validated_data.pop("formas_pago")
+        motivo = validated_data.pop("solicitar_autorizacion", None)
         request = self.context["request"]
         clinica = get_clinica_activa(request) or validated_data["paciente"].clinica
         if not validated_data.get("sede"):
@@ -964,12 +1097,14 @@ class CotizacionSerializer(serializers.ModelSerializer):
         FormaPagoCotizacion.objects.bulk_create(
             [FormaPagoCotizacion(cotizacion=cotizacion, **forma) for forma in formas_pago_data]
         )
+        self._aplicar_precios_fuera_de_regla(cotizacion, motivo)
         return cotizacion
 
     @transaction.atomic
     def update(self, instance, validated_data):
         items_data = validated_data.pop("items", None)
         formas_pago_data = validated_data.pop("formas_pago", None)
+        motivo = validated_data.pop("solicitar_autorizacion", None)
         for attr, value in validated_data.items():
             setattr(instance, attr, value)
         instance.save()
@@ -977,6 +1112,7 @@ class CotizacionSerializer(serializers.ModelSerializer):
         if items_data is not None:
             instance.items.filter(activo=True).update(activo=False)
             self._crear_items(instance, items_data)
+            self._aplicar_precios_fuera_de_regla(instance, motivo)
 
         if formas_pago_data is not None:
             existentes = {str(item.id): item for item in instance.formas_pago.filter(activo=True)}
@@ -1000,6 +1136,26 @@ class CotizacionSerializer(serializers.ModelSerializer):
 
         instance.refresh_from_db()
         return instance
+
+
+class SolicitudAutorizacionPrecioSerializer(serializers.ModelSerializer):
+    solicitada_por_nombre = serializers.CharField(source="solicitada_por.nombre_completo", read_only=True, default=None)
+    resuelta_por_nombre = serializers.CharField(source="resuelta_por.nombre_completo", read_only=True, default=None)
+    paciente_nombre = serializers.CharField(source="cotizacion.paciente.nombre_completo", read_only=True)
+    sede_nombre = serializers.CharField(source="cotizacion.sede.nombre", read_only=True, default=None)
+
+    class Meta:
+        model = SolicitudAutorizacionPrecio
+        fields = (
+            "id", "cotizacion", "estado", "directa", "motivo", "comentario",
+            "solicitada_por", "solicitada_por_nombre", "resuelta_por", "resuelta_por_nombre", "resuelta_en",
+            "items", "total_pedido", "total_permitido", "paciente_nombre", "sede_nombre", "created_at",
+        )
+        read_only_fields = fields
+
+
+class DecidirAutorizacionPrecioSerializer(serializers.Serializer):
+    comentario = serializers.CharField(required=False, allow_blank=True, max_length=1000, default="")
 
 
 class ItemCotizacionListaSerializer(serializers.ModelSerializer):
@@ -1045,6 +1201,10 @@ class CotizacionListSerializer(CotizacionSerializer):
         total = sum((item.subtotal for item in self._items_activos(obj)), Decimal("0.00"))
         return f"{total:.2f}"
 
+    def get_autorizacion_precio(self, obj):
+        # El listado usa ``precio_por_autorizar``; el detalle trae la solicitud.
+        return None
+
     def to_representation(self, instance):
         # Se salta el to_representation del detalle, que vuelve a consultar los ítems.
         return serializers.ModelSerializer.to_representation(self, instance)
@@ -1057,6 +1217,8 @@ class EntregarObsequioSerializer(serializers.Serializer):
         request = self.context.get("request")
         if request and request.user.rol != "superadmin" and sede.clinica_id != request.user.clinica_id:
             raise serializers.ValidationError("La sede no pertenece a tu clinica.")
+        # El stock sale de esa sede: quien está acotado a otras no la usa (CT-10).
+        validar_sede_del_usuario(request, sede)
         return sede
 
 
@@ -1083,3 +1245,22 @@ class EnviarCotizacionEmailSerializer(serializers.Serializer):
 class RegistrarEnvioCotizacionSerializer(serializers.Serializer):
     canal = serializers.ChoiceField(choices=((CotizacionEnvio.Canal.PDF, "PDF descargado"),))
     notas = serializers.CharField(max_length=300, required=False, allow_blank=True)
+
+
+class CotizacionParaAgendarSerializer(serializers.ModelSerializer):
+    """Paquetes vendidos de un paciente para Nueva cita, sin montos.
+
+    Quien agenda sin "ver cotizaciones" no ve totales, saldos, plan de pagos ni
+    precios (decisión del 15/10/2026, CT-19). Las sesiones salen de /sesiones/.
+    """
+
+    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True, default=None)
+    profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True, default=None)
+
+    class Meta:
+        model = Cotizacion
+        fields = (
+            "id", "estado", "paciente", "sede", "sede_nombre", "profesional", "profesional_nombre",
+            "aceptada_en", "created_at",
+        )
+        read_only_fields = fields

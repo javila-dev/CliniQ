@@ -1,4 +1,5 @@
 import requests
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import mixins, status
 from rest_framework.decorators import action
@@ -105,8 +106,14 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
         return request.META.get("REMOTE_ADDR")
 
     @action(detail=True, methods=["post"], url_path="marcar_completado")
+    @transaction.atomic
     def marcar_completado(self, request, pk=None):
         sesion = self.get_object()
+        # Con la fila bloqueada y una sola vez: repetirlo pisaba la fecha, el
+        # profesional y los procedimientos de una sesión ya cerrada (AT-20).
+        sesion = SesionProcedimiento.objects.select_for_update().get(pk=sesion.pk)
+        if sesion.estado == SesionProcedimiento.Estado.COMPLETADO:
+            raise ValidationError({"error": "La sesión ya está completada.", "code": "SESION_COMPLETADA"})
         cita = None
         profesional = None
         cita_id = request.data.get("cita_id") or request.data.get("cita")
@@ -116,6 +123,8 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
             if request.user.rol != "superadmin":
                 cita_qs = cita_qs.filter(sede__clinica=request.user.clinica)
             cita = get_object_or_404(cita_qs, id=cita_id)
+            if cita.paciente_id != sesion.tratamiento.paciente_id:
+                raise ValidationError({"cita_id": "La cita es de otro paciente.", "code": "CITA_DE_OTRO_PACIENTE"})
         if profesional_id:
             profesional_qs = User.objects.all()
             if request.user.rol != "superadmin":
@@ -139,13 +148,37 @@ class SesionProcedimientoViewSet(mixins.UpdateModelMixin, GenericViewSet):
                 observaciones=request.data.get("observaciones", ""),
                 fecha=request.data.get("fecha"),
                 hora=request.data.get("hora"),
-                procedimientos_ejecutados=request.data.get("procedimientos_ejecutados", []),
+                procedimientos_ejecutados=self._procedimientos_de_la_clinica(
+                    request, request.data.get("procedimientos_ejecutados", []),
+                ),
                 forzar_sin_consentimiento=bool(request.data.get("forzar_sin_consentimiento")),
                 motivo=request.data.get("motivo", ""),
             )
         except ProtocolosError as exc:
             return Response({"error": str(exc), "code": exc.code, **exc.extra}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(sesion).data, status=status.HTTP_200_OK)
+
+    @staticmethod
+    def _procedimientos_de_la_clinica(request, ids):
+        """Los procedimientos ejecutados tienen que ser del catálogo de la clínica (AT-20)."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        from apps.clinicas.models import Servicio
+
+        if not ids:
+            return []
+        procedimientos = Servicio.objects.filter(id__in=ids)
+        if request.user.rol != "superadmin":
+            procedimientos = procedimientos.filter(clinica=request.user.clinica)
+        try:
+            procedimientos = list(procedimientos)
+        except (DjangoValidationError, ValueError, TypeError):
+            procedimientos = []
+        if len(procedimientos) != len(set(map(str, ids))):
+            raise ValidationError({
+                "procedimientos_ejecutados": "Hay procedimientos que no son del catálogo de la clínica.",
+            })
+        return procedimientos
 
     @action(detail=True, methods=["post"], url_path="marcar_completada")
     def marcar_completada(self, request, pk=None):

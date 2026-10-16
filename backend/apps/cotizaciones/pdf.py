@@ -114,7 +114,9 @@ def build_cotizacion_pdf_context(cotizacion: Cotizacion) -> dict:
         "subtotal_bruto": format_currency(subtotal_bruto),
         "total_descuentos": format_currency(total_descuentos),
         "total": format_currency(cotizacion.total),
-        "fecha_emision": format_date(cotizacion.created_at),
+        # Renovada: la fecha es la de la renovación, de la que corre la validez.
+        # Antes salía la original junto a la validez nueva (CT-17).
+        "fecha_emision": format_date(cotizacion.vigente_desde or cotizacion.created_at),
         "fecha_vencimiento": format_date(cotizacion.fecha_vencimiento),
         "documento_paciente": f"{cotizacion.paciente.tipo_documento} {cotizacion.paciente.numero_documento}",
         "telefono_paciente": cotizacion.paciente.telefono or "-",

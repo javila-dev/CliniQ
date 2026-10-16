@@ -8,6 +8,7 @@ import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 from django.conf import settings
+from storages.backends.s3boto3 import S3Boto3Storage
 
 logger = logging.getLogger(__name__)
 
@@ -201,3 +202,19 @@ def delete_public_file(path: str) -> None:
             settings.MINIO_PUBLIC_BUCKET, path, exc_info=True,
         )
         _delete_local_file(path)
+
+
+class ArchivosS3Storage(S3Boto3Storage):
+    """Storage por defecto (MinIO/S3) que no tumba una respuesta por una URL.
+
+    Sin endpoint configurado, ``url()`` lanzaba ``ValueError`` y una sola foto de
+    control dejaba el listado de pacientes entero en 500 (QA-01). Ahora ese
+    archivo sale sin URL y el error queda en el log.
+    """
+
+    def url(self, name, *args, **kwargs):
+        try:
+            return super().url(name, *args, **kwargs)
+        except (ValueError, BotoCoreError, ClientError):
+            logger.exception("No se pudo generar la URL del archivo %s: revisar MINIO_ENDPOINT", name)
+            return ""

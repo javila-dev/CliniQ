@@ -62,7 +62,8 @@ def _rangos_citas_ocupadas(profesional_id, desde, hasta, excluir_cita_id=None) -
     """
     citas = (
         Cita.objects.filter(profesional_id=profesional_id)
-        .exclude(estado=Cita.Estado.CANCELADA)
+        # Una cita "no asistió" ya no ocupa el horario: se puede atender a otro (AG-10).
+        .exclude(estado__in=[Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO])
         .filter(
             Q(fecha_inicio__lt=hasta, fecha_fin__gt=desde)
             | Q(
@@ -259,6 +260,26 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
     return slots
 
 
+def duracion_de_sesion(sesion) -> tuple[int, str]:
+    """Duración y nombre de una sesión de tratamiento: la de su tipo de sesión, la
+    suma de los procedimientos del tipo o la de su procedimiento. (0, "") si no
+    se puede resolver."""
+    from django.db.models import Sum
+
+    tipo = sesion.tipo_sesion
+    if tipo:
+        duracion = tipo.duracion_min or 0
+        if not duracion:
+            duracion = tipo.procedimientos.filter(activo=True).aggregate(
+                total=Sum("procedimiento__duracion_min")
+            )["total"] or 0
+        if duracion:
+            return duracion, tipo.nombre
+    if sesion.procedimiento_id:
+        return sesion.procedimiento.duracion_min or 0, sesion.procedimiento.nombre
+    return 0, ""
+
+
 def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion_ejecutada=None):
     """Resuelve duracion_min y servicio_nombre según la forma de la cita."""
     import logging
@@ -284,6 +305,12 @@ def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion
             "[_resolver_duracion] item_cotizacion=%s, tratamiento=%s, servicio=%s",
             item_cotizacion.id, item_cotizacion.tratamiento_id, item_cotizacion.servicio_id,
         )
+        if item_cotizacion.tratamiento_id and sesion_ejecutada:
+            # La sesión elegida manda: antes toda sesión del paquete ocupaba la
+            # duración del tipo de sesión más largo (AG-07).
+            duracion, _ = duracion_de_sesion(sesion_ejecutada)
+            if duracion:
+                return duracion, nombre
         if item_cotizacion.tratamiento_id:
             tipos_qs = item_cotizacion.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
             resultado = tipos_qs.aggregate(Max("duracion_min"))
@@ -299,33 +326,19 @@ def _resolver_duracion(servicio, item_cotizacion, duracion_min_explicito, sesion
                 logger.debug("[_resolver_duracion] duracion desde procedimientos del tipo_sesion: %s", duracion)
             if duracion:
                 return duracion, nombre
-        if item_cotizacion.servicio_id:
-            logger.debug("[_resolver_duracion] duracion desde item.servicio: %s", item_cotizacion.servicio.duracion_min)
-            return item_cotizacion.servicio.duracion_min, nombre
+        if item_cotizacion.procedimiento_efectivo_id:
+            procedimiento = item_cotizacion.procedimiento_efectivo
+            logger.debug("[_resolver_duracion] duracion desde el procedimiento del item: %s", procedimiento.duracion_min)
+            return procedimiento.duracion_min, nombre
         if duracion_min_explicito:
             logger.debug("[_resolver_duracion] duracion desde duracion_min_explicito: %s", duracion_min_explicito)
             return duracion_min_explicito, nombre
         logger.debug("[_resolver_duracion] ERROR: no se pudo resolver duracion")
 
     if sesion_ejecutada:
-        from django.db.models import Sum
-        nombre = ""
-        tipo = sesion_ejecutada.tipo_sesion
-        if tipo:
-            nombre = tipo.nombre
-            duracion = tipo.duracion_min or 0
-            if not duracion:
-                resultado_proc = tipo.procedimientos.filter(activo=True).aggregate(
-                    total=Sum("procedimiento__duracion_min")
-                )
-                duracion = resultado_proc["total"] or 0
-            if duracion:
-                logger.debug("[_resolver_duracion] duracion desde tipo_sesion de sesion_ejecutada: %s", duracion)
-                return duracion, nombre
-        if sesion_ejecutada.procedimiento_id:
-            nombre = sesion_ejecutada.procedimiento.nombre
-            duracion = sesion_ejecutada.procedimiento.duracion_min
-            logger.debug("[_resolver_duracion] duracion desde procedimiento de sesion_ejecutada: %s", duracion)
+        duracion, nombre = duracion_de_sesion(sesion_ejecutada)
+        if duracion:
+            logger.debug("[_resolver_duracion] duracion desde la sesion: %s", duracion)
             return duracion, nombre
         logger.debug("[_resolver_duracion] ERROR: sesion_ejecutada sin duracion resoluble")
 
@@ -385,7 +398,7 @@ def deuda_bloqueante_info(paciente, clinica):
 
 
 @transaction.atomic
-def _validar_deuda_paciente(paciente, clinica, *, accion="agendar una nueva cita"):
+def _validar_deuda_paciente(paciente, clinica, *, accion="iniciar la atención"):
     info = deuda_bloqueante_info(paciente, clinica)
     if info is None:
         return
@@ -407,6 +420,16 @@ def _bloquear_agenda_del_profesional(profesional_id):
 
 def validar_horario_cita(*, sede, profesional, fecha_inicio, fecha_fin, excluir_cita_id=None):
     """Reglas comunes al crear y al editar una cita."""
+    from apps.users.authorization import user_sede_ids_acotadas
+
+    # Un profesional asignado a ciertas sedes no se agenda en otra: luego no veía
+    # esa cita en su agenda (AT-22). Sin sedes asignadas atiende en todas.
+    sedes_del_profesional = user_sede_ids_acotadas(profesional)
+    if sedes_del_profesional is not None and sede.id not in sedes_del_profesional:
+        raise ValidationError({
+            "error": f"{profesional.nombre_completo} no atiende en la sede {sede.nombre}.",
+            "code": "PROFESIONAL_FUERA_DE_SEDE",
+        })
     if not verificar_horario_sede(sede, fecha_inicio, fecha_fin):
         raise ValidationError({"error": "La cita está fuera del horario de la sede."})
     if not verificar_horario_profesional(profesional.id, sede.id, fecha_inicio, fecha_fin):
@@ -446,6 +469,19 @@ def avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin, exclui
     })
 
 
+def _reservar_sesion_del_item(item_cotizacion):
+    """Vuelve a contar las sesiones del paquete con la fila del ítem bloqueada.
+
+    El serializer ya lo valida, pero fuera de la transacción: dos recepcionistas
+    agendando a la vez podían tomar las dos la última sesión (AG-02).
+    """
+    from apps.cotizaciones.models import ItemCotizacion
+
+    item = ItemCotizacion.objects.select_for_update().get(pk=item_cotizacion.pk)
+    if item.citas_no_canceladas() + item.sesiones_previas_consumidas >= item.num_sesiones_efectivas():
+        raise ValidationError({"error": "Este item no tiene sesiones disponibles.", "code": "SIN_SESIONES_DISPONIBLES"})
+
+
 @transaction.atomic
 def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -> Cita:
     data = dict(data)
@@ -457,6 +493,9 @@ def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -
     paciente = data["paciente"]
     profesional = data["profesional"]
     fecha_inicio = data["fecha_inicio"]
+
+    if item_cotizacion is not None:
+        _reservar_sesion_del_item(item_cotizacion)
 
     duracion_min, servicio_nombre = _resolver_duracion(
         servicio, item_cotizacion, duracion_min_explicito, sesion_ejecutada
@@ -477,7 +516,8 @@ def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -
     if avisar_cruce_paciente:
         avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin)
 
-    _validar_deuda_paciente(paciente, sede.clinica)
+    # La mora no bloquea agendar ni reprogramar: el bloqueo es al iniciar la
+    # atención (decisión del 15/10/2026). Ver cambiar_estado → en_curso.
 
     cita = Cita.objects.create(
         **data,

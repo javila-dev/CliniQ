@@ -154,7 +154,7 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
 
     def _can_manage_antecedentes(self, paciente):
         # El permiso (ver/editar antecedentes) ya lo exige get_permissions. Quien
-        # atiende pacientes, además, solo los de pacientes que ha atendido. Antes
+        # atiende pacientes, además, solo edita los de pacientes que ha atendido. Antes
         # se miraba el rol fijo y un rol personalizado con el permiso quedaba fuera.
         user = self.request.user
         if not atiende_solo_lo_propio(user):
@@ -245,7 +245,9 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
     @action(detail=True, methods=["get", "put", "patch"], url_path="antecedentes")
     def antecedentes(self, request, pk=None):
         paciente = self.get_object()
-        if not self._can_manage_antecedentes(paciente):
+        # Leer sigue la misma regla que la historia (quien la ve, ve sus notas de
+        # cualquier paciente); escribir, solo en pacientes que ha atendido.
+        if request.method != "GET" and not self._can_manage_antecedentes(paciente):
             return Response({"error": "No autorizado.", "code": "FORBIDDEN"}, status=status.HTTP_403_FORBIDDEN)
 
         if request.method == "GET":

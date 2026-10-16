@@ -78,6 +78,27 @@ def atiende_solo_lo_propio(user) -> bool:
     return bool(getattr(user, "es_profesional", False)) or getattr(user, "rol", None) == "profesional"
 
 
+def ve_solo_su_agenda(user, request=None) -> bool:
+    """True si el usuario solo ve sus propias citas.
+
+    Ver las citas de toda la sede es de quien agenda (``agenda.citas.crear``);
+    quien atiende pacientes sin ese permiso ve solo su agenda. Decisión del
+    usuario (14/10/2026). Quien no atiende sigue con "Ver la agenda".
+    """
+    if not atiende_solo_lo_propio(user):
+        return False
+    return not user_has_permission(user, "agenda.citas.crear", request=request)
+
+
+def puede_atender_la_cita(user, cita) -> bool:
+    """Iniciar o cerrar la atención clínica de una cita: quien la atiende (check
+    "atiende pacientes" y es su cita) o el admin. Antes bastaba "cambiar estado":
+    recepción podía pasar una cita a "en curso" o "completada" sin nota (QF-02)."""
+    if user_is_tenant_admin(user):
+        return True
+    return bool(getattr(user, "es_profesional", False)) and getattr(cita, "profesional_id", None) == user.id
+
+
 def user_is_tenant_admin(user) -> bool:
     if not user or not getattr(user, "is_authenticated", False):
         return False

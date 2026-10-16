@@ -20,12 +20,14 @@ from apps.users.permissions import HasClinicamente, RequirePermission, get_clini
 
 
 class PuedeListarInsumos(BasePermission):
-    """Permite listar/ver insumos a quien puede gestionar inventario o solo registrar consumo en atencion."""
+    """Listar/ver insumos: quien ve el inventario, quien registra consumo en una
+    atención y quien cotiza (elige un producto del inventario como obsequio; sin
+    esto el selector decía "No se pudo cargar el inventario")."""
 
     def has_permission(self, request, view):
-        return (
-            user_has_permission(request.user, "inventario.ver", request=request)
-            or user_has_permission(request.user, "inventario.consumo.registrar", request=request)
+        return any(
+            user_has_permission(request.user, clave, request=request)
+            for clave in ("inventario.ver", "inventario.consumo.registrar", "cotizaciones.gestionar")
         )
 
 

@@ -164,7 +164,8 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
                 self.superadmin,
             )
 
-    def test_crear_cita_bloqueada_por_deuda_vencida(self):
+    def test_crear_cita_con_deuda_vencida_se_permite(self):
+        # La mora bloquea al iniciar la atención, no al agendar (decisión del 15/10/2026).
         self.clinica.bloquear_agenda_por_deuda = True
         self.clinica.dias_gracia_deuda = 0
         self.clinica.save(update_fields=["bloquear_agenda_por_deuda", "dias_gracia_deuda"])
@@ -188,19 +189,18 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
             pagada=False,
         )
 
-        with self.assertRaises(ValidationError) as ctx:
-            crear_cita(
-                {
-                    "paciente": self.paciente,
-                    "sede": self.sede,
-                    "servicio": self.servicio,
-                    "profesional": self.profesional,
-                    "fecha_inicio": self.inicio,
-                    "canal_origen": Cita.CanalOrigen.PRESENCIAL,
-                },
-                self.superadmin,
-            )
-        self.assertEqual(ctx.exception.detail.get("code"), "PACIENTE_CON_DEUDA")
+        cita = crear_cita(
+            {
+                "paciente": self.paciente,
+                "sede": self.sede,
+                "servicio": self.servicio,
+                "profesional": self.profesional,
+                "fecha_inicio": self.inicio,
+                "canal_origen": Cita.CanalOrigen.PRESENCIAL,
+            },
+            self.superadmin,
+        )
+        self.assertEqual(cita.estado, Cita.Estado.PENDIENTE)
 
     def test_crear_cita_excluye_cita_cancelada_en_disponibilidad(self):
         fin = calcular_fecha_fin(self.inicio, 30)

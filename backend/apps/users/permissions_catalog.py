@@ -59,7 +59,7 @@ PERMISSION_CATALOG = [
     ("inventario.insumos.gestionar", "inventario", "insumos.gestionar", "Gestionar insumos", False),
     ("inventario.kardex.ver", "inventario", "kardex.ver", "Ver kardex", True),
     ("inventario.ver", "inventario", "ver", "Ver inventario", True),
-    ("migracion.gestionar", "migracion", "gestionar", "Usar el asistente de puesta en marcha (cargar datos previos)", False),
+    ("migracion.gestionar", "migracion", "gestionar", "Revertir cargas de la puesta en marcha (cargar lo hace quien crea cotizaciones)", False),
     ("pacientes.antecedentes.editar", "pacientes", "antecedentes.editar", "Editar antecedentes", False),
     ("pacientes.antecedentes.ver", "pacientes", "antecedentes.ver", "Ver antecedentes", True),
     ("pacientes.crear", "pacientes", "crear", "Crear pacientes", True),
@@ -314,7 +314,10 @@ CAPABILITY_CATALOG = [
             {
                 "clave": "cotizaciones.cambiar_precio",
                 "titulo": "Cambiar precios en cotizaciones",
-                "descripcion": "Poner cualquier precio, aunque sea menor al de catálogo o supere el descuento máximo.",
+                "descripcion": (
+                    "Poner cualquier precio, aunque sea menor al de catálogo o supere el descuento máximo, "
+                    "y autorizar o rechazar los precios que piden los demás en sus sedes."
+                ),
                 "permisos": ["cotizaciones.cambiar_precio"],
             },
             {
@@ -610,8 +613,8 @@ CAPABILITY_CATALOG = [
             },
             {
                 "clave": "config.puesta_en_marcha",
-                "titulo": "Usar el asistente de puesta en marcha",
-                "descripcion": "Cargar datos previos (pacientes, cartera, historia) en la migracion inicial.",
+                "titulo": "Revertir cargas de la puesta en marcha",
+                "descripcion": "Deshacer una carga de datos previos (sus cobros, pagos, citas y cartera). Cargar pacientes en curso lo puede hacer quien crea cotizaciones.",
                 "permisos": ["migracion.gestionar"],
             },
             {

@@ -94,6 +94,10 @@ class Cotizacion(BaseModel):
         blank=True,
         related_name="cotizaciones",
     )
+    # Tiene precios fuera de la regla del catálogo sin autorizar (pendiente o
+    # rechazada): no se envía, no sale el PDF para el paciente ni se acepta.
+    # Lo recalcula cada guardado de ítems y cada decisión del autorizador.
+    precio_por_autorizar = models.BooleanField(default=False)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -353,7 +357,10 @@ class ItemCotizacion(BaseModel):
         return sum(obsequio.num_citas for obsequio in obsequios)
 
     def citas_no_canceladas(self):
-        return self.citas.exclude(estado="cancelada").count()
+        """Citas que ocupan una sesión del ítem. Ni las canceladas ni las de "no
+        asistió" consumen sesión: la no asistida queda solo como registro de que
+        el paciente agendó y no vino (decisión del 15/10/2026, AG-03)."""
+        return self.citas.exclude(estado__in=["cancelada", "no_asistio"]).count()
 
     def sesiones_vendidas(self):
         """Sesiones del tratamiento tal como quedaron al aceptar la cotización.
@@ -392,6 +399,17 @@ class ItemCotizacion(BaseModel):
             {"nombre": e["tipo"].nombre, "cantidad": e["cantidad"], "duracion_min": e["tipo"].duracion_min}
             for e in sorted(por_tipo.values(), key=lambda e: e["tipo"].orden)
         ]
+
+    @property
+    def procedimiento_efectivo(self):
+        """Procedimiento del catálogo de este ítem. Los ítems nuevos lo guardan en
+        `procedimiento`; los viejos, en `servicio`. Leer solo `servicio` dejaba sin
+        duración (y sin poder agendar) todo procedimiento vendido (QF-01)."""
+        return self.procedimiento or self.servicio
+
+    @property
+    def procedimiento_efectivo_id(self):
+        return self.procedimiento_id or self.servicio_id
 
     def num_sesiones_efectivas(self):
         """Sesiones agendables reales del ítem.
@@ -445,6 +463,57 @@ class FormaPagoCotizacion(BaseModel):
     class Meta:
         db_table = "formas_pago_cotizacion"
         ordering = ["created_at"]
+
+
+class SolicitudAutorizacionPrecio(BaseModel):
+    """Pedido de autorización para cotizar por debajo de lo permitido.
+
+    Quien no tiene ``cotizaciones.cambiar_precio`` la pide; quien lo tiene la
+    autoriza o la rechaza. Cubre los precios del snapshot ``items`` (uno por
+    ítem fuera de regla): bajar después un precio autorizado vuelve a pedirla,
+    subirlo no. Ver docs/plan-autorizacion-precios.md.
+    """
+
+    class Estado(models.TextChoices):
+        PENDIENTE = "pendiente", "Pendiente"
+        AUTORIZADA = "autorizada", "Autorizada"
+        RECHAZADA = "rechazada", "Rechazada"
+        CANCELADA = "cancelada", "Cancelada"
+
+    cotizacion = models.ForeignKey(
+        Cotizacion,
+        on_delete=models.CASCADE,
+        related_name="autorizaciones_precio",
+    )
+    estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE, db_index=True)
+    # Precio puesto por quien ya tiene el permiso: autorizada al guardar, sin pasar por la bandeja.
+    directa = models.BooleanField(default=False)
+    solicitada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="autorizaciones_precio_solicitadas",
+    )
+    motivo = models.TextField(blank=True, default="")
+    resuelta_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="autorizaciones_precio_resueltas",
+    )
+    resuelta_en = models.DateTimeField(null=True, blank=True)
+    comentario = models.TextField(blank=True, default="")
+    # Ítems fuera de regla tal como se pidieron: clave de catálogo, precio de
+    # lista, mínimo permitido, precio pedido y diferencia.
+    items = models.JSONField(default=list)
+    total_pedido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+    total_permitido = models.DecimalField(max_digits=14, decimal_places=2, default=0)
+
+    class Meta:
+        db_table = "cotizaciones_autorizaciones_precio"
+        ordering = ["-created_at"]
 
 
 # ── Estado comercial en consultas ──

@@ -133,6 +133,9 @@ def _sesion_vinculada_o_pendiente(cita):
         .filter(
             tratamiento__cotizacion_item_id=item_id,
             estado=SesionProcedimiento.Estado.PENDIENTE,
+            # Las ya asignadas a otra cita no: sus consentimientos (y la sesión que
+            # se marca al completar) eran los de la cita de otro día (AG-16).
+            cita__isnull=True,
         )
         .order_by("tipo_sesion__orden", "numero")
         .first()

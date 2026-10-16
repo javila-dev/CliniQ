@@ -23,19 +23,26 @@ class GestionOportunidadSerializer(serializers.ModelSerializer):
 
 def _frase(oportunidad, hoy) -> str:
     """Por qué está en la lista, en una frase."""
+    por_whatsapp = oportunidad.motivo == Oportunidad.Motivo.WHATSAPP
     if oportunidad.tipo == Oportunidad.Tipo.PAQUETE or oportunidad.motivo not in (
-        Oportunidad.Motivo.MANUAL, Oportunidad.Motivo.CAMPANA,
+        Oportunidad.Motivo.MANUAL, Oportunidad.Motivo.CAMPANA, Oportunidad.Motivo.WHATSAPP,
     ):
         return oportunidad.detalle.get("frase") or oportunidad.get_motivo_display()
-    partes = [oportunidad.get_etapa_display() if oportunidad.etapa else oportunidad.get_tipo_display()]
+    if por_whatsapp and oportunidad.etapa in (None, Oportunidad.Etapa.NUEVO):
+        # Escribió al WhatsApp de la clínica: lo que dijo es el motivo.
+        partes = ["Escribió por WhatsApp"]
+        if oportunidad.tipo != Oportunidad.Tipo.NUEVA:
+            partes.append(oportunidad.get_tipo_display())
+    else:
+        partes = [oportunidad.get_etapa_display() if oportunidad.etapa else oportunidad.get_tipo_display()]
     if oportunidad.etapa == Oportunidad.Etapa.VALORACION and oportunidad.cita_id:
         fecha = timezone.localdate(oportunidad.cita.fecha_inicio)
         partes.append(("valoración " if fecha >= hoy else "fue a valoración ") + fecha.strftime("%d/%m"))
     elif oportunidad.etapa == Oportunidad.Etapa.COTIZADO:
         partes.append("cotización enviada")
     if oportunidad.interes:
-        partes.append(f"le interesa {oportunidad.interes}")
-    if oportunidad.origen:
+        partes.append(f"«{oportunidad.interes}»" if por_whatsapp else f"le interesa {oportunidad.interes}")
+    if oportunidad.origen and not por_whatsapp:
         partes.append(f"llegó por {oportunidad.get_origen_display()}")
     return " · ".join(partes)
 

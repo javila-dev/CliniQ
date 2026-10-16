@@ -15,7 +15,8 @@ from apps.consentimientos.serializers import (
     RevocarConsentimientoSerializer,
 )
 from apps.consentimientos.services import (
-    confirmar_firma_compromiso_pago,
+    RESPUESTA_FIRMA_NO_CONFIRMADA,
+    confirmar_firma_con_documenso,
     enviar_link_firma_consentimiento,
     firmar_consentimiento,
     generar_consentimiento,
@@ -132,8 +133,19 @@ class ConsentimientoViewSet(ReadOnlyModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="confirmar_firma_documenso")
     def confirmar_firma_documenso(self, request, pk=None):
+        """El embed avisó que se firmó: se confirma con Documenso antes de marcarlo.
+
+        Antes se marcaba firmado con solo llamar al endpoint, y eso aceptaba la
+        venta sin firma. Si Documenso aún no lo refleja, 409 y la pantalla sigue
+        esperando (el webhook lo marca al llegar).
+        """
         consentimiento = self.get_object()
-        consentimiento = confirmar_firma_compromiso_pago(consentimiento)
+        confirmada = confirmar_firma_con_documenso(
+            lambda: verificar_firma_compromiso_pago_en_documenso(consentimiento) == Consentimiento.Estado.FIRMADO,
+        )
+        if not confirmada:
+            return Response(RESPUESTA_FIRMA_NO_CONFIRMADA, status=status.HTTP_409_CONFLICT)
+        consentimiento.refresh_from_db()
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="verificar_firma_documenso")

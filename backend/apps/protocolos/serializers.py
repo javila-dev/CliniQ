@@ -251,7 +251,7 @@ class TratamientoPacienteSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al paciente."})
             if tratamiento_catalogo and cotizacion_item.tratamiento_id != tratamiento_catalogo.id:
                 raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al tratamiento."})
-            if servicio and cotizacion_item.servicio_id != servicio.id:
+            if servicio and cotizacion_item.procedimiento_efectivo_id != servicio.id:
                 raise serializers.ValidationError({"cotizacion_item": "El item no corresponde al procedimiento."})
         return attrs
 

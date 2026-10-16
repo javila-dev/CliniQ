@@ -217,7 +217,9 @@ class GastoRequiereSesionAbiertaTests(_BaseCajaTest):
 
 
 class PermisosSesionTests(_BaseCajaTest):
-    def test_recepcion_no_puede_abrir_ni_cerrar(self):
+    def test_recepcion_abre_la_caja_pero_no_la_cierra(self):
+        # Registra gastos, y un gasto exige la caja abierta: puede abrirla (QA-04).
+        # Cerrar y cuadrar sigue siendo de quien hace cierres.
         recepcion = User.objects.create_user(
             email="recepcion-caja@example.com",
             password="secret123",
@@ -228,8 +230,12 @@ class PermisosSesionTests(_BaseCajaTest):
         )
         self.client.force_authenticate(recepcion)
         r = self._abrir()
-        self.assertEqual(r.status_code, 403)
-        self.assertFalse(SesionCaja.objects.filter(caja=self.caja).exists())
+        self.assertEqual(r.status_code, 201, r.content)
+        sesion = SesionCaja.objects.get(caja=self.caja)
+        cerrar = self.client.post(
+            f"/api/v1/caja/sesiones/{sesion.id}/cerrar/", {"efectivo_contado": "0"}, format="json",
+        )
+        self.assertEqual(cerrar.status_code, 403)
 
 
 class CategoriaGastoTests(_BaseCajaTest):

@@ -1075,6 +1075,34 @@ def verificar_firma_asistencia_en_documenso(cita) -> str:
     return cita.firma_asistencia_estado
 
 
+# Confirmar una firma hecha en el embed: Documenso puede tardar un instante en
+# reflejarla. Misma regla para consentimientos, asistencia y compromiso de pago.
+INTENTOS_CONFIRMAR_FIRMA = 3
+ESPERA_CONFIRMAR_FIRMA_SEG = 1
+RESPUESTA_FIRMA_NO_CONFIRMADA = {
+    "error": "Documenso todavía no confirma la firma. Espera unos segundos y reintenta.",
+    "code": "FIRMA_NO_CONFIRMADA",
+}
+
+
+def confirmar_firma_con_documenso(verificar) -> bool:
+    """Confirma con la API de Documenso una firma que el navegador reportó.
+
+    No se confía en el aviso del embed: cualquiera con permiso podía llamar al
+    endpoint y dejar un documento "firmado" sin firma (AG-12). ``verificar`` consulta
+    Documenso, marca la firma si la encuentra y devuelve True. Se reintenta unos
+    segundos; si no aparece, el webhook la marca al llegar.
+    """
+    import time
+
+    for intento in range(INTENTOS_CONFIRMAR_FIRMA):
+        if verificar():
+            return True
+        if intento < INTENTOS_CONFIRMAR_FIRMA - 1:
+            time.sleep(ESPERA_CONFIRMAR_FIRMA_SEG)
+    return False
+
+
 def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento) -> str:
     """Analogo de :func:`verificar_firma_asistencia_en_documenso` para el
     ``Consentimiento`` (compromiso de pago / consentimientos con flujo Documenso).
@@ -1092,6 +1120,9 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
                     "[verificar_firma_compromiso_pago] fallo al recuperar PDF | consentimiento_id=%s",
                     consentimiento.id,
                 )
+        return consentimiento.estado
+    if consentimiento.estado == Consentimiento.Estado.REVOCADO:
+        # Cotización descartada o documento reemplazado: firmar ya no cuenta (CT-06).
         return consentimiento.estado
 
     envelope_id = (consentimiento.documenso_documento_id or "").strip()

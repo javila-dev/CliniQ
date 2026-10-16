@@ -120,7 +120,12 @@ class SesionCajaViewSet(ReadOnlyModelViewSet):
     ordering_fields = ("abierta_en", "cerrada_en")
 
     def get_permissions(self):
-        if self.action in ("abrir", "cerrar"):
+        if self.action == "abrir":
+            # Registrar un gasto exige la caja abierta: quien lo registra puede
+            # abrirla sin un permiso aparte (antes el mensaje le pedía abrirla y
+            # no podía). Cerrar y cuadrar sigue siendo de quien hace cierres.
+            return [RequireAnyPermission("caja.cierre.realizar", "caja.gastos.registrar")()]
+        if self.action == "cerrar":
             return [RequirePermission("caja.cierre.realizar")()]
         if self.action == "actual":
             # Registrar un gasto necesita saber si la caja está abierta: "ver

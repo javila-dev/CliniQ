@@ -503,9 +503,11 @@ class H87H89HistoriaClinicaTests(TestCase):
         )
         self.assertEqual(resp_patch2.status_code, 400)
 
-        # Completar dos veces debe fallar
+        # Completar dos veces es idempotente: reintentar el cierre de una atención
+        # no puede quedar trabado en un 400 (AT-03).
         resp_completar2 = self.client.post(f"/api/v1/historia-clinica/notas/{nota_id}/completar/")
-        self.assertEqual(resp_completar2.status_code, 400)
+        self.assertEqual(resp_completar2.status_code, 200)
+        self.assertEqual(resp_completar2.json()["estado"], "completada")
 
         # HistoriaClinica.motivo_consulta/plan_manejo deben reflejar la última nota completada
         resp_historia = self.client.get(f"/api/v1/historia-clinica/historias/{self.historia.id}/")

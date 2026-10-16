@@ -117,7 +117,11 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
                 safe_data,
             )
             raise
-        return Response(ColaboradorSerializer(colaborador, context=self.get_serializer_context()).data, status=status.HTTP_201_CREATED)
+        data = ColaboradorSerializer(colaborador, context=self.get_serializer_context()).data
+        error_invitacion = getattr(colaborador, "invitacion_error", None)
+        if error_invitacion:
+            data["invitacion_error"] = error_invitacion
+        return Response(data, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):
         instance = self.get_object()

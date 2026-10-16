@@ -92,7 +92,7 @@ class VerificacionPaso3Tests(ClinicaFixtureMixin, TestCase):
             documenso_document_id="doc-1",
         )
         url = f"/api/v1/historia-clinica/consentimientos/{consentimiento.id}/completar_firma/"
-        with mock.patch("apps.historia_clinica.views.ESPERA_CONFIRMAR_FIRMA_SEG", 0), mock.patch(
+        with mock.patch("apps.consentimientos.services.ESPERA_CONFIRMAR_FIRMA_SEG", 0), mock.patch(
             "apps.historia_clinica.views.verificar_firma_consentimiento_en_documenso", return_value=False,
         ):
             response = self.client.patch(url, {"documenso_document_id": "doc-1"}, format="json")

@@ -1,11 +1,11 @@
 import base64
 import logging
-import time
 
 import requests
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.files.storage import default_storage
+from django.db import transaction
 from django.db.models import Count
 from django.db.models import Prefetch
 from django.db.models import Q
@@ -15,6 +15,7 @@ from django.utils import timezone
 from rest_framework import mixins, serializers, status
 from rest_framework.decorators import action
 from rest_framework.permissions import BasePermission
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
 from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelViewSet
 from weasyprint import HTML
@@ -70,6 +71,7 @@ from apps.notificaciones.services import (
     resolver_ruta_whatsapp,
 )
 from apps.pacientes.serializers import enmascarar_cola
+from apps.historia_clinica.autoria import exigir_documentable, puede_documentar
 from apps.users.authorization import atiende_solo_lo_propio, user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
@@ -189,6 +191,9 @@ def normalize_error_response(detail):
 
 class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin, GenericViewSet):
     serializer_class = HistoriaClinicaResumenSerializer
+    # Solo PATCH: un PUT reemplazaba la historia entera con el serializer de
+    # resumen y respondía 500 (AT-21).
+    http_method_names = ["get", "patch", "head", "options"]
     queryset = HistoriaClinica.objects.select_related("paciente", "clinica").prefetch_related("notas").all()
 
     def get_queryset(self):
@@ -198,8 +203,26 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
             queryset = queryset.filter(clinica=user.clinica)
         paciente_id = self.request.query_params.get("paciente")
         if paciente_id:
+            self._asegurar_historia(paciente_id)
             queryset = queryset.filter(paciente_id=paciente_id)
         return queryset
+
+    def _asegurar_historia(self, paciente_id):
+        """Un paciente de la clínica sin historia la recibe al consultarla (AT-12)."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.pacientes.models import Paciente
+
+        if self.action != "list":
+            return
+        pacientes = Paciente.objects.filter(historia_clinica__isnull=True)
+        if self.request.user.rol != "superadmin":
+            pacientes = pacientes.filter(clinica=self.request.user.clinica)
+        try:
+            paciente = pacientes.filter(pk=paciente_id).first()
+        except DjangoValidationError:
+            return
+        if paciente is not None:
+            HistoriaClinica.del_paciente(paciente)
 
     def get_permissions(self):
         return [RequirePermission("historia.ver")()]
@@ -430,7 +453,9 @@ class NotaClinicaAccessPermission(BasePermission):
         if view.action in {"partial_update", "completar"} and obj.cotizacion_id:
             return user_has_permission(request.user, "historia.notas.crear", request=request) or \
                 user_has_permission(request.user, "cotizaciones.gestionar", request=request)
-        return user_has_permission(request.user, "historia.notas.crear", request=request)
+        # Quien atiende escribe solo en sus propias atenciones (AT-02).
+        return user_has_permission(request.user, "historia.notas.crear", request=request) and \
+            puede_documentar(request.user, obj)
 
 
 class NotaClinicaViewSet(
@@ -475,6 +500,27 @@ class NotaClinicaViewSet(
             queryset = queryset.filter(cotizacion_id=cotizacion_id)
         return queryset
 
+    def create(self, request, *args, **kwargs):
+        """Un solo borrador por cita: si ya hay uno, se devuelve ese. Antes el doble
+        efecto de la pantalla o dos pestañas creaban varios (AT-04: había citas con
+        15 borradores) y lo escrito quedaba repartido entre ellos."""
+        cita_id = request.data.get("cita")
+        if not cita_id:
+            return super().create(request, *args, **kwargs)
+        from apps.agenda.models import Cita
+
+        with transaction.atomic():
+            Cita.objects.select_for_update().filter(pk=cita_id).first()
+            existente = (
+                self.get_queryset()
+                .filter(cita_id=cita_id, estado=NotaClinica.EstadoNota.BORRADOR, activo=True)
+                .order_by("-created_at")
+                .first()
+            )
+            if existente is not None and self.check_object_permissions(request, existente) is None:
+                return Response(self.get_serializer(existente).data, status=status.HTTP_200_OK)
+            return super().create(request, *args, **kwargs)
+
     def perform_create(self, serializer):
         serializer.save(estado=NotaClinica.EstadoNota.BORRADOR)
 
@@ -482,10 +528,9 @@ class NotaClinicaViewSet(
     def completar(self, request, pk=None):
         nota = self.get_object()
         if nota.estado == NotaClinica.EstadoNota.COMPLETADA:
-            return Response(
-                {"error": "La nota ya está completada.", "code": "NOTA_YA_COMPLETADA"},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
+            # Idempotente: si el cierre de la atención falló después de completar
+            # la nota, reintentar no puede quedar trabado en un 400 (AT-03).
+            return Response(NotaClinicaSerializer(nota, context={"request": request}).data, status=status.HTTP_200_OK)
         nota.estado = NotaClinica.EstadoNota.COMPLETADA
         nota.save(update_fields=["estado", "updated_at"])
         registrar_accion(request, "nota.completar", nota, {"historia_id": str(nota.historia_id)})
@@ -571,7 +616,8 @@ class FotoClinicaAccessPermission(BasePermission):
         if view.action == "destroy" and obj.nota.cotizacion_id:
             return user_has_permission(request.user, "historia.fotos.eliminar", request=request) or \
                 user_has_permission(request.user, "cotizaciones.gestionar", request=request)
-        return user_has_permission(request.user, "historia.fotos.eliminar", request=request)
+        return user_has_permission(request.user, "historia.fotos.eliminar", request=request) and \
+            puede_documentar(request.user, obj.nota)
 
 
 class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, GenericViewSet):
@@ -596,12 +642,11 @@ class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, Gene
         # profesional, no la ausencia de cita.
         if atiende_solo_lo_propio(user) and nota.cita_id and nota.cita.profesional_id != user.id:
             raise serializers.ValidationError({"nota": "Solo puedes subir fotos a notas de tus propias citas."})
+        if nota.estado == NotaClinica.EstadoNota.COMPLETADA and not nota.cotizacion_id:
+            raise serializers.ValidationError(
+                {"nota": "La nota ya está completada: no se pueden agregar fotos.", "code": "NOTA_COMPLETADA"}
+            )
         serializer.save()
-
-
-# completar_firma: Documenso puede tardar un instante en reflejar la firma del embed.
-INTENTOS_CONFIRMAR_FIRMA = 3
-ESPERA_CONFIRMAR_FIRMA_SEG = 1
 
 
 class ConsentimientoInformadoViewSet(
@@ -809,21 +854,12 @@ class ConsentimientoInformadoViewSet(
         al iniciar la firma) antes de marcarlo firmado. Si Documenso todavía no lo
         refleja, 409 y la pantalla ofrece "Reintentar sincronización".
         """
+        from apps.consentimientos.services import RESPUESTA_FIRMA_NO_CONFIRMADA, confirmar_firma_con_documenso
+
         consentimiento = self.get_object()
         if not consentimiento.firmado:
-            for intento in range(INTENTOS_CONFIRMAR_FIRMA):
-                if verificar_firma_consentimiento_en_documenso(consentimiento):
-                    break
-                if intento < INTENTOS_CONFIRMAR_FIRMA - 1:
-                    time.sleep(ESPERA_CONFIRMAR_FIRMA_SEG)
-            else:
-                return Response(
-                    {
-                        "error": "Documenso todavía no confirma la firma. Espera unos segundos y reintenta.",
-                        "code": "FIRMA_NO_CONFIRMADA",
-                    },
-                    status=status.HTTP_409_CONFLICT,
-                )
+            if not confirmar_firma_con_documenso(lambda: verificar_firma_consentimiento_en_documenso(consentimiento)):
+                return Response(RESPUESTA_FIRMA_NO_CONFIRMADA, status=status.HTTP_409_CONFLICT)
             consentimiento.refresh_from_db()
         return Response(self.get_serializer(consentimiento).data, status=status.HTTP_200_OK)
 
@@ -949,9 +985,35 @@ class ResultadoExamenViewSet(ModelViewSet):
         return queryset
 
     def perform_create(self, serializer):
+        nota = serializer.validated_data.get("nota")
+        if nota is not None:
+            if nota.historia_id != serializer.validated_data["historia"].id:
+                raise serializers.ValidationError({"nota": "La nota no es de esta historia."})
+            exigir_documentable(self.request.user, nota)
         serializer.save(created_by=self.request.user)
 
+    def _exigir_que_sea_suyo(self, instance):
+        """Editar o borrar un examen: el de una atención abierta propia, o uno que
+        cargó el mismo usuario; el admin, cualquiera. Antes cualquiera que atiende
+        borraba para siempre exámenes de otras visitas (AT-01)."""
+        user = self.request.user
+        if not atiende_solo_lo_propio(user):
+            return
+        if instance.nota_id:
+            exigir_documentable(user, instance.nota)
+        elif instance.created_by_id != user.id:
+            raise PermissionDenied("Solo puedes modificar los exámenes que cargaste tú.")
+
+    def perform_update(self, serializer):
+        instance = serializer.instance
+        self._exigir_que_sea_suyo(instance)
+        for campo in ("historia", "nota"):
+            if campo in serializer.validated_data and serializer.validated_data[campo] != getattr(instance, campo):
+                raise serializers.ValidationError({campo: "No se puede mover un examen a otra historia o nota."})
+        serializer.save()
+
     def perform_destroy(self, instance):
+        self._exigir_que_sea_suyo(instance)
         if instance.archivo:
             default_storage.delete(instance.archivo.name)
         instance.delete()
@@ -1121,7 +1183,18 @@ class AnotacionZonaViewSet(
             queryset = queryset.filter(nota_id=nota_id, activo=True)
         return queryset
 
+    def perform_create(self, serializer):
+        exigir_documentable(self.request.user, serializer.validated_data.get("nota"))
+        serializer.save()
+
+    def perform_update(self, serializer):
+        exigir_documentable(self.request.user, serializer.instance.nota)
+        if "nota" in serializer.validated_data and serializer.validated_data["nota"] != serializer.instance.nota:
+            raise serializers.ValidationError({"nota": "No se puede mover una zona a otra nota."})
+        serializer.save()
+
     def perform_destroy(self, instance):
+        exigir_documentable(self.request.user, instance.nota)
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
 
@@ -1158,6 +1231,7 @@ class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, Gene
     def create(self, request, *args, **kwargs):
         serializer = RegistrarConsumoInsumoSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
+        exigir_documentable(request.user, serializer.validated_data["nota"])
         consumo = registrar_consumo_insumo(
             nota=serializer.validated_data["nota"],
             insumo=serializer.validated_data["insumo"],
@@ -1169,4 +1243,5 @@ class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, Gene
         return Response(ConsumoInsumoSerializer(consumo).data, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
+        exigir_documentable(self.request.user, instance.nota, en_borrador=False)
         eliminar_consumo_insumo(instance, self.request.user)

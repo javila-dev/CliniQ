@@ -1183,10 +1183,13 @@ def procesar_webhook(payload: dict) -> str:
     if evento == "message_updated":
         return _mensaje_fallido(payload) if _fallo_en_meta(payload) else "ignorado"
     if evento == "message_created" and payload.get("message_type") in ("incoming", 0):
-        # Respuesta del paciente: la clinica ya la ve en su telefono. Solo se
-        # registra; se usara si hay botones (p. ej. "Confirmar cita").
+        # Alguien escribió a la clínica: la clínica ya lo ve en su teléfono; si
+        # no está en seguimiento, entra como interesado (o recompra).
+        from apps.seguimiento.whatsapp_entrante import registrar_mensaje_entrante
+
         inbox = (payload.get("inbox") or {}).get("id") or (payload.get("conversation") or {}).get("inbox_id")
-        logger.info("Respuesta de paciente en el inbox %s (mensaje %s)", inbox, payload.get("id"))
+        resultado = registrar_mensaje_entrante(payload)
+        logger.info("Mensaje entrante en el inbox %s (mensaje %s): %s", inbox, payload.get("id"), resultado)
         return "respuesta_registrada"
     return "ignorado"
 

@@ -15,9 +15,9 @@ from django.utils import timezone
 import requests
 from rest_framework import status
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
 from rest_framework.response import Response
-from rest_framework.viewsets import ModelViewSet
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
 
 from apps.agenda.models import Cita, RegistroConfirmacion
 from apps.core.logging import registrar_accion
@@ -28,6 +28,7 @@ from apps.cotizaciones.models import (
     CotizacionEnvio,
     FormaPagoCotizacion,
     ItemCotizacion,
+    SolicitudAutorizacionPrecio,
     con_estado_comercial,
     filtrar_estado_comercial,
 )
@@ -36,12 +37,16 @@ from apps.cotizaciones.serializers import (
     CambiarEstadoCotizacionSerializer,
     CotizacionEnvioSerializer,
     CotizacionListSerializer,
+    CotizacionParaAgendarSerializer,
     CotizacionSerializer,
+    DecidirAutorizacionPrecioSerializer,
     EntregarObsequioSerializer,
     EnviarCotizacionEmailSerializer,
     ItemCotizacionSerializer,
     RegistrarEnvioCotizacionSerializer,
+    SolicitudAutorizacionPrecioSerializer,
 )
+from apps.cotizaciones import autorizaciones
 from apps.notificaciones.models import EnvioWhatsApp
 from apps.notificaciones.services import (
     WhatsAppNoDisponibleError,
@@ -51,8 +56,8 @@ from apps.notificaciones.services import (
     enviar_whatsapp,
     resolver_ruta_whatsapp,
 )
-from apps.users.authorization import sede_ids_para_filtro, ve_solo_su_actividad_comercial
-from apps.users.permissions import RequirePermission
+from apps.users.authorization import sede_ids_para_filtro, user_has_permission, ve_solo_su_actividad_comercial
+from apps.users.permissions import RequireAnyPermission, RequirePermission, get_clinica_activa
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +85,12 @@ def normalize_error_response(detail):
     return detail
 
 
+class ServicioNoDisponible(APIException):
+    status_code = 503
+    default_detail = "El servicio no está disponible en este momento."
+    default_code = "servicio_no_disponible"
+
+
 class CotizacionViewSet(ModelViewSet):
     serializer_class = CotizacionSerializer
     queryset = Cotizacion.objects.select_related(
@@ -100,10 +111,21 @@ class CotizacionViewSet(ModelViewSet):
     search_fields = ("paciente__nombres", "paciente__apellidos", "notas")
     ordering_fields = ("created_at", "updated_at")
 
+    def _es_para_agendar(self):
+        """Paquetes vendidos de un paciente (?paciente=&estado=aceptada): los usa
+        Nueva cita para agendar sus sesiones. No es actividad comercial."""
+        params = self.request.query_params
+        return bool(params.get("paciente")) and params.get("estado") == Cotizacion.Estado.ACEPTADA
+
     def get_permissions(self):
+        # Agendar la sesión de un paquete vendido es trabajo de agenda: quien crea
+        # citas lo necesita aunque no vea cotizaciones (antes Nueva cita decía
+        # "El paciente no tiene cotizaciones aceptadas").
+        if (self.action == "list" and self._es_para_agendar()) or self.action == "sesiones":
+            return [RequireAnyPermission("cotizaciones.ver", "agenda.citas.crear")()]
         if self.action in {"list", "retrieve", "pdf", "envios", "consolidado_asistencia",
                            "historial_sesiones", "sesiones", "consentimientos_pendientes", "consentimientos",
-                           "profesionales",
+                           "profesionales", "autorizacion_precio",
                            # Quién puede firmar lo decide la vista (es_profesional).
                            "firma_profesional", "firma_profesional_documento"}:
             return [RequirePermission("cotizaciones.ver")()]
@@ -123,7 +145,13 @@ class CotizacionViewSet(ModelViewSet):
         # Un profesional solo ve en el listado las cotizaciones que creó,
         # no las de toda la clínica. El detalle sigue accesible por id para
         # los flujos que abren una cotización puntual (paciente, cartera…).
-        if self.action == "list" and ve_solo_su_actividad_comercial(user, self.request):
+        # En las pantallas del paciente (?paciente=) se listan todas las suyas; abrir
+        # las de otro profesional lo frena get_object.
+        if (
+            self.action == "list"
+            and not self.request.query_params.get("paciente")
+            and ve_solo_su_actividad_comercial(user, self.request)
+        ):
             queryset = queryset.filter(profesional=user)
         # Alcance por sede (igual que ventas y seguimiento): el listado comercial
         # muestra solo las cotizaciones de las sedes del usuario. Las pantallas
@@ -174,6 +202,12 @@ class CotizacionViewSet(ModelViewSet):
         "enviar_whatsapp", "enviar_email_action", "registrar_envio",
     }
 
+    # Lo comercial de una cotización. Sus consentimientos (clínicos, sin montos)
+    # siguen abiertos: cualquier profesional firma los de una venta ajena.
+    ACCIONES_DE_LECTURA = {
+        "retrieve", "pdf", "envios", "consolidado_asistencia", "historial_sesiones", "autorizacion_precio",
+    }
+
     def _acotar_por_sede(self, queryset, sede_pedida=None):
         sede_ids = sede_ids_para_filtro(self.request.user, sede_pedida)
         if sede_ids is None:
@@ -184,6 +218,12 @@ class CotizacionViewSet(ModelViewSet):
         return queryset.filter(filtro)
 
     def get_serializer_class(self):
+        if (
+            self.action == "list"
+            and self._es_para_agendar()
+            and not user_has_permission(self.request.user, "cotizaciones.ver", request=self.request)
+        ):
+            return CotizacionParaAgendarSerializer
         if self.action == "list":
             return CotizacionListSerializer
         return super().get_serializer_class()
@@ -193,13 +233,18 @@ class CotizacionViewSet(ModelViewSet):
         if self.action in self.ACCIONES_EN_SU_SEDE and cotizacion.sede_id:
             if not sede_ids_para_filtro(self.request.user, cotizacion.sede_id):
                 raise PermissionDenied("Esta cotización es de otra sede.")
-        # Quien solo ve su actividad comercial abre por id la de otro (paciente,
-        # cartera…), pero no la cambia: el mismo alcance del listado (M5-29).
+        # Quien solo ve su actividad comercial no cambia (M5-29) ni abre la de otro:
+        # la ve en el listado del paciente, pero no entra (decisión del 15/10/2026).
+        # Las sesiones del paquete siguen abiertas para agendar.
         if (
-            self.action in self.ACCIONES_EN_SU_SEDE
+            self.action in self.ACCIONES_EN_SU_SEDE | self.ACCIONES_DE_LECTURA
             and cotizacion.profesional_id != self.request.user.id
             and ve_solo_su_actividad_comercial(self.request.user, self.request)
         ):
+            if self.action in self.ACCIONES_DE_LECTURA:
+                raise PermissionDenied(
+                    "Esta cotización es de otro profesional: la ves en el listado del paciente, pero no puedes abrirla."
+                )
             raise PermissionDenied("Esta cotización es de otro profesional: solo puedes cambiar las tuyas.")
         return cotizacion
 
@@ -235,12 +280,16 @@ class CotizacionViewSet(ModelViewSet):
         """Compromiso de pago vigente de la cotizacion (consentimiento sin plantilla)."""
         from apps.consentimientos.models import Consentimiento
 
-        return (
+        from apps.consentimientos.services import es_acta_acuerdo_pago
+
+        candidatos = (
             Consentimiento.objects.filter(cotizacion=cotizacion, plantilla__isnull=True)
             .exclude(estado=Consentimiento.Estado.REVOCADO)
             .order_by("-created_at")
-            .first()
         )
+        # El acta de un acuerdo de pago también es un consentimiento sin plantilla:
+        # la tarjeta del compromiso mostraba el acta (CT-07).
+        return next((c for c in candidatos if not es_acta_acuerdo_pago(c)), None)
 
     def perform_destroy(self, instance):
         # Solo borrador o descartada: no generan cartera, cuotas ni citas (eso nace al aceptar).
@@ -260,6 +309,7 @@ class CotizacionViewSet(ModelViewSet):
         )
         instance.activo = False
         instance.save(update_fields=["activo", "updated_at"])
+        autorizaciones.cancelar_pendientes(instance, "La cotización se eliminó.")
         registrar_accion(
             self.request, "cotizacion.eliminar", instance,
             {"estado": instance.estado, "paciente": str(instance.paciente)},
@@ -275,12 +325,28 @@ class CotizacionViewSet(ModelViewSet):
         headers = self.get_success_headers(serializer.data)
         return Response(serializer.data, status=status.HTTP_201_CREATED, headers=headers)
 
+    @staticmethod
+    def _bloquear(cotizacion):
+        """Bloquea la fila y toma el estado actual (CT-14).
+
+        Aceptar, descartar y editar a la vez decidían sobre un estado leído antes:
+        se podía editar una venta recién aceptada o descartar una aceptada. Una
+        cotización eliminada no cambia de estado (por API se podía aceptar con
+        ``?activo=false``). Se llama dentro de una transacción.
+        """
+        fila = Cotizacion.objects.select_for_update().filter(pk=cotizacion.pk).values("estado", "activo").first()
+        if fila is None or not fila["activo"]:
+            raise ValidationError({"error": "Esta cotización fue eliminada.", "code": "COTIZACION_ELIMINADA"})
+        cotizacion.estado = fila["estado"]
+
+    @transaction.atomic
     def partial_update(self, request, *args, **kwargs):
         import logging
         logger = logging.getLogger(__name__)
         logger.debug("[PATCH cotizacion] payload: %s", request.data)
 
         instance = self.get_object()
+        self._bloquear(instance)
         if instance.estado != Cotizacion.Estado.BORRADOR:
             raise ValidationError({"error": "Solo se pueden editar cotizaciones en borrador.", "code": "COTIZACION_NO_EDITABLE"})
         serializer = self.get_serializer(instance, data=request.data, partial=True)
@@ -296,8 +362,10 @@ class CotizacionViewSet(ModelViewSet):
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cambiar_estado")
+    @transaction.atomic
     def cambiar_estado(self, request, pk=None):
         cotizacion = self.get_object()
+        self._bloquear(cotizacion)
         serializer = CambiarEstadoCotizacionSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         nuevo_estado = serializer.validated_data["estado"]
@@ -326,6 +394,7 @@ class CotizacionViewSet(ModelViewSet):
                         "fecha_vencimiento": cotizacion.fecha_vencimiento.isoformat(),
                     }
                 )
+            autorizaciones.validar_sin_precio_por_autorizar(cotizacion, "aceptar")
             validar_plan_de_pagos(cotizacion)
             compromiso_pago = self._generar_compromiso_pago_si_aplica(cotizacion)
             requiere_firma = (
@@ -451,19 +520,37 @@ class CotizacionViewSet(ModelViewSet):
         if not config:
             return None
 
-        existente = Consentimiento.objects.filter(
-            cotizacion=cotizacion, plantilla__isnull=True,
-        ).exclude(estado=Consentimiento.Estado.REVOCADO).first()
+        existente = self._compromiso_pago_existente(cotizacion)
+        if existente and existente.estado == Consentimiento.Estado.FIRMADO and cotizacion.estado == Cotizacion.Estado.BORRADOR:
+            # Lo firmado tiene que ser lo que se vende: si la cotización cambió
+            # después de la firma (precio, ítems o plan), esa firma no vale y se pide
+            # otra. Antes se aceptaba la venta con un documento por otro valor (CT-01).
+            from apps.consentimientos.services import renderizar_compromiso_pago_estandar
+
+            snapshot = renderizar_compromiso_pago_estandar(
+                cotizacion, fecha_generacion=timezone.localtime(existente.created_at).date(),
+            )
+            if hashlib.sha256(snapshot.encode("utf-8")).hexdigest() != existente.hash_contenido:
+                existente.estado = Consentimiento.Estado.REVOCADO
+                existente.revocado_en = timezone.now()
+                existente.motivo_revocacion = "La cotización cambió después de la firma: se generó un compromiso nuevo."
+                existente.save(update_fields=["estado", "revocado_en", "motivo_revocacion", "updated_at"])
+                existente = None
         if existente:
             return self._refrescar_compromiso_pendiente(cotizacion, existente)
 
         try:
             return generar_consentimiento(cotizacion=cotizacion, plantilla=None)
-        except Exception:
+        except Exception as exc:
             logger.exception(
                 "[cambiar_estado] fallo al generar compromiso de pago | cotizacion_id=%s", cotizacion.id,
             )
-            return None
+            # La clínica exige el compromiso: sin él no se acepta la venta. Antes se
+            # aceptaba igual y solo quedaba un log (CT-08).
+            raise ServicioNoDisponible(
+                {"error": "No se pudo generar el compromiso de pago. Intenta de nuevo en un momento.",
+                 "code": "COMPROMISO_PAGO_NO_GENERADO"}
+            ) from exc
 
     @action(detail=True, methods=["get"], url_path="consentimientos_pendientes")
     def consentimientos_pendientes(self, request, pk=None):
@@ -600,7 +687,7 @@ class CotizacionViewSet(ModelViewSet):
         cotizacion = self.get_object()
         nota = NotaClinica.objects.filter(cotizacion=cotizacion).first()
         if nota is None:
-            historia = HistoriaClinica.objects.get(paciente_id=cotizacion.paciente_id)
+            historia = HistoriaClinica.del_paciente(cotizacion.paciente)
             nota = NotaClinica.objects.create(historia=historia, cotizacion=cotizacion)
         serializer = NotaClinicaSerializer(nota, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
@@ -608,6 +695,7 @@ class CotizacionViewSet(ModelViewSet):
     @action(detail=True, methods=["get"], url_path="pdf")
     def pdf(self, request, pk=None):
         cotizacion = self.get_object()
+        autorizaciones.validar_sin_precio_por_autorizar(cotizacion, "descargar el PDF")
         pdf_bytes = render_cotizacion_pdf(cotizacion)
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'attachment; filename="cotizacion-{cotizacion.id}.pdf"'
@@ -642,6 +730,20 @@ class CotizacionViewSet(ModelViewSet):
                 ),
                 "code": "COTIZACION_VENCIDA",
             })
+        autorizaciones.validar_sin_precio_por_autorizar(cotizacion, "enviar")
+
+    @action(detail=True, methods=["get"], url_path="autorizacion_precio")
+    def autorizacion_precio(self, request, pk=None):
+        """Estado de la autorización de precios: lo consulta el formulario cada ~10 s."""
+        cotizacion = self.get_object()
+        solicitud = autorizaciones.ultima_solicitud(cotizacion)
+        return Response({
+            "precio_por_autorizar": cotizacion.precio_por_autorizar,
+            "solicitud": (
+                SolicitudAutorizacionPrecioSerializer(solicitud, context=self.get_serializer_context()).data
+                if solicitud else None
+            ),
+        })
 
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")
     def enviar_whatsapp(self, request, pk=None):
@@ -761,12 +863,14 @@ class CotizacionViewSet(ModelViewSet):
             enviado_por=request.user,
             notas=serializer.validated_data.get("notas", ""),
         )
-        return Response(CotizacionEnvioSerializer(envio).data, status=status.HTTP_201_CREATED)
+        return Response(CotizacionEnvioSerializer(envio, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="envios")
     def envios(self, request, pk=None):
         cotizacion = self.get_object()
-        serializer = CotizacionEnvioSerializer(cotizacion.envios.select_related("enviado_por").all(), many=True)
+        serializer = CotizacionEnvioSerializer(
+            cotizacion.envios.select_related("enviado_por").all(), many=True, context={"request": request},
+        )
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="sesiones")
@@ -1082,3 +1186,61 @@ def _eventos_cita(cita, reagenda_logs):
         )
     eventos.sort(key=lambda e: e["fecha"])
     return eventos
+
+
+class AutorizacionPrecioViewSet(ReadOnlyModelViewSet):
+    """Bandeja de autorizaciones de precio: quien tiene cotizaciones.cambiar_precio,
+    en las sedes que ve, autoriza o rechaza (docs/plan-autorizacion-precios.md)."""
+
+    serializer_class = SolicitudAutorizacionPrecioSerializer
+    permission_classes = [RequirePermission(autorizaciones.PERMISO_AUTORIZAR)]
+    ESTADOS_FILTRO = {"pendiente", "autorizada", "rechazada", "resueltas"}
+
+    def get_queryset(self):
+        Estado = SolicitudAutorizacionPrecio.Estado
+        queryset = SolicitudAutorizacionPrecio.objects.select_related(
+            "cotizacion__paciente", "cotizacion__sede", "solicitada_por", "resuelta_por",
+        ).filter(cotizacion__activo=True, directa=False)
+        clinica = get_clinica_activa(self.request)
+        queryset = queryset.filter(cotizacion__clinica=clinica) if clinica else queryset.none()
+        sede_ids = sede_ids_para_filtro(self.request.user, self.request.query_params.get("sede"))
+        if sede_ids is not None:
+            queryset = queryset.filter(cotizacion__sede_id__in=sede_ids)
+        if self.action == "list":
+            estado = self.request.query_params.get("estado") or Estado.PENDIENTE
+            if estado not in self.ESTADOS_FILTRO:
+                raise ValidationError({"error": "Estado invalido.", "code": "ESTADO_INVALIDO"})
+            if estado == "resueltas":
+                queryset = queryset.filter(estado__in=[Estado.AUTORIZADA, Estado.RECHAZADA]).order_by("-resuelta_en")
+            else:
+                queryset = queryset.filter(estado=estado)
+                if estado == Estado.PENDIENTE:
+                    queryset = queryset.order_by("created_at")
+        return queryset
+
+    @action(detail=False, methods=["get"], url_path="contador")
+    def contador(self, request):
+        pendientes = self.get_queryset().filter(estado=SolicitudAutorizacionPrecio.Estado.PENDIENTE)
+        ultima = pendientes.order_by("-created_at").values_list("created_at", flat=True).first()
+        return Response({"pendientes": pendientes.count(), "ultima_en": ultima})
+
+    @action(detail=True, methods=["post"], url_path="autorizar")
+    def autorizar(self, request, pk=None):
+        serializer = DecidirAutorizacionPrecioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        solicitud = autorizaciones.autorizar(
+            self.get_object(), request=request, comentario=serializer.validated_data["comentario"].strip(),
+        )
+        return Response(self.get_serializer(solicitud).data)
+
+    @action(detail=True, methods=["post"], url_path="rechazar")
+    def rechazar(self, request, pk=None):
+        serializer = DecidirAutorizacionPrecioSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        comentario = serializer.validated_data["comentario"].strip()
+        if not comentario:
+            raise ValidationError({
+                "comentario": "Cuéntale al asesor por qué no se autoriza.", "code": "COMENTARIO_REQUERIDO",
+            })
+        solicitud = autorizaciones.rechazar(self.get_object(), request=request, comentario=comentario)
+        return Response(self.get_serializer(solicitud).data)

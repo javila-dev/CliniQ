@@ -173,6 +173,15 @@ def _handle_compromiso_pago(external_id: str, event: str, document_id: str | Non
         logger.warning("Webhook Documenso compromiso_pago: consentimiento no encontrado | id=%s", consentimiento_id)
         return
 
+    if consentimiento.estado == Consentimiento.Estado.REVOCADO:
+        # Cotización descartada o documento reemplazado: el sobre viejo puede seguir
+        # abierto en Documenso, pero firmarlo ya no cuenta (CT-06).
+        logger.warning(
+            "Webhook Documenso compromiso_pago: compromiso revocado ignorado | id=%s | event=%s",
+            consentimiento_id, event,
+        )
+        return
+
     if not _sobre_compromiso_vigente(consentimiento, huella):
         # El documento cambio (cotizacion editada) despues de crear este sobre:
         # firmar el link viejo no acepta la cotizacion con un contenido distinto.

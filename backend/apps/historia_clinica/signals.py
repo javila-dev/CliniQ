@@ -9,7 +9,4 @@ from apps.pacientes.models import Paciente
 def crear_historia_clinica(sender, instance, created, **kwargs):
     if not created:
         return
-    HistoriaClinica.objects.get_or_create(
-        paciente=instance,
-        defaults={"clinica": instance.clinica},
-    )
+    HistoriaClinica.del_paciente(instance)

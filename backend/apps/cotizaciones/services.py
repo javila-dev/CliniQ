@@ -107,12 +107,20 @@ def aceptar_cotizacion(cotizacion, *, actor=None) -> list:
         cartera.total = cotizacion.total
         cartera.save(update_fields=["total", "updated_at"])
     if not cartera.cuotas.exists():
-        for forma_pago in cotizacion.formas_pago.filter(activo=True):
+        formas_pago = list(cotizacion.formas_pago.filter(activo=True))
+        # El plan se acepta con hasta 1 peso de diferencia por redondeo: la
+        # diferencia va a la última cuota para que la cartera cuadre exacto. Antes
+        # quedaba un saldo de centavos pendiente para siempre (CT-09).
+        diferencia = Decimal(cotizacion.total) - sum((f.valor for f in formas_pago), Decimal("0"))
+        if abs(diferencia) > TOLERANCIA_PLAN_PAGOS:
+            diferencia = Decimal("0")
+        for indice, forma_pago in enumerate(formas_pago):
+            valor = forma_pago.valor + (diferencia if indice == len(formas_pago) - 1 else Decimal("0"))
             CuotaCartera.objects.create(
                 cartera=cartera,
                 tipo=forma_pago.tipo,
                 descripcion=forma_pago.descripcion,
-                valor_esperado=forma_pago.valor,
+                valor_esperado=valor,
                 fecha_esperada=forma_pago.fecha,
             )
 
@@ -133,6 +141,19 @@ def descartar_cotizacion(cotizacion, *, motivo: str = "", nota: str = "") -> Non
     cotizacion.motivo_descarte = motivo
     cotizacion.nota_descarte = nota
     cotizacion.save(update_fields=["estado", "descartada_en", "motivo_descarte", "nota_descarte", "updated_at"])
+    from apps.consentimientos.models import Consentimiento
+    from apps.cotizaciones.autorizaciones import cancelar_pendientes
+
+    cancelar_pendientes(cotizacion, "La cotización se descartó.")
+    # Los documentos sin firmar (el compromiso de pago, sobre todo) se revocan:
+    # antes el paciente podía firmar el compromiso de una propuesta descartada
+    # (CT-06). Si la propuesta se reabre, al aceptarla se genera uno nuevo.
+    cotizacion.consentimientos.filter(estado=Consentimiento.Estado.PENDIENTE).update(
+        estado=Consentimiento.Estado.REVOCADO,
+        revocado_en=timezone.now(),
+        motivo_revocacion="La cotización se descartó.",
+        updated_at=timezone.now(),
+    )
 
 
 def renovar_cotizacion(cotizacion) -> None:
@@ -256,6 +277,14 @@ def aceptar_cotizacion_por_firma_compromiso(consentimiento) -> None:
     if cotizacion.estado != Cotizacion.Estado.BORRADOR or not cotizacion.activo:
         return
     if not clinica_exige_compromiso_pago(cotizacion):
+        return
+    # Precios fuera de regla sin autorizar: firmar el compromiso no los aprueba.
+    if cotizacion.precio_por_autorizar:
+        logger.warning(
+            "[aceptar_cotizacion_por_firma_compromiso] precios por autorizar; no se acepta"
+            " | cotizacion_id=%s | consentimiento_id=%s",
+            cotizacion.id, consentimiento.id,
+        )
         return
     # Si el borrador se editó y el plan de pagos ya no suma el total, aceptar
     # dejaría una venta con cuotas que no cuadran: queda en borrador para que

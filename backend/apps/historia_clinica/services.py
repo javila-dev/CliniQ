@@ -513,8 +513,15 @@ def paciente_firmo_en_envelope(consentimiento, payload: dict) -> bool:
     from apps.consentimientos.services import _estado_firma_desde_envelope
     from apps.historia_clinica.documenso_firmantes import destinatario_firmo
 
-    if consentimiento.requiere_firma_profesional and consentimiento.documenso_recipient_paciente_id:
-        return destinatario_firmo(payload, consentimiento.documenso_recipient_paciente_id)
+    if consentimiento.requiere_firma_profesional:
+        recipient_id = consentimiento.documenso_recipient_paciente_id
+        if not recipient_id:
+            # Sin el id guardado (registros viejos): el paciente es el primer firmante,
+            # la misma convención con la que se crea el sobre. Mirar el sobre completo
+            # dejaría la firma "sin confirmar" hasta que firme el profesional.
+            firmantes = _firmantes_por_orden(payload.get("recipients") or [])
+            recipient_id = firmantes[0].get("id") if firmantes else None
+        return bool(recipient_id) and destinatario_firmo(payload, recipient_id)
     return _estado_firma_desde_envelope(payload) == "firmada"
 
 

@@ -124,3 +124,75 @@ class EstadoFinancieroTests(TestCase):
         self.assertEqual(acotado["actual"]["ingresos_facturado"], "1500000.00")
         nombres = {r["sede_nombre"] for r in acotado["por_sede"]}
         self.assertNotIn("Otra", nombres)
+
+
+class IngresosPorOrigenTests(TestCase):
+    """Ingresos del dashboard: por origen, acumulables y sin gastos."""
+
+    def setUp(self):
+        from apps.clinicas.models import FormaDePago
+        from apps.cobros.models import PagoRecibido
+        from apps.cotizaciones.models import Cotizacion
+
+        self.client = APIClient()
+        self.admin = User.objects.create_user(
+            email="root-origen@example.com", password="secret123",
+            first_name="Root", last_name="Origen", rol=User.Role.SUPERADMIN,
+        )
+        clinica = Clinica.objects.create(nombre="Clinica Origen", nit="901444555")
+        sede = Sede.objects.create(
+            clinica=clinica, nombre="Centro", ciudad="Bogota", direccion="Calle 1", telefono="3000000000",
+        )
+        paciente = Paciente.objects.create(
+            clinica=clinica, tipo_documento=Paciente.TipoDocumento.CC, numero_documento="444555666",
+            nombres="Eva", apellidos="Paz",
+            fecha_nacimiento=timezone.localdate() - timezone.timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO, direccion="Calle 9", telefono="3000000009",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP, autoriza_datos=True,
+        )
+        medio = FormaDePago.objects.create(clinica=clinica, nombre="Efectivo test", tipo_base="efectivo")
+        cotizacion = Cotizacion.objects.create(
+            clinica=clinica, paciente=paciente, sede=sede, estado=Cotizacion.Estado.ACEPTADA,
+            aceptada_en=_dt(2026, 8, 5),
+        )
+
+        def pago(origen, valor, fecha, **extra):
+            cobro = Cobro.objects.create(
+                origen=origen, paciente=paciente, sede=sede, created_by=self.admin, fecha=fecha, **extra,
+            )
+            PagoRecibido.objects.create(
+                cobro=cobro, medio_pago=medio, valor=valor, fecha=fecha, recibido_por=self.admin,
+            )
+            return cobro
+
+        pago(Cobro.Origen.CITA, "100000.00", _dt(2026, 8, 3))
+        venta = pago(Cobro.Origen.COTIZACION, "300000.00", _dt(2026, 8, 5), cotizacion=cotizacion)
+        PagoRecibido.objects.create(
+            cobro=venta, medio_pago=medio, valor="200000.00", fecha=_dt(2026, 8, 20), recibido_por=self.admin,
+        )
+        pago(Cobro.Origen.LIBRE, "50000.00", _dt(2026, 8, 10))
+        pago(Cobro.Origen.CITA, "999999.00", _dt(2026, 8, 11), estado=Cobro.Estado.ANULADO)
+        # Periodo anterior: los mismos 31 días justo antes.
+        pago(Cobro.Origen.CITA, "400000.00", _dt(2026, 7, 15))
+        self.client.force_authenticate(self.admin)
+
+    def test_totales_por_origen_y_comparacion(self):
+        data = self.client.get(
+            "/api/v1/reportes/ingresos-por-origen/", {"fecha_inicio": "2026-08-01", "fecha_fin": "2026-08-31"},
+        ).json()
+        self.assertEqual(data["totales"], {
+            "citas": "100000.00", "ventas": "300000.00", "cartera": "200000.00", "otros": "50000.00",
+            "total": "650000.00",
+        })
+        self.assertEqual(len(data["serie"]), 31)
+        self.assertEqual(data["serie"][19], {
+            "fecha": "2026-08-20", "citas": "0.00", "ventas": "0.00", "cartera": "200000.00", "otros": "0.00",
+        })
+        self.assertEqual(data["anterior"]["fecha_inicio"], "2026-07-01")
+        self.assertEqual(data["anterior"]["total"], "400000.00")
+
+    def test_rango_invertido_es_400(self):
+        r = self.client.get(
+            "/api/v1/reportes/ingresos-por-origen/", {"fecha_inicio": "2026-08-31", "fecha_fin": "2026-08-01"},
+        )
+        self.assertEqual(r.status_code, 400)

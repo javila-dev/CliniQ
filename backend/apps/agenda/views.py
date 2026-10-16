@@ -6,7 +6,7 @@ import logging
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Q, Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -51,10 +51,18 @@ from apps.notificaciones.services import (
     uso_whatsapp_mes_actual,
 )
 from apps.pacientes.serializers import enmascarar_cola
-from apps.users.authorization import sede_ids_para_filtro, user_sede_ids_acotadas
+from apps.users.authorization import (
+    puede_atender_la_cita,
+    sede_ids_para_filtro,
+    user_has_permission,
+    user_sede_ids_acotadas,
+    ve_solo_su_agenda,
+)
 from apps.users.models import User
 from apps.users.permissions import (
     CanChangeAppointmentState,
+    PuedeGestionarLlegada,
+    PuedeVerCitas,
     RequireAnyPermission,
     RequirePermission,
     get_clinica_activa,
@@ -150,7 +158,7 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequirePermission("agenda.citas.crear"),)
         elif self.action in {"update", "partial_update"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action in {"cambiar_estado", "firma_profesional", "firma_profesional_documento"}:
+        elif self.action in {"cambiar_estado", "firma_profesional", "firma_profesional_documento", "completar_atencion"}:
             permission_classes = (CanChangeAppointmentState,)
         elif self.action == "destroy":
             permission_classes = (RequirePermission("agenda.citas.eliminar"),)
@@ -160,12 +168,15 @@ class CitaViewSet(ModelViewSet):
             permission_classes = (RequireAnyPermission("agenda.citas.crear", "agenda.citas.editar"),)
         elif self.action in {"solicitar_recordatorio", "enviar_recordatorio_inmediato"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action in {"iniciar_checkin", "verificar_otp", "checkin_foto"}:
-            permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action in {"enviar_firma_asistencia", "iniciar_registro_asistencia", "enviar_link_firma_asistencia", "recuperar_pdf_asistencia", "confirmar_firma_asistencia", "verificar_firma_asistencia"}:
-            permission_classes = (RequirePermission("agenda.citas.editar"),)
-        elif self.action == "registro_asistencia_pdf":
-            permission_classes = (RequirePermission("agenda.citas.ver"),)
+        elif self.action in {
+            "iniciar_checkin", "verificar_otp", "checkin_foto",
+            "enviar_firma_asistencia", "iniciar_registro_asistencia", "enviar_link_firma_asistencia",
+            "recuperar_pdf_asistencia", "confirmar_firma_asistencia", "verificar_firma_asistencia",
+        }:
+            # Editar citas, o atender esa cita (el profesional recibe a su paciente).
+            permission_classes = (PuedeGestionarLlegada,)
+        elif self.action in {"list", "retrieve"}:
+            permission_classes = (PuedeVerCitas,)
         else:
             permission_classes = (RequirePermission("agenda.citas.ver"),)
         return [permission() for permission in permission_classes]
@@ -177,6 +188,16 @@ class CitaViewSet(ModelViewSet):
             return queryset.order_by("fecha_inicio")
         if user.rol != "superadmin":
             queryset = queryset.filter(sede__clinica=user.clinica)
+        # La agenda de toda la sede la ve quien agenda; quien atiende sin ese
+        # permiso ve solo la suya. Las pantallas del paciente (?paciente=) y el
+        # detalle de una cita muestran todo: su historial no se acota. Las
+        # acciones sobre citas ajenas las frenan sus propios permisos.
+        if (
+            self.action in {"list", "hoy"}
+            and not self.request.query_params.get("paciente")
+            and ve_solo_su_agenda(user, request=self.request)
+        ):
+            queryset = queryset.filter(profesional=user)
 
         estado = self.request.query_params.get("estado")
         estado_in = self.request.query_params.get("estado__in")
@@ -270,6 +291,9 @@ class CitaViewSet(ModelViewSet):
                 "code": "CITA_CON_REGISTROS",
             })
 
+    # El bloqueo de la agenda del profesional (select_for_update) exige una
+    # transacción: sin ella todo PATCH de una cita respondía 500 (AG-01).
+    @transaction.atomic
     def perform_update(self, serializer):
         instance = self.get_object()
         if instance.estado in self.ESTADOS_CERRADOS:
@@ -402,6 +426,9 @@ class CitaViewSet(ModelViewSet):
             )
             raise ValidationError({"error": "El flujo de estado no es valido."})
 
+        if nuevo_estado in {Cita.Estado.EN_CURSO, Cita.Estado.COMPLETADA} and not puede_atender_la_cita(request.user, cita):
+            raise PermissionDenied("Solo quien atiende esta cita puede iniciar o cerrar la atención.")
+
         if nuevo_estado == Cita.Estado.EN_CURSO:
             # Bloqueo duro por mora: si la cotización que originó la cita (o
             # cualquier cartera del paciente) tiene cuotas vencidas y la clínica
@@ -448,6 +475,31 @@ class CitaViewSet(ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
+        # Cancelar una cita ya cobrada: se avisa y se pregunta qué hacer con el cobro
+        # (decisión del 15/10/2026). Antes el ingreso quedaba cobrado sin aviso (AG-15).
+        anular_cobro = False
+        if nuevo_estado == Cita.Estado.CANCELADA:
+            from apps.cobros.models import Cobro
+
+            cobro = Cobro.objects.filter(cita=cita).exclude(estado=Cobro.Estado.ANULADO).first()
+            if cobro is not None and cobro.pagos.exists():
+                accion_cobro = request.data.get("accion_cobro")
+                puede_anular = user_has_permission(request.user, "cobros.anular", request=request)
+                if accion_cobro not in {"mantener", "anular"}:
+                    return Response(
+                        {
+                            "error": "Esta cita ya tiene un cobro con pagos. Elige qué hacer con el cobro al cancelarla.",
+                            "code": "CITA_CON_COBRO_PAGADO",
+                            "cobro": {"id": str(cobro.id), "total_pagado": str(cobro.pagos.aggregate(t=Sum("valor"))["t"] or 0)},
+                            "puede_anular": puede_anular,
+                        },
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                if accion_cobro == "anular":
+                    if not puede_anular:
+                        raise PermissionDenied("Tu rol no puede anular cobros. Cancela la cita manteniendo el cobro.")
+                    anular_cobro = cobro
+
         estado_anterior = cita.estado
         cita.estado = nuevo_estado
         update_fields = ["estado", "updated_at"]
@@ -476,11 +528,20 @@ class CitaViewSet(ModelViewSet):
             cita.fecha_inicio_real = None
             update_fields.append("fecha_inicio_real")
 
-        cita.save(update_fields=list(dict.fromkeys(update_fields)))
+        with transaction.atomic():
+            if anular_cobro:
+                from apps.cobros.models import Cobro
+                from apps.cobros.services import reversar_pago
 
-        if nuevo_estado == Cita.Estado.CANCELADA:
+                for pago in list(anular_cobro.pagos.all()):
+                    reversar_pago(cobro=anular_cobro, pago=pago)
+                Cobro.objects.filter(pk=anular_cobro.pk).update(estado=Cobro.Estado.ANULADO, updated_at=timezone.now())
+                registrar_accion(request, "cobro.anular", anular_cobro, {"motivo": "Cita cancelada", "cita_id": str(cita.id)})
+            cita.save(update_fields=list(dict.fromkeys(update_fields)))
+
+        if nuevo_estado in {Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO}:
             # Liberar las sesiones de tratamiento vinculadas a esta cita para que
-            # puedan reagendarse. El cupo del ítem de cotización ya queda libre vía
+            # puedan reagendarse ("no asistió" tampoco consume la sesión). El cupo del ítem de cotización ya queda libre vía
             # citas_no_canceladas(); esto suelta además el FK de la SesionProcedimiento,
             # que si no bloquea el reagendado con SESION_YA_VINCULADA.
             from apps.protocolos.models import SesionProcedimiento
@@ -489,15 +550,19 @@ class CitaViewSet(ModelViewSet):
                 estado=SesionProcedimiento.Estado.PENDIENTE
             ).update(cita=None, updated_at=timezone.now())
 
-            if estado_anterior == Cita.Estado.EN_CURSO:
-                # Se canceló una atención ya iniciada: los insumos que se
-                # registraron vuelven al stock (antes se quedaban descontados).
-                from apps.historia_clinica.models import ConsumoInsumo
-                from apps.historia_clinica.services import eliminar_consumo_insumo
+            # Los insumos registrados en la atención vuelven al stock. No solo si
+            # estaba en curso: tras "Desiniciar" la cita queda en espera con los
+            # consumos de su nota, y al cancelarla se quedaban descontados (AT-07).
+            from apps.historia_clinica.models import ConsumoInsumo
+            from apps.historia_clinica.services import eliminar_consumo_insumo
 
-                with transaction.atomic():
-                    for consumo in ConsumoInsumo.objects.filter(nota__cita=cita, activo=True):
+            for consumo in ConsumoInsumo.objects.filter(nota__cita=cita, activo=True):
+                try:
+                    with transaction.atomic():
                         eliminar_consumo_insumo(consumo, request.user)
+                except ValidationError:
+                    # Ya lo devolvió otra petición a la vez.
+                    continue
 
         if nuevo_estado in {
             Cita.Estado.CONFIRMADA,
@@ -517,6 +582,71 @@ class CitaViewSet(ModelViewSet):
             registrar_accion(request, "cita.cancelar", cita, {"motivo": cita.motivo_cancelacion})
         elif nuevo_estado == Cita.Estado.COMPLETADA:
             registrar_accion(request, "cita.completar", cita)
+        return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="completar_atencion")
+    def completar_atencion(self, request, pk=None):
+        """Cierra la atención en una sola transacción: marca la sesión del
+        tratamiento (si la hay), completa la nota y pasa la cita a completada.
+
+        Antes eran tres llamadas desde la pantalla: si fallaba la última, la nota
+        quedaba completada con la cita en curso y la atención se trababa; al
+        recargar se creaba una nota nueva vacía (AT-03). Es idempotente.
+        """
+        from apps.historia_clinica.autoria import exigir_documentable
+        from apps.historia_clinica.models import NotaClinica
+        from apps.protocolos.models import SesionProcedimiento
+        from apps.protocolos.services import ProtocolosError, _sesion_vinculada_o_pendiente, marcar_sesion_completada
+
+        with transaction.atomic():
+            cita = Cita.objects.select_for_update().get(pk=self.get_object().pk)
+            if cita.estado == Cita.Estado.COMPLETADA:
+                return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
+            if not puede_atender_la_cita(request.user, cita):
+                raise PermissionDenied("Solo quien atiende esta cita puede cerrar la atención.")
+            if cita.estado != Cita.Estado.EN_CURSO:
+                raise ValidationError({"error": "La atención no está en curso.", "code": "INVALID_TRANSITION"})
+
+            notas = NotaClinica.objects.filter(cita=cita, activo=True).order_by("-created_at")
+            nota_id = request.data.get("nota")
+            nota = notas.filter(id=nota_id).first() if nota_id else notas.first()
+            if nota is None:
+                raise ValidationError({"error": "La atención no tiene nota.", "code": "NOTA_REQUERIDA"})
+            exigir_documentable(request.user, nota, en_borrador=False)
+
+            sesion = _sesion_vinculada_o_pendiente(cita)
+            if sesion is not None and sesion.estado == SesionProcedimiento.Estado.PENDIENTE:
+                validos = {str(sesion.procedimiento_id)} if sesion.procedimiento_id else set()
+                if sesion.tipo_sesion_id:
+                    validos |= {
+                        str(pid) for pid in sesion.tipo_sesion.procedimientos.filter(activo=True)
+                        .values_list("procedimiento_id", flat=True)
+                    }
+                pedidos = [str(p) for p in (request.data.get("procedimientos_ejecutados") or [])]
+                ejecutados = [p for p in pedidos if p in validos] or sorted(validos)
+                try:
+                    marcar_sesion_completada(
+                        sesion, cita=cita,
+                        # La sesión es del profesional de la cita, no de quien la cierra (AT-11).
+                        profesional=cita.profesional or sesion.profesional,
+                        procedimientos_ejecutados=ejecutados,
+                    )
+                except ProtocolosError as exc:
+                    transaction.set_rollback(True)
+                    return Response({"error": str(exc), "code": exc.code, **exc.extra}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Todas las notas de la cita se cierran: un borrador duplicado no queda abierto.
+            for abierta in notas.filter(estado=NotaClinica.EstadoNota.BORRADOR):
+                abierta.estado = NotaClinica.EstadoNota.COMPLETADA
+                abierta.save(update_fields=["estado", "updated_at"])
+
+            cita.estado = Cita.Estado.COMPLETADA
+            update_fields = ["estado", "updated_at"]
+            if cita.fecha_fin_real is None:
+                cita.fecha_fin_real = timezone.now()
+                update_fields.append("fecha_fin_real")
+            cita.save(update_fields=update_fields)
+        registrar_accion(request, "cita.completar", cita)
         return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get", "post"], url_path="firma_profesional")
@@ -708,7 +838,7 @@ class CitaViewSet(ModelViewSet):
             try:
                 item = (
                     ItemCotizacion.objects
-                    .select_related("tratamiento", "servicio", "cotizacion")
+                    .select_related("tratamiento", "servicio", "procedimiento", "cotizacion")
                     .get(id=item_cotizacion_id)
                 )
                 logger.debug(
@@ -724,7 +854,22 @@ class CitaViewSet(ModelViewSet):
                     item.cotizacion.clinica_id, request.user.clinica_id,
                 )
                 raise ValidationError({"item_cotizacion_id": "El item no pertenece a tu clinica."})
-            if item.tratamiento_id:
+            sesion_id = request.query_params.get("sesion_ejecutada_id")
+            if item.tratamiento_id and sesion_id:
+                # Con la sesión elegida, su duración: antes los horarios se
+                # calculaban con la sesión más larga del paquete (AG-07).
+                from apps.agenda.services import duracion_de_sesion
+                from apps.protocolos.models import SesionProcedimiento
+
+                sesion = (
+                    SesionProcedimiento.objects
+                    .select_related("tipo_sesion", "procedimiento")
+                    .filter(id=sesion_id, tratamiento__paciente__clinica_id=item.cotizacion.clinica_id)
+                    .first()
+                )
+                if sesion is not None:
+                    duracion_min = duracion_de_sesion(sesion)[0] or None
+            if item.tratamiento_id and not duracion_min:
                 from django.db.models import Sum
                 tipos_qs = item.tratamiento.tipos_sesion.filter(es_compromiso=True, activo=True)
                 resultado = tipos_qs.aggregate(max_duracion=Max("duracion_min"))
@@ -739,9 +884,9 @@ class CitaViewSet(ModelViewSet):
                     )
                     duracion_min = resultado_proc["max_duracion_proc"] or 0
                     logger.debug("[slots_disponibles] duracion_min desde procedimientos del tipo_sesion: %s", duracion_min)
-            if not duracion_min and item.servicio_id:
-                duracion_min = item.servicio.duracion_min
-                logger.debug("[slots_disponibles] duracion_min desde item.servicio: %s", duracion_min)
+            if not duracion_min and item.procedimiento_efectivo_id:
+                duracion_min = item.procedimiento_efectivo.duracion_min
+                logger.debug("[slots_disponibles] duracion_min desde el procedimiento del item: %s", duracion_min)
             if not duracion_min:
                 logger.debug(
                     "[slots_disponibles] ERROR: item %s sin duracion (tratamiento=%s, servicio=%s)",
@@ -806,14 +951,23 @@ class CitaViewSet(ModelViewSet):
         sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede"))
         profesionales = request.query_params.get("profesional__in", "")
         profesional_ids = [p.strip() for p in profesionales.split(",") if p.strip()] or None
+        if ve_solo_su_agenda(request.user, request=request):
+            profesional_ids = [request.user.id]
         return Response(services.citas_sin_confirmar_proximo_dia_habil(clinica, sede_ids, profesional_ids))
 
     @action(detail=True, methods=["patch"], url_path="confirmar_manual")
     def confirmar_manual(self, request, pk=None):
         serializer = ConfirmarManualSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+        cita = self.get_object()
+        # Como "no confirmó": solo citas que siguen por venir. Por API se confirmaba
+        # una cita cancelada o ya atendida (AG-14).
+        if cita.estado not in {Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA}:
+            raise ValidationError({
+                "error": "Solo se confirma una cita pendiente o confirmada.", "code": "CITA_NO_CONFIRMABLE",
+            })
         cita = confirmar_manual(
-            self.get_object(),
+            cita,
             request.user,
             medio=serializer.validated_data.get("medio", ""),
             nota=serializer.validated_data.get("nota", ""),
@@ -1120,15 +1274,21 @@ class CitaViewSet(ModelViewSet):
         'firmada' de inmediato sin esperar el webhook de Documenso (que puede llegar
         tarde o fallar). El webhook sigue siendo el canal para guardar el PDF firmado.
         """
-        cita = self.get_object()
-        if cita.firma_asistencia_estado == "firmada":
-            serializer = self.get_serializer(cita)
-            return Response(serializer.data, status=status.HTTP_200_OK)
+        from apps.consentimientos.services import (
+            RESPUESTA_FIRMA_NO_CONFIRMADA,
+            confirmar_firma_con_documenso,
+            verificar_firma_asistencia_en_documenso,
+        )
 
-        cita.firma_asistencia_estado = "firmada"
-        cita.save(update_fields=["firma_asistencia_estado", "updated_at"])
+        cita = self.get_object()
+        # Se confirma con Documenso: antes cualquier llamada la marcaba firmada sin
+        # verificar nada (AG-12). Si Documenso aún no lo reporta, el asistente sigue
+        # esperando y el webhook la marca al llegar.
+        if not confirmar_firma_con_documenso(lambda: verificar_firma_asistencia_en_documenso(cita) == "firmada"):
+            return Response(RESPUESTA_FIRMA_NO_CONFIRMADA, status=status.HTTP_409_CONFLICT)
+        cita.refresh_from_db()
         logger.info(
-            "[confirmar_firma_asistencia] estado actualizado eager | cita_id=%s | user=%s",
+            "[confirmar_firma_asistencia] firma verificada en Documenso | cita_id=%s | user=%s",
             cita.id, request.user.id,
         )
         serializer = self.get_serializer(cita)
@@ -1375,6 +1535,19 @@ class BloqueoAgendaViewSet(ModelViewSet):
         from apps.users.authorization import user_has_permission
 
         self._puede_modificar(serializer.instance)
+        bloqueo = serializer.instance
+        datos = {
+            campo: serializer.validated_data.get(campo, getattr(bloqueo, campo))
+            for campo in ("sede", "profesional", "fecha_inicio", "fecha_fin")
+        }
+        # Lo mismo que al crear: un usuario acotado no lo mueve a otra sede ni lo
+        # extiende a toda la clínica con sede vacía (AG-11).
+        acotadas = user_sede_ids_acotadas(self.request.user)
+        if acotadas is not None and (datos["sede"] is None or datos["sede"].id not in acotadas):
+            raise PermissionDenied("Solo puedes dejar bloqueos en tus sedes.")
+        if any(datos[campo] != getattr(bloqueo, campo) for campo in datos):
+            clinica = getattr(datos["sede"], "clinica", None) or bloqueo.clinica or self.request.user.clinica
+            self._avisar_citas_afectadas(datos, datos["sede"], clinica)
         # Un bloqueo aprobado que edita alguien sin permiso de aprobar vuelve a revisión.
         if serializer.instance.estado == BloqueoAgenda.Estado.APROBADO and not user_has_permission(
             self.request.user, "agenda.aprobar_bloqueo", request=self.request
@@ -1392,6 +1565,12 @@ class BloqueoAgendaViewSet(ModelViewSet):
         bloqueo = self.get_object()
         if bloqueo.estado == BloqueoAgenda.Estado.APROBADO:
             return Response({"detail": "El bloqueo ya está aprobado."}, status=status.HTTP_400_BAD_REQUEST)
+        # Mientras estuvo pendiente se pudieron agendar citas en ese horario: se
+        # muestran antes de aprobar, como al crearlo (AG-11).
+        self._avisar_citas_afectadas(
+            {"profesional": bloqueo.profesional, "fecha_inicio": bloqueo.fecha_inicio, "fecha_fin": bloqueo.fecha_fin},
+            bloqueo.sede, bloqueo.clinica or getattr(bloqueo.sede, "clinica", None),
+        )
         bloqueo.estado = BloqueoAgenda.Estado.APROBADO
         bloqueo.aprobado_por = request.user
         bloqueo.aprobado_en = timezone.now()
