@@ -4,14 +4,14 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   CalendarDays, Users, CheckCircle2,
-  ArrowRight, Plus, TrendingUp, DollarSign,
+  ArrowRight, DollarSign,
   FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
   ChevronDown, Search, ShoppingBag, CalendarX,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer, Legend,
+  ResponsiveContainer,
 } from 'recharts'
 import { reportesApi } from '@/lib/api/reportes'
 import { carteraApi } from '@/lib/api/cartera'
@@ -21,14 +21,16 @@ import { useUserSedes } from '@/hooks/useUserSedes'
 import { useAuthStore } from '@/store/authStore'
 import { ParaHoyResumen } from '@/components/seguimiento/ParaHoyResumen'
 import { AvisoDatosProfesionales } from '@/components/shared/AvisoDatosProfesionales'
+import { CitasHoyCard } from '@/components/dashboard/CitasHoyCard'
+import { IngresosAcumuladosCard } from '@/components/dashboard/IngresosAcumuladosCard'
+import { AutorizacionesPendientesBanner } from '@/components/cotizaciones/AutorizacionesPrecioAcceso'
 import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
-import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { SetupChecklist, useSetupChecklist } from '@/components/shared/SetupChecklist'
 import { PuestaEnMarchaBanner } from '@/components/shared/PuestaEnMarchaBanner'
 import { canAccess, hasPermission, isAdminOrSuperAdmin, PERM, veDashboard } from '@/lib/permissions'
-import { addDaysISO, cn, formatTime, scrollWheelFallback, todayISO, toTitleCase } from '@/lib/utils'
+import { cn, scrollWheelFallback, todayISO, toTitleCase } from '@/lib/utils'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -37,9 +39,9 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
-import type { EstadoCita } from '@/types/agenda'
 import type { ComercialMetrics, PacienteSinReagendar, Vendedor } from '@/types/reportes'
 import type { ResumenCartera } from '@/types/cartera'
+import type { AuthUser } from '@/types/auth'
 
 const STALE = 5 * 60 * 1000
 
@@ -49,16 +51,6 @@ const COP = new Intl.NumberFormat('es-CO', {
 
 // Servicio se lleva el espacio sobrante; citas cabe en 3 dígitos y el % en "100.0%".
 const COLS_SERVICIOS = 'grid grid-cols-[minmax(0,1fr)_2rem_6rem_3.5rem] gap-x-3 px-5'
-
-const ESTADO_LEFT: Record<EstadoCita, string> = {
-  pendiente: 'border-l-yellow-400',
-  confirmada: 'border-l-blue-400',
-  en_espera: 'border-l-violet-400',
-  en_curso: 'border-l-primary',
-  completada: 'border-l-green-400',
-  cancelada: 'border-l-red-300',
-  no_asistio: 'border-l-gray-300',
-}
 
 function abrevCOP(value: number): string {
   if (value >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`
@@ -112,21 +104,6 @@ function rangoPeriodo(key: PeriodoKey): { ini: string; fin: string } {
   return { ini: ini.toLocaleDateString('en-CA'), fin }
 }
 
-/** El endpoint devuelve `periodo` como día (YYYY-MM-DD), mes (YYYY-MM) o
- *  semana ISO (YYYY-Www) según `agrupar_por`. Formatea cada caso para el eje X. */
-function fmtPeriodoGrafica(p: string): string {
-  if (/^\d{4}-\d{2}-\d{2}$/.test(p)) {
-    return new Date(p + 'T00:00:00').toLocaleDateString('es-CO', { month: 'short', day: 'numeric' })
-  }
-  if (/^\d{4}-\d{2}$/.test(p)) {
-    const [y, m] = p.split('-').map(Number)
-    return new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'short', year: '2-digit' })
-  }
-  const wk = p.match(/^(\d{4})-W?(\d{2})$/)
-  if (wk) return `Sem ${wk[2]}`
-  return p
-}
-
 function KPICard({
   label, value, sub, icon: Icon, iconBg, iconColor, loading, alert, onClick, ayuda,
 }: {
@@ -175,33 +152,6 @@ function KPICard({
         )}
       </div>
     </Contenedor>
-  )
-}
-
-function GraficaIngresos({ data, loading }: { data: { periodo: string; total_cobros: string; total_gastos: string }[]; loading: boolean }) {
-  if (loading) return <Skeleton className="h-48 w-full rounded-xl" />
-
-  const chartData = data.map(d => ({
-    fecha: fmtPeriodoGrafica(d.periodo),
-    Ingresos: parseFloat(d.total_cobros),
-    Gastos: parseFloat(d.total_gastos),
-  }))
-
-  return (
-    <ResponsiveContainer width="100%" height={200}>
-      <BarChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-        <XAxis dataKey="fecha" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
-        <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} tickFormatter={v => `$${(v / 1000).toFixed(0)}k`} />
-        <Tooltip
-          formatter={(value: number) => COP.format(value)}
-          contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
-        />
-        <Legend wrapperStyle={{ fontSize: 12 }} />
-        <Bar dataKey="Ingresos" fill="#f43f5e" radius={[3, 3, 0, 0]} />
-        <Bar dataKey="Gastos" fill="#e5e7eb" radius={[3, 3, 0, 0]} />
-      </BarChart>
-    </ResponsiveContainer>
   )
 }
 
@@ -630,13 +580,125 @@ function SheetNotificacionesFallidas({
   )
 }
 
+/** "Mis citas de hoy": quien atiende pacientes y no agenda. Quien puede agendar
+ *  (recepción, aunque también atienda) ve las citas de toda la sede. */
+function veSoloSusCitas(user: AuthUser | null | undefined) {
+  return user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.AGENDA_CREAR)
+}
+
 export default function DashboardPage() {
   const { user } = useAuthStore()
   return (
     <RoleGuard check={canAccess.dashboard}>
-      {veDashboard(user) ? <DashboardContent /> : <DashboardSinReportes />}
+      {veSoloSusCitas(user)
+        ? <DashboardProfesional />
+        : veDashboard(user) ? <DashboardContent /> : <DashboardSinReportes />}
     </RoleGuard>
   )
+}
+
+/** Quien atiende pacientes y no agenda ve su propio día: sus citas, no las de
+ *  toda la sede. Antes esta vista exigía no tener reportes y nunca se veía. */
+function DashboardProfesional() {
+  const { user } = useAuthStore()
+  const { data: citasHoyData, isLoading: citasLoading } = useQuery({
+    queryKey: ['citas', 'hoy', 'mias', user?.id],
+    queryFn: () => agendaApi.citas.list({ fecha_inicio__date: todayISO(), profesional: user!.id, page_size: 100 }),
+    enabled: !!user?.id,
+    staleTime: STALE,
+    refetchInterval: STALE,
+  })
+  const citasHoy = citasHoyData?.results
+  const enCurso = citasHoy?.filter(c => c.estado === 'en_curso') ?? []
+  const totalCitas = citasHoy?.length ?? 0
+  const completadas = citasHoy?.filter(c => c.estado === 'completada').length ?? 0
+
+    return (
+      <div className="w-[90%] mx-auto space-y-6">
+        {/* Hero */}
+        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
+          <div className="relative z-10">
+            <p className="text-white/70 text-sm mb-0.5 capitalize">{todayLong()}</p>
+            <h1 className="text-2xl font-bold">{greeting()}, {user?.first_name}</h1>
+            <p className="text-white/80 text-sm mt-1">
+              {enCurso.length > 0
+                ? <><span className="font-semibold text-white">{enCurso.length}</span> cita{enCurso.length !== 1 ? 's' : ''} en curso ahora mismo</>
+                : totalCitas === 0
+                  ? 'No hay citas agendadas para hoy'
+                  : <><span className="font-semibold text-white">{totalCitas}</span> cita{totalCitas !== 1 ? 's' : ''} agendada{totalCitas !== 1 ? 's' : ''} para hoy</>
+              }
+            </p>
+          </div>
+          <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
+          <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
+          <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
+        </div>
+
+        <AvisoDatosProfesionales />
+        <AutorizacionesPendientesBanner />
+
+        {/* KPIs simples */}
+        <div className="grid grid-cols-2 gap-4">
+          <KPICard
+            label="Citas hoy"
+            value={totalCitas}
+            icon={CalendarDays}
+            iconBg="bg-blue-50"
+            iconColor="text-blue-500"
+            loading={citasLoading}
+          />
+          <KPICard
+            label="Completadas"
+            value={completadas}
+            sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
+            icon={CheckCircle2}
+            iconBg="bg-green-50"
+            iconColor="text-green-500"
+            loading={citasLoading}
+          />
+        </div>
+
+        {/* Citas + accesos */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2">
+            <CitasHoyCard
+              citas={citasHoy}
+              loading={citasLoading}
+              titulo="Mis citas de hoy"
+              accionVacia={canAccess.agenda(user) ? { href: '/agenda', label: 'Ver agenda' } : undefined}
+            />
+          </div>
+
+          <div className="space-y-4">
+            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+              <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
+              <div className="space-y-2">
+                {[
+                  { href: '/atenciones', icon: CheckCircle2, label: 'Atenciones', desc: 'Cola de atenciones', visible: canAccess.atenciones(user) },
+                  { href: '/agenda', icon: CalendarDays, label: 'Agenda', desc: 'Ver mi agenda del día', visible: canAccess.agenda(user) },
+                  { href: '/pacientes', icon: Users, label: 'Pacientes', desc: 'Buscar pacientes', visible: canAccess.pacientes(user) },
+                ].filter((a) => a.visible).map(({ href, icon: Icon, label, desc }) => (
+                  <Link
+                    key={href}
+                    href={href}
+                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
+                  >
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                      <Icon className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium">{label}</p>
+                      <p className="text-xs text-muted-foreground">{desc}</p>
+                    </div>
+                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    )
 }
 
 /** Sin permiso de reportes: accesos a lo que sí puede usar, en vez de
@@ -647,6 +709,10 @@ function DashboardSinReportes() {
     { href: '/agenda', label: 'Agenda', detalle: 'Citas del día y por agendar', visible: canAccess.agenda(user) },
     { href: '/atenciones', label: 'Atenciones', detalle: 'Pacientes que atiendes hoy', visible: canAccess.atenciones(user) },
     { href: '/pacientes', label: 'Pacientes', detalle: 'Buscar y abrir fichas', visible: canAccess.pacientes(user) },
+    { href: '/seguimiento', label: 'Seguimiento', detalle: 'A quién llamar hoy', visible: hasPermission(user, PERM.SEGUIMIENTO_VER) },
+    { href: '/cotizaciones', label: 'Cotizaciones', detalle: 'Propuestas a pacientes', visible: hasPermission(user, PERM.COTIZACIONES_VER) },
+    { href: '/ingresos', label: 'Ingresos', detalle: 'Cobros y pagos recibidos', visible: canAccess.cobros(user) },
+    { href: '/cartera', label: 'Cartera', detalle: 'Cuotas y saldos por cobrar', visible: hasPermission(user, PERM.CARTERA_VER) },
   ].filter((a) => a.visible)
   return (
     <div className="space-y-6">
@@ -654,6 +720,7 @@ function DashboardSinReportes() {
         <h1 className="text-2xl font-semibold tracking-tight">{greeting()}, {user?.first_name}</h1>
         <p className="text-sm text-muted-foreground capitalize">{todayLong()}</p>
       </div>
+      <AutorizacionesPendientesBanner />
       {accesos.length > 0 ? (
         <div className="grid gap-3 sm:grid-cols-3">
           {accesos.map((a) => (
@@ -684,20 +751,23 @@ function DashboardContent() {
   const periodoSufijo = PERIODO_SUFIJO[periodo]
 
   const { allDone: checklistDone } = useSetupChecklist()
-  const esSoloProfesional = user?.es_profesional === true && !isAdminOrSuperAdmin(user) && !hasPermission(user, PERM.REPORTES_VER)
   // KPIs financieros/comerciales de dueño: cartera agregada, P&L 30 días,
   // ingresos por servicio, conversión de cotizaciones, tasa de completado por
   // profesional. Recepción / profesional ven un dashboard operativo sin esto.
   // Debe coincidir con el gate del backend (DashboardView.get: "reportes.ver_financieros"),
   // que es el que decide si el payload trae `cobros_hoy`/`ingresos_semana`.
   const canVerFinanzas = hasPermission(user, PERM.REPORTES_VER_FINANCIEROS)
+  // Las tarjetas que leen citas o cartera piden su propio permiso: sin él se
+  // ocultan en vez de mostrar 0 (la consulta respondía 403 en silencio).
+  const veAgenda = canAccess.agenda(user)
+  const veCartera = canVerFinanzas && hasPermission(user, PERM.CARTERA_VER)
   const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
   // `sedeId` = elección explícita del usuario. Sin elección, cae en la sede por
   // defecto de su scope: acotado a una sola sede -> esa sede; all-sedes -> null
   // (= todas). Así un usuario de una sede nunca recibe métricas de toda la clínica.
   const sede = (sedeId ?? defaultSedeId) ?? undefined
 
-  // KPIs "de hoy": alimentan el hero, "Progreso del día" y "Cobros de hoy por
+  // KPIs "de hoy": alimentan el hero, la tarjeta de citas y "Cobros de hoy por
   // medio" (que se mantienen anclados a hoy) y, cuando periodo === 'hoy', también
   // la fila de KPIs superior.
   const { data: kpis, isLoading: kpisLoading } = useQuery({
@@ -719,18 +789,38 @@ function DashboardContent() {
   const kpisView = periodo === 'hoy' ? kpis : kpisPeriodo
   const kpisViewLoading = periodo === 'hoy' ? kpisLoading : kpisPeriodoLoading
 
-  // Gráfica de tendencia: con periodo 'hoy' conserva la ventana de 30 días; con
-  // rangos amplios agrupa por semana/mes para no saturar el eje.
-  const ingRango = periodo === 'hoy'
-    ? { ini: addDaysISO(todayISO(), -29), fin: todayISO(), agrupar: 'dia' as const }
-    : { ini: rango.ini, fin: rango.fin, agrupar: (periodo === '1a' ? 'mes' : periodo === 'mes' ? 'dia' : 'semana') as 'dia' | 'semana' | 'mes' }
+  // Ingresos acumulados por origen. "Hoy" y "Este mes" muestran el mes en curso
+  // y lo comparan con el mes pasado hasta el mismo día; los rangos largos, con
+  // el mismo número de días justo antes. Sin gastos: los de caja no son la
+  // contabilidad de la clínica y darían un resultado engañoso.
+  const ingRango = (() => {
+    if (periodo === 'hoy' || periodo === 'mes') {
+      const hoy = new Date()
+      const ini = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+      const finMesPasado = new Date(hoy.getFullYear(), hoy.getMonth(), 0)
+      const iniMesPasado = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+      const mismoDia = new Date(hoy.getFullYear(), hoy.getMonth() - 1, Math.min(hoy.getDate(), finMesPasado.getDate()))
+      return {
+        ini: ini.toLocaleDateString('en-CA'),
+        fin: todayISO(),
+        comparar_inicio: iniMesPasado.toLocaleDateString('en-CA'),
+        comparar_fin: mismoDia.toLocaleDateString('en-CA'),
+        titulo: 'Ingresos del mes',
+        comparadoCon: 'el mes pasado a esta fecha',
+      }
+    }
+    const comparado: Record<PeriodoKey, string> = {
+      hoy: '', mes: '', '3m': 'los 3 meses anteriores', '6m': 'los 6 meses anteriores', '1a': 'el año anterior',
+    }
+    return { ini: rango.ini, fin: rango.fin, titulo: `Ingresos ${periodoSufijo}`, comparadoCon: comparado[periodo] }
+  })()
 
   const { data: ingresos, isLoading: ingresosLoading } = useQuery({
-    queryKey: ['reportes', 'ingresos', periodo, sede],
-    queryFn: () => reportesApi.getIngresos({
+    queryKey: ['reportes', 'ingresos-por-origen', ingRango.ini, ingRango.fin, sede],
+    queryFn: () => reportesApi.getIngresosPorOrigen({
       fecha_inicio: ingRango.ini,
       fecha_fin: ingRango.fin,
-      agrupar_por: ingRango.agrupar,
+      ...('comparar_inicio' in ingRango ? { comparar_inicio: ingRango.comparar_inicio, comparar_fin: ingRango.comparar_fin } : {}),
       sede_id: sede,
     }),
     staleTime: STALE,
@@ -769,18 +859,18 @@ function DashboardContent() {
   })
 
   const { data: citasHoyData, isLoading: citasLoading } = useQuery({
-    queryKey: ['citas', 'hoy', sede, esSoloProfesional ? user?.id : null],
+    queryKey: ['citas', 'hoy', sede],
     queryFn: () => {
       const hoy = todayISO()
       return agendaApi.citas.list({
         fecha_inicio__date: hoy,
         sede,
         page_size: 100,
-        ...(esSoloProfesional && user?.id ? { profesional: user.id } : {}),
       })
     },
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: veAgenda,
   })
   const citasHoy = citasHoyData?.results
 
@@ -806,7 +896,7 @@ function DashboardContent() {
     queryFn: () => carteraApi.resumen({ sede_id: sede }),
     staleTime: STALE,
     refetchInterval: STALE,
-    enabled: canVerFinanzas,
+    enabled: veCartera,
   })
 
   const { data: citasSinCerrarData } = useQuery({
@@ -822,6 +912,7 @@ function DashboardContent() {
     }),
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: veAgenda,
   })
 
   const { data: pacientesSinReagendar, isLoading: pacientesLoading } = useQuery({
@@ -841,15 +932,11 @@ function DashboardContent() {
   const notificacionesFallidas = notificacionesFallidasData?.results ?? []
 
   const enCurso = citasHoy?.filter(c => c.estado === 'en_curso') ?? []
-  const totalCitas = esSoloProfesional
-    ? (citasHoy?.length ?? 0)
-    : (kpis?.citas_hoy.total ?? 0)
-  const completadas = esSoloProfesional
-    ? (citasHoy?.filter(c => c.estado === 'completada').length ?? 0)
-    : (kpis?.citas_hoy.completadas ?? 0)
+  const totalCitas = kpis?.citas_hoy.total ?? 0
+  const completadas = kpis?.citas_hoy.completadas ?? 0
 
   // Valores de la fila de KPIs, ya sujetos al filtro de periodo (los de arriba
-  // se mantienen "de hoy" para el hero y "Progreso del día").
+  // se mantienen "de hoy" para el hero y la tarjeta de citas).
   const citasKpi = kpisView?.citas_hoy.total ?? 0
   const completadasKpi = kpisView?.citas_hoy.completadas ?? 0
   // Servicios: con 'hoy' muestra el mes en curso (su etiqueta dice "del mes").
@@ -989,153 +1076,13 @@ function DashboardContent() {
     </div>
   )
 
-  if (esSoloProfesional) {
-    return (
-      <div className="w-[90%] mx-auto space-y-6">
-        {/* Hero */}
-        <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
-          <div className="relative z-10">
-            <p className="text-white/70 text-sm mb-0.5 capitalize">{todayLong()}</p>
-            <h1 className="text-2xl font-bold">{greeting()}, {user?.first_name}</h1>
-            <p className="text-white/80 text-sm mt-1">
-              {enCurso.length > 0
-                ? <><span className="font-semibold text-white">{enCurso.length}</span> cita{enCurso.length !== 1 ? 's' : ''} en curso ahora mismo</>
-                : totalCitas === 0
-                  ? 'No hay citas agendadas para hoy'
-                  : <><span className="font-semibold text-white">{totalCitas}</span> cita{totalCitas !== 1 ? 's' : ''} agendada{totalCitas !== 1 ? 's' : ''} para hoy</>
-              }
-            </p>
-          </div>
-          <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
-          <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
-          <div className="absolute right-24 -bottom-6 h-16 w-16 rounded-full bg-white/10" />
-        </div>
-
-        <AvisoDatosProfesionales />
-
-        {/* KPIs simples */}
-        <div className="grid grid-cols-2 gap-4">
-          <KPICard
-            label="Citas hoy"
-            value={totalCitas}
-            icon={CalendarDays}
-            iconBg="bg-blue-50"
-            iconColor="text-blue-500"
-            loading={citasLoading}
-          />
-          <KPICard
-            label="Completadas"
-            value={completadas}
-            sub={totalCitas > 0 ? `${Math.round((completadas / totalCitas) * 100)}% del día` : undefined}
-            icon={CheckCircle2}
-            iconBg="bg-green-50"
-            iconColor="text-green-500"
-            loading={citasLoading}
-          />
-        </div>
-
-        {/* Citas + accesos */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <div className="flex items-center justify-between px-5 py-4 border-b">
-              <div className="flex items-center gap-2">
-                <CalendarDays className="h-4 w-4 text-primary" />
-                <h2 className="font-semibold text-sm">Mis citas de hoy</h2>
-              </div>
-              <Link href="/agenda" className="text-xs text-primary hover:underline flex items-center gap-1">
-                Ver agenda <ArrowRight className="h-3 w-3" />
-              </Link>
-            </div>
-            <div className="divide-y">
-              {citasLoading ? (
-                <div className="p-4 space-y-3">
-                  {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
-                </div>
-              ) : !citasHoy?.length ? (
-                <div className="flex flex-col items-center py-12 text-center px-4">
-                  <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
-                  <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
-                  <Button size="sm" className="mt-3" asChild>
-                    <Link href="/agenda">
-                      <Plus className="h-3.5 w-3.5 mr-1.5" />
-                      Ver agenda
-                    </Link>
-                  </Button>
-                </div>
-              ) : (
-                citasHoy.map(cita => (
-                  <Link
-                    key={cita.id}
-                    href={`/agenda?cita=${cita.id}`}
-                    className={cn(
-                      'flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors border-l-4',
-                      ESTADO_LEFT[cita.estado]
-                    )}
-                  >
-                    <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
-                      <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
-                      <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
-                      <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
-                    </div>
-                    <CitaStatusBadge estado={cita.estado} />
-                  </Link>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
-              <div className="space-y-2">
-                {[
-                  { href: '/agenda', icon: CalendarDays, label: 'Agenda', desc: 'Ver mi agenda del día' },
-                  { href: '/atenciones', icon: CheckCircle2, label: 'Atenciones', desc: 'Cola de atenciones' },
-                  { href: '/pacientes', icon: Users, label: 'Pacientes', desc: 'Buscar pacientes' },
-                ].map(({ href, icon: Icon, label, desc }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                      <Icon className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{label}</p>
-                      <p className="text-xs text-muted-foreground">{desc}</p>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-
-            {!citasLoading && totalCitas > 0 && (
-              <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-                <h2 className="font-semibold text-sm mb-3">Progreso del día</h2>
-                <div className="space-y-2">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>{completadas} de {totalCitas} completadas</span>
-                    <span>{Math.round((completadas / totalCitas) * 100)}%</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                    <div
-                      className="h-full bg-green-400 rounded-full transition-all"
-                      style={{ width: `${(completadas / totalCitas) * 100}%` }}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    )
-  }
+  // Solo lo que el usuario puede hacer: antes "Nueva cita" y "Nuevo paciente"
+  // salían a todos y terminaban en "no tienes permiso".
+  const accesosRapidos = [
+    { href: '/agenda', icon: CalendarDays, label: 'Nueva cita', desc: 'Agendar para hoy', visible: hasPermission(user, PERM.AGENDA_CREAR) },
+    { href: '/pacientes/nuevo', icon: Users, label: 'Nuevo paciente', desc: 'Registrar paciente', visible: hasPermission(user, PERM.PACIENTES_CREAR) },
+    { href: '/cotizaciones', icon: FileText, label: 'Cotizaciones', desc: 'Ver y crear cotizaciones', visible: hasPermission(user, PERM.COTIZACIONES_VER) },
+  ].filter((a) => a.visible)
 
   return (
     <div className="w-[90%] mx-auto space-y-6">
@@ -1166,6 +1113,7 @@ function DashboardContent() {
       <div className="flex flex-col lg:flex-row gap-4 empty:hidden [&>*]:min-w-0 lg:[&>*]:flex-1">
         <PuestaEnMarchaBanner />
         <AvisoDatosProfesionales />
+        <AutorizacionesPendientesBanner />
       </div>
 
       {/* Filtros (sede + periodo) — encima de los KPI */}
@@ -1187,69 +1135,22 @@ function DashboardContent() {
 
       {/* Citas del día + Accesos rápidos: segunda fila, justo después de los KPI */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <div className="flex items-center justify-between px-5 py-4 border-b">
-            <div className="flex items-center gap-2">
-              <CalendarDays className="h-4 w-4 text-primary" />
-              <h2 className="font-semibold text-sm">Citas de hoy</h2>
-            </div>
-            <Link href="/agenda" className="text-xs text-primary hover:underline flex items-center gap-1">
-              Ver agenda <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-          <div className="divide-y">
-            {citasLoading ? (
-              <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full rounded-lg" />)}
-              </div>
-            ) : !citasHoy?.length ? (
-              <div className="flex flex-col items-center py-12 text-center px-4">
-                <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
-                <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
-                <Button size="sm" className="mt-3" asChild>
-                  <Link href="/agenda">
-                    <Plus className="h-3.5 w-3.5 mr-1.5" />
-                    Agendar cita
-                  </Link>
-                </Button>
-              </div>
-            ) : (
-              citasHoy.map(cita => (
-                <Link
-                  key={cita.id}
-                  href={`/agenda?cita=${cita.id}`}
-                  className={cn(
-                    'flex items-center gap-4 px-5 py-3.5 hover:bg-gray-50 transition-colors border-l-4',
-                    ESTADO_LEFT[cita.estado]
-                  )}
-                >
-                  <div className="text-center w-[84px] shrink-0 whitespace-nowrap">
-                    <p className="text-sm font-bold text-primary tabular-nums">{formatTime(cita.fecha_inicio)}</p>
-                    <p className="text-[10px] text-muted-foreground tabular-nums">{formatTime(cita.fecha_fin)}</p>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{cita.paciente_nombre}</p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      <span className="uppercase">{cita.servicio_nombre}</span> · {cita.profesional_nombre}
-                    </p>
-                  </div>
-                  <CitaStatusBadge estado={cita.estado} />
-                </Link>
-              ))
-            )}
-          </div>
-        </div>
+        {veAgenda && <div className="lg:col-span-2">
+          <CitasHoyCard
+            citas={citasHoy}
+            loading={citasLoading}
+            titulo="Citas de hoy"
+            mostrarProfesional
+            accionVacia={hasPermission(user, PERM.AGENDA_CREAR) ? { href: '/agenda', label: 'Agendar cita', crear: true } : undefined}
+          />
+        </div>}
 
         <div className="space-y-4">
           {canVerSeguimiento && <ParaHoyResumen sede={sede} />}
-          <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+          {accesosRapidos.length > 0 && <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
             <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
             <div className="space-y-2">
-              {[
-                { href: '/agenda', icon: CalendarDays, label: 'Nueva cita', desc: 'Agendar para hoy' },
-                { href: '/pacientes/nuevo', icon: Users, label: 'Nuevo paciente', desc: 'Registrar paciente' },
-                { href: '/cotizaciones', icon: FileText, label: 'Cotizaciones', desc: 'Ver y crear cotizaciones' },
-              ].map(({ href, icon: Icon, label, desc }) => (
+              {accesosRapidos.map(({ href, icon: Icon, label, desc }) => (
                 <Link
                   key={href}
                   href={href}
@@ -1266,25 +1167,7 @@ function DashboardContent() {
                 </Link>
               ))}
             </div>
-          </div>
-
-          {!kpisLoading && totalCitas > 0 && (
-            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <h2 className="font-semibold text-sm mb-3">Progreso del día</h2>
-              <div className="space-y-2">
-                <div className="flex justify-between text-xs text-muted-foreground">
-                  <span>{completadas} de {totalCitas} completadas</span>
-                  <span>{Math.round((completadas / totalCitas) * 100)}%</span>
-                </div>
-                <div className="h-2 rounded-full bg-gray-100 overflow-hidden">
-                  <div
-                    className="h-full bg-green-400 rounded-full transition-all"
-                    style={{ width: `${(completadas / totalCitas) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
+          </div>}
         </div>
       </div>
 
@@ -1351,7 +1234,7 @@ function DashboardContent() {
           </div>
         )}
 
-        {canVerFinanzas && (
+        {veCartera && (
           <div className={cn(
             'bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
             (resumenCartera?.cuotas_vencidas ?? 0) > 0 ? 'border-red-200' : 'border-gray-100'
@@ -1429,23 +1312,15 @@ function DashboardContent() {
         </Link>
       )}
 
-      {/* Gráfica + Cobros por medio de pago */}
+      {/* Ingresos acumulados por origen + Cobros de hoy por medio de pago */}
       {canVerFinanzas && (
       <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-3')}>
-        <div className="lg:col-span-2 bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h2 className="font-semibold text-sm">
-                {periodo === 'hoy' ? 'Ingresos últimos 30 días' : `Ingresos ${periodoSufijo}`}
-              </h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Cobros vs gastos{periodo === 'hoy' || periodo === 'mes' ? ' por día' : ingRango.agrupar === 'mes' ? ' por mes' : ' por semana'}
-              </p>
-            </div>
-            <TrendingUp className="h-4 w-4 text-muted-foreground" />
-          </div>
-          <GraficaIngresos data={ingresos ?? []} loading={ingresosLoading} />
-        </div>
+        <IngresosAcumuladosCard
+          data={ingresos}
+          loading={ingresosLoading}
+          titulo={ingRango.titulo}
+          comparadoCon={ingRango.comparadoCon}
+        />
 
         <div className="bg-white rounded-xl border shadow-sm p-5 space-y-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <h2 className="font-semibold text-sm">Cobros de hoy por medio</h2>

@@ -45,6 +45,18 @@ export interface IngresosPeriodo {
   total_gastos: string
 }
 
+/** Ingresos por origen (GET /reportes/ingresos-por-origen/). Montos en string. */
+export type OrigenIngreso = 'citas' | 'ventas' | 'cartera' | 'otros'
+
+export interface IngresosPorOrigen {
+  fecha_inicio: string
+  fecha_fin: string
+  /** Un registro por día del rango (sin acumular). */
+  serie: ({ fecha: string } & Record<OrigenIngreso, string>)[]
+  totales: Record<OrigenIngreso | 'total', string>
+  anterior: { fecha_inicio: string; fecha_fin: string; total: string }
+}
+
 export interface ServicioReporte {
   servicio_nombre: string
   cantidad_citas: number

@@ -32,7 +32,7 @@ import { mensajeDeError } from '@/lib/errores'
 import { toast } from '@/hooks/use-toast'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, PERM, puedeAbrirCotizacion } from '@/lib/permissions'
 import type { EstadoCobro } from '@/types/cobros'
 import type { Cita } from '@/types/agenda'
 
@@ -575,12 +575,18 @@ export default function PacienteDetailPage({ params }: Props) {
               <p className="text-sm text-muted-foreground/60 italic px-6 py-4">Sin cotizaciones registradas.</p>
             ) : (
               <div className="divide-y">
-                {cotizacionesData!.results.map((c) => (
-                  <Link
+                {cotizacionesData!.results.map((c) => {
+                  const abrible = puedeAbrirCotizacion(user, c.profesional)
+                  const Fila = abrible ? Link : 'div'
+                  return (
+                  <Fila
                     key={c.id}
                     href={c.estado === 'aceptada' ? `/ventas/${c.id}` : `/cotizaciones/${c.id}`}
-                    onClick={() => setActiveModal(null)}
-                    className="flex items-center justify-between gap-3 px-6 py-3 hover:bg-muted/30 transition-colors group"
+                    onClick={() => abrible && setActiveModal(null)}
+                    className={cn(
+                      'flex items-center justify-between gap-3 px-6 py-3 transition-colors group',
+                      abrible && 'hover:bg-muted/30',
+                    )}
                   >
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
@@ -594,10 +600,14 @@ export default function PacienteDetailPage({ params }: Props) {
                           · {c.items.length} servicio{c.items.length !== 1 ? 's' : ''}
                         </span>
                       </p>
+                      {!abrible && (
+                        <p className="text-xs text-muted-foreground mt-0.5">De {c.profesional_nombre || 'otro profesional'}</p>
+                      )}
                     </div>
-                    <ChevronRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 shrink-0 transition-colors" />
-                  </Link>
-                ))}
+                    {abrible && <ChevronRight className="h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 shrink-0 transition-colors" />}
+                  </Fila>
+                  )
+                })}
                 {cotCount > cotizacionesData!.results.length && (
                   <p className="text-xs text-muted-foreground px-6 py-3">
                     Se muestran {cotizacionesData!.results.length} de {cotCount} cotizaciones.

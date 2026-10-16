@@ -64,11 +64,10 @@ export const historiaClinicaApi = {
       const res = await apiClient.post<NotaClinica>('/historia-clinica/notas/', data)
       return res.data
     },
-    // H26: retorna el borrador existente para la cita, o crea uno nuevo
+    // H26: el backend devuelve el borrador de la cita si ya existe, o crea uno.
+    // Antes se leía y luego se creaba aquí: dos pestañas o el doble efecto de la
+    // pantalla creaban varios borradores (AT-04).
     createBorrador: async (historiaId: string, citaId: string): Promise<NotaClinica> => {
-      const notasRes = await apiClient.get<NotaClinica[]>(`/historia-clinica/historias/${historiaId}/notas/`)
-      const existente = notasRes.data.find((n) => n.cita === citaId && n.estado === 'borrador')
-      if (existente) return existente
       const res = await apiClient.post<NotaClinica>('/historia-clinica/notas/', {
         historia: historiaId,
         cita: citaId,

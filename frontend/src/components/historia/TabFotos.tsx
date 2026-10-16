@@ -14,6 +14,8 @@ import type { GaleriaFoto, HistoriaClinica, NotaClinica } from '@/types/historia
 interface TabFotosProps {
   historia: HistoriaClinica
   notas: NotaClinica[]
+  /** Nota a la que van las fotos nuevas (la de la atención o la de la cotización). */
+  notaId?: string
   modoAtencion?: boolean
 }
 
@@ -25,7 +27,7 @@ const TIPO_COLOR: Record<string, string> = {
   referencia: 'bg-gray-100 text-gray-700',
 }
 
-export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProps) {
+export function TabFotos({ historia, notas, notaId, modoAtencion = false }: TabFotosProps) {
   const [notaParaFoto, setNotaParaFoto] = useState<string | null>(null)
   const [fotoAmpliada, setFotoAmpliada] = useState<string | null>(null)
 
@@ -52,12 +54,15 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
     ([, a], [, b]) => new Date(fechaGrupo(b)).getTime() - new Date(fechaGrupo(a)).getTime()
   )
 
-  // Encontrar una nota disponible para adjuntar fotos (la más reciente)
-  const notaReciente = notas[0]
+  // Las fotos nuevas van a la nota indicada o, si no hay, a la última nota en
+  // borrador. Antes iban a notas[0], que podía ser la de otra visita (AT-06), y
+  // una nota completada ya no admite fotos.
+  // En la atención, solo su propia nota.
+  const notaDestino = notaId ?? (modoAtencion ? undefined : notas.find((n) => n.estado === 'borrador')?.id)
   // Si esa nota ya tiene su propio grupo de fotos más abajo, ese grupo ya trae
   // su propio botón "Agregar" — mostrar también el de acá sería el mismo botón
   // dos veces.
-  const notaRecienteYaTieneGrupo = sesiones.some(([, fotos]) => fotos[0].nota === notaReciente?.id)
+  const notaDestinoYaTieneGrupo = sesiones.some(([, fotos]) => fotos[0].nota === notaDestino)
 
   return (
     <div className="space-y-4">
@@ -66,8 +71,8 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
         <p className="text-sm text-muted-foreground">
           {galeria ? `${galeria.total} foto${galeria.total !== 1 ? 's' : ''} en total` : ''}
         </p>
-        {notaReciente && !notaRecienteYaTieneGrupo && (
-          <Button size="sm" variant="outline" onClick={() => setNotaParaFoto(notaReciente.id)}>
+        {notaDestino && !notaDestinoYaTieneGrupo && (
+          <Button size="sm" variant="outline" onClick={() => setNotaParaFoto(notaDestino)}>
             <Upload className="h-3.5 w-3.5 mr-1.5" />
             Agregar fotos
           </Button>
@@ -97,8 +102,8 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
         <div className="rounded-lg border border-dashed py-12 text-center">
           <ImageOff className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
           <p className="text-sm text-muted-foreground">Sin fotos registradas</p>
-          {notaReciente && (
-            <Button size="sm" variant="ghost" className="mt-3" onClick={() => setNotaParaFoto(notaReciente.id)}>
+          {notaDestino && (
+            <Button size="sm" variant="ghost" className="mt-3" onClick={() => setNotaParaFoto(notaDestino)}>
               <Upload className="h-3.5 w-3.5 mr-1.5" />
               Agregar la primera foto
             </Button>
@@ -123,15 +128,17 @@ export function TabFotos({ historia, notas, modoAtencion = false }: TabFotosProp
                       {' '}· {fotos.length} foto{fotos.length !== 1 ? 's' : ''}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs"
-                    onClick={() => setNotaParaFoto(primeraFoto.nota)}
-                  >
-                    <Upload className="h-3 w-3 mr-1" />
-                    Agregar
-                  </Button>
+                  {primeraFoto.nota === notaDestino && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs"
+                      onClick={() => setNotaParaFoto(notaDestino)}
+                    >
+                      <Upload className="h-3 w-3 mr-1" />
+                      Agregar
+                    </Button>
+                  )}
                 </div>
                 <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
                   {fotos.map((foto) => (

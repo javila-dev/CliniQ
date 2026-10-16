@@ -6,7 +6,7 @@ import type { Paginated } from '@/types/common'
 type SlotsBase = { profesional_id: string; sede_id: string; fecha: string; cita_id?: string }
 export type SlotsParams =
   | (SlotsBase & { servicio_id: string })
-  | (SlotsBase & { item_cotizacion_id: string })
+  | (SlotsBase & { item_cotizacion_id: string; sesion_ejecutada_id?: string })
   | (SlotsBase & { duracion_min: number })
 
 export interface CitasSinConfirmar {
@@ -66,6 +66,14 @@ export const agendaApi = {
     },
     cambiarEstado: async (id: string, data: CambiarEstadoRequest): Promise<Cita> => {
       const res = await apiClient.post<Cita>(`/agenda/citas/${id}/cambiar_estado/`, data)
+      return res.data
+    },
+    /** Cierra la atención en una sola transacción: sesión del tratamiento, nota y cita. */
+    completarAtencion: async (
+      id: string,
+      data: { nota?: string; procedimientos_ejecutados?: string[] },
+    ): Promise<Cita> => {
+      const res = await apiClient.post<Cita>(`/agenda/citas/${id}/completar_atencion/`, data)
       return res.data
     },
     confirmarManual: async (id: string, data?: { medio?: string; nota?: string }): Promise<Cita> => {
@@ -171,8 +179,11 @@ export const agendaApi = {
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/agenda/bloqueos/${id}/`)
     },
-    aprobar: async (id: string): Promise<BloqueoAgenda> => {
-      const res = await apiClient.post<BloqueoAgenda>(`/agenda/bloqueos/${id}/aprobar/`)
+    /** `confirmar`: aprobar aunque haya citas en ese horario (se avisan antes). */
+    aprobar: async (id: string, confirmar = false): Promise<BloqueoAgenda> => {
+      const res = await apiClient.post<BloqueoAgenda>(
+        `/agenda/bloqueos/${id}/aprobar/`, confirmar ? { confirmar_citas_afectadas: true } : {},
+      )
       return res.data
     },
     rechazar: async (id: string, motivo?: string): Promise<BloqueoAgenda> => {

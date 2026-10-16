@@ -28,6 +28,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/comp
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn, formatDate, fechaLocalISO } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
+import { useAuthStore } from '@/store/authStore'
+import { puedeAbrirCotizacion } from '@/lib/permissions'
 import type { CarteraPaciente } from '@/types/cartera'
 
 // Columnas ordenables → clave `ordering` del listado por paciente.
@@ -238,7 +240,11 @@ function ResumenCard({
 
 type FilaMontos = Pick<CarteraPaciente, 'saldo_pendiente' | 'en_mora' | 'mora_dias' | 'mora_valor' | 'proxima_cuota_fecha' | 'proxima_cuota_valor'>
 
-function LinkCotizacion({ id }: { id: string }) {
+function LinkCotizacion({ id, profesionalId }: { id: string; profesionalId?: string | null }) {
+  const { user } = useAuthStore()
+  if (!puedeAbrirCotizacion(user, profesionalId)) {
+    return <span className="text-xs text-muted-foreground font-mono">#{id.slice(0, 8).toUpperCase()}</span>
+  }
   return (
     <Link
       href={`/cotizaciones/${id}`}
@@ -516,7 +522,7 @@ export default function CarteraPage() {
                         {varias ? (
                           <span className="text-xs text-muted-foreground">{p.carteras_count} cotizaciones</span>
                         ) : (
-                          <LinkCotizacion id={unica.cotizacion_id} />
+                          <LinkCotizacion id={unica.cotizacion_id} profesionalId={unica.cotizacion_profesional_id} />
                         )}
                       </td>
                       <td className="px-4 py-2 tabular-nums font-semibold">{formatCOP(p.total)}</td>
@@ -536,7 +542,7 @@ export default function CarteraPage() {
                       >
                         <td />
                         <td className="py-2 pl-7 pr-4 text-xs text-muted-foreground">
-                          <span className="lg:hidden"><LinkCotizacion id={c.cotizacion_id} /></span>
+                          <span className="lg:hidden"><LinkCotizacion id={c.cotizacion_id} profesionalId={c.cotizacion_profesional_id} /></span>
                           <span className="hidden lg:inline">Aprobada el {formatDate(c.created_at)}</span>
                           {c.profesional_nombre && (
                             <span className="ml-2 inline-flex items-center gap-1 align-middle">
@@ -544,7 +550,7 @@ export default function CarteraPage() {
                             </span>
                           )}
                         </td>
-                        <td className="px-4 py-2 hidden lg:table-cell"><LinkCotizacion id={c.cotizacion_id} /></td>
+                        <td className="px-4 py-2 hidden lg:table-cell"><LinkCotizacion id={c.cotizacion_id} profesionalId={c.cotizacion_profesional_id} /></td>
                         <td className="px-4 py-2 tabular-nums text-xs">{formatCOP(c.total)}</td>
                         <td className="px-4 py-2 tabular-nums text-xs text-emerald-600">{formatCOP(c.total_pagado)}</td>
                         <td className="px-4 py-2 tabular-nums text-xs"><Saldo fila={c} /></td>

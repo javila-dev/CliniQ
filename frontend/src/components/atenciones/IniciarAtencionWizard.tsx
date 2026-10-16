@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { AlertTriangle, Check, CheckCircle2, Maximize2, Minimize2, X, Loader2 } from 'lucide-react'
@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { textoDeudaBloqueante } from '@/lib/deuda'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
 import { ConsentimientoFirmaContent } from './ConsentimientoFirmaContent'
 import { PagoContent, cobroConPagos } from './PagoContent'
@@ -94,9 +96,13 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
     return () => clearTimeout(timer)
   }, [esperandoConfirmacionFirma])
 
-  const { mutate: confirmarLlegada } = useMutation({
+  const { mutate: confirmarLlegada, isPending: confirmandoLlegada } = useMutation({
     mutationFn: () => agendaApi.citas.cambiarEstado(citaId!, { estado: 'en_espera' }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['citas'] }),
+    onError: (err) => {
+      queryClient.invalidateQueries({ queryKey: ['citas', citaId] })
+      toast.error('No se registró la llegada', mensajeDeError(err, 'Cierra y vuelve a abrir el asistente.'))
+    },
   })
 
   const pendienteConsentimiento = cita?.consentimiento_info?.consentimientos?.find((c) => !c.vigente) ?? null
@@ -138,16 +144,24 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
     setViewingStep(null)
   }, [currentStep])
 
-  // Cuando todos los pasos activos están completos:
-  // - Si paso_checkin estaba desactivado, la cita nunca pasó por en_espera — hacerlo ahora.
-  // - Detener el polling de firma.
+  // Cuando todos los pasos activos están completos, se detiene el polling de firma.
   useEffect(() => {
-    if (!allDone) return
-    setEsperandoConfirmacionFirma(false)
-    if (wizardConfig && !wizardConfig.paso_checkin && cita?.estado === 'confirmada') {
-      confirmarLlegada()
-    }
+    if (allDone) setEsperandoConfirmacionFirma(false)
   }, [allDone])
+
+  // Si paso_checkin está desactivado, la cita nunca pasó por en_espera: se hace
+  // al completar los pasos. Depende también del estado y de la configuración:
+  // antes solo miraba allDone y, si la cita en caché aún decía "pendiente" (al
+  // registrar "Llegó" sin confirmar) o la configuración llegaba tarde, no se
+  // volvía a intentar y la cita no entraba nunca a la cola (AG-06).
+  const llegadaEnviadaRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!allDone || !wizardConfig || wizardConfig.paso_checkin) return
+    if (cita?.estado !== 'confirmada' || confirmandoLlegada) return
+    if (llegadaEnviadaRef.current === cita.id) return
+    llegadaEnviadaRef.current = cita.id
+    confirmarLlegada(undefined, { onError: () => { llegadaEnviadaRef.current = null } })
+  }, [allDone, wizardConfig, cita?.estado, cita?.id, confirmandoLlegada, confirmarLlegada])
 
   // Si el paciente rechazó la firma desde su teléfono, dejamos de consultar:
   // el usuario tiene que reenviar o firmar en pantalla.

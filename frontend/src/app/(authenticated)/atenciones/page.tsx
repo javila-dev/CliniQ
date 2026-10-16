@@ -9,6 +9,8 @@ import { ResumenDia } from '@/components/atenciones/ResumenDia'
 import { HistorialCitas } from '@/components/atenciones/HistorialCitas'
 import { TodasLasAtenciones } from '@/components/atenciones/TodasLasAtenciones'
 import { LoadingState } from '@/components/shared/LoadingState'
+import { ErrorState } from '@/components/shared/ErrorState'
+import { mensajeDeError } from '@/lib/errores'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess, isAdminOrSuperAdmin } from '@/lib/permissions'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -28,7 +30,7 @@ function AtencionesContent() {
   const esAdmin = isAdminOrSuperAdmin(user)
 
   // Citas de hoy — polling cada 30s
-  const { data: citasData, isLoading: loadingCitas } = useQuery({
+  const { data: citasData, isLoading: loadingCitas, isError: errorCitas, error: errCitas, refetch: recargarCitas } = useQuery({
     queryKey: ['citas', 'atenciones', user?.id, hoy],
     queryFn: () => agendaApi.citas.list({
       profesional: user!.id,
@@ -61,6 +63,10 @@ function AtencionesContent() {
     .sort((a, b) => a.fecha_inicio.localeCompare(b.fecha_inicio))
 
   if (loadingCitas && (user?.es_profesional || !esAdmin)) return <LoadingState rows={4} />
+  // Sin esto, un error se veía como "No hay más pacientes" (AG-08).
+  if (errorCitas && !citasData && user?.es_profesional) {
+    return <ErrorState message={mensajeDeError(errCitas, 'No se pudo cargar la cola de hoy.')} onRetry={() => recargarCitas()} />
+  }
 
   if (!user?.es_profesional && !esAdmin) {
     return (

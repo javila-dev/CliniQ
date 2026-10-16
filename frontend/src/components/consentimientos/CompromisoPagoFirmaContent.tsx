@@ -29,6 +29,9 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
   const [signingToken, setSigningToken] = useState<string | null>(initialSigningToken ?? null)
   const [generando, setGenerando] = useState(false)
   const [firmado, setFirmado] = useState(false)
+  // Firmó en el embed y se está confirmando con Documenso, o Documenso aún no lo
+  // refleja: nada se da por firmado sin esa confirmación.
+  const [confirmacion, setConfirmacion] = useState<'confirmando' | 'pendiente' | null>(null)
   const autoAbiertoRef = useRef(false)
   // Evita doble llamada a iniciarFirmaDocumenso en React StrictMode (dev).
   const generacionDisparadaRef = useRef(false)
@@ -47,12 +50,13 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
     queryKey: ['consentimiento', consentimientoId],
     queryFn: () => consentimientosApi.get(consentimientoId),
     enabled: !firmado,
-    refetchInterval: modo === 'enviado' && !firmado ? 4000 : false,
+    refetchInterval: (modo === 'enviado' || confirmacion === 'pendiente') && !firmado ? 4000 : false,
     refetchIntervalInBackground: true,
   })
 
   useEffect(() => {
     if (estadoConsentimiento?.estado === 'firmado' && !firmado) {
+      setConfirmacion(null)
       setFirmado(true)
       queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
       onFirmado?.()
@@ -72,6 +76,7 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
     try {
       const c = await consentimientosApi.verificarFirmaDocumenso(consentimientoId)
       if (c.estado === 'firmado') {
+        setConfirmacion(null)
         setFirmado(true)
         queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
         onFirmado?.()
@@ -138,12 +143,17 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
   async function handleFirmado() {
     autoAbiertoRef.current = false
     setSigningToken(null)
-    setFirmado(true)
+    setConfirmacion('confirmando')
     try {
+      // El backend lo confirma con Documenso antes de marcarlo firmado.
       await consentimientosApi.confirmarFirmaDocumenso(consentimientoId)
     } catch {
-      // no-op — el webhook de Documenso confirmará el estado igualmente
+      // Documenso aún no lo refleja: se sigue consultando y el webhook lo marca.
+      setConfirmacion('pendiente')
+      return
     }
+    setConfirmacion(null)
+    setFirmado(true)
     queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
     toast.success(`${documentoLabel} firmado`, 'El paciente firmó el documento.')
     onFirmado?.()
@@ -152,9 +162,10 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
   function handleError(err: string) {
     setSigningToken(null)
     if (autoAbiertoRef.current) {
+      // El embed auto-abierto falló: probablemente ya está firmado y falta que
+      // Documenso lo confirme. Se espera la confirmación, no se da por firmado.
       autoAbiertoRef.current = false
-      setFirmado(true)
-      onFirmado?.()
+      setConfirmacion('pendiente')
     } else {
       toast.error('Error al firmar', err)
     }
@@ -176,7 +187,24 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
       )}
 
       <div className="flex-1 min-h-0">
-        {firmado ? (
+        {!firmado && confirmacion ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-12 text-center h-full">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            <p className="text-sm font-medium">
+              {confirmacion === 'confirmando' ? 'Confirmando la firma con Documenso…' : 'Esperando confirmación de Documenso'}
+            </p>
+            {confirmacion === 'pendiente' && (
+              <>
+                <p className="text-xs text-muted-foreground max-w-xs">
+                  Documenso todavía no reporta la firma. Se actualiza solo en unos segundos.
+                </p>
+                <Button variant="outline" size="sm" disabled={comprobando} onClick={handleComprobarEnDocumenso}>
+                  {comprobando ? 'Verificando…' : 'Verificar ahora'}
+                </Button>
+              </>
+            )}
+          </div>
+        ) : firmado ? (
           <div className="flex flex-col items-center justify-center gap-3 py-12 text-center h-full">
             <CheckCircle2 className="h-10 w-10 text-green-600" />
             <p className="text-sm font-medium">{documentoLabel} firmado</p>

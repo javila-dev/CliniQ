@@ -22,6 +22,8 @@ import type { GrupoSesiones, SesionEjecutada } from '@/types/protocolos'
 interface SesionesCotizacionPanelProps {
   cotizacionId: string
   pacienteId: string
+  /** Sede de la venta: Nueva cita abre con ella. */
+  sedeId?: string | null
 }
 
 const ESTADO_CONFIG: Record<string, { label: string; variant: 'default' | 'secondary' | 'success' | 'destructive' | 'outline'; icon: React.ElementType }> = {
@@ -178,7 +180,7 @@ function SesionRow({
   )
 }
 
-export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCotizacionPanelProps) {
+export function SesionesCotizacionPanel({ cotizacionId, pacienteId, sedeId }: SesionesCotizacionPanelProps) {
   const queryClient = useQueryClient()
   const [descargando, setDescargando] = useState(false)
   // Ítems cuya lista de sesiones está desplegada. Colapsada por defecto: una
@@ -195,7 +197,7 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
   // cada vez que se entra a la cotización (o se recarga la página).
   const SIEMPRE_FRESCO = { staleTime: 0, refetchOnMount: 'always' as const }
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['cotizacion-sesiones', cotizacionId],
     queryFn: () => cotizacionesApi.sesiones(cotizacionId),
     ...SIEMPRE_FRESCO,
@@ -309,6 +311,21 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
           {Array.from({ length: 2 }).map((_, i) => (
             <Skeleton key={i} className="h-28 w-full" />
           ))}
+        </CardContent>
+      </Card>
+    )
+  }
+
+  // Antes un error dejaba la venta sin el panel y sin aviso (CT-12).
+  if (isError && !data) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Seguimiento de sesiones</CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-col items-center gap-3 py-6 text-center">
+          <p className="text-sm text-muted-foreground">{mensajeDeError(error, 'No se pudieron cargar las sesiones de esta venta.')}</p>
+          <Button variant="outline" size="sm" onClick={() => refetch()}>Reintentar</Button>
         </CardContent>
       </Card>
     )
@@ -490,6 +507,7 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId }: SesionesCo
         defaultItemCotizacion={modal?.itemId ?? null}
         defaultItemCotizacionTipo={modal?.itemTipo ?? null}
         defaultSesionEjecutada={modal?.sesionEjecutadaId ?? null}
+        defaultSede={sedeId ?? null}
         onCreated={refrescar}
       />
     </>

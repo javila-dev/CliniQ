@@ -580,7 +580,7 @@ function DiagramaPanel({
 // ─── TabZonas ────────────────────────────────────────────────────────────────
 
 export function TabZonas({ notaId, readOnly }: Props) {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['nota-zonas', notaId],
     queryFn: () => historiaClinicaApi.zonas.get(notaId),
     staleTime: 30_000,
@@ -590,6 +590,16 @@ export function TabZonas({ notaId, readOnly }: Props) {
     return (
       <div className="space-y-4 animate-pulse p-4">
         {[1, 2].map((i) => <div key={i} className="h-64 rounded-lg bg-muted" />)}
+      </div>
+    )
+  }
+
+  // Antes un error se veía como "Sin diagramas configurados" (AT-17).
+  if (isError && !data) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center px-6">
+        <p className="text-sm text-muted-foreground">{mensajeDeError(error, 'No se pudieron cargar las zonas.')}</p>
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Reintentar</Button>
       </div>
     )
   }

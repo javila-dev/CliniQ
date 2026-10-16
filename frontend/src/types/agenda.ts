@@ -25,6 +25,8 @@ export interface ConsentimientoInfo {
 
 export interface CotizacionResumenCita {
   cotizacion_id: string
+  /** Quien la vendió: sin él no se puede saber si el usuario la puede abrir. */
+  profesional_id?: string | null
   descripcion: string
   num_citas: number
   citas_agendadas: number
@@ -123,6 +125,8 @@ export type MedioConfirmacion = 'whatsapp' | 'llamada' | 'sms' | 'presencial' | 
 export interface CambiarEstadoRequest {
   estado: EstadoCita
   motivo_cancelacion?: string
+  /** Al cancelar una cita ya cobrada: qué hacer con el cobro. */
+  accion_cobro?: 'mantener' | 'anular'
   medio?: MedioConfirmacion | ''
   nota?: string
 }

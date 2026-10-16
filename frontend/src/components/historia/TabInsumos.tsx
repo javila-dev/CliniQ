@@ -47,7 +47,7 @@ export function TabInsumos({ notaId, sedeId }: Props) {
 
   const qKey = ['nota-consumos-insumo', notaId]
 
-  const { data: consumos, isLoading } = useQuery({
+  const { data: consumos, isLoading, isError, error, refetch } = useQuery({
     queryKey: qKey,
     queryFn: () => historiaClinicaApi.consumosInsumo.list(notaId),
   })
@@ -120,7 +120,14 @@ export function TabInsumos({ notaId, sedeId }: Props) {
       )}
 
       <div className="space-y-2">
-        {(!consumos || consumos.length === 0) && (
+        {/* Antes un error se veía como "Sin insumos registrados" (AT-17). */}
+        {isError && !consumos && (
+          <div className="rounded-lg border border-dashed py-10 text-center">
+            <p className="text-sm text-muted-foreground">{mensajeDeError(error, 'No se pudieron cargar los insumos de la atención.')}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Reintentar</Button>
+          </div>
+        )}
+        {!isError && (!consumos || consumos.length === 0) && (
           <div className="rounded-lg border border-dashed py-10 text-center">
             <Package className="h-8 w-8 text-muted-foreground/30 mx-auto mb-2" />
             <p className="text-sm text-muted-foreground">Sin insumos registrados en esta atención.</p>

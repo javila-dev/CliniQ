@@ -34,13 +34,15 @@ export default function DetalleCotizacionPage({ params }: { params: Promise<{ id
   if (isLoading || esVenta) return <div className="p-8"><LoadingState rows={6} /></div>
   if (isError || !data) {
     const noExiste = (error as { response?: { status?: number } } | null)?.response?.status === 404
+    // Sin permiso (p. ej. la cotización de otro profesional) reintentar no cambia nada.
+    const sinPermiso = (error as { response?: { status?: number } } | null)?.response?.status === 403
     return (
       <div className="p-8 flex flex-col items-center">
         <ErrorState
           message={noExiste
             ? 'No encontramos esta cotización; puede que se haya eliminado.'
             : mensajeDeError(error, 'No se pudo cargar la cotización.')}
-          onRetry={noExiste ? undefined : () => refetch()}
+          onRetry={noExiste || sinPermiso ? undefined : () => refetch()}
         />
         <Button variant="ghost" size="sm" asChild>
           <Link href="/cotizaciones">Volver a cotizaciones</Link>

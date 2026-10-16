@@ -135,6 +135,8 @@ export interface NotaClinica {
   observaciones?: string | null
   created_at: string
   updated_at?: string
+  /** Zonas, insumos y mediciones de la nota (solo en el detalle). */
+  otros_registros?: number | null
 }
 
 export interface ZonaTratada {

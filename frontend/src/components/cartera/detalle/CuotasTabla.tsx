@@ -154,7 +154,8 @@ export function CuotasTabla({
   puedeEditarFecha: boolean
   /** Hay un acuerdo pendiente de firma: no se cobra ni se mueven fechas. */
   bloqueado: boolean
-  onCobrar: (cuota: CuotaCartera) => void
+  /** Sin permiso de registrar pagos no se pasa: la fila no muestra "Cobrar". */
+  onCobrar?: (cuota: CuotaCartera) => void
 }) {
   const [abiertas, setAbiertas] = useState<Set<string>>(new Set())
 
@@ -255,7 +256,7 @@ export function CuotasTabla({
                       <ChevronDown className={cn('h-4 w-4 transition-transform', abierta && 'rotate-180')} />
                     </Button>
                   )}
-                  {saldo > 0 && (
+                  {saldo > 0 && onCobrar && (
                     <Button
                       type="button"
                       size="sm"

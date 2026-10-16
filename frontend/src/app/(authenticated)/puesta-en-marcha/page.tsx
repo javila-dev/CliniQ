@@ -6,6 +6,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArrowLeft, ChevronLeft, ChevronRight, Rocket, Search, UserPlus, Undo2 } from 'lucide-react'
 import { migracionApi } from '@/lib/api/migracion'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { RoleGuard } from '@/components/shared/RoleGuard'
+import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { Card, CardContent } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -23,7 +26,19 @@ const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP',
 const fmt = (v: string) => new Date(v).toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
 const PAGE_SIZE = 25
 
+// Cargar pacientes en curso arma su cotización, pagos y saldo: lo hace quien crea
+// cotizaciones. Revertir una carga pide además el permiso de puesta en marcha.
 export default function PuestaEnMarchaPage() {
+  return (
+    <RoleGuard check={(u) => hasPermission(u, PERM.COTIZACIONES_GESTIONAR)}>
+      <PuestaEnMarchaContent />
+    </RoleGuard>
+  )
+}
+
+function PuestaEnMarchaContent() {
+  const { user } = useAuthStore()
+  const puedeRevertir = hasPermission(user, PERM.MIGRACION_GESTIONAR)
   const qc = useQueryClient()
   const [revertir, setRevertir] = useState<LoteMigracion | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
@@ -155,12 +170,12 @@ export default function PuestaEnMarchaPage() {
                             <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
                               Revertido
                             </span>
-                          ) : (
+                          ) : puedeRevertir ? (
                             <Button size="sm" variant="ghost" className="text-rose-600"
                               onClick={() => setRevertir(l)}>
                               <Undo2 className="h-4 w-4 mr-1" />Revertir
                             </Button>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     )

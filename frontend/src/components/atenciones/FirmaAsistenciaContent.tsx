@@ -125,13 +125,17 @@ export function FirmaAsistenciaContent({
     setFirmada(true)
     // Confirmar el estado en el backend de forma eager sin esperar el webhook de Documenso.
     // Si falla, el wizard padre aún puede recuperarse vía polling mientras esperaLenta esté activo.
+    // El backend lo confirma con Documenso antes de marcarlo firmado. Si Documenso
+    // aún no lo refleja, el wizard sigue consultando y el webhook lo marca.
+    let confirmada = false
     try {
       await agendaApi.citas.confirmarFirmaAsistencia(citaId)
+      confirmada = true
     } catch {
-      // no-op
+      // Queda esperando la confirmación (ver la vista de "firmada").
     }
     queryClient.invalidateQueries({ queryKey: ['citas'] })
-    toast.success('Asistencia registrada', 'El paciente firmó el registro de asistencia.')
+    if (confirmada) toast.success('Asistencia registrada', 'El paciente firmó el registro de asistencia.')
     onFirmada?.()
   }
 
@@ -196,9 +200,9 @@ export function FirmaAsistenciaContent({
         <div className="flex flex-col items-center justify-center gap-4 h-full text-center">
           <CheckCircle2 className="h-10 w-10 text-green-600" />
           <div className="space-y-1">
-            <p className="text-sm font-medium">Firma registrada</p>
+            <p className="text-sm font-medium">Esperando confirmación de Documenso</p>
             <p className="text-xs text-muted-foreground max-w-xs">
-              El paciente ya firmó. Confirmando con el servidor para continuar...
+              Se registra cuando Documenso confirme la firma. Se actualiza solo en unos segundos.
             </p>
           </div>
           {esperaLenta ? (

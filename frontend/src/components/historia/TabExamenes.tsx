@@ -39,7 +39,7 @@ export function TabExamenes({ historia, notaId }: TabExamenesProps) {
   const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const { data: resultadosRaw, isLoading } = useQuery({
+  const { data: resultadosRaw, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['resultados-examenes', historia.id],
     queryFn: () => historiaClinicaApi.resultadosExamenes.list(historia.id),
   })
@@ -211,6 +211,13 @@ export function TabExamenes({ historia, notaId }: TabExamenesProps) {
               </div>
             )
           })}
+          {/* Antes un error se veía como "Sin resultados" (AT-17). */}
+          {isError && !resultadosRaw && (
+            <div className="rounded-lg border border-dashed py-10 text-center">
+            <p className="text-sm text-muted-foreground">{mensajeDeError(error, 'No se pudieron cargar los exámenes.')}</p>
+            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Reintentar</Button>
+          </div>
+          )}
           {resultados?.length === 0 && !agregando && (
             <div className="rounded-lg border border-dashed py-10 text-center">
               <FileText className="h-7 w-7 text-muted-foreground/30 mx-auto mb-2" />

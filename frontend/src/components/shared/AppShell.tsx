@@ -41,12 +41,13 @@ import { ImpersonationBanner } from './ImpersonationBanner'
 import { TrialBanner } from './TrialBanner'
 import { ThemeApplier } from './ThemeApplier'
 import { ConfirmarNumeroCliniqDialog } from './ConfirmarNumeroCliniqDialog'
+import { AvisoAutorizacionesPrecio } from './AvisoAutorizacionesPrecio'
 import { hasPermission, canAccess, isSuperAdmin, PERM } from '@/lib/permissions'
 import { puedeEntrarAConfiguracion } from '@/components/configuracion/navegacion'
 import { resolveMediaUrl } from '@/lib/utils/media'
 import type { AuthUser } from '@/types/auth'
 
-type NavItem = { href: string; label: string; icon: React.ElementType }
+type NavItem = { href: string; label: string; icon: React.ElementType; badge?: number }
 type NavGroup = { section: string; items: NavItem[]; icon: React.ElementType }
 type NavEntry = NavItem | NavGroup
 
@@ -80,10 +81,18 @@ function allow(user: AuthUser | null, item: typeof NAV[keyof typeof NAV]): boole
   if (item.href === '/dashboard')     return canAccess.dashboard(user)
   if (item.href === '/atenciones')    return canAccess.atenciones(user)
   if (item.href === '/configuracion') return puedeEntrarAConfiguracion(user)
-  if (item.href === '/resultados')    return canAccess.finanzas(user)
+  // Con solo "ver cobros", Resultados redirigía a Ingresos, que ya está en el
+  // menú: dos entradas a la misma pantalla (QA-11).
+  if (item.href === '/resultados') {
+    return canAccess.resultadosPyL(user)
+      || hasPermission(user, PERM.CAJA_GASTOS_VER)
+      || hasPermission(user, PERM.CAJA_CIERRE_VER)
+  }
   return hasPermission(user, item.perm)
 }
 
+// La bandeja de autorizaciones de precio no va en el menú (lo recargaba): se entra
+// desde el aviso del dashboard y el botón de Cotizaciones.
 function buildNav(user: AuthUser | null): NavEntry[] {
   const n = NAV
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
@@ -130,7 +139,19 @@ function activeSection(entries: NavEntry[], pathname: string): string | null {
   return null
 }
 
-function NavLink({ href, label, icon: Icon, onClose, compact }: NavItem & { onClose?: () => void; compact?: boolean }) {
+function NavBadge({ value }: { value?: number }) {
+  if (!value) return null
+  return (
+    <span
+      className="ml-auto inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-rose-500 px-1.5 text-[10px] font-bold leading-5 text-white tabular-nums"
+      aria-label={`${value} pendientes`}
+    >
+      {value > 99 ? '99+' : value}
+    </span>
+  )
+}
+
+function NavLink({ href, label, icon: Icon, onClose, compact, badge }: NavItem & { onClose?: () => void; compact?: boolean }) {
   const pathname = usePathname()
   const active = pathname === href || pathname.startsWith(href + '/')
 
@@ -145,6 +166,7 @@ function NavLink({ href, label, icon: Icon, onClose, compact }: NavItem & { onCl
         )}
       >
         {label}
+        <NavBadge value={badge} />
       </Link>
     )
   }
@@ -168,13 +190,14 @@ function NavLink({ href, label, icon: Icon, onClose, compact }: NavItem & { onCl
         )} />
       </div>
       <span className="flex-1">{label}</span>
+      <NavBadge value={badge} />
     </Link>
   )
 }
 
 function NavGroupHeader({
-  section, icon: Icon, open, active, onToggle,
-}: { section: string; icon: React.ElementType; open: boolean; active: boolean; onToggle: () => void }) {
+  section, icon: Icon, open, active, onToggle, badge,
+}: { section: string; icon: React.ElementType; open: boolean; active: boolean; onToggle: () => void; badge?: number }) {
   return (
     <button
       type="button"
@@ -194,6 +217,7 @@ function NavGroupHeader({
         )} />
       </div>
       <span className="flex-1 text-left">{section}</span>
+      {!open && <NavBadge value={badge} />}
       <ChevronDown className={cn('h-3.5 w-3.5 text-white/30 transition-transform duration-200', open && 'rotate-180')} />
     </button>
   )
@@ -280,6 +304,7 @@ function Sidebar({ onClose }: { onClose?: () => void }) {
                     open={open}
                     active={sectionActive}
                     onToggle={() => toggleSection(entry.section)}
+                    badge={entry.items.reduce((n, item) => n + (item.badge ?? 0), 0)}
                   />
                   {open && (
                     <div className="space-y-0.5 py-0.5 pl-9 pr-1">
@@ -408,6 +433,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <div className="flex min-h-screen bg-gray-50 overflow-x-hidden">
       <ThemeApplier />
       <ConfirmarNumeroCliniqDialog />
+      <AvisoAutorizacionesPrecio />
       <aside className={cn('hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:left-0 lg:w-60 z-40', SIDEBAR_BG)}>
         <Sidebar />
       </aside>

@@ -67,6 +67,8 @@ interface NuevaCitaModalProps {
   defaultItemCotizacion?: string | null
   defaultItemCotizacionTipo?: TipoItemCotizacion | null
   defaultSesionEjecutada?: string | null
+  /** Sede con la que abre (p. ej. la de la venta). */
+  defaultSede?: string | null
   /** Se dispara tras crear la cita con éxito (para invalidar queries del origen). */
   onCreated?: () => void
 }
@@ -87,11 +89,13 @@ export function NuevaCitaModal({
   defaultItemCotizacion = null,
   defaultItemCotizacionTipo = null,
   defaultSesionEjecutada = null,
+  defaultSede = null,
   onCreated,
 }: NuevaCitaModalProps) {
   const queryClient = useQueryClient()
   const router = useRouter()
   const { user } = useAuthStore()
+  const puedeCrearPaciente = hasPermission(user, PERM.PACIENTES_CREAR)
   const canAprobarExcepcion = hasPermission(user, PERM.CARTERA_APROBAR_EXCEPCION)
 
   // Estado del paciente
@@ -157,6 +161,10 @@ export function NuevaCitaModal({
     setValue('fecha', defaultFecha ?? todayISO())
     setValue('slot', '')
     if (defaultProfesional) setValue('profesional', defaultProfesional)
+    // La sede de la venta, o la única del usuario: antes había que elegirla
+    // aunque no hubiera opción (QF-04).
+    const sedeInicial = defaultSede ?? (user?.sedes?.length === 1 ? user.sedes[0].id : null)
+    if (sedeInicial) setValue('sede', sedeInicial)
     setPaciente(defaultPaciente)
     setModo(defaultModo)
     setItemCotizacion(defaultItemCotizacion)
@@ -164,7 +172,7 @@ export function NuevaCitaModal({
     setSesionEjecutada(defaultSesionEjecutada)
   }, [
     open, defaultFecha, defaultProfesional, defaultPaciente, defaultModo, defaultItemCotizacion,
-    defaultItemCotizacionTipo, defaultSesionEjecutada, setValue,
+    defaultItemCotizacionTipo, defaultSesionEjecutada, defaultSede, setValue,
   ])
 
   const { data: sedesData } = useQuery({
@@ -236,6 +244,11 @@ export function NuevaCitaModal({
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
+      // Sesiones restantes del paquete, aviso de sin confirmar y asistencias del
+      // paciente: con caché vieja el modal volvía a ofrecer una sesión ya tomada (AG-09).
+      queryClient.invalidateQueries({ queryKey: ['cotizacion-sesiones'] })
+      queryClient.invalidateQueries({ queryKey: ['citas-sin-confirmar-proximo-dia-habil'] })
+      queryClient.invalidateQueries({ queryKey: ['citas-asistencias'] })
       onCreated?.()
       handleClose()
     },
@@ -398,7 +411,7 @@ export function NuevaCitaModal({
   // Props dinámicos para SlotPicker según el modo activo
   const slotPickerProps = (() => {
     if (modo === 'cotizacion' && itemCotizacion)
-      return { itemCotizacionId: itemCotizacion } as const
+      return { itemCotizacionId: itemCotizacion, sesionEjecutadaId: sesionEjecutada ?? undefined } as const
     if (modo === 'servicio' && servicioId)
       return { servicioId } as const
     if (modo === 'libre' && duracionLibre > 0)
@@ -436,10 +449,11 @@ export function NuevaCitaModal({
                 setValue('slot', '')
                 if (modo === 'cotizacion') cambiarModo('servicio')
               }}
-              onCreateNew={(nombre) => {
+              // Crear la ficha aquí mismo solo con permiso de crear pacientes.
+              onCreateNew={puedeCrearPaciente ? (nombre) => {
                 setCrearPacienteNombre(nombre ?? '')
                 setCrearPacienteOpen(true)
-              }}
+              } : undefined}
             />
             {pacienteError && <p className="text-xs text-destructive">Selecciona un paciente</p>}
           </div>

@@ -68,6 +68,13 @@ export const seguimientoApi = {
     return res.data
   },
 
+  /** Escribió por WhatsApp pero no es cliente (proveedor, familiar, número equivocado):
+   *  se cierra y su teléfono no vuelve a crear interesados. */
+  noEsCliente: async (id: string): Promise<Oportunidad> => {
+    const res = await apiClient.post<Oportunidad>(`${BASE}${id}/no_es_cliente/`)
+    return res.data
+  },
+
   reabrir: async (id: string): Promise<Oportunidad> => {
     const res = await apiClient.post<Oportunidad>(`${BASE}${id}/reabrir/`)
     return res.data

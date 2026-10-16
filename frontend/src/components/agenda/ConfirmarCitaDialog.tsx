@@ -11,6 +11,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { cn, formatDateTime, formatTime } from '@/lib/utils'
 import { MEDIOS } from './ConfirmacionForm'
 import type { Cita, MedioConfirmacion } from '@/types/agenda'
+import { CancelarConCobroDialog, cobroDeLaCitaDelError, type AccionCobro, type CobroDeLaCita } from './CancelarConCobroDialog'
 
 type Resultado = 'confirmo' | 'cancelo' | 'no_confirmo' | 'no_asistio'
 
@@ -23,11 +24,15 @@ interface ConfirmarCitaDialogProps {
   modo: 'estado' | 'manual'
   /** Muestra "No asistió" (cita confirmada, o pendiente cuya hora ya pasó). */
   permiteNoAsistio?: boolean
+  /** Muestra "Canceló": solo para quien puede cancelar la cita (AG-13). */
+  permiteCancelar?: boolean
 }
 
 /** Registro del contacto con el paciente: confirmó, canceló, no confirmó o no asistió. Cada opción
  * queda en el historial de contacto con el usuario que la registró. */
-export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoAsistio }: ConfirmarCitaDialogProps) {
+export function ConfirmarCitaDialog({
+  cita, open, onOpenChange, modo, permiteNoAsistio, permiteCancelar = true,
+}: ConfirmarCitaDialogProps) {
   const queryClient = useQueryClient()
   const [medio, setMedio] = useState<MedioConfirmacion | ''>('')
   const [nota, setNota] = useState('')
@@ -44,8 +49,10 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
     }
   }, [open])
 
+  const [cobroAlCancelar, setCobroAlCancelar] = useState<CobroDeLaCita | null>(null)
+
   const { mutate, isPending, variables } = useMutation({
-    mutationFn: (resultado: Resultado) => {
+    mutationFn: ({ resultado, accion_cobro }: { resultado: Resultado; accion_cobro?: AccionCobro }) => {
       const texto = nota.trim()
       if (resultado === 'no_confirmo') return agendaApi.citas.noConfirmo(cita.id, { medio, nota: texto })
       if (resultado === 'no_asistio') {
@@ -53,14 +60,16 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
       }
       if (resultado === 'cancelo') {
         return agendaApi.citas.cambiarEstado(cita.id, {
-          estado: 'cancelada', motivo_cancelacion: texto, medio, nota: texto,
+          estado: 'cancelada', motivo_cancelacion: texto, medio, nota: texto, accion_cobro,
         })
       }
       if (modo === 'manual') return agendaApi.citas.confirmarManual(cita.id, { medio, nota: texto })
       return agendaApi.citas.cambiarEstado(cita.id, { estado: 'confirmada', medio, nota: texto })
     },
     onSuccess: () => {
+      setCobroAlCancelar(null)
       queryClient.invalidateQueries({ queryKey: ['citas'] })
+      queryClient.invalidateQueries({ queryKey: ['cobros'] })
       queryClient.invalidateQueries({ queryKey: ['slots'] })
       queryClient.invalidateQueries({ queryKey: ['registros-confirmacion', cita.id] })
       queryClient.invalidateQueries({ queryKey: ['citas-sin-confirmar-proximo-dia-habil'] })
@@ -69,6 +78,11 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     onError: (err: any) => {
       const data = err?.response?.data
+      const cobro = cobroDeLaCitaDelError(err)
+      if (cobro) {
+        setCobroAlCancelar(cobro)
+        return
+      }
       if (err?.response?.status === 403) {
         setError('Tu rol no tiene permiso para gestionar citas. Pídeselo al administrador.')
         return
@@ -84,12 +98,13 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
       notaRef.current?.focus()
       return
     }
-    mutate(resultado)
+    mutate({ resultado })
   }
 
-  const guardando = (r: Resultado) => isPending && variables === r
+  const guardando = (r: Resultado) => isPending && variables?.resultado === r
 
   return (
+    <>
     <Dialog open={open} onOpenChange={(o) => { if (!isPending) onOpenChange(o) }}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
@@ -183,15 +198,17 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
             <PhoneOff className="h-4 w-4 mr-1.5" />
             {guardando('no_confirmo') ? 'Guardando…' : 'No confirmó'}
           </Button>
-          <Button
-            variant="outline"
-            disabled={isPending}
-            onClick={() => registrar('cancelo')}
-            className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
-          >
-            <X className="h-4 w-4 mr-1.5" />
-            {guardando('cancelo') ? 'Guardando…' : 'Canceló'}
-          </Button>
+          {permiteCancelar && (
+            <Button
+              variant="outline"
+              disabled={isPending}
+              onClick={() => registrar('cancelo')}
+              className="border-destructive/40 text-destructive hover:bg-destructive/5 hover:text-destructive"
+            >
+              <X className="h-4 w-4 mr-1.5" />
+              {guardando('cancelo') ? 'Guardando…' : 'Canceló'}
+            </Button>
+          )}
           <Button disabled={isPending} onClick={() => registrar('confirmo')}>
             <Check className="h-4 w-4 mr-1.5" />
             {guardando('confirmo') ? 'Guardando…' : 'Confirmó'}
@@ -199,5 +216,12 @@ export function ConfirmarCitaDialog({ cita, open, onOpenChange, modo, permiteNoA
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <CancelarConCobroDialog
+      cobro={cobroAlCancelar}
+      enviando={isPending}
+      onCerrar={() => setCobroAlCancelar(null)}
+      onElegir={(accion_cobro) => mutate({ resultado: 'cancelo', accion_cobro })}
+    />
+    </>
   )
 }

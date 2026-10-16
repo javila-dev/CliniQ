@@ -41,6 +41,7 @@ export const PERM = {
   // Cobros
   COBROS_VER:                'cobros.ver',
   COBROS_CREAR:              'cobros.crear',
+  COBROS_REGISTRAR_PAGO:     'cobros.registrar_pago',
   COBROS_ANULAR:             'cobros.anular',
   COBROS_CAMBIAR_PRECIO:     'cobros.cambiar_precio',
 
@@ -98,6 +99,7 @@ export const PERM = {
 
   // Cartera
   CARTERA_VER:               'cartera.ver',
+  CARTERA_REGISTRAR_PAGO:    'cartera.registrar_pago',
   CARTERA_APROBAR_EXCEPCION: 'cartera.aprobar_excepcion',
   CARTERA_MODIFICAR_PLAZO:   'cartera.modificar_plazo',
 
@@ -269,6 +271,16 @@ export const canAccess = {
     hasPermission(u, PERM.ROLES_VER),
 } as const
 
+/** Quien solo ve su actividad comercial ve las cotizaciones de otros profesionales
+ *  en el listado del paciente, pero no las abre (decisión del 15/10/2026). */
+export function puedeAbrirCotizacion(
+  user: AuthUser | null | undefined,
+  profesionalId: string | null | undefined,
+): boolean {
+  if (!user?.ve_solo_su_actividad_comercial) return true
+  return profesionalId === user.id
+}
+
 // ── Ruta de aterrizaje post-login ─────────────────────────────────────────────
 
 /** Quien no ve reportes no tiene nada que mirar en el Dashboard (antes veía
@@ -285,5 +297,11 @@ export function defaultRoute(user: AuthUser): string {
   if (canAccess.agenda(user)) return '/agenda'
   if (canAccess.atenciones(user)) return '/atenciones'
   if (canAccess.pacientes(user)) return '/pacientes'
+  // Roles de caja o comerciales (sin agenda ni pacientes): a su pantalla de trabajo
+  // y no a un dashboard vacío.
+  if (canAccess.cobros(user)) return '/ingresos'
+  if (hasPermission(user, PERM.CARTERA_VER)) return '/cartera'
+  if (hasPermission(user, PERM.SEGUIMIENTO_VER)) return '/seguimiento'
+  if (hasPermission(user, PERM.COTIZACIONES_VER)) return '/cotizaciones'
   return '/dashboard'
 }

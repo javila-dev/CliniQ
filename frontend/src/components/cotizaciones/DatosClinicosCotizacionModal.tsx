@@ -88,7 +88,7 @@ export function DatosClinicosCotizacionModal({ cotizacionId, pacienteId, open, o
               <TabMediciones pacienteId={pacienteId} notaId={nota.id} />
             </TabsContent>
             <TabsContent value="fotos" className="pt-4">
-              <TabFotos historia={historia} notas={[nota]} />
+              <TabFotos historia={historia} notas={[nota]} notaId={nota.id} />
             </TabsContent>
           </Tabs>
         )}

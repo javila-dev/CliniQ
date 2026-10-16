@@ -4,12 +4,13 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { Rocket, ArrowRight, X } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { Button } from '@/components/ui/button'
 
-/** Banner que invita a cargar los pacientes en curso, visible a cualquier
- *  usuario mientras el superadmin tiene activo el "modo puesta en marcha"
- *  de la clínica — sin exigir ningún permiso (el flag viaja en el perfil
- *  del usuario, no requiere clinicas.ver).
+/** Banner que invita a cargar los pacientes en curso mientras el superadmin
+ *  tiene activo el "modo puesta en marcha" de la clínica. Solo para quien puede
+ *  crear cotizaciones: la carga arma la cotización, los pagos y el saldo (el
+ *  flag viaja en el perfil del usuario, no requiere clinicas.ver).
  *  `dismissible` (default true): permite descartarlo por navegador — en el
  *  dashboard sí, en Configuración no (siempre visible). */
 export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boolean }) {
@@ -22,7 +23,7 @@ export function PuestaEnMarchaBanner({ dismissible = true }: { dismissible?: boo
   })
 
   if (dismissible && dismissed) return null
-  if (!user?.modo_puesta_en_marcha) return null
+  if (!user?.modo_puesta_en_marcha || !hasPermission(user, PERM.COTIZACIONES_GESTIONAR)) return null
 
   const cerrar = () => {
     setDismissed(true)

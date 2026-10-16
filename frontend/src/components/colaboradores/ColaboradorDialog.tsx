@@ -22,6 +22,7 @@ import { Switch } from '@/components/ui/switch'
 import { cn, todayISO } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { GruposAtencionSelect, useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
+import { toast } from '@/hooks/use-toast'
 import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
 import type { Rol } from '@/types/usuarios'
 import type { DiaSemana, HorarioSede } from '@/types/clinicas'
@@ -581,10 +582,18 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
 
   const createMut = useMutation({
     mutationFn: colaboradoresApi.create,
-    onSuccess: (_data, variables) => {
+    onSuccess: (data, variables) => {
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
       qc.invalidateQueries({ queryKey: ['mi-plan'] })
-      authApi.invitar(variables.email).catch(() => {})
+      if (data.invitacion_error) {
+        // Se creó igual; antes un correo caído impedía dar de alta (QA-12).
+        toast({
+          title: 'Colaborador creado, pero no salió la invitación',
+          description: 'Reenvíala desde la lista de colaboradores cuando el correo funcione.',
+        })
+      } else {
+        authApi.invitar(variables.email).catch(() => {})
+      }
       onOpenChange(false)
     },
     onError: (err: any) => {

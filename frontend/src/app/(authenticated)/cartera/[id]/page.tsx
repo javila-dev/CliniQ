@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { ArrowLeft, ArrowUpRight, HandCoins, Wallet } from 'lucide-react'
 import { carteraApi } from '@/lib/api/cartera'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, PERM, puedeAbrirCotizacion } from '@/lib/permissions'
 import { NuevoAcuerdoPagoModal } from '@/components/cartera/NuevoAcuerdoPagoModal'
 import { CompromisoPagoFirmaContent } from '@/components/consentimientos/CompromisoPagoFirmaContent'
 import { AcuerdoPendienteAviso } from '@/components/cartera/detalle/AcuerdoPendienteAviso'
@@ -36,6 +36,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
   const canModificarPlazo = hasPermission(user, PERM.CARTERA_MODIFICAR_PLAZO)
+  const puedeCobrar = hasPermission(user, PERM.CARTERA_REGISTRAR_PAGO)
   const [cuotaSeleccionada, setCuotaSeleccionada] = useState<CuotaCartera | null>(null)
   const [showNuevoAcuerdo, setShowNuevoAcuerdo] = useState(false)
   const [showFirmaAcuerdo, setShowFirmaAcuerdo] = useState(false)
@@ -61,7 +62,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
   const cuotas = cartera.cuotas ?? []
   const estado = estadoCartera(cartera)
   // La acción principal cobra la cuota más antigua con saldo (las cuotas vienen ordenadas por fecha).
-  const proximaACobrar = cuotas.find((c) => saldoCuota(c) > 0) ?? null
+  const proximaACobrar = puedeCobrar ? cuotas.find((c) => saldoCuota(c) > 0) ?? null : null
   const puedeCrearAcuerdo = canModificarPlazo && Number(cartera.saldo_pendiente) > 0 && !acuerdoPendiente
   const acuerdos = cartera.acuerdos ?? []
 
@@ -94,10 +95,14 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
               <Link href={`/pacientes/${cartera.paciente_id}`} className="inline-flex items-center gap-0.5 hover:text-foreground hover:underline underline-offset-4">
                 Ver paciente <ArrowUpRight className="h-3.5 w-3.5" />
               </Link>
-              <span aria-hidden className="text-border">|</span>
-              <Link href={`/cotizaciones/${cartera.cotizacion_id}`} className="inline-flex items-center gap-0.5 hover:text-foreground hover:underline underline-offset-4">
-                Ver cotización <ArrowUpRight className="h-3.5 w-3.5" />
-              </Link>
+              {puedeAbrirCotizacion(user, cartera.cotizacion_profesional_id) && (
+                <>
+                  <span aria-hidden className="text-border">|</span>
+                  <Link href={`/cotizaciones/${cartera.cotizacion_id}`} className="inline-flex items-center gap-0.5 hover:text-foreground hover:underline underline-offset-4">
+                    Ver cotización <ArrowUpRight className="h-3.5 w-3.5" />
+                  </Link>
+                </>
+              )}
               {cartera.profesional_nombre && (
                 <>
                   <span aria-hidden className="text-border">|</span>
@@ -164,7 +169,7 @@ export default function DetalleCarteraPage({ params }: { params: Promise<{ id: s
               carteraId={id}
               puedeEditarFecha={canModificarPlazo}
               bloqueado={Boolean(acuerdoPendiente)}
-              onCobrar={setCuotaSeleccionada}
+              onCobrar={puedeCobrar ? setCuotaSeleccionada : undefined}
             />
           </CardContent>
         </Card>

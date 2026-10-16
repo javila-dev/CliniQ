@@ -603,6 +603,7 @@ function DayListView({
   citas: Cita[]; fecha: string; selectedId: string | null
   onSelectCita: (id: string) => void; onClickSlot: (iso: string) => void; density: AgendaDensity
 }) {
+  const { user } = useAuthStore()
   const sorted = [...citas].sort((a, b) => new Date(a.fecha_inicio).getTime() - new Date(b.fecha_inicio).getTime())
   const now = new Date()
   const isToday = fecha === todayISO()
@@ -650,7 +651,7 @@ function DayListView({
             <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-primary/10 text-primary"><Clock3 className="h-6 w-6" /></div>
             <h3 className="font-semibold text-gray-900">El día está libre</h3>
             <p className="mt-1 max-w-sm text-sm text-muted-foreground">No hay citas con los filtros seleccionados.</p>
-            {fecha >= todayISO() && (
+            {fecha >= todayISO() && hasPermission(user, PERM.AGENDA_CREAR) && (
               <Button className="mt-5" size="sm" onClick={() => onClickSlot(`${fecha}T09:00:00`)}>
                 <Plus className="mr-1.5 h-4 w-4" /> Agendar una cita
               </Button>
@@ -1548,22 +1549,20 @@ function AgendaContent() {
     }
   }, [isAllSedes, filterSede, defaultSedeId])
 
-  const { data: profesionales } = useQuery({
+  const { data: todosLosProfesionales } = useQuery({
     queryKey: ['profesionales', filterSede],
     queryFn: () => colaboradoresApi.profesionales(filterSede || undefined),
   })
+  // Las citas de toda la sede las ve quien agenda; un profesional que no agenda
+  // ve solo su agenda (el backend ya le devuelve solo sus citas): sin columnas
+  // ni filtro de los demás.
+  const profesionales = esSoloProfesional
+    ? todosLosProfesionales?.filter((p) => p.id === user?.id)
+    : todosLosProfesionales
 
-  // Un profesional puro arranca viendo sus propias citas. Es solo el filtro
-  // inicial: puede quitarlo para ver la agenda de los demás.
-  const filtroInicialAplicado = useRef(false)
   useEffect(() => {
-    if (filtroInicialAplicado.current || !esSoloProfesional || !profesionales) return
-    const miPerfil = profesionales.find((p) => p.id === user?.id)
-    if (miPerfil) {
-      setFilterProfesional([miPerfil.id])
-      filtroInicialAplicado.current = true
-    }
-  }, [esSoloProfesional, profesionales, user?.id])
+    if (esSoloProfesional && user?.id) setFilterProfesional([user.id])
+  }, [esSoloProfesional, user?.id])
 
   const handleSedeChange = (val: string) => {
     setFilterSede(val === 'all' ? '' : val)
@@ -1797,11 +1796,13 @@ function AgendaContent() {
               </SelectContent>
             </Select>
 
-            <ProfessionalMultiSelect
-              options={profesionales ?? []}
-              value={filterProfesional}
-              onChange={setFilterProfesional}
-            />
+            {!esSoloProfesional && (
+              <ProfessionalMultiSelect
+                options={profesionales ?? []}
+                value={filterProfesional}
+                onChange={setFilterProfesional}
+              />
+            )}
           </div>
 
           {/* Actions */}

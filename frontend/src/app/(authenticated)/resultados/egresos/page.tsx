@@ -254,6 +254,17 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
 
   const bloqueado = errorCaja || sinCaja || (!cargandoCaja && !cajaAbierta && !!sedeSel)
 
+  // Quien registra gastos puede abrir la caja aquí mismo, con el fondo sugerido.
+  const abrirCaja = useMutation({
+    mutationFn: () => cajaApi.sesiones.abrir({ caja: estadoCaja!.caja!.id }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['caja-actual'] })
+      qc.invalidateQueries({ queryKey: ['caja-sesiones'] })
+      toast.success('Caja abierta', 'Ya puedes registrar el gasto.')
+    },
+    onError: (e) => setErr(mensajeDeError(e, 'No se pudo abrir la caja')),
+  })
+
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
       <SheetContent className="w-full sm:max-w-md">
@@ -280,7 +291,21 @@ function RegistrarGastoSheet({ open, onClose, sedes, sedeDefault, categorias }: 
               <div>
                 {sinCaja
                   ? 'Esta sede no tiene una caja configurada. Pídele a un administrador que la cree en Configuración → Cajas.'
-                  : <>La caja de esta sede está cerrada. Ábrela en la pestaña <span className="font-medium">Caja</span> para registrar gastos.</>}
+                  : (
+                    <div className="space-y-2">
+                      <p>
+                        La caja de esta sede está cerrada. Para registrar el gasto, ábrela con el fondo sugerido de{' '}
+                        <span className="font-medium tabular-nums">{COP.format(Number(estadoCaja?.caja?.monto_apertura_sugerido ?? 0))}</span>.
+                      </p>
+                      <Button
+                        type="button" size="sm" variant="outline" className="h-7 bg-white text-xs"
+                        disabled={abrirCaja.isPending || !estadoCaja?.caja}
+                        onClick={() => abrirCaja.mutate()}
+                      >
+                        {abrirCaja.isPending ? 'Abriendo…' : 'Abrir caja'}
+                      </Button>
+                    </div>
+                  )}
               </div>
             </div>
           )}

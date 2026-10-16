@@ -9,6 +9,7 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { PuestaEnMarchaButton } from '@/components/shared/PuestaEnMarchaButton'
+import { AutorizacionesBoton } from '@/components/cotizaciones/AutorizacionesPrecioAcceso'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -133,6 +134,7 @@ export default function CotizacionesPage() {
         action={
           <div className="flex items-center gap-2">
             <PuestaEnMarchaButton />
+            <AutorizacionesBoton />
             {canGestionar && (
               <Button onClick={abrirNueva} disabled={loadingNueva}>
                 {loadingNueva
@@ -270,6 +272,11 @@ export default function CotizacionesPage() {
                   <div className="flex flex-wrap items-center gap-1.5">
                     <CotizacionEstadoBadge estado={c.estado_comercial ?? c.estado} />
                     {c.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={c.enviada_en} />}
+                    {c.estado === 'borrador' && c.precio_por_autorizar && (
+                      <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200/70">
+                        Precio por autorizar
+                      </span>
+                    )}
                   </div>
                 </Td>
                 <Td className="hidden md:table-cell w-32"><CeldaFecha fecha={c.created_at} /></Td>

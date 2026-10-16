@@ -228,7 +228,9 @@ function IngresoDetalleSheet({ cobro: cobroFila, open, onClose }: { cobro: Cobro
 
   const cfg = ESTADO_CONFIG[cobro.estado]
   const Icon = cfg.icon
-  const puedePagar = cobro.estado === 'pendiente' || cobro.estado === 'pagado_parcial'
+  // Con saldo y con permiso de registrar pagos (antes salía a quien solo ve ingresos).
+  const puedePagar = (cobro.estado === 'pendiente' || cobro.estado === 'pagado_parcial')
+    && hasPermission(user, PERM.COBROS_REGISTRAR_PAGO)
   const origenCfg = cobro.origen ? ORIGEN_CONFIG[cobro.origen] : null
 
   return (

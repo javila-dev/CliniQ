@@ -106,7 +106,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
     queryFn: () => colaboradoresApi.profesionales(formSede || undefined),
   })
 
-  const { data: bloqueos, isLoading } = useQuery({
+  const { data: bloqueos, isLoading, isError: errorBloqueos, error: errBloqueos, refetch: recargarBloqueos } = useQuery({
     queryKey: ['bloqueos', 'panel', filterSede, filterEstado],
     queryFn: () => agendaApi.bloqueos.list({
       // Vigentes y próximos: los ya terminados no se gestionan.
@@ -163,19 +163,42 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
     },
   })
 
-  const { mutate: aprobar } = useMutation({
-    mutationFn: (id: string) => agendaApi.bloqueos.aprobar(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bloqueos'] }),
+  // Antes un fallo al aprobar, rechazar o eliminar no mostraba nada (AG-08).
+  const alFallar = (titulo: string) => (err: unknown) => {
+    queryClient.invalidateQueries({ queryKey: ['bloqueos'] })
+    toast.error(titulo, mensajeDeError(err))
+  }
+
+  // Mientras estuvo pendiente se pudieron agendar citas en ese horario: el
+  // backend las devuelve y se confirma antes de aprobar (AG-11).
+  const [aprobarConCitas, setAprobarConCitas] = useState<{ id: string; mensaje: string; citas: CitaAfectadaBloqueo[] } | null>(null)
+
+  const { mutate: aprobar, isPending: aprobando } = useMutation({
+    mutationFn: ({ id, confirmar = false }: { id: string; confirmar?: boolean }) => agendaApi.bloqueos.aprobar(id, confirmar),
+    onSuccess: () => {
+      setAprobarConCitas(null)
+      queryClient.invalidateQueries({ queryKey: ['bloqueos'] })
+    },
+    onError: (err: any, { id }) => {
+      const data = err?.response?.data
+      if (data?.code === 'BLOQUEO_CON_CITAS') {
+        setAprobarConCitas({ id, mensaje: mensajeDeError(err), citas: data.citas ?? [] })
+        return
+      }
+      alFallar('No se aprobó el bloqueo')(err)
+    },
   })
 
   const { mutate: rechazar } = useMutation({
     mutationFn: (id: string) => agendaApi.bloqueos.rechazar(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bloqueos'] }),
+    onError: alFallar('No se rechazó el bloqueo'),
   })
 
   const { mutate: eliminar } = useMutation({
     mutationFn: (id: string) => agendaApi.bloqueos.delete(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['bloqueos'] }),
+    onError: alFallar('No se eliminó el bloqueo'),
   })
 
   return (
@@ -230,7 +253,13 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
             {isLoading && (
               <p className="text-sm text-muted-foreground text-center py-8">Cargando bloqueos...</p>
             )}
-            {!isLoading && (!bloqueos || bloqueos.length === 0) && (
+            {!isLoading && errorBloqueos && !bloqueos && (
+              <div className="text-center py-8">
+                <p className="text-sm text-muted-foreground">{mensajeDeError(errBloqueos, 'No se pudieron cargar los bloqueos.')}</p>
+                <Button variant="outline" size="sm" className="mt-3" onClick={() => recargarBloqueos()}>Reintentar</Button>
+              </div>
+            )}
+            {!isLoading && !errorBloqueos && (!bloqueos || bloqueos.length === 0) && (
               <p className="text-sm text-muted-foreground text-center py-8">No hay bloqueos registrados.</p>
             )}
             {bloqueos?.map((b) => (
@@ -241,7 +270,7 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
                 // Igual que el backend: quien gestiona bloqueos borra cualquiera;
                 // quien lo solicitó, solo mientras sigue pendiente.
                 canEliminar={canGestionar || (b.estado === 'pendiente' && b.creado_por === user?.id)}
-                onAprobar={() => aprobar(b.id)}
+                onAprobar={() => aprobar({ id: b.id })}
                 onRechazar={() => rechazar(b.id)}
                 onEliminar={() => eliminar(b.id)}
               />
@@ -355,6 +384,35 @@ export function BloqueosPanel({ open, onOpenChange, defaultSedeId }: BloqueosPan
                 {creando ? 'Guardando...' : canAprobar ? 'Crear bloqueo' : 'Enviar solicitud'}
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={aprobarConCitas !== null} onOpenChange={(o) => { if (!o && !aprobando) setAprobarConCitas(null) }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Hay citas en ese horario</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{aprobarConCitas?.mensaje}</p>
+          {aprobarConCitas && aprobarConCitas.citas.length > 0 && (
+            <ul className="max-h-36 overflow-y-auto rounded-md border bg-amber-50/60 px-3 py-2 text-xs space-y-1">
+              {aprobarConCitas.citas.map((c) => (
+                <li key={c.id} className="flex justify-between gap-2">
+                  <span className="truncate">{c.paciente}</span>
+                  <span className="shrink-0 text-muted-foreground">{formatDT(c.fecha_inicio)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAprobarConCitas(null)} disabled={aprobando}>Cancelar</Button>
+            <Button
+              variant="destructive"
+              disabled={aprobando}
+              onClick={() => aprobarConCitas && aprobar({ id: aprobarConCitas.id, confirmar: true })}
+            >
+              {aprobando ? 'Aprobando...' : 'Aprobar de todas formas'}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

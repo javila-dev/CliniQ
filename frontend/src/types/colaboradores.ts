@@ -71,6 +71,8 @@ export interface GrupoDelColaborador {
 
 export interface Colaborador {
   id: string
+  /** Solo al crear: la invitación por correo no salió (se reenvía desde la lista). */
+  invitacion_error?: string
   user: string
   // user fields — require backend to include in serializer
   email?: string

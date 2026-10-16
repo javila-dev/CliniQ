@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion } from '@/store/numeroCliniqStore'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, Venta } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoAutorizacionCotizacion, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, SolicitudAutorizacionPrecio, Venta } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { NotaClinica } from '@/types/historia'
 import type { Paginated } from '@/types/common'
@@ -150,6 +150,12 @@ export const cotizacionesApi = {
     return res.data
   },
 
+  /** Estado de la autorización de precios (el formulario lo consulta cada ~10 s mientras espera). */
+  autorizacionPrecio: async (id: string): Promise<EstadoAutorizacionCotizacion> => {
+    const res = await apiClient.get<EstadoAutorizacionCotizacion>(`/cotizaciones/${id}/autorizacion_precio/`)
+    return res.data
+  },
+
   registrarEnvioPdf: async (id: string): Promise<CotizacionEnvio> => {
     const res = await apiClient.post<CotizacionEnvio>(`/cotizaciones/${id}/registrar_envio/`, { canal: 'pdf' })
     return res.data
@@ -192,6 +198,33 @@ export const ventasApi = {
   // Profesionales con ventas, para el filtro de la lista.
   vendedores: async (): Promise<{ id: string; nombre: string }[]> => {
     const res = await apiClient.get<{ id: string; nombre: string }[]>('/ventas/vendedores/')
+    return res.data
+  },
+}
+
+/** Bandeja de autorizaciones de precio: solo con cotizaciones.cambiar_precio, acotada a sus sedes. */
+export const autorizacionesPrecioApi = {
+  list: async (params?: {
+    estado?: 'pendiente' | 'resueltas'
+    sede?: string
+    page?: number
+  }): Promise<Paginated<SolicitudAutorizacionPrecio>> => {
+    const res = await apiClient.get<Paginated<SolicitudAutorizacionPrecio>>('/autorizaciones-precio/', { params })
+    return res.data
+  },
+
+  contador: async (): Promise<{ pendientes: number; ultima_en: string | null }> => {
+    const res = await apiClient.get<{ pendientes: number; ultima_en: string | null }>('/autorizaciones-precio/contador/')
+    return res.data
+  },
+
+  autorizar: async (id: string, comentario = ''): Promise<SolicitudAutorizacionPrecio> => {
+    const res = await apiClient.post<SolicitudAutorizacionPrecio>(`/autorizaciones-precio/${id}/autorizar/`, { comentario })
+    return res.data
+  },
+
+  rechazar: async (id: string, comentario: string): Promise<SolicitudAutorizacionPrecio> => {
+    const res = await apiClient.post<SolicitudAutorizacionPrecio>(`/autorizaciones-precio/${id}/rechazar/`, { comentario })
     return res.data
   },
 }

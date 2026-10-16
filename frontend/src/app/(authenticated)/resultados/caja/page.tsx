@@ -53,6 +53,8 @@ function CajaContent() {
   const { user } = useAuthStore()
   const { sede: sedeCtx, sedes } = useResultadosSede()
   const puedeOperar = hasPermission(user, PERM.CAJA_CIERRE_REALIZAR)
+  // Abrir la caja también lo puede quien registra gastos (un gasto exige la caja abierta).
+  const puedeAbrir = puedeOperar || hasPermission(user, PERM.CAJA_GASTOS_REGISTRAR)
 
   // La caja es de UNA sede; si el filtro está en "Todas", cae en la 1ª.
   const sede = sedeCtx ?? sedes[0]?.id
@@ -205,7 +207,7 @@ function CajaContent() {
                 <span className="font-medium tabular-nums text-foreground">{COP.format(Number(caja.monto_apertura_sugerido))}</span>
               </p>
             </div>
-            {puedeOperar
+            {puedeAbrir
               ? <Button size="sm" onClick={() => setAbrirOpen(true)}><LockOpen className="h-4 w-4 mr-1.5" />Abrir caja</Button>
               : <p className="text-xs text-muted-foreground">No tienes permiso para abrir caja.</p>}
           </CardContent>

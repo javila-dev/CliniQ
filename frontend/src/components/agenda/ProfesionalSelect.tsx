@@ -43,7 +43,7 @@ export function ProfesionalSelect({
   const filtroActivo = Boolean(user?.filtrar_profesionales_por_procedimiento)
   const hayFiltro = Boolean(filtro?.servicioIds?.length || filtro?.itemCotizacionId || filtro?.sesionEjecutadaId)
 
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, isError, refetch } = useQuery({
     queryKey: [
       'profesionales', sedeId,
       filtro?.servicioIds?.join(',') ?? '', filtro?.itemCotizacionId ?? '', filtro?.sesionEjecutadaId ?? '',
@@ -72,7 +72,7 @@ export function ProfesionalSelect({
           className="flex h-10 w-full items-center justify-between rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
         >
           <span className={cn('truncate', !seleccionado && 'text-muted-foreground')}>
-            {esperando ? esperando : isLoading ? 'Cargando...' : seleccionado ? toTitleCase(seleccionado.nombre_completo) : placeholder}
+            {esperando ? esperando : isLoading ? 'Cargando...' : isError && !data ? 'No se pudo cargar: toca para reintentar' : seleccionado ? toTitleCase(seleccionado.nombre_completo) : placeholder}
           </span>
           <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
         </button>
@@ -89,7 +89,15 @@ export function ProfesionalSelect({
           />
         </div>
         <div className="max-h-60 overflow-y-auto py-1" onWheel={scrollWheelFallback}>
-          {filtrados.length === 0 ? (
+          {isError && !data ? (
+            // Antes un error se veía como "Sin resultados" (AG-08).
+            <div className="px-3 py-3 text-center">
+              <p className="text-sm text-muted-foreground">No se pudo cargar la lista de profesionales.</p>
+              <button type="button" onClick={() => refetch()} className="mt-1 text-sm font-medium text-primary hover:underline">
+                Reintentar
+              </button>
+            </div>
+          ) : filtrados.length === 0 ? (
             <p className="px-3 py-3 text-sm text-muted-foreground text-center">
               {sinProfesionalesParaElProcedimiento
                 ? 'Ningún profesional realiza este procedimiento en esta sede. Asígnalo desde Configuración o desde el perfil del profesional.'

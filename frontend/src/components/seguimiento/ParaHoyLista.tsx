@@ -134,10 +134,13 @@ function SesionesPaquete({ sesion, total }: { sesion: number; total: number }) {
 export interface AccionesContacto {
   canGestionar: boolean
   onWhatsapp: (op: Oportunidad) => void
-  onAgendar: (op: Oportunidad) => void
+  /** Sin permiso de agendar citas no se pasa y no aparece el botón. */
+  onAgendar?: (op: Oportunidad) => void
   onGestion: (op: Oportunidad) => void
   onPosponer: (op: Oportunidad) => void
   onPerder: (op: Oportunidad) => void
+  /** Interesado que llegó por WhatsApp y no es cliente: no vuelve a entrar. */
+  onNoEsCliente?: (op: Oportunidad) => void
 }
 
 const AYUDA_SIN_FICHA = 'Aún no es paciente: no tiene ficha creada. Se crea al agendar su valoración.'
@@ -268,10 +271,10 @@ function AccionesRapidas({ op, acciones }: { op: Oportunidad; acciones: Acciones
       >
         <WhatsAppIcon className="h-4 w-4" />
       </BotonIcono>
-      {puedeAgendar(op) && (
+      {acciones.onAgendar && puedeAgendar(op) && (
         <BotonIcono
           etiqueta={op.tipo === 'paquete' ? 'Agendar su siguiente sesión' : 'Agendar cita de valoración'}
-          onClick={() => acciones.onAgendar(op)}
+          onClick={() => acciones.onAgendar?.(op)}
         >
           <CalendarPlus className="h-4 w-4" />
         </BotonIcono>
@@ -306,6 +309,11 @@ function MenuOpciones({ op, acciones }: { op: Oportunidad; acciones: AccionesCon
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem className="text-destructive" onClick={() => acciones.onPerder(op)}>Ya no le interesa…</DropdownMenuItem>
+            {acciones.onNoEsCliente && op.motivo === 'whatsapp' && !op.paciente && (
+              <DropdownMenuItem className="text-destructive" onClick={() => acciones.onNoEsCliente?.(op)}>
+                No es cliente (no volver a registrarlo)
+              </DropdownMenuItem>
+            )}
           </>
         )}
       </DropdownMenuContent>

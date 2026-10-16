@@ -10,7 +10,6 @@ import {
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { agendaApi } from '@/lib/api/agenda'
-import { protocolosApi } from '@/lib/api/protocolos'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -31,6 +30,7 @@ import { TabLaboratorios } from '@/components/obesidad/TabLaboratorios'
 import { TabFarmacologico } from '@/components/obesidad/TabFarmacologico'
 import { TabZonas } from '@/components/historia/TabZonas'
 import { TabInsumos } from '@/components/historia/TabInsumos'
+import { guardarBorradoresDeNota } from '@/components/historia/useBorradorNota'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
 import {
   FirmaProfesionalModal,
@@ -67,7 +67,10 @@ export default function AtencionCitaPage({ params }: Props) {
   const [isNavigating, startTransition] = useTransition()
   const queryClient = useQueryClient()
   const { tabsActivos } = useAtencionConfig()
-  const { notaId, setNota, clear: clearNota } = useNotaEnProgreso()
+  const { notaId: notaIdStore, citaId: citaDeLaNota, setNota, clear: clearNota } = useNotaEnProgreso()
+  // Solo la nota de ESTA cita: una respuesta tardía de otra atención podía dejar
+  // el borrador de otro paciente en el store y documentar en él (AT-05).
+  const notaId = citaDeLaNota === citaId ? notaIdStore : null
   const { user } = useAuthStore()
 
   // ── Queries ────────────────────────────────────────────────────────────────
@@ -135,8 +138,10 @@ export default function AtencionCitaPage({ params }: Props) {
   useEffect(() => {
     if (!isReady || !historia || !cita) return
     if (notaId) return   // ya existe borrador para esta sesión
+    let vigente = true
     historiaClinicaApi.notas.createBorrador(historia.id, cita.id)
       .then((nota) => {
+        if (!vigente) return
         setNota(nota.id, cita.id)
         // Las pestañas leen las notas de la caché: sin esto, la primera vez
         // apuntaban a la nota de la visita anterior (p. ej. al subir fotos).
@@ -144,8 +149,10 @@ export default function AtencionCitaPage({ params }: Props) {
       })
       .catch((err) => {
         // Sin nota no se puede documentar: avisar en vez de dejar las pestañas en blanco.
+        if (!vigente) return
         toast.error('No se pudo abrir la nota de esta atención', mensajeDeError(err, 'Recarga la página e intenta de nuevo.'))
       })
+    return () => { vigente = false }
   }, [isReady, historia?.id, cita?.id])
 
   // Limpiar store al desmontar
@@ -168,22 +175,16 @@ export default function AtencionCitaPage({ params }: Props) {
   // ── Completar atención ─────────────────────────────────────────────────────
 
   const { mutate: completar, isPending: completando } = useMutation({
+    // Una sola llamada: el backend marca la sesión del tratamiento, completa la
+    // nota y cierra la cita en una transacción. Antes eran tres y, si fallaba la
+    // última, la atención quedaba trabada (AT-03). Reintentar es seguro.
     mutationFn: async () => {
-      // Si la cita es una sesión de tratamiento pendiente, marcarla completada
-      // con los procedimientos que efectivamente se realizaron.
-      if (sesionCtx && sesionCtx.estado === 'pendiente') {
-        await protocolosApi.sesionesEjecutadas.marcarCompletada(sesionCtx.sesion_id, {
-          procedimientos_ejecutados: procsSel,
-          cita: citaId,
-        })
-      }
-      // H26: completar la nota antes de cambiar estado de cita
-      // Si la nota no se puede cerrar, la cita tampoco: antes quedaba completada
-      // con la nota en borrador.
-      if (notaId) {
-        await historiaClinicaApi.notas.completar(notaId)
-      }
-      return agendaApi.citas.cambiarEstado(citaId, { estado: 'completada' })
+      // Lo último escrito se guarda antes de cerrar la nota (AT-13).
+      if (notaId) await guardarBorradoresDeNota(notaId)
+      return agendaApi.citas.completarAtencion(citaId, {
+        nota: notaId ?? undefined,
+        ...(sesionCtx && sesionCtx.estado === 'pendiente' ? { procedimientos_ejecutados: procsSel } : {}),
+      })
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
@@ -217,14 +218,28 @@ export default function AtencionCitaPage({ params }: Props) {
     if (!notaId) { setShowBloqueoVacio(true); return }
     setVerificando(true)
     try {
+      // Sin esto, lo escrito hace menos de dos segundos no contaba como contenido.
+      await guardarBorradoresDeNota(notaId)
+    } catch (err) {
+      setVerificando(false)
+      toast.error('No se guardó lo último escrito', mensajeDeError(err, 'Revisa tu conexión y vuelve a intentar.'))
+      return
+    }
+    try {
       const nota = await historiaClinicaApi.notas.get(notaId)
       const tieneContenido =
         nota.motivo_consulta?.trim() ||
         nota.plan_manejo?.trim() ||
         (nota.examenes?.length ?? 0) > 0 ||
         (nota.ordenes?.length ?? 0) > 0 ||
-        (nota.fotos?.length ?? 0) > 0
-      if (!tieneContenido) {
+        (nota.fotos?.length ?? 0) > 0 ||
+        // Zonas, insumos y mediciones también son contenido (AT-15).
+        (nota.otros_registros ?? 0) > 0
+      // Si la clínica apagó todas las pestañas donde se escribe, no hay cómo
+      // agregar contenido: antes la atención no se podía completar nunca.
+      const hayDondeDocumentar = ['motivo-consulta', 'plan-manejo', 'examenes', 'ordenes', 'fotos']
+        .some((tab) => tabsActivos[tab] ?? true) || tieneZonas
+      if (!tieneContenido && hayDondeDocumentar) {
         // Nota vacía → no se puede completar (salida: Descartar).
         setShowBloqueoVacio(true)
         return
@@ -644,7 +659,7 @@ export default function AtencionCitaPage({ params }: Props) {
             {/* Fotos */}
             {(tabsActivos.fotos ?? true) && historia && (
               <TabsContent value="fotos" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
-                <TabFotos historia={historia} notas={notas ?? []} modoAtencion />
+                <TabFotos historia={historia} notas={notas ?? []} notaId={notaId ?? undefined} modoAtencion />
               </TabsContent>
             )}
 
@@ -733,6 +748,11 @@ export default function AtencionCitaPage({ params }: Props) {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-1.5 py-1">
+            {sesionCtx && sesionCtx.procedimientos.length === 0 && (
+              <p className="rounded-lg bg-muted/50 px-3 py-2 text-sm text-muted-foreground">
+                Este tipo de sesión no tiene procedimientos en el catálogo: se registra la sesión completa.
+              </p>
+            )}
             {sesionCtx?.procedimientos.map((p) => (
               <label key={p.id} className="flex items-center gap-2.5 rounded-lg border px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
                 <input
@@ -749,7 +769,9 @@ export default function AtencionCitaPage({ params }: Props) {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowSesionProcs(false)}>Cancelar</Button>
             <Button
-              disabled={procsSel.length === 0}
+              // Sin procedimientos configurados no hay nada que marcar: antes el botón
+              // quedaba deshabilitado y la atención no se podía cerrar.
+              disabled={(sesionCtx?.procedimientos.length ?? 0) > 0 && procsSel.length === 0}
               onClick={() => { setShowSesionProcs(false); proceedCompletar() }}
             >
               Completar sesión y atención

@@ -168,6 +168,7 @@ export interface Cotizacion {
   motivo_descarte?: MotivoDescarte | ''
   nota_descarte?: string
   oportunidad?: string | null      // oportunidad del seguimiento de la que nace
+  oportunidad_otras_abiertas?: number  // otras propuestas abiertas de esa oportunidad
   notas: string
   items: ItemCotizacion[]
   formas_pago: FormaPagoCotizacion[]
@@ -178,8 +179,59 @@ export interface Cotizacion {
   cartera_id?: string | null    // id de la cartera asociada; null si aún no hay cartera
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
+  /** Tiene precios fuera de regla sin autorizar: no se envía, no sale el PDF ni se acepta. */
+  precio_por_autorizar?: boolean
+  /** Última solicitud de autorización de precios (sin las canceladas). Solo en el detalle. */
+  autorizacion_precio?: SolicitudAutorizacionPrecio | null
   created_at: string
   updated_at: string
+}
+
+// ── Autorización de precios (docs/plan-autorizacion-precios.md) ──────────────
+
+export type EstadoAutorizacionPrecio = 'pendiente' | 'autorizada' | 'rechazada' | 'cancelada'
+
+/** Ítem fuera de regla tal como se pidió. Montos en string (Decimal). */
+export interface ItemAutorizacionPrecio {
+  clave: string
+  descripcion: string
+  num_citas: number
+  /** 'precio': bajó el precio de catálogo; 'descuento': pasó el descuento máximo. */
+  regla: 'precio' | 'descuento'
+  precio_lista: string
+  descuento_maximo_pct: string
+  valor_unitario: string
+  descuento_porcentaje: string
+  precio_efectivo: string
+  minimo: string
+  precio_pedido: string
+  diferencia: string
+  diferencia_pct: string
+}
+
+export interface SolicitudAutorizacionPrecio {
+  id: string
+  cotizacion: string
+  estado: EstadoAutorizacionPrecio
+  directa: boolean
+  motivo: string
+  comentario: string
+  solicitada_por: string | null
+  solicitada_por_nombre: string | null
+  resuelta_por: string | null
+  resuelta_por_nombre: string | null
+  resuelta_en: string | null
+  items: ItemAutorizacionPrecio[]
+  total_pedido: string
+  total_permitido: string
+  paciente_nombre: string
+  sede_nombre: string | null
+  created_at: string
+}
+
+export interface EstadoAutorizacionCotizacion {
+  precio_por_autorizar: boolean
+  solicitud: SolicitudAutorizacionPrecio | null
 }
 
 // H32: precio de campaña vigente por id de catálogo, para poblar el formulario
@@ -234,6 +286,8 @@ export interface CreateCotizacionRequest {
   notas: string
   items: CreateItemCotizacion[]
   formas_pago: CreateFormaPago[]
+  /** Motivo: guarda los precios fuera de regla y pide autorizarlos. */
+  solicitar_autorizacion?: string
 }
 
 // Venta = cotización aceptada (GET /ventas/). El detalle es el de la cotización.

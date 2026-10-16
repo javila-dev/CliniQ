@@ -34,13 +34,15 @@ export default function DetalleVentaPage({ params }: { params: Promise<{ id: str
   if (isLoading || noEsVenta) return <div className="p-8"><LoadingState rows={6} /></div>
   if (isError || !data) {
     const noExiste = (error as { response?: { status?: number } } | null)?.response?.status === 404
+    // Sin permiso (p. ej. la cotización de otro profesional) reintentar no cambia nada.
+    const sinPermiso = (error as { response?: { status?: number } } | null)?.response?.status === 403
     return (
       <div className="p-8 flex flex-col items-center">
         <ErrorState
           message={noExiste
             ? 'No encontramos esta venta; puede que se haya eliminado.'
             : mensajeDeError(error, 'No se pudo cargar la venta.')}
-          onRetry={noExiste ? undefined : () => refetch()}
+          onRetry={noExiste || sinPermiso ? undefined : () => refetch()}
         />
         <Button variant="ghost" size="sm" asChild>
           <Link href="/ventas">Volver a ventas</Link>

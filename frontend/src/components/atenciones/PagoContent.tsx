@@ -183,6 +183,27 @@ export function PagoContent({ cita, soloRegistrar = false, onInicioExitoso, onRe
     )
   }
 
+  // Quien atiende y recibe a su paciente puede no cobrar: el pago queda pendiente
+  // y recepción lo registra después desde la cita (el asistente se reabre).
+  if (!hasPermission(user, PERM.COBROS_CREAR)) {
+    return (
+      <div className="flex flex-col items-center gap-3 py-6 text-center">
+        <Lock className="h-8 w-8 text-muted-foreground" />
+        <div>
+          <p className="font-semibold">El cobro lo registra recepción</p>
+          <p className="text-sm text-muted-foreground mt-0.5">
+            Tu rol no registra pagos. El cobro de {cita.paciente_nombre} queda pendiente y se puede registrar
+            después desde la cita.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {onCancel && <Button variant="outline" onClick={onCancel}>Cerrar</Button>}
+          {onPagoRegistrado && <Button onClick={onPagoRegistrado}>Continuar sin cobrar</Button>}
+        </div>
+      </div>
+    )
+  }
+
   const usadosPorFila = (i: number) => new Set(filas.filter((_, j) => j !== i).map((f) => f.medio))
 
   return (

@@ -14,10 +14,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { agendaApi } from '@/lib/api/agenda'
 import { useAuthStore } from '@/store/authStore'
-import { canIniciarAtencion } from '@/lib/permissions'
+import { canIniciarAtencion, hasPermission, PERM } from '@/lib/permissions'
 import { formatTime } from '@/lib/utils'
 import { mensajeErrorDeuda } from '@/lib/deuda'
 import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 import type { Cita } from '@/types/agenda'
 import { cobroConPagos } from './PagoContent'
 import {
@@ -59,7 +60,10 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     const doneMap = {
       llegada:        cita.estado !== 'confirmada',
       consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-      pago:           cita.item_cotizacion_id != null || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada',
+      // Quien no registra cobros ("Continuar sin cobrar" en el asistente) no queda
+      // bloqueado por el pago: recepción lo registra después (AG-05).
+      pago:           cita.item_cotizacion_id != null || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada'
+                      || !hasPermission(user, PERM.COBROS_CREAR),
       firma:          cita.firma_asistencia_estado === 'firmada',
     }
     const activeSteps = (['llegada', 'consentimiento', 'pago', 'firma'] as const).filter((step) => {
@@ -90,8 +94,21 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
         setFirmaProfesionalCita(cita)
         return
       }
+      // La cita pudo cambiar en otra pantalla: se vuelve a cargar la cola.
+      queryClient.invalidateQueries({ queryKey: ['citas'] })
       const deuda = mensajeErrorDeuda(err)
-      if (deuda) toast.error('Atención bloqueada por mora', deuda)
+      if (deuda) {
+        toast.error('Atención bloqueada por mora', deuda)
+        return
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = (err as any)?.response?.data ?? {}
+      if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
+        toast.error('Consentimientos pendientes', `Falta firmar: ${(data.pendientes ?? []).join(', ')}`)
+      } else {
+        // Antes los demás errores no mostraban nada y el botón solo se apagaba (AG-08).
+        toast.error('No se pudo iniciar la atención', mensajeDeError(err, 'Revisa el estado de la cita.'))
+      }
     }
   }
 
@@ -107,6 +124,19 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     iniciar(cita)
   }
 
+  // Antes de cualquier return: un hook después del "cola vacía" rompía la
+  // pantalla al llegar el primer paciente (cambia el número de hooks).
+  // H30 workaround: cuando la primera cita en espera tiene sesión pre-vinculada,
+  // consultamos sus consentimientos específicos en lugar de confiar solo en consentimiento_info
+  const siguienteCitaEnEspera = !citaActiva ? citas.find((c) => c.estado === 'en_espera') : undefined
+  const siguienteSesionId = siguienteCitaEnEspera?.sesion_ejecutada_id ?? null
+
+  const { data: sesionConsentData } = useQuery({
+    queryKey: ['sesion-consents-cola', siguienteSesionId, siguienteCitaEnEspera?.id],
+    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(siguienteSesionId!, siguienteCitaEnEspera?.id),
+    enabled: Boolean(siguienteSesionId),
+  })
+
   if (!citas.length) {
     return (
       <Card>
@@ -120,17 +150,6 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
     )
   }
 
-  // H30 workaround: cuando la primera cita en espera tiene sesión pre-vinculada,
-  // consultamos sus consentimientos específicos en lugar de confiar solo en consentimiento_info
-  const siguienteCitaEnEspera = !citaActiva ? citas.find((c) => c.estado === 'en_espera') : undefined
-  const siguienteSesionId = siguienteCitaEnEspera?.sesion_ejecutada_id ?? null
-
-  const { data: sesionConsentData } = useQuery({
-    queryKey: ['sesion-consents-cola', siguienteSesionId, siguienteCitaEnEspera?.id],
-    queryFn: () => protocolosApi.sesionesEjecutadas.getConsentimientos(siguienteSesionId!, siguienteCitaEnEspera?.id),
-    enabled: Boolean(siguienteSesionId),
-  })
-
   return (
     <>
       <Card>
@@ -142,7 +161,9 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
         </CardHeader>
         <CardContent className="space-y-2">
           {citas.map((cita, idx) => {
-            const esElSiguiente = idx === 0
+            // "El siguiente" es el primero que ya llegó (en espera), no la fila 0:
+            // si el de las 9:00 no ha llegado, el de las 9:30 se puede atender (AG-04).
+            const esElSiguiente = siguienteCitaEnEspera ? cita.id === siguienteCitaEnEspera.id : idx === 0
             const enEspera = cita.estado === 'en_espera'
             // Si la cita tiene sesión pre-vinculada (H30) y tenemos datos de esa sesión,
             // usamos puede_ejecutar como fuente de verdad; si no, usamos consentimiento_info

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useMutation } from '@tanstack/react-query'
+import { mensajeDeError } from '@/lib/errores'
 import { Smartphone, Camera, Loader2, CheckCircle2, AlertTriangle, RefreshCw } from 'lucide-react'
 import { agendaApi } from '@/lib/api/agenda'
 import { Button } from '@/components/ui/button'
@@ -118,13 +119,16 @@ export function LlegadaCheckinContent({ cita, onCheckinSuccess, facialActivo = f
       if (!data.otp_activo) setCooldown(60)
       setErrorMsg(null)
     },
-    onError: () => {
+    onError: (err) => {
       setOtpState('idle')
+      // El motivo del servidor (WhatsApp no disponible, cita en otro estado…) va
+      // primero: antes todo se leía como un problema del número (AG-08).
+      const motivo = mensajeDeError(err, '')
       if (facialActivo) {
-        setErrorMsg('No se pudo enviar el código. Verifica el número del paciente e inténtalo de nuevo.')
+        setErrorMsg(motivo || 'No se pudo enviar el código. Verifica el número del paciente e inténtalo de nuevo.')
       } else {
         setFotoHabilitada(true)
-        setErrorMsg('No se pudo enviar el código. Usa la foto de respaldo.')
+        setErrorMsg(`${motivo || 'No se pudo enviar el código.'} Usa la foto de respaldo.`)
       }
     },
   })
@@ -137,6 +141,10 @@ export function LlegadaCheckinContent({ cita, onCheckinSuccess, facialActivo = f
       const data = err?.response?.data
       if (data?.intentos_restantes === 0) {
         setOtpState('bloqueado'); setErrorMsg('Demasiados intentos incorrectos.')
+      } else if (data?.intentos_restantes == null) {
+        // No es un código equivocado (conexión, código vencido, cita en otro estado).
+        setOtpState('esperando_codigo')
+        setErrorMsg(mensajeDeError(err, 'No se pudo verificar el código. Intenta de nuevo.'))
       } else {
         setOtpState('esperando_codigo')
         setErrorMsg(`Código incorrecto.${data?.intentos_restantes != null ? ` ${data.intentos_restantes} intento(s) restante(s).` : ''}`)

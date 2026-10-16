@@ -172,6 +172,10 @@ export default function SeguimientoPage() {
   const qc = useQueryClient()
   const { user } = useAuthStore()
   const canGestionar = hasPermission(user, PERM.SEGUIMIENTO_GESTIONAR)
+  // Agendar desde la bandeja crea una cita (y a veces la ficha): sin ese permiso
+  // el botón terminaba en "no tienes permiso".
+  const puedeAgendarCitas = hasPermission(user, PERM.AGENDA_CREAR)
+  const puedeCrearPaciente = hasPermission(user, PERM.PACIENTES_CREAR)
   // Atiende pacientes sin permiso de ver toda la sede: el backend ya le muestra
   // solo los suyos, así que "Todos / Míos" no aplica.
   const soloLosSuyos = user?.ve_solo_su_actividad_comercial
@@ -285,6 +289,14 @@ export default function SeguimientoPage() {
     mutationFn: ({ id, fecha }: { id: string; fecha: string }) => seguimientoApi.actualizar(id, { proximo_contacto: fecha }),
     onSuccess: (op) => { refrescar(); setPosponer(null); toast.success('Listo', `Volverá a aparecer en "Para hoy" el ${formatFechaLocal(op.proximo_contacto)}.`) },
     onError: (err) => errorDe(err, 'No se pudo posponer'),
+  })
+  const noEsCliente = useMutation({
+    mutationFn: (id: string) => seguimientoApi.noEsCliente(id),
+    onSuccess: () => {
+      refrescar()
+      toast.success('Listo', 'Salió de la lista y sus próximos mensajes por WhatsApp no lo vuelven a registrar.')
+    },
+    onError: (err) => errorDe(err, 'No se pudo sacar de la lista'),
   })
   const pierde = useMutation({
     mutationFn: ({ id, data }: { id: string; data: Parameters<typeof seguimientoApi.perder>[1] }) => seguimientoApi.perder(id, data),
@@ -522,10 +534,11 @@ export default function SeguimientoPage() {
           acciones={{
             canGestionar,
             onWhatsapp: whatsapp,
-            onAgendar: agendar,
+            onAgendar: puedeAgendarCitas ? agendar : undefined,
             onGestion: (op) => setGestion({ op, canal: 'llamada', resultado: null }),
             onPosponer: setPosponer,
             onPerder: setPerder,
+            onNoEsCliente: (op) => noEsCliente.mutate(op.id),
           }}
         />
         </>
@@ -563,7 +576,7 @@ export default function SeguimientoPage() {
         loading={registrar.isPending}
         onConfirm={(d) => gestion && registrar.mutate({ id: gestion.op.id, data: d })}
         onPerder={() => { if (gestion) { setPerder(gestion.op); setGestion(null) } }}
-        onAgendar={gestion && puedeAgendar(gestion.op) ? () => { const op = gestion.op; setGestion(null); agendar(op) } : undefined}
+        onAgendar={gestion && puedeAgendarCitas && puedeAgendar(gestion.op) ? () => { const op = gestion.op; setGestion(null); agendar(op) } : undefined}
       />
       <PosponerDialog
         open={posponer !== null}
@@ -588,7 +601,7 @@ export default function SeguimientoPage() {
           <DialogHeader>
             <DialogTitle>Completa la ficha para agendar</DialogTitle>
             <DialogDescription>
-              Para darle una cita, {fichaPara?.nombre.split(' ')[0]} necesita ficha de paciente. Si ya la tiene, búscala; si no, créala. Después eliges el horario.
+              Para darle una cita, {fichaPara?.nombre.split(' ')[0]} necesita ficha de paciente. Si ya la tiene, búscala{puedeCrearPaciente ? '; si no, créala' : ''}. Después eliges el horario.
             </DialogDescription>
           </DialogHeader>
           {/* Si ya es paciente se vincula a su ficha en lugar de crear otra (M5-25). */}
@@ -610,10 +623,13 @@ export default function SeguimientoPage() {
               )}
             </div>
           )}
-          {fichaPara && !pacienteExistente && (
+          {fichaPara && !pacienteExistente && puedeCrearPaciente && (
             <p className="text-sm font-medium">O crea una ficha nueva</p>
           )}
-          {fichaPara && !pacienteExistente && (
+          {fichaPara && !pacienteExistente && !puedeCrearPaciente && (
+            <p className="text-xs text-muted-foreground">Si aún no tiene ficha, pídele a recepción que la cree.</p>
+          )}
+          {fichaPara && !pacienteExistente && puedeCrearPaciente && (
             <PacienteForm
               onSubmit={crearFicha}
               isLoading={creandoFicha}

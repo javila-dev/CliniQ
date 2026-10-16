@@ -14,6 +14,7 @@ export function DescartarCotizacionDialog({
   onOpenChange,
   pacienteNombre,
   conSeguimiento = false,
+  otrasAbiertas = 0,
   loading,
   onConfirm,
 }: {
@@ -22,6 +23,8 @@ export function DescartarCotizacionDialog({
   pacienteNombre?: string
   /** La cotización viene de una oportunidad abierta en Seguimiento. */
   conSeguimiento?: boolean
+  /** Otras propuestas abiertas de la misma oportunidad: no se cierra (CT-05). */
+  otrasAbiertas?: number
   loading?: boolean
   onConfirm: (data: { motivo_descarte?: MotivoDescarte; nota_descarte?: string; cerrar_oportunidad?: boolean }) => void
 }) {
@@ -76,7 +79,15 @@ export function DescartarCotizacionDialog({
           maxLength={1000}
         />
 
-        {conSeguimiento && (
+        {conSeguimiento && otrasAbiertas > 0 && (
+          <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            {otrasAbiertas === 1
+              ? 'El paciente tiene otra propuesta abierta: sigue en Seguimiento hasta que se decida esa.'
+              : `El paciente tiene ${otrasAbiertas} propuestas abiertas más: sigue en Seguimiento hasta que se decidan.`}
+          </p>
+        )}
+
+        {conSeguimiento && otrasAbiertas === 0 && (
           <label className="flex items-start gap-2 text-sm">
             <Checkbox checked={cerrarSeguimiento} onChange={(e) => setCerrarSeguimiento(e.target.checked)} className="mt-0.5" />
             <span>
@@ -101,7 +112,7 @@ export function DescartarCotizacionDialog({
             onClick={() => onConfirm({
               motivo_descarte: motivo ?? undefined,
               nota_descarte: nota.trim() || undefined,
-              cerrar_oportunidad: conSeguimiento && cerrarSeguimiento,
+              cerrar_oportunidad: conSeguimiento && otrasAbiertas === 0 && cerrarSeguimiento,
             })}
           >
             {loading ? 'Procesando…' : 'Descartar'}

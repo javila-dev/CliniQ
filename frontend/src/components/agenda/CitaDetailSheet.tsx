@@ -11,7 +11,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { agendaApi } from '@/lib/api/agenda'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, PERM, puedeAbrirCotizacion } from '@/lib/permissions'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -32,7 +32,18 @@ import { CambiarProfesionalDialog } from './CambiarProfesionalDialog'
 import { ReintentarPdfConsentimiento } from '@/components/historia/ReintentarPdfConsentimiento'
 import { formatDateTime, formatTime } from '@/lib/utils'
 import { ESTADO_CITA_CONFIG, TRANSICIONES_ESTADO, CANAL_LABEL } from '@/lib/constants'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 import type { EstadoCita, MedioConfirmacion } from '@/types/agenda'
+import { CancelarConCobroDialog, cobroDeLaCitaDelError, type AccionCobro, type CobroDeLaCita } from './CancelarConCobroDialog'
+
+type CambiarEstadoVars = {
+  estado: EstadoCita
+  motivo_cancelacion?: string
+  medio?: MedioConfirmacion | ''
+  nota?: string
+  accion_cobro?: AccionCobro
+}
 
 interface CitaDetailSheetProps {
   citaId: string | null
@@ -91,14 +102,25 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     enabled: Boolean(citaId),
   })
 
+  // Cancelar una cita ya cobrada: el backend pregunta qué hacer con el cobro.
+  const [cobroAlCancelar, setCobroAlCancelar] = useState<{ cobro: CobroDeLaCita; vars: CambiarEstadoVars } | null>(null)
+
   const { mutate: cambiarEstado, isPending: cambiando } = useMutation({
-    mutationFn: ({ estado, motivo_cancelacion, medio, nota }: {
-      estado: EstadoCita
-      motivo_cancelacion?: string
-      medio?: MedioConfirmacion | ''
-      nota?: string
-    }) => agendaApi.citas.cambiarEstado(citaId!, { estado, motivo_cancelacion, medio, nota }),
+    meta: { errorManejado: true },
+    mutationFn: ({ estado, motivo_cancelacion, medio, nota, accion_cobro }: CambiarEstadoVars) =>
+      agendaApi.citas.cambiarEstado(citaId!, { estado, motivo_cancelacion, medio, nota, accion_cobro }),
+    onError: (err, vars) => {
+      const cobro = cobroDeLaCitaDelError(err)
+      if (cobro) {
+        setModalOpen(false)
+        setCobroAlCancelar({ cobro, vars })
+        return
+      }
+      toast.error('No se pudo cambiar el estado', mensajeDeError(err, 'Intenta de nuevo.'))
+    },
     onSuccess: (cita) => {
+      setCobroAlCancelar(null)
+      queryClient.invalidateQueries({ queryKey: ['cobros'] })
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['slots'] })
       queryClient.invalidateQueries({ queryKey: ['registros-confirmacion', citaId] })
@@ -180,10 +202,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
       estado: 'confirmada', medio: 'presencial', nota: 'Llegó sin haber confirmado.',
     }),
     onSuccess: (actualizada) => {
+      // El asistente abre con la cita ya confirmada, no con la copia vieja (AG-06).
+      queryClient.setQueryData(['citas', actualizada.id], actualizada)
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['registros-confirmacion', citaId] })
       setWizardCitaId(actualizada.id)
     },
+    onError: (err) => toast.error('No se registró la llegada', mensajeDeError(err)),
   })
 
   const { data: sesionesData } = useQuery({
@@ -355,12 +380,14 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                       <ReceiptText className="h-3.5 w-3.5" />
                       Cotización vinculada
                     </p>
-                    <Link
-                      href={`/cotizaciones/${cita.cotizacion_resumen.cotizacion_id}`}
-                      className="text-xs text-primary hover:underline"
-                    >
-                      Ver cotización
-                    </Link>
+                    {puedeAbrirCotizacion(user, cita.cotizacion_resumen.profesional_id) && (
+                      <Link
+                        href={`/cotizaciones/${cita.cotizacion_resumen.cotizacion_id}`}
+                        className="text-xs text-primary hover:underline"
+                      >
+                        Ver cotización
+                      </Link>
+                    )}
                   </div>
                   <p className="text-sm font-medium">
                     {itemSesiones?.descripcion ?? cita.cotizacion_resumen.descripcion}
@@ -608,6 +635,12 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     </Sheet>
 
     <IniciarAtencionWizard citaId={wizardCitaId} onClose={() => setWizardCitaId(null)} />
+    <CancelarConCobroDialog
+      cobro={cobroAlCancelar?.cobro ?? null}
+      enviando={cambiando}
+      onCerrar={() => setCobroAlCancelar(null)}
+      onElegir={(accion_cobro) => cobroAlCancelar && cambiarEstado({ ...cobroAlCancelar.vars, accion_cobro })}
+    />
 
     {cita && (
       <CambiarProfesionalDialog
@@ -625,6 +658,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
         onOpenChange={(open) => { if (!open) setConfirmarDialog(null) }}
         modo={confirmarDialog ?? 'estado'}
         permiteNoAsistio={transiciones.includes('no_asistio')}
+        permiteCancelar={transiciones.includes('cancelada')}
       />
     )}
 

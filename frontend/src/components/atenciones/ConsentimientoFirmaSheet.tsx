@@ -76,6 +76,7 @@ export function ConsentimientoFirmaSheet({
     },
   })
 
+  const [docPorConfirmar, setDocPorConfirmar] = useState<string | null>(null)
   const { mutate: completarFirma, isPending: completando } = useMutation({
     mutationFn: ({ id, docId }: { id: string; docId: string }) =>
       historiaClinicaApi.consentimientosInformados.completarFirma(id, docId),
@@ -84,9 +85,13 @@ export function ConsentimientoFirmaSheet({
       queryClient.invalidateQueries({ queryKey: ['consentimientos-resumen', pacienteId] })
       queryClient.invalidateQueries({ queryKey: ['consentimientos-lista', pacienteId] })
       queryClient.invalidateQueries({ queryKey: ['citas'] })
+      setDocPorConfirmar(null)
       setSigned(true)
       onCompleted?.()
     },
+    // Documenso aún no refleja la firma: se ofrece verificar de nuevo. Antes no
+    // pasaba nada y la pantalla quedaba sobre el documento firmado.
+    onError: (_err, { docId }) => setDocPorConfirmar(docId),
   })
 
   const targetConsentimientoId = consentimientoId ?? consentimientoCreado?.id
@@ -120,6 +125,7 @@ export function ConsentimientoFirmaSheet({
   function handleOpen(isOpen: boolean) {
     if (!isOpen) {
       setSigned(false)
+      setDocPorConfirmar(null)
       setMaximized(false)
       setEmbedReady(false)
       setEmbedError(null)
@@ -242,8 +248,24 @@ export function ConsentimientoFirmaSheet({
                 </div>
               )}
               {completando && (
-                <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/80">
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-background/80">
                   <Loader2 className="h-6 w-6 animate-spin" />
+                  <p className="text-sm text-muted-foreground">Confirmando la firma con Documenso…</p>
+                </div>
+              )}
+              {!completando && docPorConfirmar && targetConsentimientoId && (
+                <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 bg-background/90 px-6 text-center">
+                  <p className="text-sm font-medium">Esperando confirmación de Documenso</p>
+                  <p className="text-xs text-muted-foreground max-w-xs">
+                    Documenso todavía no reporta la firma. Espera unos segundos y verifica de nuevo.
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => completarFirma({ id: targetConsentimientoId, docId: docPorConfirmar })}
+                  >
+                    Verificar ahora
+                  </Button>
                 </div>
               )}
               {signingToken && (

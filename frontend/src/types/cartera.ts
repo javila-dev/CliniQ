@@ -71,6 +71,7 @@ export interface Cartera {
   paciente_id: string
   paciente_nombre: string
   profesional_nombre?: string | null
+  cotizacion_profesional_id?: string | null
   total: string
   total_pagado: string
   saldo_pendiente: string

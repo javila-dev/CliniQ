@@ -34,6 +34,7 @@ import { precioEnSede, precioGeneralProcedimiento, precioPropioSede } from '@/li
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
 import { CotizacionVencidaDialog } from './CotizacionVencidaDialog'
+import { AutorizacionPrecioBanner, SolicitarAutorizacionDialog, type ItemPorAutorizar } from './AutorizacionPrecioPanel'
 import { BuscadorPopover } from '@/components/ui/buscador-popover'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { consentimientosApi } from '@/lib/api/consentimientos'
@@ -43,10 +44,10 @@ import { useAuthStore } from '@/store/authStore'
 import { useUserSedes } from '@/hooks/useUserSedes'
 import { useFormasPago } from '@/hooks/useFormasPago'
 import { toast } from '@/hooks/use-toast'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
 import { mensajeDeError } from '@/lib/errores'
 import { cn, formatFechaLocal, formatDateTime } from '@/lib/utils'
-import type { Cotizacion, EstadoCotizacion, MotivoDescarte, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
+import type { Cotizacion, EstadoAutorizacionCotizacion, EstadoCotizacion, MotivoDescarte, TipoItemApi, TipoItemCotizacion } from '@/types/cotizaciones'
 import type { TratamientoCatalogo, Procedimiento, PrecioSede } from '@/types/clinicas'
 import type { BusquedaPaciente, CreatePacienteRequest } from '@/types/pacientes'
 
@@ -328,6 +329,11 @@ function primerMensaje(data: unknown): string | null {
   return null
 }
 
+/** El backend guardaría el precio si se pide autorización (asesor sin cotizaciones.cambiar_precio). */
+function pideAutorizacion(error: unknown): boolean {
+  return (error as { response?: { data?: { code?: string } } })?.response?.data?.code === 'PRECIO_REQUIERE_AUTORIZACION'
+}
+
 /** Título y detalle del toast al fallar crear/guardar una cotización. */
 function errorGuardado(error: unknown): { titulo: string; mensaje: string } {
   const res = (error as { response?: { status?: number; data?: unknown } })?.response
@@ -354,6 +360,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   const router = useRouter()
   const queryClient = useQueryClient()
   const { user } = useAuthStore()
+  const puedeCrearPaciente = hasPermission(user, PERM.PACIENTES_CREAR)
   const esNueva = !cotizacion
   const esVistaVenta = vista === 'venta'
   // Una aceptada se muestra como venta (título, regreso a /ventas).
@@ -371,7 +378,11 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   // profesional (desde el paciente o la cartera), pero no cambiarla: el backend
   // responde 403 (M5-29). Se muestra como de solo lectura.
   const esAjena = !!cotizacion && !!user?.ve_solo_su_actividad_comercial && (cotizacion.profesional ?? null) !== user?.id
-  const canGestionar = tienePermisoGestionar && !esAjena
+  // Una cotización de una sede a la que el usuario no tiene acceso (se ve desde la
+  // ficha del paciente) es de solo lectura: el backend responde 403 a todo (CT-11).
+  const esDeOtraSede = !!cotizacion?.sede && !isAdminOrSuperAdmin(user) && Array.isArray(user?.sedes)
+    && !user.sedes.some((s) => s.id === cotizacion.sede)
+  const canGestionar = tienePermisoGestionar && !esAjena && !esDeOtraSede
   // Sin cobros.ver el panel decía "Sin cobros registrados" aunque los hubiera.
   const canVerCobros = hasPermission(user, PERM.COBROS_VER)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
@@ -409,7 +420,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     select: (d) => d,
   })
 
-  const { sedes } = useUserSedes()
+  const { sedes, isAllSedes } = useUserSedes()
   const { formasPago } = useFormasPago()
 
   const pagosRef = useRef<HTMLDivElement>(null)
@@ -747,13 +758,20 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     return payload
   }
 
+  // Valores que esperan el motivo para guardarse pidiendo autorización de precio.
+  const [porSolicitar, setPorSolicitar] = useState<FormValues | null>(null)
+
   const { mutate: crear, isPending: creando } = useMutation({
     mutationFn: (values: FormValues) => cotizacionesApi.create(buildPayload(values)),
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       router.replace(`/cotizaciones/${data.id}`)
     },
-    onError: (error) => {
+    onError: (error, values) => {
+      if (pideAutorizacion(error)) {
+        setPorSolicitar(values)
+        return
+      }
       const { titulo, mensaje } = errorGuardado(error)
       toast.error(titulo === 'No se pudo guardar' ? 'No se pudo crear la cotización' : titulo, mensaje)
     },
@@ -763,8 +781,37 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     mutationFn: (values: FormValues) => cotizacionesApi.patch(cotizacion!.id, buildPayload(values)),
     onSuccess: (data) => {
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
+      sincronizarAutorizacion(data)
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       toast.success('Cotización guardada')
+    },
+    onError: (error, values) => {
+      if (pideAutorizacion(error)) {
+        setPorSolicitar(values)
+        return
+      }
+      const { titulo, mensaje } = errorGuardado(error)
+      toast.error(titulo, mensaje)
+    },
+  })
+
+  // Guarda y pide autorización en el mismo paso (el motivo viaja con el guardado).
+  const { mutate: solicitarAutorizacion, isPending: solicitando } = useMutation({
+    mutationFn: ({ values, motivo }: { values: FormValues; motivo: string }) => {
+      const payload = { ...buildPayload(values), solicitar_autorizacion: motivo }
+      return esNueva ? cotizacionesApi.create(payload) : cotizacionesApi.patch(cotizacion!.id, payload)
+    },
+    onSuccess: (data) => {
+      setPorSolicitar(null)
+      queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+      queryClient.invalidateQueries({ queryKey: ['autorizaciones-precio'] })
+      toast.success('Autorización pedida', 'La cotización quedó guardada. Aquí verás la respuesta apenas decidan.')
+      if (esNueva) {
+        router.replace(`/cotizaciones/${data.id}`)
+        return
+      }
+      queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
+      sincronizarAutorizacion(data)
     },
     onError: (error) => {
       const { titulo, mensaje } = errorGuardado(error)
@@ -772,12 +819,106 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     },
   })
 
+  // ── Autorización de precios ──
+  // Su propia consulta (no la de la cotización, que reiniciaría el formulario):
+  // cada 10 s mientras espera, para que la decisión aparezca sola.
+  const autorizacionKey = ['cotizacion-autorizacion', cotizacion?.id]
+  const { data: estadoAutorizacion } = useQuery({
+    queryKey: autorizacionKey,
+    queryFn: () => cotizacionesApi.autorizacionPrecio(cotizacion!.id),
+    enabled: cotizacion?.estado === 'borrador',
+    initialData: cotizacion
+      ? { precio_por_autorizar: !!cotizacion.precio_por_autorizar, solicitud: cotizacion.autorizacion_precio ?? null }
+      : undefined,
+    refetchInterval: (q) => (q.state.data?.solicitud?.estado === 'pendiente' ? 10_000 : false),
+  })
+  function sincronizarAutorizacion(data: Cotizacion) {
+    queryClient.setQueryData<EstadoAutorizacionCotizacion>(['cotizacion-autorizacion', data.id], {
+      precio_por_autorizar: !!data.precio_por_autorizar,
+      solicitud: data.autorizacion_precio ?? null,
+    })
+  }
+  const solicitudPrecio = estadoAutorizacion?.solicitud ?? null
+  const porAutorizar = cotizacion?.estado === 'borrador' && !!estadoAutorizacion?.precio_por_autorizar
+  const motivoBloqueo = porAutorizar
+    ? solicitudPrecio?.estado === 'rechazada'
+      ? 'No se autorizó el precio: corrígelo o pide autorización de nuevo.'
+      : 'Esperando la autorización del precio.'
+    : undefined
+
+  // Aviso cuando llega la decisión (la que tome otro; la propia ya avisa al decidir).
+  const estadoSolicitudPrevio = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    const actual = solicitudPrecio?.estado
+    const previo = estadoSolicitudPrevio.current
+    estadoSolicitudPrevio.current = actual
+    if (previo !== 'pendiente' || !actual || actual === 'pendiente' || !solicitudPrecio) return
+    queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
+    if (solicitudPrecio.resuelta_por === user?.id) return
+    if (actual === 'autorizada') {
+      toast.success('¡Precio autorizado!', `${solicitudPrecio.resuelta_por_nombre ?? 'Quien autoriza'} lo aprobó. Ya puedes enviar la cotización.`)
+    } else if (actual === 'rechazada') {
+      toast.error('No se autorizó el precio', solicitudPrecio.comentario || 'Revisa el aviso en la cotización.')
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [solicitudPrecio?.estado])
+
+  /** Cómo está el precio de un ítem frente a la regla: libre, por autorizar, esperando o autorizado. */
+  function coberturaPrecio(item: FormValues['items'][number], efectivo: number): 'pendiente' | 'autorizado' | null {
+    if (!solicitudPrecio || (solicitudPrecio.estado !== 'pendiente' && solicitudPrecio.estado !== 'autorizada')) return null
+    const clave = item.tipo === 'tratamiento' ? `t:${item.tratamiento}` : `p:${item.procedimiento}`
+    const cubre = solicitudPrecio.items.some((e) => e.clave === clave && efectivo >= Number(e.precio_efectivo) - 1)
+    if (!cubre) return null
+    return solicitudPrecio.estado === 'pendiente' ? 'pendiente' : 'autorizado'
+  }
+
+  /** Ítems bajo lo permitido, para mostrar en el diálogo (el backend hace el cálculo oficial). */
+  function itemsPorAutorizar(values: FormValues): ItemPorAutorizar[] {
+    return values.items.flatMap((item) => {
+      if (item.es_obsequio) return []
+      const valor = item.valor_unitario || 0
+      const efectivo = valor * (1 - (item.descuento_porcentaje || 0) / 100)
+      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [], values.sede)
+      const piso = info ? info.precioLista * (1 - info.descMaxPct / 100) : null
+      if (piso !== null && efectivo < piso - 1) return [{ descripcion: item.descripcion, minimo: piso, pedido: efectivo }]
+      const min = precioMinimoDe(item)
+      if (min !== null && valor < min) return [{ descripcion: item.descripcion, minimo: min, pedido: valor }]
+      return []
+    })
+  }
+
+  /** Rechazada: deja cada ítem en lo máximo que se puede cotizar sin autorización y guarda. */
+  function volverAlPrecioPermitido() {
+    getValues('items').forEach((item, idx) => {
+      if (item.es_obsequio) return
+      let valor = item.valor_unitario || 0
+      const min = precioMinimoDe(item)
+      if (min !== null && valor < min) {
+        valor = min
+        setValue(`items.${idx}.valor_unitario`, min, { shouldDirty: true })
+      }
+      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
+      if (!info || valor <= 0) return
+      const piso = info.precioLista * (1 - info.descMaxPct / 100)
+      const desc = item.descuento_porcentaje || 0
+      const campanaExacta = !!item.precio_campana_disponible && desc === 0 && valor === parseFloat(item.precio_campana_disponible)
+      if (!campanaExacta && valor * (1 - desc / 100) < piso - 1) {
+        // El descuento más alto que deja el precio en el mínimo (redondeado hacia abajo).
+        const maximo = Math.max(0, Math.floor((1 - piso / valor) * 10000) / 100)
+        setValue(`items.${idx}.descuento_porcentaje`, Math.min(desc, maximo), { shouldDirty: true })
+      }
+    })
+    actualizar(getValues())
+  }
+
   const [compromisoPagoId, setCompromisoPagoId] = useState<string | null>(null)
   const [recuperandoCompromiso, setRecuperandoCompromiso] = useState(false)
   const [consentimientosWizardOpen, setConsentimientosWizardOpen] = useState(false)
   const [firmaProfesionalOpen, setFirmaProfesionalOpen] = useState(false)
 
-  const { data: consentimientosRequeridos } = useQuery({
+  const {
+    data: consentimientosRequeridos, isError: errorConsentimientos, refetch: recargarConsentimientos,
+  } = useQuery({
     queryKey: [CONSENTIMIENTOS_COTIZACION_KEY, cotizacion?.id],
     queryFn: () => cotizacionesApi.consentimientos(cotizacion!.id),
     enabled: cotizacion?.estado === 'aceptada',
@@ -801,14 +942,27 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const firmaVistaEnModalRef = useRef(false)
   useEffect(() => {
     if (compromisoVigilado?.estado !== 'firmado' || !cotizacion) return
-    queryClient.invalidateQueries({ queryKey: ['cotizacion', cotizacion.id] })
+    const id = cotizacion.id
+    // El aviso sale del estado real tras la firma: la aceptación automática se
+    // frena si hay precio por autorizar o el plan no cuadra, y antes decía
+    // "quedó aceptada" igual (CT-01).
+    queryClient.fetchQuery({ queryKey: ['cotizacion', id], queryFn: () => cotizacionesApi.get(id), staleTime: 0 })
+      .then((actual) => {
+        if (firmaVistaEnModalRef.current) return
+        toast.success(
+          'El paciente firmó',
+          actual.estado === 'aceptada'
+            ? 'La cotización quedó aceptada.'
+            : actual.precio_por_autorizar
+              ? 'Falta que autoricen el precio para registrar la venta.'
+              : 'El compromiso de pago quedó firmado.',
+        )
+      })
+      .catch(() => queryClient.invalidateQueries({ queryKey: ['cotizacion', id] }))
     queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
-    if (!firmaVistaEnModalRef.current) {
-      toast.success(
-        'El paciente firmó',
-        cotizacion.estado === 'borrador' ? 'La cotización quedó aceptada.' : 'El compromiso de pago quedó firmado.',
-      )
-    }
+    queryClient.invalidateQueries({ queryKey: ['ventas'] })
+    queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
+    queryClient.invalidateQueries({ queryKey: ['cotizaciones-aceptadas'] })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [compromisoVigilado?.estado])
 
@@ -848,6 +1002,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       queryClient.invalidateQueries({ queryKey: ['cotizaciones'] })
       queryClient.invalidateQueries({ queryKey: ['ventas'] })
       queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
+      // Nueva cita y la cartera leen la venta recién aceptada (CT-13).
+      queryClient.invalidateQueries({ queryKey: ['cotizaciones-aceptadas'] })
+      queryClient.invalidateQueries({ queryKey: ['cartera'] })
       queryClient.setQueryData(['cotizacion', cotizacion!.id], data)
       setDescartarOpen(false)
       setVencidaAlAceptar(null)
@@ -916,45 +1073,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   }
   const aplicandoCampana = false
 
-  /** Tope de descuento del catálogo: avisa y devuelve true si algún ítem lo supera.
-   * Guardar y Aprobar comparten la regla para que el aviso del campo y el bloqueo coincidan. */
-  function avisarDescuentoExcedido(items: FormValues['items']): boolean {
-    // Con "cambiar precio" el tope del catálogo no aplica (decisión del usuario, M5-18).
-    if (canEditPrice) return false
-    const itemDescExcedido = items.filter((item) => !item.es_obsequio).find((item) => {
-      const info = getDescMaxItem(item.tipo, item.procedimiento, item.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
-      if (!info) return false
-      const desc = item.descuento_porcentaje || 0
-      const efectivo = (item.valor_unitario || 0) * (1 - desc / 100)
-      const piso = info.precioLista * (1 - info.descMaxPct / 100)
-      const campanaExacta = !!item.precio_campana_disponible && desc === 0 && item.valor_unitario === parseFloat(item.precio_campana_disponible)
-      return !campanaExacta && efectivo < piso - 1
-    })
-    if (!itemDescExcedido) return false
-    const info = getDescMaxItem(itemDescExcedido.tipo, itemDescExcedido.procedimiento, itemDescExcedido.tratamiento, procedimientos ?? [], tratamientos ?? [], sedeSeleccionada)
-    toast.error(
-      'Descuento sobre el máximo',
-      info && info.descMaxPct > 0
-        ? `"${itemDescExcedido.descripcion}" supera el descuento máximo permitido (${info.descMaxPct}%).`
-        : `"${itemDescExcedido.descripcion}" no admite descuento.`,
-    )
-    return true
-  }
-
   async function handleAceptar() {
     const values = getValues()
     const { formas_pago, items } = values
-
-    const itemBajoMin = items.filter((item) => !item.es_obsequio).find((item) => {
-      const min = precioMinimoDe(item)
-      return min !== null && item.valor_unitario < min
-    })
-    if (itemBajoMin) {
-      toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
+    if (porAutorizar) {
+      toast.error('Falta la autorización del precio', motivoBloqueo)
       return
     }
-
-    if (avisarDescuentoExcedido(items)) return
+    // Un precio bajo lo permitido lo detecta el guardado: abre el diálogo para pedir autorización.
 
     const totalItems = items.reduce((acc, i) => acc + (i.valor_unitario || 0) * (i.num_citas || 1) * (1 - (i.descuento_porcentaje || 0) / 100), 0)
     const sumPagos = formas_pago.reduce((acc, p) => acc + (p.valor || 0), 0)
@@ -1172,7 +1298,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           {/* Acciones topbar */}
           <div className="flex items-center gap-2 shrink-0">
             {cotizacion && (
-              <Button variant="outline" size="sm" onClick={descargarPdf} disabled={descargandoPdf}>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={descargarPdf}
+                disabled={descargandoPdf || porAutorizar}
+                title={motivoBloqueo}
+              >
                 {descargandoPdf
                   ? <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                   : <Download className="h-3.5 w-3.5 mr-1.5" />}
@@ -1215,6 +1347,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 size="sm"
                 variant="outline"
                 onClick={() => setEnviarOpen(true)}
+                disabled={porAutorizar}
+                title={motivoBloqueo}
               >
                 <Send className="h-3.5 w-3.5 mr-1.5" />
                 Enviar
@@ -1247,21 +1381,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             {!soloLectura && (
               <Button
                 size="sm"
-                disabled={guardando}
+                disabled={guardando || solicitando}
                 onClick={handleSubmit((v) => {
                   if (esNueva && !v.paciente) {
                     setError('paciente', { type: 'required', message: 'Selecciona un cliente para continuar' })
                     return
                   }
-                  const itemBajoMin = v.items.filter((item) => !item.es_obsequio).find((item) => {
-                    const min = precioMinimoDe(item)
-                    return min !== null && item.valor_unitario < min
-                  })
-                  if (itemBajoMin) {
-                    toast.error('Precio por debajo del mínimo', `"${itemBajoMin.descripcion}" tiene un precio inferior al mínimo permitido.`)
-                    return
-                  }
-                  if (avisarDescuentoExcedido(v.items)) return
+                  // Un precio bajo lo permitido no se bloquea aquí: el backend
+                  // responde PRECIO_REQUIERE_AUTORIZACION y se ofrece pedirla.
                   esNueva ? crear(v) : actualizar(v)
                 }, avisarCamposInvalidos)}
               >
@@ -1277,6 +1404,26 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+
+        {esDeOtraSede && tienePermisoGestionar && (
+          <p className="rounded-lg border bg-muted/50 px-4 py-2.5 text-sm text-muted-foreground">
+            Esta cotización es de {cotizacion?.sede_nombre ? <span className="font-medium text-foreground">{cotizacion.sede_nombre}</span> : 'otra sede'}:
+            puedes verla, pero la gestiona esa sede.
+          </p>
+        )}
+
+        {/* ── Autorización de precio (pendiente, rechazada o recién autorizada) ── */}
+        {cotizacion?.estado === 'borrador' && (
+          <AutorizacionPrecioBanner
+            estado={estadoAutorizacion}
+            // Autoriza en sus sedes (el backend aplica el mismo alcance).
+            puedeDecidir={canEditPrice && (isAllSedes || sedes.some((s) => s.id === cotizacion.sede))}
+            puedeEditar={canGestionar}
+            corrigiendo={actualizando || solicitando}
+            onVolverAlPermitido={volverAlPrecioPermitido}
+            onPedirDeNuevo={() => setPorSolicitar(getValues())}
+          />
+        )}
 
         {/* ── Aceptación del cliente (solo borrador ya creado) ─────────────── */}
         {cotizacion?.estado === 'borrador' && canGestionar && (
@@ -1301,6 +1448,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                       ? 'Falta registrar las formas de pago'
                       : `Las formas de pago (${cop(sumaPagosForm)}) no suman el total (${cop(total)})`}
                 </li>
+                {porAutorizar && (
+                  <li className="flex items-center gap-1.5 text-amber-700">
+                    <Clock className="h-3.5 w-3.5" />
+                    {solicitudPrecio?.estado === 'rechazada'
+                      ? 'No se autorizó el precio: corrígelo o pide autorización de nuevo'
+                      : 'Falta que autoricen el precio'}
+                  </li>
+                )}
                 {cotizacion.compromiso_pago?.estado === 'pendiente' && (
                   <li className="flex items-center gap-1.5 text-amber-700">
                     <Clock className="h-3.5 w-3.5" />
@@ -1311,8 +1466,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             </div>
             <Button
               className="bg-green-600 hover:bg-green-700 shrink-0"
-              disabled={cambiando || actualizando}
+              disabled={cambiando || actualizando || porAutorizar}
               onClick={handleAceptar}
+              title={motivoBloqueo}
             >
               {cambiando
                 ? <Loader2 className="h-4 w-4 animate-spin mr-1.5" />
@@ -1337,10 +1493,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     onSelect={field.onChange}
                     onClear={() => field.onChange(null)}
                     placeholder="Buscar cliente por nombre o documento..."
-                    onCreateNew={(nombre) => {
+                    // Crear la ficha aquí mismo solo con permiso de crear pacientes.
+                    onCreateNew={puedeCrearPaciente ? (nombre) => {
                       setCrearPacienteNombre(nombre ?? '')
                       setCrearPacienteOpen(true)
-                    }}
+                    } : undefined}
                   />
                 )}
               />
@@ -1420,7 +1577,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         {/* ── Fila 2: Seguimiento de sesiones + (Avance de cartera, Compromiso, Consentimientos) ── */}
         {cotizacion?.estado === 'aceptada' && (
           <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-4 md:items-stretch">
-            <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} />
+            <SesionesCotizacionPanel cotizacionId={cotizacion.id} pacienteId={cotizacion.paciente} sedeId={cotizacion.sede} />
             {/* Misma columna/ancho para las tres: Avance de cartera siempre está
                (cotización aceptada), Compromiso y Consentimientos son opcionales.
                La columna toma la altura de Seguimiento de sesiones y Avance de
@@ -1432,6 +1589,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               {compromisoCard && (
                 <div className="flex-1 [&>*]:h-full">
                   {compromisoCard}
+                </div>
+              )}
+              {/* Antes un error ocultaba el panel sin aviso (CT-12). */}
+              {cotizacion?.estado === 'aceptada' && errorConsentimientos && !consentimientosRequeridos && (
+                <div className="bg-white rounded-xl border p-4 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm text-muted-foreground">No se pudieron cargar los consentimientos de esta venta.</p>
+                  <Button variant="outline" size="sm" onClick={() => recargarConsentimientos()}>Reintentar</Button>
                 </div>
               )}
               {hayConsentimientos && consentimientosRequeridos && (
@@ -1582,6 +1746,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                     const pisoDescuento = descMaxInfo ? descMaxInfo.precioLista * (1 - descMaxInfo.descMaxPct / 100) : null
                     const precioCampanaExacto = !!precioCampana && desc === 0 && val === parseFloat(precioCampana)
                     const descExcedido = pisoDescuento !== null && !precioCampanaExacto && precioEfectivo < pisoDescuento - 1
+                    // Bajo lo permitido no es un error: se guarda pidiendo autorización.
+                    const cobertura = (bajoPrecioMin || descExcedido) && items[idx] ? coberturaPrecio(items[idx], precioEfectivo) : null
+                    const avisoPrecio = cobertura === 'autorizado'
+                      ? { texto: 'Autorizado', clase: 'text-green-700' }
+                      : cobertura === 'pendiente'
+                        ? { texto: 'Esperando autorización', clase: 'text-amber-700' }
+                        : { texto: 'Requiere autorización', clase: 'text-amber-700' }
+                    const bordePrecio = cobertura === 'autorizado' ? null : 'border-amber-400 focus-visible:ring-amber-400'
 
                     const campanaDisponible = !!precioCampana && !soloLectura
                     const campanaAplicada = !!precioCampana &&
@@ -1626,7 +1798,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                                   className={cn(
                                     'h-8 text-sm text-right pl-6',
                                     itemPrecioLocked && 'pr-7',
-                                    bajoPrecioMin && 'border-destructive focus-visible:ring-destructive',
+                                    bajoPrecioMin && bordePrecio,
                                   )}
                                   disabled={soloLectura}
                                   value={f.value ? new Intl.NumberFormat('es-CO').format(f.value) : ''}
@@ -1652,7 +1824,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                             return (
                               <div>
                                 {bajoPrecioMin
-                                  ? withTooltip(`Mínimo permitido: ${cop(precioMinimo!)}`)
+                                  ? withTooltip(`Mínimo sin autorización: ${cop(precioMinimo!)}. ${cobertura ? avisoPrecio.texto : 'Al guardar podrás pedir que lo autoricen.'}`)
                                   : isLocked
                                   ? withTooltip(`Precio de catálogo: puedes subirlo, no bajarlo${precioMinimo !== null ? ` de ${cop(precioMinimo)}` : ''}`)
                                   : itemPrecioLocked
@@ -1660,8 +1832,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                                   : inputEl
                                 }
                                 {bajoPrecioMin && (
-                                  <p className="text-[10px] text-destructive mt-0.5 text-right">
-                                    Mín: {cop(precioMinimo!)}
+                                  <p className={cn('text-[10px] mt-0.5 text-right', avisoPrecio.clase)}>
+                                    {avisoPrecio.texto} · mín {cop(precioMinimo!)}
                                   </p>
                                 )}
                               </div>
@@ -1678,16 +1850,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                           type="number" min={0} max={descMaxInfo ? descMaxInfo.descMaxPct : 100}
                           className={cn(
                             'h-8 text-sm text-right',
-                            descExcedido && 'border-destructive focus-visible:ring-destructive',
+                            descExcedido && bordePrecio,
                           )}
                           disabled={soloLectura}
                           {...register(`items.${idx}.descuento_porcentaje`, { valueAsNumber: true })}
                         />
                         {descExcedido && (
-                          <p className="text-[10px] text-destructive mt-0.5 text-right">
+                          <p className={cn('text-[10px] mt-0.5 text-right', avisoPrecio.clase)}>
                             {descMaxInfo && descMaxInfo.descMaxPct > 0
-                              ? `Máx ${descMaxInfo.descMaxPct}% · mín ${cop(pisoDescuento!)}`
-                              : 'Sin descuento permitido'}
+                              ? `Máx ${descMaxInfo.descMaxPct}% · ${avisoPrecio.texto.toLowerCase()}`
+                              : `Sin descuento · ${avisoPrecio.texto.toLowerCase()}`}
                           </p>
                         )}
                       </div>
@@ -2110,6 +2282,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             onOpenChange={setDescartarOpen}
             pacienteNombre={cotizacion.paciente_nombre}
             conSeguimiento={!!cotizacion.oportunidad}
+            otrasAbiertas={cotizacion.oportunidad_otras_abiertas ?? 0}
             loading={cambiando}
             onConfirm={(extra) => cambiarEstadoMut({ estado: 'descartada', extra })}
           />
@@ -2274,6 +2447,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <SolicitarAutorizacionDialog
+        open={!!porSolicitar}
+        items={porSolicitar ? itemsPorAutorizar(porSolicitar) : []}
+        enviando={solicitando}
+        onOpenChange={(open) => !open && setPorSolicitar(null)}
+        onConfirmar={(motivo) => porSolicitar && solicitarAutorizacion({ values: porSolicitar, motivo })}
+      />
 
       {/* ── Modal descripción ampliada ──────────────────────────────────── */}
       <Dialog open={!!descModal} onOpenChange={(open) => !open && setDescModal(null)}>

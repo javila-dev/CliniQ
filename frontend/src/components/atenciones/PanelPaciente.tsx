@@ -11,6 +11,8 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { TabDatosGenerales } from '@/components/historia/TabDatosGenerales'
 import { formatDate, edadPaciente } from '@/lib/utils'
+import { useAuthStore } from '@/store/authStore'
+import { puedeAbrirCotizacion } from '@/lib/permissions'
 import type { Paciente } from '@/types/pacientes'
 import type { Cita } from '@/types/agenda'
 import type { HistoriaClinica } from '@/types/historia'
@@ -25,10 +27,22 @@ interface PanelPacienteProps {
   mostrarDatosGenerales?: boolean
 }
 
+/** Tarjeta del paquete: enlaza a la cotización solo si el usuario la puede abrir. */
+function TarjetaPaquete({ href, children }: { href: string | null; children: React.ReactNode }) {
+  const clase = 'block rounded-lg border bg-white p-3 shadow-sm space-y-2'
+  if (!href) return <div className={clase}>{children}</div>
+  return (
+    <Link href={href} className={`${clase} hover:shadow-md hover:-translate-y-0.5 transition-all duration-200`}>
+      {children}
+    </Link>
+  )
+}
+
 export function PanelPaciente({
   paciente, cita, historia, totalNotas = 0, totalFotos = 0, mostrarDatosGenerales = true,
 }: PanelPacienteProps) {
   const [datosOpen, setDatosOpen] = useState(false)
+  const { user } = useAuthStore()
 
   const { data: antecedentes } = useQuery({
     queryKey: ['antecedentes', paciente.id],
@@ -38,7 +52,9 @@ export function PanelPaciente({
 
   const { data: citasPaciente } = useQuery({
     queryKey: ['citas-paciente', paciente.id],
-    queryFn: () => agendaApi.citas.list({ paciente: paciente.id, page_size: 10 }),
+    // Las visitas completadas más recientes: antes llegaban las 10 citas más
+    // antiguas y se mostraban esas, o "Primera visita" aunque hubiera visitas (AT-09).
+    queryFn: () => agendaApi.citas.list({ paciente: paciente.id, estado: 'completada', ordering: '-fecha_inicio', page_size: 5 }),
     enabled: Boolean(paciente.id),
   })
   const visitasAnteriores = (citasPaciente?.results ?? [])
@@ -61,11 +77,15 @@ export function PanelPaciente({
   const citasRestantes = itemSesiones?.citas_restantes ?? cita.cotizacion_resumen?.citas_restantes ?? 0
   const citasAgendadas = itemSesiones?.citas_agendadas ?? cita.cotizacion_resumen?.citas_agendadas ?? 0
   const sesionesUsadas = Math.max(0, totalSesionesContratadas - citasRestantes)
-  const sesionActual = totalSesionesContratadas > 0
-    ? Math.min(totalSesionesContratadas, Math.max(1, sesionesUsadas || citasAgendadas || 1))
-    : 0
+  // El número de esta sesión sale del tratamiento (igual que el encabezado). Restar
+  // las restantes contaba las agendadas: con todo agendado decía "6 de 6" en la
+  // primera atención (AT-08).
+  const sesionActual = cita.sesion_tratamiento?.numero
+    ?? (totalSesionesContratadas > 0
+      ? Math.min(totalSesionesContratadas, Math.max(1, sesionesUsadas || citasAgendadas || 1))
+      : 0)
   const progresoSesionesPct = totalSesionesContratadas > 0
-    ? Math.min(100, Math.round((sesionesUsadas / totalSesionesContratadas) * 100))
+    ? Math.min(100, Math.round(((cita.sesion_tratamiento ? sesionActual - 1 : sesionesUsadas) / totalSesionesContratadas) * 100))
     : 0
 
   const initials = paciente.nombre_completo
@@ -104,9 +124,10 @@ export function PanelPaciente({
 
         {/* Progreso de cotización */}
         {cita.cotizacion_resumen && (
-          <Link
-            href={'/cotizaciones/' + cita.cotizacion_resumen.cotizacion_id}
-            className="block rounded-lg border bg-white p-3 shadow-sm space-y-2 hover:shadow-md hover:-translate-y-0.5 transition-all duration-200"
+          <TarjetaPaquete
+            href={puedeAbrirCotizacion(user, cita.cotizacion_resumen.profesional_id)
+              ? '/cotizaciones/' + cita.cotizacion_resumen.cotizacion_id
+              : null}
           >
             <p className="text-xs font-medium leading-snug line-clamp-2">
               {cita.cotizacion_resumen.descripcion}
@@ -137,7 +158,7 @@ export function PanelPaciente({
                 </p>
               </>
             )}
-          </Link>
+          </TarjetaPaquete>
         )}
 
         {/* Alertas */}
