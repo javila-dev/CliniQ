@@ -183,7 +183,7 @@ Si tu clínica lo exige, el flujo cambia: se genera el documento de aceptación 
 el paciente lo firma y, **al confirmarse la firma, la cotización se acepta sola**.
 No hay que volver a entrar a marcarla.
 
-Esto se activa en Configuración → Otros documentos y se explica en
+Esto se activa en Configuración → Comercial, en la sección Cotizaciones, y se explica en
 [La aceptación de la cotización y el compromiso de pago](/ayuda/articulo/el-compromiso-de-pago).
 
 ## Revisa antes de aceptar

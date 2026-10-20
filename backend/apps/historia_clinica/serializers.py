@@ -473,6 +473,7 @@ class ResultadoExamenSerializer(serializers.ModelSerializer):
 
 class PlantillaOrdenSerializer(serializers.ModelSerializer):
     created_by_nombre = serializers.CharField(source="created_by.nombre_completo", read_only=True)
+    es_mia = serializers.SerializerMethodField()
 
     class Meta:
         model = PlantillaOrden
@@ -482,12 +483,23 @@ class PlantillaOrdenSerializer(serializers.ModelSerializer):
             "contenido",
             "permite_edicion_profesional",
             "activa",
+            "compartida",
+            "es_mia",
             "created_by",
             "created_by_nombre",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "created_by", "created_by_nombre", "created_at", "updated_at")
+        read_only_fields = ("id", "es_mia", "created_by", "created_by_nombre", "created_at", "updated_at")
+
+    def get_es_mia(self, obj) -> bool:
+        request = self.context.get("request")
+        return bool(request and obj.created_by_id == request.user.id)
+
+
+class GuardarComoPlantillaSerializer(serializers.Serializer):
+    nombre = serializers.CharField(max_length=200)
+    compartida = serializers.BooleanField(default=False)
 
 
 class OrdenMedicaAuditoriaSerializer(serializers.ModelSerializer):
@@ -513,6 +525,7 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
             "nota",
             "plantilla_origen",
             "plantilla_nombre",
+            "titulo",
             "contenido",
             "contenido_original",
             "fue_editada",
@@ -530,6 +543,7 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
             "auditorias",
             "created_at",
         )
+        extra_kwargs = {"titulo": {"required": False}}
 
     def validate(self, attrs):
         request = self.context["request"]
@@ -568,6 +582,7 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
                     {"error": "Esta plantilla no permite modificaciones", "code": "PLANTILLA_NO_EDITABLE"}
                 )
             attrs["fue_editada"] = contenido != plantilla.contenido
+            attrs["titulo"] = plantilla.nombre
         elif not contenido:
             raise serializers.ValidationError({"contenido": "Debes enviar contenido o seleccionar una plantilla."})
 
@@ -575,8 +590,13 @@ class OrdenMedicaSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         request = self.context["request"]
+        from apps.historia_clinica.variables_orden import llenar_variables
+
         fue_editada = validated_data.get("fue_editada", False)
         plantilla = validated_data.get("plantilla_origen")
+        validated_data["contenido"] = llenar_variables(
+            validated_data["contenido"], validated_data["historia"].paciente, request.user,
+        )
         orden = OrdenMedica.objects.create(
             **validated_data,
             profesional=request.user,

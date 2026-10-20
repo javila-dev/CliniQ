@@ -32,7 +32,11 @@ class SesionUnicaTests(TestCase):
             HTTP_USER_AGENT=user_agent,
         )
         self.assertEqual(response.status_code, 200)
-        return response.json()
+        # El token de renovación ya no viaja en el cuerpo: va en la cookie HttpOnly.
+        datos = response.json()
+        self.assertNotIn("refresh", datos)
+        datos["refresh"] = response.cookies["cliniq_refresh"].value
+        return datos
 
     def test_segundo_login_cierra_la_sesion_del_primer_dispositivo(self):
         cliente_a = APIClient()
@@ -69,17 +73,19 @@ class SesionUnicaTests(TestCase):
         cliente_b = APIClient()
         self._login(cliente_b)
 
-        refresh_fallido = cliente_a.post(
-            "/api/v1/auth/refresh/", {"refresh": tokens_a["refresh"]}, format="json"
-        )
+        # Con la cookie que guardó el navegador del dispositivo A.
+        refresh_fallido = cliente_a.post("/api/v1/auth/refresh/", {}, format="json")
         self.assertEqual(refresh_fallido.status_code, 401)
 
     def test_refrescar_sin_una_sesion_nueva_de_por_medio_sigue_funcionando(self):
         cliente = APIClient()
         tokens = self._login(cliente)
 
-        refresh_ok = cliente.post("/api/v1/auth/refresh/", {"refresh": tokens["refresh"]}, format="json")
+        refresh_ok = cliente.post("/api/v1/auth/refresh/", {}, format="json")
         self.assertEqual(refresh_ok.status_code, 200)
+        self.assertNotIn("refresh", refresh_ok.json())
+        # Rota: la cookie trae un token nuevo, distinto del anterior.
+        self.assertNotEqual(refresh_ok.cookies["cliniq_refresh"].value, tokens["refresh"])
 
         nuevo_access = refresh_ok.json()["access"]
         cliente.credentials(HTTP_AUTHORIZATION=f"Bearer {nuevo_access}", HTTP_X_CLINICA_ID=str(self.clinica.id))

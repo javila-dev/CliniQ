@@ -37,7 +37,11 @@ async function login(clave) {
   const r = await fetch(`${API}/auth/login/`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cred[clave]),
   })
-  return r.json()
+  // El token de renovación viene en la cookie HttpOnly; se inyecta como sesión
+  // vieja (localStorage) y el front lo migra a la cookie al cargar.
+  const datos = await r.json()
+  datos.refresh = (r.headers.get('set-cookie') ?? '').match(/cliniq_refresh=([^;]+)/)?.[1]
+  return datos
 }
 
 async function api(clave, ruta) {
@@ -49,7 +53,8 @@ async function sesion(browser, clave) {
   const { access, refresh, user } = await login(clave)
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   await context.addInitScript(({ access, refresh, clinica }) => {
-    if (!localStorage.getItem('access_token')) {
+    if (!sessionStorage.getItem('qa-sesion')) {
+      sessionStorage.setItem('qa-sesion', '1')
       localStorage.setItem('access_token', access)
       localStorage.setItem('refresh_token', refresh)
       if (clinica) localStorage.setItem('clinica_id', clinica)

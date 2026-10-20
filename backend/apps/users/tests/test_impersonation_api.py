@@ -49,12 +49,39 @@ class ImpersonateUserApiTests(TestCase):
         self.assertEqual(body["user"]["clinica_id"], str(self.clinica.id))
         self.assertEqual(body["user"]["rol"], self.target.rol)
         self.assertIn("access", body)
-        self.assertIn("refresh", body)
+        # Sin token de renovación ni cookie: la sesión del superadmin sigue en la suya.
+        self.assertNotIn("refresh", body)
+        self.assertNotIn("cliniq_refresh", response.cookies)
 
         token = AccessToken(body["access"])
         self.assertEqual(token["user_id"], str(self.target.id))
         self.assertEqual(token["rol"], self.target.rol)
         self.assertEqual(token["clinica_id"], str(self.clinica.id))
+        self.assertEqual(token["suplantado_por"], str(self.superadmin.id))
+
+    def test_la_suplantacion_queda_registrada_y_se_revoca_al_terminar(self):
+        from rest_framework.test import APIClient
+
+        from apps.core.models import LogAccion
+        from apps.users.models import SesionSuplantacion
+
+        self.client.force_authenticate(self.superadmin)
+        access = self.client.post(f"/api/v1/auth/impersonate/{self.target.id}/", format="json").json()["access"]
+        sesion = SesionSuplantacion.objects.get(superadmin=self.superadmin, usuario=self.target)
+        self.assertTrue(sesion.vigente)
+        self.assertTrue(LogAccion.objects.filter(accion="usuario.suplantar").exists())
+
+        como_target = APIClient()
+        como_target.credentials(HTTP_AUTHORIZATION=f"Bearer {access}", HTTP_X_CLINICA_ID=str(self.clinica.id))
+        self.assertEqual(como_target.get("/api/v1/auth/me/").status_code, 200)
+        self.assertEqual(como_target.post("/api/v1/auth/impersonate/terminar/", {}, format="json").status_code, 204)
+
+        sesion.refresh_from_db()
+        self.assertIsNotNone(sesion.terminada_en)
+        self.assertTrue(LogAccion.objects.filter(accion="usuario.suplantar_fin").exists())
+        rechazado = como_target.get("/api/v1/auth/me/")
+        self.assertEqual(rechazado.status_code, 401)
+        self.assertEqual(rechazado.json()["code"], "SUPLANTACION_TERMINADA")
 
     def test_non_superadmin_gets_403(self):
         self.client.force_authenticate(self.admin)

@@ -315,7 +315,7 @@ vuelve a generar con los datos nuevos: el paciente nunca firma montos desactuali
 
 ## Cómo se activa
 
-En **Configuración → Otros documentos** hay un interruptor: o la clínica exige
+En **Configuración → Comercial**, en la sección Cotizaciones, hay un interruptor: o la clínica exige
 compromiso de pago en todas sus cotizaciones, o no lo exige en ninguna. No es una
 decisión caso por caso.
 

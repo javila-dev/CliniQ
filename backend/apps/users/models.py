@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 from django.utils import timezone
@@ -224,3 +226,27 @@ class CapturaFirmaToken(BaseModel):
     @property
     def vigente(self) -> bool:
         return not self.usado and not self.vencido
+
+
+class SesionSuplantacion(models.Model):
+    """Un superadmin entrando como otro usuario. Registra quién suplantó a quién
+    y permite revocar el token al terminar: el token de suplantación solo vale
+    mientras su sesión siga abierta (ver ClinicScopedJWTAuthentication)."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    superadmin = models.ForeignKey(User, on_delete=models.CASCADE, related_name="suplantaciones_hechas")
+    usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name="suplantaciones_recibidas")
+    creada_en = models.DateTimeField(auto_now_add=True)
+    expira_en = models.DateTimeField()
+    terminada_en = models.DateTimeField(null=True, blank=True)
+    ip = models.GenericIPAddressField(null=True, blank=True)
+    user_agent = models.CharField(max_length=300, blank=True, default="")
+
+    class Meta:
+        db_table = "sesiones_suplantacion"
+        ordering = ["-creada_en"]
+
+    @property
+    def vigente(self) -> bool:
+        return self.terminada_en is None and self.expira_en > timezone.now()
+

@@ -152,6 +152,18 @@ SIMPLE_JWT = {
     "UPDATE_LAST_LOGIN": True,
 }
 
+# El token de renovacion viaja en una cookie que JavaScript no puede leer
+# (HttpOnly): antes estaba en localStorage y cualquier script de la pagina se lo
+# podia llevar. El de acceso queda solo en memoria del navegador.
+AUTH_REFRESH_COOKIE_NAME = "cliniq_refresh"
+AUTH_REFRESH_COOKIE_SECURE = config("AUTH_REFRESH_COOKIE_SECURE", default=True, cast=bool)
+AUTH_REFRESH_COOKIE_SAMESITE = "Lax"
+# "/" porque en produccion el navegador llama por /proxy/v1 (rewrite de Next) y
+# en local directo a /api/v1: la ruta que ve el navegador cambia.
+AUTH_REFRESH_COOKIE_PATH = config("AUTH_REFRESH_COOKIE_PATH", default="/")
+# Suplantacion del superadmin: solo token de acceso, corto y sin renovacion.
+SUPLANTACION_DURACION = timedelta(minutes=60)
+
 # OAuth ID del cliente web de Google. Vacio = el endpoint /auth/google/ responde
 # 503. El login con Google solo autentica usuarios que ya existen (creados desde
 # el panel); nunca da de alta cuentas nuevas.
@@ -159,6 +171,10 @@ GOOGLE_OAUTH_CLIENT_ID = config("GOOGLE_OAUTH_CLIENT_ID", default="")
 
 CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", default="", cast=Csv())
 CORS_ALLOW_ALL_ORIGINS = config("CORS_ALLOW_ALL_ORIGINS", default=False, cast=bool)
+# Cookies en llamadas de otro origen: en produccion el front llama por el mismo
+# dominio (/proxy/v1) y no hace falta; activarlo con todos los origenes
+# permitidos dejaria a otra app del dominio usar la cookie de sesion.
+CORS_ALLOW_CREDENTIALS = config("CORS_ALLOW_CREDENTIALS", default=False, cast=bool)
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-clinica-id",
     "x-active-clinica",

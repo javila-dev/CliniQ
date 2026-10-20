@@ -14,6 +14,7 @@ from apps.users.views import (
     PasswordResetRequestView,
     PasswordResetValidateView,
     RefreshView,
+    TerminarSuplantacionView,
 )
 
 
@@ -26,6 +27,7 @@ urlpatterns = [
     path("me/captura-firma/", CapturaFirmaView.as_view(), name="auth-captura-firma"),
     path("me/captura-firma/<str:token>/estado/", CapturaFirmaEstadoView.as_view(), name="auth-captura-firma-estado"),
     path("firma-movil/<str:token>/", FirmaMovilPublicaView.as_view(), name="auth-firma-movil"),
+    path("impersonate/terminar/", TerminarSuplantacionView.as_view(), name="auth-impersonate-terminar"),
     path("impersonate/<uuid:user_id>/", ImpersonateUserView.as_view(), name="auth-impersonate"),
     path("invitar/", InvitationRequestView.as_view(), name="auth-invitar"),
     path("recuperar-password/", PasswordResetRequestView.as_view(), name="auth-password-reset-request"),

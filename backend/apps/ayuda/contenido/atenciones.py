@@ -252,20 +252,33 @@ permite reconstruir después qué se hizo exactamente en cada sesión.
 
 Una orden se genera durante la atención, desde la pestaña de **Órdenes médicas**.
 
-1. Eliges una **plantilla** del listado que configuró la clínica.
-2. La plantilla se llena con los datos del paciente y del profesional.
-3. Si la plantilla lo permite, puedes **editar el texto** antes de emitirla.
+1. Empiezas **en blanco** o desde una **plantilla**: las de la clínica o las tuyas
+   (en «Mis plantillas»).
+2. Si la plantilla lo permite, puedes **editar el texto** antes de emitirla.
+3. Solo escribes el contenido: el nombre, documento, edad del paciente, la fecha
+   y tus datos salen solos en el encabezado del PDF.
 4. La orden queda guardada en la historia del paciente, con la fecha, el
    profesional y la nota clínica a la que pertenece.
 
 Cuando una orden se edita sobre la plantilla, queda marcada como editada. Así se
 distingue de las que salieron tal cual estaban definidas.
 
+### Reutilizar una orden
+
+En el menú **…** de cualquier orden emitida, en la atención o en la historia:
+
+- **Usar de nuevo** abre una orden nueva con el mismo texto, para ajustarla y emitirla.
+- **Guardar como plantilla** guarda su texto para emitirlo con otros pacientes.
+
 ### Plantillas
 
-Las plantillas se administran en **Configuración → Plantillas de órdenes**. Cada
-una tiene su nombre, su contenido y una opción que define si el profesional puede
-modificarla al emitirla.
+Al escribir una orden puedes marcar **Guardar también como plantilla**. Queda en
+«Mis plantillas» (solo la ves tú) o, si marcas **Compartir con toda la clínica**,
+la ven todos los profesionales.
+
+El administrador gestiona todas en **Configuración → Atención clínica →
+Plantillas de órdenes**: puede editarlas, compartir las personales y decidir si
+el profesional puede modificar el texto al emitirlas.
 
 Sirven para cualquier documento repetitivo: órdenes de laboratorio, remisiones,
 indicaciones posteriores a un procedimiento, incapacidades.

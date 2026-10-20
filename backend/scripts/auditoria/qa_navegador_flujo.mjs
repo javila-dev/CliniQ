@@ -32,10 +32,13 @@ async function sesion(browser, clave) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cred[clave]),
   })
   if (!r.ok) throw new Error(`login ${clave}: ${r.status}`)
-  const { access, refresh, user } = await r.json()
+  const { access, user } = await r.json()
+  // El token de renovación viene en la cookie HttpOnly (el front lo migra al cargar).
+  const refresh = (r.headers.get('set-cookie') ?? '').match(/cliniq_refresh=([^;]+)/)?.[1]
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   await context.addInitScript(({ access, refresh, clinica }) => {
-    if (!localStorage.getItem('access_token')) {
+    if (!sessionStorage.getItem('qa-sesion')) {
+      sessionStorage.setItem('qa-sesion', '1')
       localStorage.setItem('access_token', access)
       localStorage.setItem('refresh_token', refresh)
       if (clinica) localStorage.setItem('clinica_id', clinica)

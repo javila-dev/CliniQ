@@ -10,6 +10,9 @@ CSRF_COOKIE_SECURE = True
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+# El navegador recuerda por un año que la API solo va por HTTPS. Sin
+# includeSubDomains: 2asoft.tech tiene otros subdominios que no son de CliniQ.
+SECURE_HSTS_SECONDS = 31536000
 
 # Proxy / Traefik
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")

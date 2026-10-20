@@ -142,8 +142,8 @@ acordarse.
 
 - **Pantalla del profesional** e **Historia clínica**: elige qué pestañas ve el
   profesional, para no mostrar campos que tu clínica no usa.
-- **Otros documentos**: decide si al aceptar una cotización se exige el
-  documento de aceptación y compromiso de pago firmado.
+- **Comercial → Cotizaciones**: decide si al aceptar una cotización se exige
+  el documento de aceptación y compromiso de pago firmado.
 - **Cajas y categorías de gasto**: si vas a manejar efectivo, define la caja de
   cada sede, su fondo inicial y su responsable.
 

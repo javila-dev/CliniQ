@@ -1,3 +1,4 @@
+import hashlib
 import logging
 
 from django.conf import settings
@@ -22,6 +23,7 @@ from django.db.models.deletion import ProtectedError
 from apps.clinicas.models import Clinica
 from apps.core.logging import registrar_accion
 from apps.users import services
+from apps.users.cookie_sesion import borrar_cookie, refresh_de_la_peticion, respuesta_con_sesion
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
 from apps.users.authorization import user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, IsSuperAdmin, RequireAnyPermission, RequirePermission, get_clinica_activa
@@ -100,10 +102,24 @@ class GoogleLoginThrottle(SimpleRateThrottle):
 
 
 class TokenRefreshThrottle(SimpleRateThrottle):
+    """Por sesión, no por IP: ahora cada pestaña que se abre o se recarga pide un
+    token de acceso, y todos los equipos de una clínica suelen salir por la misma
+    IP. El límite por IP queda, más alto, para quien mande tokens inventados."""
+
     rate = "30/min"
 
     def get_cache_key(self, request, view):
-        return f"token_refresh_{self.get_ident(request)}"
+        token = refresh_de_la_peticion(request)
+        if not token:
+            return None
+        return f"token_refresh_{hashlib.sha256(token.encode()).hexdigest()[:32]}"
+
+
+class TokenRefreshIpThrottle(SimpleRateThrottle):
+    rate = "300/min"
+
+    def get_cache_key(self, request, view):
+        return f"token_refresh_ip_{self.get_ident(request)}"
 
 
 class PasswordResetRequestThrottle(SimpleRateThrottle):
@@ -191,7 +207,7 @@ class LoginView(APIView):
             {"resumen": f"Inicio de sesión de {user.email}", "metodo": "password"},
             clinica=user.clinica, actor=user,
         )
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        return respuesta_con_sesion(serializer.validated_data, status.HTTP_200_OK)
 
     @staticmethod
     def _respuesta_cuenta_inactiva(email):
@@ -296,21 +312,26 @@ class GoogleLoginView(APIView):
             clinica=user.clinica, actor=user,
         )
         logger.info("Login con Google | user=%s", user.pk)
-        return Response(data, status=status.HTTP_200_OK)
+        return respuesta_con_sesion(data, status.HTTP_200_OK)
 
 
 class RefreshView(TokenRefreshView):
     authentication_classes = ()
     permission_classes = ()
-    throttle_classes = (TokenRefreshThrottle,)
+    throttle_classes = (TokenRefreshIpThrottle, TokenRefreshThrottle)
 
     def post(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
+        # El token viene en la cookie HttpOnly (o, al migrar una sesión vieja, en
+        # el cuerpo); el nuevo, rotado, vuelve en la cookie.
+        serializer = self.get_serializer(data={"refresh": refresh_de_la_peticion(request)})
         try:
             serializer.is_valid(raise_exception=True)
         except Exception:
+            # La cookie NO se borra: si otra pestaña acaba de renovar, esta mandó
+            # el token anterior (ya revocado) y borrarla le cerraría la sesión
+            # buena a todas. Una cookie vencida no hace daño; logout sí la borra.
             return error_response("No fue posible refrescar el token.", "TOKEN_REFRESH_FAILED", status.HTTP_401_UNAUTHORIZED)
-        return Response(serializer.validated_data, status=status.HTTP_200_OK)
+        return respuesta_con_sesion(serializer.validated_data, status.HTTP_200_OK)
 
 
 class PasswordResetRequestView(APIView):
@@ -460,7 +481,7 @@ class PasswordResetConfirmView(APIView):
             iniciar_sesion_unica(user, user_agent=request.META.get("HTTP_USER_AGENT", ""))
             refresh = LoginSerializer.get_token(user)
             access = refresh.access_token
-            return Response(
+            return respuesta_con_sesion(
                 {
                     "ok": True,
                     "auto_login": True,
@@ -468,27 +489,30 @@ class PasswordResetConfirmView(APIView):
                     "refresh": str(refresh),
                     "clinica_id": str(user.clinica_id) if user.clinica_id else None,
                 },
-                status=status.HTTP_200_OK,
+                status.HTTP_200_OK,
             )
 
         return Response({"ok": True, "auto_login": False}, status=status.HTTP_200_OK)
 
 
 class LogoutView(APIView):
-    permission_classes = (IsAuthenticated,)
+    """Revoca el token de renovación de la cookie y la borra.
+
+    No exige el token de acceso: puede haber vencido, y cerrar sesión igual debe
+    revocar la cookie. Quien no tiene la cookie no revoca nada.
+    """
+
+    authentication_classes = ()
+    permission_classes = ()
 
     def post(self, request, *args, **kwargs):
-        refresh_token = request.data.get("refresh")
-        if not refresh_token:
-            return error_response("El refresh token es obligatorio.", "REFRESH_REQUIRED", status.HTTP_400_BAD_REQUEST)
-
-        try:
-            token = RefreshToken(refresh_token)
-            token.blacklist()
-        except TokenError:
-            return error_response("El refresh token no es valido.", "INVALID_REFRESH_TOKEN", status.HTTP_400_BAD_REQUEST)
-
-        return Response(status=status.HTTP_204_NO_CONTENT)
+        refresh_token = refresh_de_la_peticion(request)
+        if refresh_token:
+            try:
+                RefreshToken(refresh_token).blacklist()
+            except TokenError:
+                pass
+        return borrar_cookie(Response(status=status.HTTP_204_NO_CONTENT))
 
 
 class MeView(APIView):
@@ -534,16 +558,60 @@ class ImpersonateUserView(APIView):
                 status.HTTP_404_NOT_FOUND,
             )
 
-        refresh = LoginSerializer.get_token(target_user)
+        # Solo un token de acceso corto, sin renovación ni cookie: la sesión del
+        # superadmin sigue en su propia cookie, y al terminar (o al vencer) vuelve
+        # a ella. El token vale mientras la suplantación siga abierta, así que se
+        # puede revocar (antes era un par normal de 7 días que quedaba vivo).
+        from django.utils import timezone
+
+        from apps.users.models import SesionSuplantacion
+
+        sesion = SesionSuplantacion.objects.create(
+            superadmin=request.user,
+            usuario=target_user,
+            expira_en=timezone.now() + settings.SUPLANTACION_DURACION,
+            ip=request.META.get("REMOTE_ADDR") or None,
+            user_agent=(request.META.get("HTTP_USER_AGENT") or "")[:300],
+        )
+        access = LoginSerializer.get_token(target_user).access_token
+        access.set_exp(lifetime=settings.SUPLANTACION_DURACION)
+        access["suplantacion"] = str(sesion.id)
+        access["suplantado_por"] = str(request.user.id)
+        registrar_accion(
+            request, "usuario.suplantar", target_user,
+            {"resumen": f"{request.user.email} entró como {target_user.email}", "sesion": str(sesion.id)},
+            clinica=target_user.clinica,
+        )
         user_data = UserSerializer(target_user, context={"request": request}).data
         return Response(
-            {
-                "access": str(refresh.access_token),
-                "refresh": str(refresh),
-                "user": user_data,
-            },
+            {"access": str(access), "user": user_data, "expira_en": sesion.expira_en.isoformat()},
             status=status.HTTP_200_OK,
         )
+
+
+class TerminarSuplantacionView(APIView):
+    """Cierra la suplantación en curso: su token deja de valer de inmediato."""
+
+    permission_classes = (IsAuthenticated,)
+
+    def post(self, request, *args, **kwargs):
+        from django.utils import timezone
+
+        from apps.users.models import SesionSuplantacion
+
+        sesion_id = request.auth.get("suplantacion") if request.auth is not None else None
+        if not sesion_id:
+            return error_response("No hay una suplantación en curso.", "SIN_SUPLANTACION", status.HTTP_400_BAD_REQUEST)
+        sesion = SesionSuplantacion.objects.select_related("superadmin").filter(id=sesion_id).first()
+        if sesion is not None and sesion.terminada_en is None:
+            sesion.terminada_en = timezone.now()
+            sesion.save(update_fields=["terminada_en"])
+            registrar_accion(
+                request, "usuario.suplantar_fin", request.user,
+                {"resumen": f"{sesion.superadmin.email} salió de la sesión de {request.user.email}", "sesion": str(sesion.id)},
+                clinica=request.user.clinica, actor=sesion.superadmin,
+            )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PermisoListView(APIView):

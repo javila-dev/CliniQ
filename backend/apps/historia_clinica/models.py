@@ -330,6 +330,9 @@ class PlantillaOrden(BaseModel):
     contenido = models.TextField()
     permite_edicion_profesional = models.BooleanField(default=True)
     activa = models.BooleanField(default=True)
+    # Falso: plantilla personal, solo la ve quien la creó (los profesionales
+    # guardan sus órdenes como plantilla y deciden si la comparten).
+    compartida = models.BooleanField(default=True)
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -372,6 +375,9 @@ class OrdenMedica(BaseModel):
         blank=True,
         related_name="ordenes_generadas",
     )
+    # Título del PDF, fijado al emitir: antes se leía en vivo de la plantilla y
+    # renombrarla cambiaba el título de las órdenes ya emitidas.
+    titulo = models.CharField(max_length=200, blank=True, default="")
     contenido = models.TextField()
     contenido_original = models.TextField(blank=True, default="")
     fue_editada = models.BooleanField(default=False)

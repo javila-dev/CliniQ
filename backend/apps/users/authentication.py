@@ -12,6 +12,17 @@ class ClinicScopedJWTAuthentication(JWTAuthentication):
 
         user, token = result
 
+        # Token de suplantación del superadmin: vale solo mientras esa suplantación
+        # siga abierta (al terminarla se revoca de inmediato).
+        suplantacion = token.get("suplantacion")
+        if suplantacion:
+            from apps.users.models import SesionSuplantacion
+
+            if not SesionSuplantacion.objects.filter(id=suplantacion, terminada_en__isnull=True).exists():
+                raise AuthenticationFailed(
+                    {"error": "La sesión como este usuario terminó.", "code": "SUPLANTACION_TERMINADA"}
+                )
+
         # Sesion unica: si el usuario inicio sesion en otro dispositivo despues
         # de que se emitiera este token, su 'sid' ya no coincide con la sesion
         # vigente. sesion_actual_id vacio = usuario aun no paso por un login

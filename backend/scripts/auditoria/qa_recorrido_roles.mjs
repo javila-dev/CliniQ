@@ -36,12 +36,12 @@ const RUTAS = [
   '/preparar-clinica', '/puesta-en-marcha',
   '/configuracion', '/configuracion/clinica', '/configuracion/sedes', '/configuracion/usuarios', '/configuracion/roles',
   '/configuracion/agenda', '/configuracion/atencion', '/configuracion/biometria', '/configuracion/cajas',
-  '/configuracion/campanas', '/configuracion/cartera', '/configuracion/consentimientos',
+  '/configuracion/campanas', '/configuracion/comercial', '/configuracion/consentimientos',
   `/configuracion/consentimientos/${ids.plantilla}/campos`, '/configuracion/consentimientos/nuevo',
   '/configuracion/formas-pago', '/configuracion/grupos-atencion', '/configuracion/historia-clinica',
   '/configuracion/log-acciones', '/configuracion/plan', '/configuracion/plantillas-ordenes',
   '/configuracion/procedimientos', `/configuracion/procedimientos/${ids.procedimiento}`,
-  '/configuracion/recepcion', '/configuracion/recordatorios', '/configuracion/seguimiento',
+  '/configuracion/recepcion', '/configuracion/recordatorios',
   '/configuracion/servicios', '/configuracion/tratamientos', '/configuracion/whatsapp', '/configuracion/whatsapp/consumo',
   '/console',
 ]
@@ -55,7 +55,11 @@ async function login(clave) {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }),
   })
   if (!r.ok) throw new Error(`login ${clave}: ${r.status} ${await r.text()}`)
-  return r.json()
+  // El token de renovación viene en la cookie HttpOnly; se inyecta como sesión
+  // vieja (localStorage) y el front lo migra a la cookie al cargar.
+  const datos = await r.json()
+  datos.refresh = (r.headers.get('set-cookie') ?? '').match(/cliniq_refresh=([^;]+)/)?.[1]
+  return datos
 }
 
 /** Espera a que la API quede quieta (las consultas con polling no bloquean). */
@@ -73,7 +77,8 @@ async function recorrer(browser, clave) {
   const { access, refresh, user } = await login(clave)
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
   await context.addInitScript(({ access, refresh, clinica }) => {
-    if (!localStorage.getItem('access_token')) {
+    if (!sessionStorage.getItem('qa-sesion')) {
+      sessionStorage.setItem('qa-sesion', '1')
       localStorage.setItem('access_token', access)
       localStorage.setItem('refresh_token', refresh)
       if (clinica) localStorage.setItem('clinica_id', clinica)

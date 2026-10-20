@@ -259,7 +259,9 @@ class ConfiguracionFacialSerializer(serializers.ModelSerializer):
             "min_resolution",
             "updated_at",
         )
-        read_only_fields = ("updated_at",)
+        # El check-in automático no se ofrece: recepción siempre confirma con
+        # "Continuar" (decisión 2026-10-17). Queda de solo lectura y en falso.
+        read_only_fields = ("updated_at", "checkin_automatico")
         # Mismos rangos que valida face-recognition-service (/v1/enroll y /v1/match):
         # fuera de ellos el servicio responde 422 y el enrollment falla.
         extra_kwargs = {

@@ -1,12 +1,13 @@
 import base64
 import logging
+import uuid
 
 import requests
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
 from django.core.files.storage import default_storage
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, IntegerField, Value
 from django.db.models import Prefetch
 from django.db.models import Q
 from django.http import HttpResponse
@@ -41,6 +42,7 @@ from apps.historia_clinica.serializers import (
     NotaClinicaSerializer,
     NotaClinicaUpdateSerializer,
     OrdenMedicaSerializer,
+    GuardarComoPlantillaSerializer,
     PlantillaOrdenSerializer,
     RegistrarConsumoInsumoSerializer,
     ResultadoExamenSerializer,
@@ -80,9 +82,14 @@ logger = logging.getLogger(__name__)
 
 
 def user_can_manage_order_templates(user) -> bool:
-    # Las plantillas de órdenes son configuración de la clínica: mismo permiso que
-    # el menú que las muestra. Antes solo el admin o un rol llamado "coordinador".
+    # Gestiona todas las plantillas de la clínica: mismo permiso que el menú de
+    # Configuración que las muestra.
     return user_is_tenant_admin(user) or user_has_permission(user, "clinicas.editar")
+
+
+def user_can_create_order_templates(user) -> bool:
+    # Quien emite órdenes puede guardarlas como plantilla (personal o compartida).
+    return user_can_manage_order_templates(user) or user_has_permission(user, "historia.notas.crear")
 
 
 def _imagen_b64(path: str) -> str | None:
@@ -107,7 +114,7 @@ def build_orden_pdf_context(orden: OrdenMedica) -> dict:
     sede = orden.cita.sede if orden.cita_id else None
     fecha_local = timezone.localtime(orden.created_at)
 
-    dx_nombre = (orden.plantilla_origen.nombre if orden.plantilla_origen_id else "ORDEN MÉDICA").upper()
+    dx_nombre = (orden.titulo or "ORDEN MÉDICA").upper()
 
     sede_info = ""
     if sede:
@@ -1020,25 +1027,39 @@ class ResultadoExamenViewSet(ModelViewSet):
 
 
 class PlantillaOrdenViewSet(ModelViewSet):
+    """Plantillas de órdenes.
+
+    Quien gestiona la clínica ve y edita todas. Quien emite órdenes ve las
+    compartidas y las suyas, puede crear (personal o compartida) y editar o
+    desactivar solo las suyas.
+    """
+
     serializer_class = PlantillaOrdenSerializer
     queryset = PlantillaOrden.objects.select_related("clinica", "created_by").all()
     http_method_names = ["get", "post", "patch", "delete"]
 
     def get_permissions(self):
-        if self.action in {"create", "partial_update", "destroy"}:
-            return [RequirePermission("historia.ver")()]
         return [RequirePermission("historia.ver")()]
 
     def check_permissions(self, request):
         super().check_permissions(request)
-        if self.action in {"create", "partial_update", "destroy"} and not user_can_manage_order_templates(request.user):
-            self.permission_denied(request, message="Solo admin o coordinador pueden gestionar plantillas.")
+        if self.action == "create" and not user_can_create_order_templates(request.user):
+            self.permission_denied(request, message="No tienes permiso para crear plantillas de órdenes.")
+
+    def check_object_permissions(self, request, obj):
+        super().check_object_permissions(request, obj)
+        if self.action in {"partial_update", "destroy"} and not (
+            user_can_manage_order_templates(request.user) or obj.created_by_id == request.user.id
+        ):
+            self.permission_denied(request, message="Solo puedes cambiar las plantillas que creaste.")
 
     def get_queryset(self):
         queryset = super().get_queryset()
         user = self.request.user
         if user.rol != "superadmin":
             queryset = queryset.filter(clinica=user.clinica)
+            if not user_can_manage_order_templates(user):
+                queryset = queryset.filter(Q(compartida=True) | Q(created_by=user))
         if self.action == "list":
             activa = self.request.query_params.get("activa", "true")
             if activa.lower() in {"true", "1"}:
@@ -1054,6 +1075,56 @@ class PlantillaOrdenViewSet(ModelViewSet):
         instance.activa = False
         instance.save(update_fields=["activa", "updated_at"])
 
+    @action(detail=False, methods=["get"], url_path="sugeridas")
+    def sugeridas(self, request):
+        """Las plantillas más usadas para escribir una orden, en este orden:
+        las usadas en el procedimiento de la cita (?cita=), las que más usa
+        quien pide y las más usadas en la clínica. Nunca las personales de otros."""
+        from apps.agenda.models import Cita
+
+        try:
+            limite = max(1, min(int(request.query_params.get("limite", 5)), 20))
+        except ValueError:
+            limite = 5
+        user = request.user
+        procedimiento = None  # filtro sobre la cita de cada orden
+        try:
+            cita_id = uuid.UUID(request.query_params.get("cita", ""))
+        except ValueError:
+            cita_id = None  # sin cita (o un id inválido): solo por uso
+        if cita_id:
+            citas = Cita.objects.filter(id=cita_id)
+            if user.rol != "superadmin":
+                citas = citas.filter(sede__clinica=user.clinica)
+            # El procedimiento se reconoce por su nombre: según de dónde salió la
+            # cita, lo guarda el servicio o el ítem de cotización (procedimiento o
+            # tratamiento), pero el nombre está siempre.
+            fila = citas.values_list("servicio_nombre", "servicio_id").first()
+            if fila and fila[0].strip():
+                procedimiento = Q(ordenes_generadas__cita__servicio_nombre__iexact=fila[0].strip())
+            elif fila and fila[1]:
+                procedimiento = Q(ordenes_generadas__cita__servicio_id=fila[1])
+
+        visibles = self.get_queryset().filter(activa=True).filter(Q(compartida=True) | Q(created_by=user))
+        usos = {"ordenes_generadas__activo": True}
+        en_procedimiento = (
+            Count("ordenes_generadas", filter=procedimiento & Q(**usos))
+            if procedimiento is not None
+            else Value(0, output_field=IntegerField())
+        )
+        plantillas = (
+            visibles.annotate(
+                usos_procedimiento=en_procedimiento,
+                usos_mios=Count("ordenes_generadas", filter=Q(ordenes_generadas__profesional=user, **usos)),
+                usos_total=Count("ordenes_generadas", filter=Q(**usos)),
+            )
+            .order_by("-usos_procedimiento", "-usos_mios", "-usos_total", "nombre")[:limite]
+        )
+        datos = PlantillaOrdenSerializer(plantillas, many=True, context={"request": request}).data
+        for fila, plantilla in zip(datos, plantillas):
+            fila["usos_procedimiento"] = plantilla.usos_procedimiento
+        return Response(datos)
+
 
 class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.CreateModelMixin, GenericViewSet):
     serializer_class = OrdenMedicaSerializer
@@ -1068,7 +1139,7 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
     http_method_names = ["get", "post"]
 
     def get_permissions(self):
-        if self.action in {"create", "enviar_whatsapp"}:
+        if self.action in {"create", "enviar_whatsapp", "guardar_como_plantilla"}:
             return [RequirePermission("historia.notas.crear")()]
         return [RequirePermission("historia.ver")()]
 
@@ -1104,6 +1175,25 @@ class OrdenMedicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixin
         response = HttpResponse(pdf_bytes, content_type="application/pdf")
         response["Content-Disposition"] = f'inline; filename="orden-medica-{orden.id}.pdf"'
         return response
+
+    @action(detail=True, methods=["post"], url_path="guardar_como_plantilla")
+    def guardar_como_plantilla(self, request, pk=None):
+        """Crea una plantilla con el texto de una orden emitida. Los datos del
+        paciente no van en el texto: el PDF los pone en su encabezado."""
+        orden = self.get_object()
+        datos = GuardarComoPlantillaSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        plantilla = PlantillaOrden.objects.create(
+            clinica=orden.historia.clinica,
+            nombre=datos.validated_data["nombre"],
+            contenido=orden.contenido,
+            compartida=datos.validated_data["compartida"],
+            created_by=request.user,
+        )
+        return Response(
+            PlantillaOrdenSerializer(plantilla, context={"request": request}).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="enviar_whatsapp")
     def enviar_whatsapp(self, request, pk=None):
