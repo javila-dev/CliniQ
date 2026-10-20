@@ -583,15 +583,16 @@ export default function AtencionCitaPage({ params }: Props) {
               >
                 <TabsList className="h-auto bg-white rounded-full p-1 gap-1 w-max flex mx-auto">
                   {/* Solo el ícono; el nombre se ve en la pestaña activa y se
-                      despliega al pasar el mouse o al llegar con el teclado. */}
+                      despliega al pasar el mouse o al llegar con el teclado. En
+                      pantallas táctiles (sin hover) se ven todos los nombres. */}
                   {tabs.map((t) => (
                     <TabsTrigger
                       key={t.value}
                       value={t.value}
-                      className="group rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-200 hover:text-foreground data-[state=active]:bg-primary data-[state=active]:px-3.5 data-[state=active]:text-white data-[state=active]:font-semibold"
+                      className="group rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-200 hover:text-foreground data-[state=active]:bg-primary data-[state=active]:px-3.5 [@media(hover:none)]:px-3.5 data-[state=active]:text-white data-[state=active]:font-semibold"
                     >
                       <t.icon className="h-4 w-4 shrink-0" />
-                      <span className="max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-out group-hover:ml-1.5 group-hover:max-w-[12rem] group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-[12rem] group-focus-visible:opacity-100 group-data-[state=active]:ml-1.5 group-data-[state=active]:max-w-[12rem] group-data-[state=active]:opacity-100">
+                      <span className="max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-out group-hover:ml-1.5 group-hover:max-w-[12rem] group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-[12rem] group-focus-visible:opacity-100 group-data-[state=active]:ml-1.5 group-data-[state=active]:max-w-[12rem] group-data-[state=active]:opacity-100 [@media(hover:none)]:ml-1.5 [@media(hover:none)]:max-w-[12rem] [@media(hover:none)]:opacity-100">
                         {t.label}
                       </span>
                     </TabsTrigger>
