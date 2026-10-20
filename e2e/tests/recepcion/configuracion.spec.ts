@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../../fixtures/sesion'
 
 test('recepción NO accede a configuración (redirige)', async ({ page }) => {
   await page.goto('/configuracion')

@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Shield, Users, Pencil, Trash2, ChevronDown, ChevronUp,
-  Lock, CheckSquare, Square, Minus, Stethoscope, Wrench,
+  Lock, CheckSquare, Square, Minus, Stethoscope, Wrench, Eye,
 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -20,7 +20,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { Badge } from '@/components/ui/badge'
+import { EtiquetaAjuste, FilaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
 import { cn } from '@/lib/utils'
 import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse } from '@/types/usuarios'
@@ -151,7 +151,7 @@ function CapacidadesEditor({
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <p className="text-sm font-medium">{cap.titulo}</p>
                           {cap.profesional && (
-                            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-600 text-[10px] font-medium px-1.5 py-0.5">
+                            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 text-sky-700 text-xs font-medium px-2 py-0.5">
                               <Stethoscope className="h-3 w-3" />
                               Atención clínica
                             </span>
@@ -458,63 +458,60 @@ function RolDialog({
 // ── Fila de rol ────────────────────────────────────────────────────────────────
 
 function RolRow({
-  rol, canEdit, onEdit, onEliminar,
+  rol, canEdit, canDelete, onEdit, onEliminar,
 }: {
   rol: Rol
   canEdit: boolean
+  canDelete: boolean
   onEdit: (r: Rol) => void
   onEliminar: (r: Rol) => void
 }) {
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 last:border-0 hover:bg-gray-50/50 transition-colors">
-      <div className="flex items-center justify-center h-9 w-9 rounded-full bg-rose-50 shrink-0">
-        <Shield className="h-4 w-4 text-rose-500" />
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="text-sm font-semibold">{rol.nombre}</p>
-          {rol.es_sistema && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">Sistema</Badge>
-          )}
-          {!rol.activo && (
-            <Badge variant="outline" className="text-[10px] px-1.5 py-0 h-4 text-gray-400">Inactivo</Badge>
-          )}
-        </div>
-        <p className="text-xs text-muted-foreground font-mono">{rol.slug}</p>
-        {rol.descripcion && (
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">{rol.descripcion}</p>
-        )}
-      </div>
-
-      <div className="flex items-center gap-3 shrink-0">
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
-          <Users className="h-3.5 w-3.5" />
-          {rol.usuarios_count}
-        </div>
-        <span className="text-xs text-muted-foreground">{rol.permission_keys.length} permisos</span>
-      </div>
-
+    <FilaAjuste
+      icono={Shield}
+      apagada={!rol.activo}
+      titulo={rol.nombre}
+      descripcion={rol.descripcion || undefined}
+      extra={
+        <>
+          {rol.es_sistema && <EtiquetaAjuste icono={Lock}>Sistema</EtiquetaAjuste>}
+          {!rol.activo && <EtiquetaAjuste tono="aviso">Inactivo</EtiquetaAjuste>}
+        </>
+      }
+    >
+      <span className="hidden items-center gap-1 text-[13px] text-muted-foreground tabular-nums sm:flex" title="Usuarios con este rol">
+        <Users className="h-3.5 w-3.5" />
+        {rol.usuarios_count} {rol.usuarios_count === 1 ? 'usuario' : 'usuarios'}
+      </span>
+      <span className="flex items-center gap-1 text-[13px] text-muted-foreground tabular-nums sm:hidden">
+        <Users className="h-3.5 w-3.5" />
+        {rol.usuarios_count}
+      </span>
       {canEdit && (
-        <div className="flex items-center gap-1 shrink-0">
-          <Button
-            variant="ghost" size="icon" className="h-8 w-8"
-            onClick={() => onEdit(rol)}
-            title={rol.editable ? 'Editar' : 'Ver'}
-          >
-            {rol.editable ? <Pencil className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
-          </Button>
-          {rol.editable && rol.usuarios_count === 0 && (
-            <Button
-              variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600 hover:bg-red-50"
-              onClick={() => onEliminar(rol)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
+        <Button
+          variant="ghost" size="icon" className="h-8 w-8"
+          onClick={() => onEdit(rol)}
+          title={rol.editable ? 'Editar' : 'Ver'}
+          aria-label={`${rol.editable ? 'Editar' : 'Ver'} ${rol.nombre}`}
+        >
+          {rol.editable ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+        </Button>
       )}
-    </div>
+      {canDelete && (
+        rol.editable && rol.usuarios_count === 0 ? (
+          <Button
+            variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/5"
+            onClick={() => onEliminar(rol)}
+            aria-label={`Eliminar ${rol.nombre}`}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        ) : (
+          // Reserva el espacio para que los botones queden alineados entre filas.
+          <span className="h-8 w-8" aria-hidden />
+        )
+      )}
+    </FilaAjuste>
   )
 }
 
@@ -565,61 +562,51 @@ function RolesContent() {
   })
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          helpSlug="roles-y-permisos"
-          title="Roles y permisos"
-          description="Define qué puede ver y hacer cada rol en la clínica."
-        />
-        {canCreate && (
-          <Button onClick={() => setRolSheet({ open: true, rol: null })} className="shrink-0">
-            <Plus className="h-4 w-4 mr-1.5" />
-            Nuevo rol
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        helpSlug="roles-y-permisos"
+        title="Roles y permisos"
+        description="Define qué puede ver y hacer cada rol en la clínica."
+      />
 
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center gap-4 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
-          <div className="w-9 shrink-0" />
-          <div className="flex-1">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Rol</span>
-          </div>
-          <div className="w-36 shrink-0 text-right">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Usuarios / Permisos</span>
-          </div>
-          {(canEdit || canDelete) && <div className="w-16 shrink-0" />}
-        </div>
-
-        {isLoading ? (
-          Array.from({ length: 4 }).map((_, i) => (
-            <div key={i} className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 animate-pulse">
-              <div className="h-9 w-9 rounded-full bg-gray-100 shrink-0" />
-              <div className="flex-1 space-y-1.5">
-                <div className="h-3.5 w-32 rounded bg-gray-100" />
-                <div className="h-3 w-20 rounded bg-gray-100" />
+      <div className="space-y-7">
+        <SeccionAjustes
+          titulo="Roles"
+          descripcion="Cada usuario tiene un rol. Los del sistema se pueden consultar pero no editar."
+          accion={canCreate ? (
+            <Button size="sm" onClick={() => setRolSheet({ open: true, rol: null })}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              Nuevo rol
+            </Button>
+          ) : undefined}
+        >
+          {isLoading ? (
+            Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4 px-4 py-3.5 animate-pulse">
+                <div className="h-8 w-8 rounded-lg bg-muted shrink-0" />
+                <div className="flex-1 space-y-1.5">
+                  <div className="h-3.5 w-32 rounded bg-muted" />
+                  <div className="h-3 w-48 rounded bg-muted" />
+                </div>
               </div>
-            </div>
-          ))
-        ) : isError ? (
-          <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los roles.')} onRetry={() => refetch()} />
-        ) : roles.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <Shield className="h-10 w-10 text-muted-foreground/20 mb-3" />
-            <p className="text-sm font-semibold">Sin roles configurados</p>
-          </div>
-        ) : (
-          roles.map(r => (
-            <RolRow
-              key={r.id}
-              rol={r}
-              canEdit={canEdit || canDelete}
-              onEdit={r => setRolSheet({ open: true, rol: r })}
-              onEliminar={r => { setDeleteError(null); setEliminando(r) }}
-            />
-          ))
-        )}
+            ))
+          ) : isError ? (
+            <ErrorState message={mensajeDeError(error, 'No se pudieron cargar los roles.')} onRetry={() => refetch()} />
+          ) : roles.length === 0 ? (
+            <VacioAjustes titulo="Sin roles configurados" descripcion="Crea un rol para asignarlo a los usuarios del equipo." />
+          ) : (
+            roles.map(r => (
+              <RolRow
+                key={r.id}
+                rol={r}
+                canEdit={canEdit || canDelete}
+                canDelete={canDelete}
+                onEdit={r => setRolSheet({ open: true, rol: r })}
+                onEliminar={r => { setDeleteError(null); setEliminando(r) }}
+              />
+            ))
+          )}
+        </SeccionAjustes>
       </div>
 
       <RolDialog

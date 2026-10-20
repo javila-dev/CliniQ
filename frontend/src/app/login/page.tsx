@@ -249,7 +249,9 @@ export default function LoginPage() {
                 <p className="text-sm text-muted-foreground mt-1">Ingresa tus credenciales para continuar</p>
               </div>
 
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+              {/* method="post": si se envía antes de que cargue el JavaScript, el
+                  navegador no pone el correo y la contraseña en la URL. */}
+              <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-5">
                 <div className="space-y-1.5">
                   <Label htmlFor="email">Correo electrónico</Label>
                   <Input
@@ -376,7 +378,7 @@ export default function LoginPage() {
                     </p>
                   </div>
 
-                  <form onSubmit={handleSubmitRecovery(onRecoverySubmit)} className="space-y-5">
+                  <form method="post" onSubmit={handleSubmitRecovery(onRecoverySubmit)} className="space-y-5">
                     <div className="space-y-1.5">
                       <Label htmlFor="recovery-email">Correo electrónico</Label>
                       <Input

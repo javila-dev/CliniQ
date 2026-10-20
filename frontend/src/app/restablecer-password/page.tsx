@@ -125,7 +125,7 @@ function RestablecerPasswordContent() {
               </p>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="nueva_password">Nueva contraseña</Label>
                 <div className="relative">

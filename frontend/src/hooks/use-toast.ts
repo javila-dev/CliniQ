@@ -10,6 +10,8 @@ type ToasterToast = ToastProps & {
   id: string
   title?: React.ReactNode
   description?: React.ReactNode
+  /** Botón dentro del aviso (p. ej. "Deshacer"); usar ToastAction. */
+  action?: React.ReactNode
 }
 
 type Action =

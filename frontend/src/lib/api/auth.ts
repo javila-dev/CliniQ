@@ -1,5 +1,5 @@
 import { apiClient } from './client'
-import type { AuthUser, LoginRequest, LoginResponse } from '@/types/auth'
+import type { AuthUser, LoginRequest, LoginResponse, SuplantacionResponse } from '@/types/auth'
 
 export const authApi = {
   login: async (data: LoginRequest): Promise<LoginResponse> => {
@@ -42,14 +42,9 @@ export const authApi = {
     return res.data
   },
 
+  /** Revoca el token de renovación de la cookie HttpOnly y la borra. */
   logout: async (): Promise<void> => {
-    const refresh = localStorage.getItem('refresh_token')
-    await apiClient.post('/auth/logout/', { refresh })
-  },
-
-  refresh: async (refresh: string): Promise<{ access: string }> => {
-    const res = await apiClient.post<{ access: string }>('/auth/refresh/', { refresh })
-    return res.data
+    await apiClient.post('/auth/logout/', {})
   },
 
   recuperarPassword: async (email: string): Promise<void> => {
@@ -65,7 +60,7 @@ export const authApi = {
     token: string,
     nueva_password: string,
     confirmar_password: string,
-  ): Promise<{ ok: boolean; auto_login: boolean; access?: string; refresh?: string; clinica_id?: string | null }> => {
+  ): Promise<{ ok: boolean; auto_login: boolean; access?: string; clinica_id?: string | null }> => {
     const res = await apiClient.post('/auth/restablecer-password/', { token, nueva_password, confirmar_password })
     return res.data
   },
@@ -74,8 +69,14 @@ export const authApi = {
     await apiClient.post('/auth/invitar/', { email })
   },
 
-  impersonate: async (userId: string): Promise<LoginResponse> => {
-    const res = await apiClient.post<LoginResponse>(`/auth/impersonate/${userId}/`)
+  /** Solo token de acceso, corto y sin renovación (la sesión del superadmin sigue en su cookie). */
+  impersonate: async (userId: string): Promise<SuplantacionResponse> => {
+    const res = await apiClient.post<SuplantacionResponse>(`/auth/impersonate/${userId}/`)
     return res.data
+  },
+
+  /** Cierra la suplantación en curso: su token deja de valer en el backend. */
+  terminarSuplantacion: async (): Promise<void> => {
+    await apiClient.post('/auth/impersonate/terminar/', {})
   },
 }

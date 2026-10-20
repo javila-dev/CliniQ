@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Search, MapPin, Phone, Clock, MoreHorizontal, Building2, ArrowLeft, AlertCircle } from 'lucide-react'
-import Link from 'next/link'
+import { Check, Plus, Search, Clock, MoreHorizontal, Building2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -22,7 +21,10 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { cn } from '@/lib/utils'
 import type { Sede, DiaSemana, HorarioSede } from '@/types/clinicas'
-import { HelpButton } from '@/components/ayuda/HelpButton'
+import { PageHeader } from '@/components/shared/PageHeader'
+import {
+  EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, VacioAjustes,
+} from '@/components/configuracion/ajustes'
 
 // ─── constantes ──────────────────────────────────────────────
 
@@ -90,17 +92,20 @@ function HorarioEditor({
         return (
           <div key={key} className={cn(
             'flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors',
-            activo ? 'border-border bg-white' : 'border-dashed border-gray-200 bg-gray-50/50'
+            activo ? 'border-border bg-white' : 'border-dashed border-border bg-muted/30'
           )}>
             <button
               type="button"
+              role="checkbox"
+              aria-checked={activo}
+              aria-label={`Abre el ${label.toLowerCase()}`}
               onClick={() => toggle(key)}
               className={cn(
                 'h-5 w-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors',
-                activo ? 'border-rose-500 bg-rose-500' : 'border-gray-300 bg-white'
+                activo ? 'border-primary bg-primary text-primary-foreground' : 'border-input bg-white'
               )}
             >
-              {activo && <span className="text-white text-[10px] font-bold">✓</span>}
+              {activo && <Check className="h-3.5 w-3.5" strokeWidth={3} />}
             </button>
             <span className={cn('text-sm w-20 shrink-0', !activo && 'text-muted-foreground')}>{label}</span>
             {activo ? (
@@ -111,7 +116,7 @@ function HorarioEditor({
                   onChange={e => setHora(key, 0, e.target.value)}
                   className="text-sm border rounded px-2 py-1 w-28"
                 />
-                <span className="text-muted-foreground text-xs">a</span>
+                <span className="text-muted-foreground text-[13px]">a</span>
                 <input
                   type="time"
                   value={horas[1]}
@@ -120,7 +125,7 @@ function HorarioEditor({
                 />
               </div>
             ) : (
-              <span className="text-xs text-muted-foreground">Cerrado</span>
+              <span className="text-[13px] text-muted-foreground">Cerrado</span>
             )}
           </div>
         )
@@ -131,29 +136,35 @@ function HorarioEditor({
 
 // ─── Resumen de horario (read-only) ─────────────────────────
 
+/** Días que abre la sede (en color) y su horario. Va dentro del texto de la fila. */
 function HorarioResumen({ horario }: { horario: HorarioSede }) {
   const diasActivos = DIAS.filter(d => horario[d.key])
-  if (!diasActivos.length) return <span className="text-xs text-muted-foreground">Sin horario</span>
+  if (!diasActivos.length) return <span className="block">Sin horario de atención</span>
 
+  const [abre, cierra] = horario[diasActivos[0].key] ?? ['', '']
+  const varia = diasActivos.some(d => horario[d.key]?.[0] !== abre || horario[d.key]?.[1] !== cierra)
   return (
-    <div className="flex items-center gap-1 flex-wrap">
-      {DIAS.map(({ key, short }) => (
-        <span
-          key={key}
-          className={cn(
-            'inline-flex h-5 w-5 items-center justify-center rounded text-[10px] font-semibold',
-            horario[key] ? 'bg-rose-100 text-rose-700' : 'bg-gray-100 text-gray-300'
-          )}
-        >
-          {short}
-        </span>
-      ))}
-      {diasActivos.length > 0 && (
-        <span className="text-xs text-muted-foreground ml-1">
-          {horario[diasActivos[0].key]?.[0]}–{horario[diasActivos[0].key]?.[1]}
-        </span>
-      )}
-    </div>
+    <span className="mt-1.5 flex flex-wrap items-center gap-1">
+      {DIAS.map(({ key, label, short }) => {
+        const horas = horario[key]
+        return (
+          <span
+            key={key}
+            title={horas ? `${label}: ${horas[0]}–${horas[1]}` : `${label}: cerrado`}
+            aria-label={horas ? `${label}: ${horas[0]} a ${horas[1]}` : `${label}: cerrado`}
+            className={cn(
+              'inline-flex h-6 w-6 items-center justify-center rounded-md text-xs font-semibold',
+              horas ? 'bg-primary/10 text-primary' : 'border border-dashed border-border text-muted-foreground',
+            )}
+          >
+            {short}
+          </span>
+        )
+      })}
+      <span className="ml-1 tabular-nums">
+        {abre}–{cierra}{varia && ' (varía según el día)'}
+      </span>
+    </span>
   )
 }
 
@@ -215,15 +226,15 @@ function SedeSheet({
 
           <div className="space-y-1.5">
             <Label>Nombre *</Label>
-            <Input placeholder="Sede Norte" {...register('nombre')} className={cn(errors.nombre && 'border-red-400')} />
-            {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
+            <Input placeholder="Sede Norte" {...register('nombre')} className={cn(errors.nombre && 'border-destructive')} />
+            {errors.nombre && <p className="text-[13px] text-destructive">{errors.nombre.message}</p>}
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label>Ciudad *</Label>
-              <Input placeholder="Bogotá" {...register('ciudad')} className={cn(errors.ciudad && 'border-red-400')} />
-              {errors.ciudad && <p className="text-xs text-red-500">{errors.ciudad.message}</p>}
+              <Input placeholder="Bogotá" {...register('ciudad')} className={cn(errors.ciudad && 'border-destructive')} />
+              {errors.ciudad && <p className="text-[13px] text-destructive">{errors.ciudad.message}</p>}
             </div>
             <div className="space-y-1.5">
               <Label>Teléfono</Label>
@@ -233,8 +244,8 @@ function SedeSheet({
 
           <div className="space-y-1.5">
             <Label>Dirección *</Label>
-            <Input placeholder="Cra 15 #93-47" {...register('direccion')} className={cn(errors.direccion && 'border-red-400')} />
-            {errors.direccion && <p className="text-xs text-red-500">{errors.direccion.message}</p>}
+            <Input placeholder="Cra 15 #93-47" {...register('direccion')} className={cn(errors.direccion && 'border-destructive')} />
+            {errors.direccion && <p className="text-[13px] text-destructive">{errors.direccion.message}</p>}
           </div>
 
           <div className="space-y-2">
@@ -246,7 +257,7 @@ function SedeSheet({
           </div>
 
           {mutation.isError && (
-            <p className="text-sm text-red-500">{mensajeDeError(mutation.error, 'No se pudo guardar la sede. Intenta de nuevo.')}</p>
+            <p className="text-sm text-destructive">{mensajeDeError(mutation.error, 'No se pudo guardar la sede. Intenta de nuevo.')}</p>
           )}
 
           <div className="flex gap-2 pt-2">
@@ -261,9 +272,9 @@ function SedeSheet({
   )
 }
 
-// ─── Card de sede ─────────────────────────────────────────────
+// ─── Fila de sede ─────────────────────────────────────────────
 
-function SedeCard({
+function FilaSede({
   sede,
   onEdit,
   onToggle,
@@ -274,74 +285,65 @@ function SedeCard({
   onToggle: (s: Sede) => void
   puedeGestionar: boolean
 }) {
+  const contacto = [sede.ciudad, sede.direccion, sede.telefono].filter(Boolean).join(' · ')
   return (
-    <div className={cn(
-      'bg-white rounded-xl border shadow-sm p-5 flex flex-col gap-4 transition-opacity',
-      !sede.activo && 'opacity-60'
-    )}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <div className={cn(
-            'h-10 w-10 rounded-lg flex items-center justify-center shrink-0',
-            sede.activo ? 'bg-rose-50' : 'bg-gray-100'
-          )}>
-            <Building2 className={cn('h-5 w-5', sede.activo ? 'text-rose-500' : 'text-gray-400')} />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <p className="text-sm font-semibold">{sede.nombre}</p>
-              {!sede.activo && (
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-gray-100 text-gray-400">Inactiva</span>
-              )}
-            </div>
-            <p className="text-xs text-muted-foreground">{sede.ciudad}</p>
-          </div>
-        </div>
-
-        {puedeGestionar && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" aria-label={`Acciones de ${sede.nombre}`}>
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => onEdit(sede)}>Editar sede</DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => onToggle(sede)}
-                className={sede.activo ? 'text-red-600 focus:text-red-600' : 'text-green-600 focus:text-green-600'}
-              >
-                {sede.activo ? 'Desactivar' : 'Activar'}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
-      </div>
-
-      <div className="space-y-1.5">
-        <div className="flex items-start gap-2 text-xs text-muted-foreground">
-          <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span>{sede.direccion}</span>
-        </div>
-        {sede.telefono && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Phone className="h-3.5 w-3.5 shrink-0" />
-            <span>{sede.telefono}</span>
-          </div>
-        )}
-        <div className="flex items-start gap-2 text-xs text-muted-foreground">
-          <Clock className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+    <FilaAjuste
+      icono={Building2}
+      apagada={!sede.activo}
+      titulo={sede.nombre}
+      extra={!sede.activo && <EtiquetaAjuste>Inactiva</EtiquetaAjuste>}
+      descripcion={
+        <>
+          <span className="block">{contacto}</span>
           <HorarioResumen horario={sede.horario ?? {}} />
+        </>
+      }
+    >
+      {puedeGestionar && (
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Acciones de ${sede.nombre}`}>
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onEdit(sede)}>Editar sede</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={() => onToggle(sede)}
+              className={sede.activo ? 'text-red-600 focus:text-red-600' : 'text-green-600 focus:text-green-600'}
+            >
+              {sede.activo ? 'Desactivar' : 'Activar'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+    </FilaAjuste>
+  )
+}
+
+/** Filas grises mientras carga la lista. */
+function FilasCargando({ filas }: { filas: number }) {
+  return (
+    <>
+      {Array.from({ length: filas }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-64 max-w-full animate-pulse rounded bg-muted" />
+          </div>
         </div>
-      </div>
-    </div>
+      ))}
+    </>
   )
 }
 
 // ─── Página principal ─────────────────────────────────────────
 
 const SEDES_TODAS = ['sedes', 'todas'] as const
+/** Con pocas sedes la búsqueda solo ocupa espacio. */
+const SEDES_PARA_BUSCAR = 6
 
 export default function SedesPage() {
   const qc = useQueryClient()
@@ -368,7 +370,6 @@ export default function SedesPage() {
   const sedesActivas = limite?.sedes_activas ?? (data?.results.filter(s => s.activo).length ?? 0)
   const maxSedes = limite?.max_sedes ?? null
   const sinLimite = limite?.sin_limite ?? maxSedes === null
-  const pct = maxSedes ? Math.min(100, Math.round((sedesActivas / maxSedes) * 100)) : 0
   const enLimite = !sinLimite && sedesActivas >= (maxSedes ?? 0)
 
   const toggleMutation = useMutation({
@@ -391,127 +392,88 @@ export default function SedesPage() {
     },
   })
 
+  const total = data?.count ?? 0
   const sedes = (data?.results ?? []).filter(s =>
     !search || s.nombre.toLowerCase().includes(search.toLowerCase()) || s.ciudad.toLowerCase().includes(search.toLowerCase())
   )
 
   const handleEdit = (s: Sede) => { setEditando(s); setSheetOpen(true) }
   const handleClose = () => { setSheetOpen(false); setEditando(null) }
+  const nuevaSede = () => { setEditando(null); setSheetOpen(true) }
+
+  const descripcion = isLoading
+    ? 'Cargando…'
+    : !sinLimite && maxSedes !== null
+      ? `${sedesActivas} de ${maxSedes} sedes activas que incluye tu plan.`
+      : `${total} sede${total !== 1 ? 's' : ''} registrada${total !== 1 ? 's' : ''}.`
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <Link href="/configuracion" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-2">
-            <ArrowLeft className="h-3.5 w-3.5" />Volver
-          </Link>
-          <div className="flex items-center gap-1.5">
-            <h1 className="text-xl font-bold">Sedes</h1>
-            <HelpButton slug="sedes-horarios-y-turnos" />
-          </div>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {isLoading ? 'Cargando…' : `${data?.count ?? 0} sede${(data?.count ?? 0) !== 1 ? 's' : ''} registradas`}
-          </p>
-        </div>
-        {puedeGestionar && (
+    <div className="space-y-6">
+      <PageHeader title="Sedes" helpSlug="sedes-horarios-y-turnos" />
+
+      <SeccionAjustes
+        titulo="Sedes"
+        descripcion={descripcion}
+        accion={puedeGestionar && (
           <Button
-            onClick={() => { setEditando(null); setSheetOpen(true) }}
+            size="sm"
+            onClick={nuevaSede}
             disabled={enLimite}
             title={enLimite ? `Límite de ${maxSedes} sedes alcanzado` : undefined}
           >
-            <Plus className="h-4 w-4 mr-1.5" />
+            <Plus className="mr-1.5 h-4 w-4" />
             Nueva sede
           </Button>
         )}
-      </div>
-
-      {/* Cuota de sedes */}
-      {!sinLimite && maxSedes !== null && (
-        <div className={cn(
-          'rounded-lg border px-4 py-3 flex items-center gap-4',
-          enLimite ? 'border-amber-200 bg-amber-50' : 'border-border bg-white'
-        )}>
-          {enLimite && <AlertCircle className="h-4 w-4 text-amber-500 shrink-0" />}
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-medium text-muted-foreground">Sedes del plan</span>
-              <span className={cn('text-xs font-semibold tabular-nums', enLimite ? 'text-amber-600' : 'text-foreground')}>
-                {sedesActivas} / {maxSedes}
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-              <div
-                className={cn('h-full rounded-full transition-all', enLimite ? 'bg-amber-400' : 'bg-rose-500')}
-                style={{ width: `${pct}%` }}
+      >
+        {total > SEDES_PARA_BUSCAR && (
+          <div className="px-4 py-2.5">
+            <div className="relative max-w-sm">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Buscar sede o ciudad…"
+                aria-label="Buscar sede o ciudad"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="h-9 pl-9"
               />
             </div>
           </div>
-          {enLimite && (
-            <p className="text-xs text-amber-700 shrink-0">
-              Límite alcanzado
-            </p>
-          )}
-        </div>
-      )}
+        )}
 
-      {/* Búsqueda */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Buscar sede o ciudad…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9 bg-white"
-        />
-      </div>
-
-      {/* Grid */}
-      {isLoading ? (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="bg-white rounded-xl border shadow-sm p-5 animate-pulse space-y-3">
-              <div className="flex gap-3">
-                <div className="h-10 w-10 rounded-lg bg-gray-100" />
-                <div className="space-y-1.5 flex-1">
-                  <div className="h-4 w-32 rounded bg-gray-100" />
-                  <div className="h-3 w-20 rounded bg-gray-100" />
-                </div>
-              </div>
-              <div className="space-y-2">
-                <div className="h-3 w-full rounded bg-gray-100" />
-                <div className="h-3 w-3/4 rounded bg-gray-100" />
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : sedes.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <Building2 className="h-12 w-12 text-muted-foreground/20 mb-3" />
-          <p className="text-sm font-semibold">Sin sedes</p>
-          {puedeGestionar && (
-            <>
-              <p className="text-sm text-muted-foreground mt-1">Crea la primera sede de la clínica</p>
-              <Button className="mt-4" onClick={() => setSheetOpen(true)}>
-                <Plus className="h-4 w-4 mr-1.5" />
+        {isLoading ? (
+          <FilasCargando filas={2} />
+        ) : total === 0 ? (
+          <VacioAjustes
+            titulo="Aún no hay sedes"
+            descripcion={puedeGestionar ? 'Crea la primera sede de la clínica con su dirección y horario de atención.' : undefined}
+            accion={puedeGestionar && (
+              <Button size="sm" onClick={nuevaSede}>
+                <Plus className="mr-1.5 h-4 w-4" />
                 Nueva sede
               </Button>
-            </>
-          )}
-        </div>
-      ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {sedes.map(s => (
-            <SedeCard
+            )}
+          />
+        ) : sedes.length === 0 ? (
+          <VacioAjustes titulo={`Ninguna sede coincide con «${search.trim()}»`} />
+        ) : (
+          sedes.map(s => (
+            <FilaSede
               key={s.id}
               sede={s}
               onEdit={handleEdit}
               onToggle={s => toggleMutation.mutate(s)}
               puedeGestionar={puedeGestionar}
             />
-          ))}
-        </div>
-      )}
+          ))
+        )}
+
+        {enLimite && (
+          <NotaAjuste>
+            Llegaste al límite de {maxSedes} sedes activas de tu plan. Para abrir otra, desactiva una o escríbenos para ampliarlo.
+          </NotaAjuste>
+        )}
+      </SeccionAjustes>
 
       <SedeSheet sede={editando} open={sheetOpen} onClose={handleClose} />
     </div>

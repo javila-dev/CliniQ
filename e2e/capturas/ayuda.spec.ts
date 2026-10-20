@@ -10,7 +10,7 @@
  */
 import { test, expect, type Page, type APIRequestContext, type Locator } from '@playwright/test'
 
-const BACKEND = process.env.BACKEND_URL ?? 'http://backend:8000'
+import { BACKEND, abrirSesionEnNavegador, loginApi } from '../fixtures/sesion'
 const PASSWORD = process.env.DEMO_PASSWORD ?? 'AuroraDemo2026*'
 const SALIDA = 'capturas-out'
 
@@ -26,28 +26,15 @@ interface Sesion {
   headers: Record<string, string>
 }
 
-/** Deja la sesión iniciada en localStorage, igual que hace el login real. */
+/** Deja la sesión iniciada en el navegador (ver fixtures/sesion.ts). */
 async function entrar(page: Page, request: APIRequestContext, email: string): Promise<Sesion> {
-  const res = await request.post(`${BACKEND}/api/v1/auth/login/`, {
-    data: { email, password: PASSWORD },
-  })
-  expect(res.ok(), `login falló para ${email}: ${await res.text()}`).toBeTruthy()
-  const { access, refresh, user } = await res.json()
-
-  await page.goto('/login')
-  await page.evaluate(
-    ({ access, refresh, clinica }) => {
-      localStorage.setItem('access_token', access)
-      localStorage.setItem('refresh_token', refresh)
-      if (clinica) localStorage.setItem('clinica_id', clinica)
-    },
-    { access, refresh, clinica: user?.clinica_id ?? null },
-  )
+  const { access, refresh, clinicaId } = await loginApi(request, email, PASSWORD)
+  await abrirSesionEnNavegador(page, refresh, clinicaId)
   return {
     token: access,
     headers: {
       Authorization: `Bearer ${access}`,
-      'X-Clinica-Id': user?.clinica_id ?? '',
+      'X-Clinica-Id': clinicaId ?? '',
     },
   }
 }

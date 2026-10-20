@@ -652,7 +652,7 @@ export default function AtencionCitaPage({ params }: Props) {
             {/* Órdenes Médicas */}
             {(tabsActivos.ordenes ?? true) && historia && (
               <TabsContent value="ordenes" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
-                <TabOrdenesMedicas historia={historia} notaId={notaId ?? undefined} />
+                <TabOrdenesMedicas historia={historia} notaId={notaId ?? undefined} citaId={citaId} />
               </TabsContent>
             )}
 

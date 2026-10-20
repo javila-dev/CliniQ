@@ -9,6 +9,7 @@ import { configuracionApi, type CampoPlantilla } from '@/lib/api/configuracion'
 import { MapeadorCampos } from '@/components/consentimientos/MapeadorCampos'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { SeccionAjustes } from '@/components/configuracion/ajustes'
 import { mensajeDeError } from '@/lib/errores'
 
 function mensajeError(error: unknown) {
@@ -79,45 +80,46 @@ export default function NuevaPlantillaPage() {
   )
 
   // ── Sin PDF: pantalla de carga ──────────────────────────────────────────────
+  // El marco de Configuración ya pone el h1 ("Consentimientos") y las pestañas:
+  // aquí solo un enlace de regreso y el título del formulario como h2.
   if (!pdfBlob) {
     return (
-      <div className="flex justify-center py-6">
-        <div className="w-full max-w-md space-y-6 px-4">
-          <div>
-            <Link href="/configuracion/consentimientos" className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-4">
-              <ChevronLeft className="h-4 w-4" /> Volver
-            </Link>
-            <h1 className="text-xl font-bold">Nueva plantilla de consentimiento</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Sube el PDF y ubica los campos en dos pasos: primero los del paciente y luego los del profesional.
-            </p>
-          </div>
+      <div className="max-w-2xl space-y-4">
+        <VolverAConsentimientos />
 
-          <div className="space-y-1.5">
-            <Label>Nombre de la plantilla</Label>
-            <Input
-              placeholder="Ej: Consentimiento toxina botulínica"
-              value={nombre}
-              onChange={e => setNombre(e.target.value)}
-            />
-          </div>
+        <SeccionAjustes
+          titulo="Nueva plantilla de consentimiento"
+          descripcion="Sube el PDF y luego ubica los campos en dos pasos: primero los del paciente y después los del profesional."
+        >
+          <div className="space-y-4 px-4 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="nombre-plantilla" className="text-[13px] font-medium">Nombre de la plantilla</Label>
+              <Input
+                id="nombre-plantilla"
+                placeholder="Ej: Consentimiento toxina botulínica"
+                value={nombre}
+                onChange={e => setNombre(e.target.value)}
+              />
+            </div>
 
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="border-2 border-dashed rounded-xl p-10 text-center cursor-pointer transition-colors border-gray-200 hover:border-primary/40 hover:bg-primary/5"
-          >
-            <Upload className="h-8 w-8 mx-auto text-muted-foreground/50 mb-3" />
-            <p className="text-sm font-medium">Haz clic para seleccionar un PDF</p>
-            <p className="text-xs text-muted-foreground mt-1">Máximo 20 MB</p>
-          </div>
-          {inputArchivo}
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full flex-col items-center rounded-xl border-2 border-dashed border-gray-200 px-6 py-8 text-center transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <Upload className="mb-2.5 h-7 w-7 text-muted-foreground/60" />
+              <span className="text-sm font-medium">Selecciona el PDF del consentimiento</span>
+              <span className="mt-1 text-xs text-muted-foreground">Máximo 20 MB</span>
+            </button>
+            {inputArchivo}
 
-          {fileError && (
-            <p className="text-sm text-destructive flex items-center gap-1.5">
-              <AlertCircle className="h-4 w-4 shrink-0" /> {fileError}
-            </p>
-          )}
-        </div>
+            {fileError && (
+              <p className="flex items-center gap-1.5 text-sm text-destructive">
+                <AlertCircle className="h-4 w-4 shrink-0" /> {fileError}
+              </p>
+            )}
+          </div>
+        </SeccionAjustes>
       </div>
     )
   }
@@ -133,25 +135,38 @@ export default function NuevaPlantillaPage() {
       onGuardar={(campos, requiere) => saveMutation.mutate({ campos, requiere })}
       encabezado={
         <>
-          <Link href="/configuracion/consentimientos" className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
-            <ChevronLeft className="h-3.5 w-3.5" /> Volver
-          </Link>
+          <VolverAConsentimientos />
           <input
             className="mt-2 w-full text-sm font-semibold bg-transparent border-0 border-b border-dashed border-gray-200 focus:outline-none focus:border-primary pb-0.5 truncate"
             value={nombre}
             onChange={e => setNombre(e.target.value)}
             placeholder="Nombre de la plantilla"
+            aria-label="Nombre de la plantilla"
           />
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+            type="button"
+            className="mt-1.5 flex max-w-full items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            title="Cambiar el PDF"
           >
-            <FileText className="h-3 w-3" />
-            {file?.name ?? 'archivo.pdf'}
+            <FileText className="h-3.5 w-3.5 shrink-0" />
+            <span className="truncate">{file?.name ?? 'archivo.pdf'}</span>
           </button>
           {inputArchivo}
         </>
       }
     />
+  )
+}
+
+function VolverAConsentimientos() {
+  return (
+    <Link
+      href="/configuracion/consentimientos"
+      className="inline-flex items-center gap-0.5 text-sm text-primary hover:underline"
+    >
+      <ChevronLeft className="h-4 w-4" />
+      Consentimientos
+    </Link>
   )
 }

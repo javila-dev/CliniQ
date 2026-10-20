@@ -1,6 +1,7 @@
 'use client'
 
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
+import type { ReactNode } from 'react'
 import { TrendingDown, TrendingUp } from 'lucide-react'
 
 import { Skeleton } from '@/components/ui/skeleton'
@@ -56,13 +57,33 @@ interface Props {
   titulo: string
   /** "el mes pasado a esta fecha", "los 3 meses anteriores"… */
   comparadoCon: string
+  /** Panel a la derecha de la gráfica (debajo en pantallas chicas), dentro de la misma tarjeta. */
+  lateral?: ReactNode
 }
 
 /** Dinero que entró en el periodo, acumulado día a día y separado por origen. */
-export function IngresosAcumuladosCard({ data, loading, titulo, comparadoCon }: Props) {
+export function IngresosAcumuladosCard({ lateral, ...props }: Props) {
+  return (
+    <div className={cn(
+      'rounded-xl border bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md',
+      lateral && 'lg:grid lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]',
+    )}>
+      <div className="min-w-0">
+        <Contenido {...props} />
+      </div>
+      {lateral && (
+        <div className="mt-5 flex flex-col border-t pt-4 lg:mt-0 lg:ml-6 lg:border-l lg:border-t-0 lg:pl-6 lg:pt-0">
+          {lateral}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Contenido({ data, loading, titulo, comparadoCon }: Omit<Props, 'lateral'>) {
   if (loading || !data) {
     return (
-      <div className="lg:col-span-2 rounded-xl border bg-white p-5 shadow-sm space-y-4">
+      <div className="space-y-4">
         <Skeleton className="h-4 w-40" />
         <Skeleton className="h-9 w-56" />
         <Skeleton className="h-2 w-full" />
@@ -84,7 +105,7 @@ export function IngresosAcumuladosCard({ data, loading, titulo, comparadoCon }: 
   const visibles = ORIGENES.filter((o) => totales[o.key] > 0)
 
   return (
-    <div className="lg:col-span-2 rounded-xl border bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <>
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
         <div>
           <h2 className="text-sm font-semibold">{titulo}</h2>
@@ -172,6 +193,6 @@ export function IngresosAcumuladosCard({ data, loading, titulo, comparadoCon }: 
           </div>
         </>
       )}
-    </div>
+    </>
   )
 }

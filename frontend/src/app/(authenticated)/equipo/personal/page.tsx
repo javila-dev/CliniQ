@@ -4,8 +4,8 @@ import { useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
-  Plus, Search, Users, Stethoscope, PhoneCall, ShieldCheck, UserCog,
-  Pencil, LogIn, AlertCircle, Mail, MoreHorizontal, UserCheck, UserX,
+  ChevronLeft, ChevronRight, Plus, Search, Stethoscope, PhoneCall, ShieldCheck, UserCog,
+  Pencil, LogIn, Mail, MoreHorizontal, UserCheck, UserX,
 } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { usuariosApi } from '@/lib/api/usuarios'
@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
 import { ColaboradorDialog } from '@/components/colaboradores/ColaboradorDialog'
+import { EtiquetaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
@@ -28,6 +29,9 @@ import { isSuperAdmin, hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
 import type { Colaborador } from '@/types/colaboradores'
 import type { PlanLimite } from '@/types/usuarios'
+
+/** Filas por página: la lista cabe en una pantalla; la búsqueda y los filtros hacen el resto. */
+const POR_PAGINA = 10
 
 // ─── helpers ──────────────────────────────────────────────────
 
@@ -54,9 +58,9 @@ function initials(name: string) {
 }
 
 const ROL_CONFIG: Record<string, { label: string; icon: React.ElementType; className: string }> = {
-  admin:       { label: 'Administrador', icon: ShieldCheck, className: 'bg-violet-50 text-violet-700 ring-violet-200/60' },
-  profesional: { label: 'Profesional',  icon: Stethoscope, className: 'bg-rose-50 text-rose-700 ring-rose-200/60' },
-  recepcion:   { label: 'Recepción',    icon: PhoneCall,   className: 'bg-sky-50 text-sky-700 ring-sky-200/60'    },
+  admin:       { label: 'Administrador', icon: ShieldCheck, className: 'bg-violet-50 text-violet-700' },
+  profesional: { label: 'Profesional',  icon: Stethoscope, className: 'bg-rose-50 text-rose-700' },
+  recepcion:   { label: 'Recepción',    icon: PhoneCall,   className: 'bg-sky-50 text-sky-700'    },
 }
 
 // Rol a mostrar en la fila: usa el config por slug conocido; si es un rol
@@ -65,61 +69,38 @@ function resolverRol(colaborador: Colaborador) {
   const conocido = ROL_CONFIG[colaborador.rol ?? '']
   if (conocido) return conocido
   const nombre = colaborador.role_nombre?.trim()
-  if (nombre) return { label: nombre, icon: UserCog, className: 'bg-gray-100 text-gray-600 ring-gray-200/60' }
+  if (nombre) return { label: nombre, icon: UserCog, className: 'bg-muted text-foreground/70' }
   return null
 }
 
-// ─── PlanLimitBanner ──────────────────────────────────────────
+const plural = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`
 
-function PlanLimitBanner({ limite }: { limite: PlanLimite }) {
-  if (limite.sin_limite) return null
-
-  const { usuarios_activos, max_usuarios, slots_disponibles, puede_agregar } = limite
-  const pct = max_usuarios ? Math.min((usuarios_activos / max_usuarios) * 100, 100) : 0
-  const isWarning = pct >= 80
-  const isFull = !puede_agregar
-
-  return (
-    <div className={cn(
-      'flex items-center gap-3 rounded-xl border px-4 py-3',
-      isFull
-        ? 'bg-red-50 border-red-200'
-        : isWarning
-          ? 'bg-amber-50 border-amber-200'
-          : 'bg-blue-50/60 border-blue-200/60',
-    )}>
-      <AlertCircle className={cn(
-        'h-4 w-4 shrink-0',
-        isFull ? 'text-red-500' : isWarning ? 'text-amber-500' : 'text-blue-400',
-      )} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center justify-between gap-2 mb-1.5">
-          <span className="text-xs font-medium text-foreground">
-            {usuarios_activos} de {max_usuarios} usuarios en el plan
-          </span>
-          {isFull ? (
-            <span className="text-xs font-semibold text-red-600">Límite alcanzado</span>
-          ) : slots_disponibles !== null ? (
-            <span className="text-xs text-muted-foreground">
-              {slots_disponibles} slot{slots_disponibles !== 1 ? 's' : ''} libre{slots_disponibles !== 1 ? 's' : ''}
-            </span>
-          ) : null}
-        </div>
-        <div className="h-1.5 w-full rounded-full bg-white/70 overflow-hidden">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all duration-300',
-              isFull ? 'bg-red-400' : isWarning ? 'bg-amber-400' : 'bg-blue-400',
-            )}
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-      </div>
-    </div>
-  )
+/** Línea de resumen bajo el título: cuántos hay, cuántos atienden y el uso del plan. */
+function resumenEquipo({ total, estado, atienden, limite }: {
+  total: number
+  estado: string
+  atienden: number
+  limite?: PlanLimite
+}) {
+  const partes = [
+    estado === 'activos' ? plural(total, 'persona activa', 'personas activas')
+      : estado === 'inactivos' ? plural(total, 'persona inactiva', 'personas inactivas')
+        : plural(total, 'persona', 'personas'),
+    `${atienden} ${atienden === 1 ? 'atiende' : 'atienden'} pacientes`,
+  ]
+  if (limite && !limite.sin_limite && limite.max_usuarios) {
+    const { usuarios_activos: usados, max_usuarios: max } = limite
+    // El cupo cuenta usuarios activos e invitaciones pendientes, no solo esta lista.
+    partes.push(usados > max
+      ? `${usados} cupos usados de ${max} del plan`
+      : `${usados} de ${max} cupos del plan`)
+  }
+  return partes.join(' · ')
 }
 
-// ─── Row ──────────────────────────────────────────────────────
+// ─── Fila ─────────────────────────────────────────────────────
+
+const COLUMNAS = 'grid grid-cols-[minmax(0,1fr)_auto_2rem] items-center gap-3 md:grid-cols-[minmax(0,1.1fr)_8.5rem_6rem_2rem] lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8.5rem_6rem_2rem] 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_8.5rem_10rem_6rem_2rem]'
 
 function ColaboradorRow({
   colaborador,
@@ -144,128 +125,115 @@ function ColaboradorRow({
 }) {
   const rol = resolverRol(colaborador)
   const RolIcon = rol?.icon ?? Stethoscope
+  const grupos = colaborador.grupos_detalle ?? []
 
   const toggleDisabled = !colaborador.activo && !canActivate
 
   return (
-    <div className={cn(
-      'group flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 last:border-0 transition-colors',
-      colaborador.activo ? 'hover:bg-rose-50/30' : 'opacity-60 hover:bg-gray-50'
-    )}>
-      <div className={cn(
-        'flex items-center justify-center h-10 w-10 rounded-full text-sm font-semibold shrink-0 select-none',
-        colaborador.activo ? avatarColor(colaborador.nombre_completo) : 'bg-gray-100 text-gray-400'
-      )}>
-        {initials(colaborador.nombre_completo)}
-      </div>
-
-      <div className="flex-1 min-w-0">
-        <p className={cn(
-          'text-sm font-semibold truncate transition-colors',
-          colaborador.activo
-            ? 'text-foreground group-hover:text-primary'
-            : 'text-muted-foreground line-through'
+    <div className={cn(COLUMNAS, 'px-4 py-2 transition-colors', colaborador.activo ? 'hover:bg-muted/30' : 'bg-muted/20')}>
+      {/* Nombre (y correo debajo cuando no hay columna de correo) */}
+      <div className="flex min-w-0 items-center gap-3">
+        <div className={cn(
+          'flex h-7 w-7 shrink-0 select-none items-center justify-center rounded-full text-xs font-semibold',
+          colaborador.activo ? avatarColor(colaborador.nombre_completo) : 'bg-muted text-muted-foreground',
         )}>
-          {colaborador.nombre_completo}
-        </p>
-        <p className="text-xs text-muted-foreground truncate">{colaborador.email}</p>
+          {initials(colaborador.nombre_completo)}
+        </div>
+        <div className="min-w-0">
+          <p className={cn(
+            'truncate text-sm font-medium',
+            colaborador.activo ? 'text-foreground' : 'text-muted-foreground line-through',
+          )}>
+            {colaborador.nombre_completo}
+          </p>
+          <p className="truncate text-[13px] text-muted-foreground lg:hidden">{colaborador.email}</p>
+        </div>
       </div>
 
-      <div className="hidden md:flex justify-center w-28 shrink-0">
+      <p className="hidden truncate text-[13px] text-muted-foreground lg:block">{colaborador.email}</p>
+
+      <div className="hidden min-w-0 md:block">
         {rol && (
-          <span className={cn(
-            'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1',
-            rol.className
-          )}>
-            <RolIcon className="h-3 w-3" />
-            {rol.label}
+          <span className={cn('inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium', rol.className)}>
+            <RolIcon className="h-3 w-3 shrink-0" />
+            <span className="truncate">{rol.label}</span>
           </span>
         )}
       </div>
 
-      <div className="hidden xl:flex justify-center items-center gap-1 w-44 min-w-0 shrink-0 flex-wrap">
-        {(colaborador.grupos_detalle ?? []).length === 0 ? (
+      <div className="hidden min-w-0 items-center gap-1 2xl:flex">
+        {grupos.length === 0 ? (
           <span className="text-xs text-muted-foreground">—</span>
         ) : (
-          <div className="contents">
-            {(colaborador.grupos_detalle ?? []).slice(0, 2).map((g) => (
-              <span key={g.id} className="inline-block px-1.5 py-0.5 rounded bg-gray-100 text-[10px] text-gray-600 truncate max-w-[88px]">
-                {g.nombre}
-              </span>
-            ))}
-            {(colaborador.grupos_detalle ?? []).length > 2 && (
-              <span className="text-[10px] text-muted-foreground">+{(colaborador.grupos_detalle ?? []).length - 2}</span>
-            )}
-          </div>
+          <>
+            <span className="truncate rounded-md bg-muted px-1.5 py-0.5 text-xs text-foreground/80" title={grupos.map((g) => g.nombre).join(', ')}>
+              {grupos[0].nombre}
+            </span>
+            {grupos.length > 1 && <span className="shrink-0 text-xs text-muted-foreground">+{grupos.length - 1}</span>}
+          </>
         )}
       </div>
 
-      <div className="w-[88px] shrink-0">
+      <div>
         {colaborador.invitacion_pendiente ? (
-          <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1 bg-amber-50 text-amber-700 ring-amber-200/60"
-            title="El colaborador fue invitado pero aún no activa su cuenta. Ocupa un cupo del plan.">
-            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
-            Pendiente
+          <span title="Fue invitado pero aún no activa su cuenta. Ocupa un cupo del plan.">
+            <EtiquetaAjuste tono="aviso">Pendiente</EtiquetaAjuste>
           </span>
+        ) : colaborador.activo ? (
+          <EtiquetaAjuste tono="activo">Activo</EtiquetaAjuste>
         ) : (
-          <span className={cn(
-            'inline-flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium ring-1',
-            colaborador.activo
-              ? 'bg-green-50 text-green-700 ring-green-200/60'
-              : 'bg-gray-100 text-gray-500 ring-gray-200/60'
-          )}>
-            <span className={cn('h-1.5 w-1.5 rounded-full', colaborador.activo ? 'bg-green-500' : 'bg-gray-400')} />
-            {colaborador.activo ? 'Activo' : 'Inactivo'}
-          </span>
+          <EtiquetaAjuste>Inactivo</EtiquetaAjuste>
         )}
       </div>
 
-      {(puedeGestionar || puedeReenviar || onImpersonate) && <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-8 w-8 shrink-0 text-muted-foreground"
-            aria-label={`Acciones para ${colaborador.nombre_completo}`}
-          >
-            <MoreHorizontal className="h-4 w-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-56">
-          {puedeGestionar && (
-            <DropdownMenuItem onClick={onEdit}>
-              <Pencil className="mr-2 h-3.5 w-3.5" />Editar
-            </DropdownMenuItem>
-          )}
-          {puedeReenviar && colaborador.invitacion_pendiente && (
-            <DropdownMenuItem onClick={onResend} disabled={resending}>
-              <Mail className="mr-2 h-3.5 w-3.5" />Reenviar invitación
-            </DropdownMenuItem>
-          )}
-          {onImpersonate && (
-            <DropdownMenuItem onClick={onImpersonate}>
-              <LogIn className="mr-2 h-3.5 w-3.5" />Ingresar como este usuario
-            </DropdownMenuItem>
-          )}
-          {puedeGestionar && <DropdownMenuSeparator />}
-          {!puedeGestionar ? null : colaborador.activo ? (
-            <DropdownMenuItem onClick={onToggle} className="text-red-600 focus:text-red-600">
-              <UserX className="mr-2 h-3.5 w-3.5" />Desactivar
-            </DropdownMenuItem>
-          ) : (
-            <DropdownMenuItem
-              onClick={onToggle}
-              disabled={toggleDisabled}
-              className="flex-col items-start text-green-600 focus:text-green-600"
+      <div className="flex justify-end">
+        {(puedeGestionar || puedeReenviar || onImpersonate) && <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0 text-muted-foreground"
+              aria-label={`Acciones para ${colaborador.nombre_completo}`}
             >
-              <span className="flex items-center"><UserCheck className="mr-2 h-3.5 w-3.5" />Activar</span>
-              {toggleDisabled && (
-                <span className="pl-[22px] text-[11px] text-muted-foreground">Límite de usuarios alcanzado. Actualiza tu plan para agregar más.</span>
-              )}
-            </DropdownMenuItem>
-          )}
-        </DropdownMenuContent>
-      </DropdownMenu>}
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-56">
+            {puedeGestionar && (
+              <DropdownMenuItem onClick={onEdit}>
+                <Pencil className="mr-2 h-3.5 w-3.5" />Editar
+              </DropdownMenuItem>
+            )}
+            {puedeReenviar && colaborador.invitacion_pendiente && (
+              <DropdownMenuItem onClick={onResend} disabled={resending}>
+                <Mail className="mr-2 h-3.5 w-3.5" />Reenviar invitación
+              </DropdownMenuItem>
+            )}
+            {onImpersonate && (
+              <DropdownMenuItem onClick={onImpersonate}>
+                <LogIn className="mr-2 h-3.5 w-3.5" />Ingresar como este usuario
+              </DropdownMenuItem>
+            )}
+            {puedeGestionar && <DropdownMenuSeparator />}
+            {!puedeGestionar ? null : colaborador.activo ? (
+              <DropdownMenuItem onClick={onToggle} className="text-red-600 focus:text-red-600">
+                <UserX className="mr-2 h-3.5 w-3.5" />Desactivar
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem
+                onClick={onToggle}
+                disabled={toggleDisabled}
+                className="flex-col items-start text-green-600 focus:text-green-600"
+              >
+                <span className="flex items-center"><UserCheck className="mr-2 h-3.5 w-3.5" />Activar</span>
+                {toggleDisabled && (
+                  <span className="pl-[22px] text-xs text-muted-foreground">Límite de usuarios alcanzado. Actualiza tu plan para agregar más.</span>
+                )}
+              </DropdownMenuItem>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>}
+      </div>
     </div>
   )
 }
@@ -274,49 +242,13 @@ function ColaboradorRow({
 
 function SkeletonRow() {
   return (
-    <div className="flex items-center gap-4 px-5 py-3.5 border-b border-gray-100 last:border-0 animate-pulse">
-      <div className="h-10 w-10 rounded-full bg-gray-100 shrink-0" />
+    <div className="flex items-center gap-3 px-4 py-2.5 animate-pulse">
+      <div className="h-8 w-8 rounded-full bg-muted shrink-0" />
       <div className="flex-1 space-y-1.5">
-        <div className="h-3.5 w-36 rounded bg-gray-100" />
-        <div className="h-3 w-48 rounded bg-gray-100" />
+        <div className="h-3.5 w-36 rounded bg-muted" />
       </div>
-      <div className="hidden md:block h-6 w-24 rounded bg-gray-100" />
-      <div className="h-6 w-16 rounded bg-gray-100" />
-      <div className="h-6 w-14 rounded bg-gray-100" />
-    </div>
-  )
-}
-
-// ─── Stats bar ────────────────────────────────────────────────
-
-function StatsBar({ data }: { data: Colaborador[] }) {
-  const total        = data.length
-  const activos      = data.filter((c) => c.activo).length
-  // Por el check "atiende pacientes", no por el rol fijo: cuenta también a
-  // admins y roles personalizados que atienden (M0-26).
-  const profesionales = data.filter((c) => c.es_profesional).length
-  const administrativos = total - profesionales
-
-  const stats = [
-    { label: 'Total',         value: total,         icon: Users,       color: 'text-foreground', bg: 'bg-gray-50'  },
-    { label: 'Activos',       value: activos,       icon: Users,       color: 'text-green-600',  bg: 'bg-green-50' },
-    { label: 'Profesionales', value: profesionales, icon: Stethoscope, color: 'text-rose-600',   bg: 'bg-rose-50'  },
-    { label: 'Administrativos', value: administrativos, icon: PhoneCall, color: 'text-sky-600',  bg: 'bg-sky-50'   },
-  ]
-
-  return (
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-      {stats.map(({ label, value, icon: Icon, color, bg }) => (
-        <div key={label} className={cn('rounded-xl border border-gray-100 px-4 py-3 flex items-center gap-3', bg)}>
-          <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-white shadow-sm shrink-0">
-            <Icon className={cn('h-4 w-4', color)} />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className={cn('text-base font-bold', color)}>{value}</p>
-          </div>
-        </div>
-      ))}
+      <div className="hidden md:block h-5 w-24 rounded-full bg-muted" />
+      <div className="h-5 w-14 rounded-full bg-muted" />
     </div>
   )
 }
@@ -339,6 +271,7 @@ export default function PersonalPage() {
   const [search, setSearch] = useState('')
   const [filtroRol, setFiltroRol] = useState('todos')
   const [filtroEstado, setFiltroEstado] = useState('activos')
+  const [pagina, setPagina] = useState(1)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editTarget, setEditTarget] = useState<Colaborador | null>(null)
   const [toggleTarget, setToggleTarget] = useState<Colaborador | null>(null)
@@ -360,6 +293,18 @@ export default function PersonalPage() {
     queryKey: ['colaboradores', params],
     queryFn: () => colaboradoresApi.list(params),
   })
+
+  // Quién atiende pacientes. El listado de colaboradores no trae `es_profesional`
+  // (antes el contador "Profesionales" salía en 0 y el filtro no encontraba a nadie):
+  // se toma de la lista de profesionales, que sí lo decide por ese check.
+  const { data: profesionales } = useQuery({
+    queryKey: ['colaboradores', 'atienden-pacientes'],
+    queryFn: () => colaboradoresApi.profesionales(),
+    staleTime: 60_000,
+  })
+  const idsQueAtienden = new Set((profesionales ?? []).map((p) => p.colaborador_id).filter(Boolean))
+  const atiende = (c: Colaborador) =>
+    c.es_profesional ?? (profesionales ? idsQueAtienden.has(c.id) || (!c.activo && c.rol === 'profesional') : c.rol === 'profesional')
 
   // Uso del plan (activados + invitaciones pendientes). El backend ya calcula
   // usuarios_activos / puede_agregar / slots; se invalida en cada toggle/create.
@@ -413,13 +358,51 @@ export default function PersonalPage() {
   const allColaboradores = data?.results ?? []
   const colaboradores = filtroRol === 'todos'
     ? allColaboradores
-    : allColaboradores.filter((c) => (filtroRol === 'profesional' ? !!c.es_profesional : !c.es_profesional))
+    : allColaboradores.filter((c) => (filtroRol === 'profesional' ? atiende(c) : !atiende(c)))
+  const totalPaginas = Math.max(1, Math.ceil(colaboradores.length / POR_PAGINA))
+  const paginaActual = Math.min(pagina, totalPaginas)
+  const visibles = colaboradores.slice((paginaActual - 1) * POR_PAGINA, paginaActual * POR_PAGINA)
 
   const handleEdit = (c: Colaborador) => { setEditTarget(c); setDialogOpen(true) }
   const handleNew  = () => { setEditTarget(null); setDialogOpen(true) }
 
+  const sinCupos = isAdmin && limite && !limite.sin_limite && !limite.puede_agregar
+  const resumen = isLoading
+    ? 'Cargando…'
+    : resumenEquipo({
+      total: data?.count ?? 0,
+      estado: filtroEstado,
+      atienden: allColaboradores.filter(atiende).length,
+      limite: isAdmin ? limite : undefined,
+    })
+
+  const botonNuevo = puedeGestionar ? (
+    <div className="flex items-center gap-2">
+      {sinCupos && <span className="hidden sm:inline"><EtiquetaAjuste tono="aviso">Plan sin cupos libres</EtiquetaAjuste></span>}
+      <TooltipProvider delayDuration={200}>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <span>
+              <Button size="sm" onClick={handleNew} disabled={!puedeAgregar}>
+                <Plus className="h-4 w-4 mr-1.5" />
+                Nuevo colaborador
+              </Button>
+            </span>
+          </TooltipTrigger>
+          {!puedeAgregar && (
+            <TooltipContent>
+              Has alcanzado el límite de usuarios activos de tu plan.
+            </TooltipContent>
+          )}
+        </Tooltip>
+      </TooltipProvider>
+    </div>
+  ) : undefined
+
+  const cambiarFiltro = (fn: (v: string) => void) => (v: string) => { fn(v); setPagina(1) }
+
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
 
       <PageHeader
         title={enConfiguracion ? 'Usuarios' : 'Equipo'}
@@ -428,125 +411,102 @@ export default function PersonalPage() {
         helpSlug="crear-usuarios-y-asignar-roles"
       />
 
-      {/* Sub-header */}
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <p className="text-sm text-muted-foreground">
-          {isLoading ? 'Cargando...' : `${data?.count ?? 0} colaborador${(data?.count ?? 0) !== 1 ? 'es' : ''} registrados`}
-        </p>
-        <TooltipProvider delayDuration={200}>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <span>
-                <Button onClick={handleNew} disabled={!puedeAgregar} className={cn(!puedeGestionar && 'hidden')}>
-                  <Plus className="h-4 w-4 mr-1.5" />
-                  Nuevo colaborador
-                </Button>
-              </span>
-            </TooltipTrigger>
-            {!puedeAgregar && (
-              <TooltipContent>
-                Has alcanzado el límite de usuarios activos de tu plan.
-              </TooltipContent>
-            )}
-          </Tooltip>
-        </TooltipProvider>
-      </div>
+      <div className="space-y-7">
+        <SeccionAjustes titulo="Personas del equipo" descripcion={resumen} accion={botonNuevo}>
+          {/* Sin cupos: en móvil la etiqueta no cabe junto al botón; va aquí. */}
+          {sinCupos && (
+            <div className="px-4 py-2.5 sm:hidden"><EtiquetaAjuste tono="aviso">Plan sin cupos libres</EtiquetaAjuste></div>
+          )}
 
-      {/* Stats */}
-      {!isLoading && allColaboradores.length > 0 && (
-        <StatsBar data={allColaboradores} />
-      )}
-
-      {/* Banner de uso del plan — solo visible para admin */}
-      {isAdmin && limite && <PlanLimitBanner limite={limite} />}
-
-      {/* Filtros */}
-      <div className="flex flex-col sm:flex-row gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input
-            placeholder="Buscar por nombre o correo..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9 bg-white"
-          />
-        </div>
-        <Select value={filtroRol} onValueChange={setFiltroRol}>
-          <SelectTrigger className="w-36 bg-white"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="todos">Todos los roles</SelectItem>
-            <SelectItem value="profesional">Profesionales</SelectItem>
-            <SelectItem value="administrativo">Administrativos</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={filtroEstado} onValueChange={setFiltroEstado}>
-          <SelectTrigger className="w-32 bg-white"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="activos">Activos</SelectItem>
-            <SelectItem value="inactivos">Inactivos</SelectItem>
-            <SelectItem value="todos">Todos</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Tabla */}
-      <div className="bg-white rounded-xl border border-gray-100 shadow-sm overflow-hidden">
-        <div className="flex items-center gap-4 px-5 py-2.5 bg-gray-50/80 border-b border-gray-100">
-          <div className="w-10 shrink-0" />
-          <div className="flex-1 min-w-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Colaborador</span>
-          </div>
-          <div className="hidden md:flex justify-center w-28 shrink-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Rol</span>
-          </div>
-          <div className="hidden xl:flex justify-center w-44 shrink-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Grupos de atención</span>
-          </div>
-          <div className="w-[88px] shrink-0">
-            <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Estado</span>
-          </div>
-          <div className="w-8 shrink-0" />
-        </div>
-
-        {isLoading ? (
-          Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
-        ) : isError ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <p className="text-sm font-semibold">Error al cargar colaboradores</p>
-            <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>
-              Reintentar
-            </Button>
-          </div>
-        ) : colaboradores.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center">
-            <div className="flex items-center justify-center h-14 w-14 rounded-2xl bg-muted mb-4">
-              <Users className="h-7 w-7 text-muted-foreground/50" />
+          {/* Filtros */}
+          <div className="flex flex-col gap-2 bg-muted/30 px-4 py-2.5 sm:flex-row">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por nombre o correo"
+                aria-label="Buscar colaborador"
+                value={search}
+                onChange={(e) => { setSearch(e.target.value); setPagina(1) }}
+                className="h-9 bg-white pl-9 text-[13px]"
+              />
             </div>
-            <p className="text-sm font-semibold text-foreground">
-              {search ? 'Sin resultados' : 'Aún no hay colaboradores'}
-            </p>
-            <p className="text-sm text-muted-foreground mt-1 max-w-xs">
-              {search
-                ? `No se encontraron colaboradores para "${search}"`
-                : 'Agrega el primer miembro del equipo usando el botón de arriba'}
-            </p>
+            <div className="flex gap-2">
+              <Select value={filtroRol} onValueChange={cambiarFiltro(setFiltroRol)}>
+                <SelectTrigger className="h-9 flex-1 bg-white text-[13px] sm:w-44" aria-label="Filtrar por tipo"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="todos">Todos los usuarios</SelectItem>
+                  <SelectItem value="profesional">Atienden pacientes</SelectItem>
+                  <SelectItem value="administrativo">No atienden pacientes</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={filtroEstado} onValueChange={cambiarFiltro(setFiltroEstado)}>
+                <SelectTrigger className="h-9 flex-1 bg-white text-[13px] sm:w-32" aria-label="Filtrar por estado"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="activos">Activos</SelectItem>
+                  <SelectItem value="inactivos">Inactivos</SelectItem>
+                  <SelectItem value="todos">Todos</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
-        ) : (
-          colaboradores.map((c) => (
-            <ColaboradorRow
-              key={c.id}
-              colaborador={c}
-              canActivate={puedeAgregar}
-              puedeGestionar={puedeGestionar}
-              puedeReenviar={puedeReenviar}
-              onEdit={() => handleEdit(c)}
-              onToggle={() => setToggleTarget(c)}
-              onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}
-              onResend={() => resendMut.mutate(c)}
-              resending={resendingId === c.id}
+
+          {/* Encabezado de columnas */}
+          <div className={cn(COLUMNAS, 'px-4 py-2 text-xs font-medium text-muted-foreground')}>
+            <span>Nombre</span>
+            <span className="hidden lg:block">Correo</span>
+            <span className="hidden md:block">Rol</span>
+            <span className="hidden 2xl:block">Grupos de atención</span>
+            <span>Estado</span>
+            <span />
+          </div>
+
+          {isLoading ? (
+            Array.from({ length: 6 }).map((_, i) => <SkeletonRow key={i} />)
+          ) : isError ? (
+            <VacioAjustes
+              titulo="No se pudo cargar el equipo"
+              accion={<Button variant="outline" size="sm" onClick={() => refetch()}>Reintentar</Button>}
             />
-          ))
-        )}
+          ) : colaboradores.length === 0 ? (
+            <VacioAjustes
+              titulo={search ? 'Sin resultados' : 'Aún no hay colaboradores'}
+              descripcion={search
+                ? `No se encontraron colaboradores para «${search}».`
+                : 'Agrega al primer miembro del equipo con «Nuevo colaborador».'}
+            />
+          ) : (
+            visibles.map((c) => (
+              <ColaboradorRow
+                key={c.id}
+                colaborador={c}
+                canActivate={puedeAgregar}
+                puedeGestionar={puedeGestionar}
+                puedeReenviar={puedeReenviar}
+                onEdit={() => handleEdit(c)}
+                onToggle={() => setToggleTarget(c)}
+                onImpersonate={canImpersonate ? () => handleImpersonate(c) : undefined}
+                onResend={() => resendMut.mutate(c)}
+                resending={resendingId === c.id}
+              />
+            ))
+          )}
+
+          {!isLoading && !isError && colaboradores.length > POR_PAGINA && (
+            <div className="flex items-center justify-end gap-2 px-4 py-1.5 text-[13px] text-muted-foreground">
+              <span className="tabular-nums">
+                {(paginaActual - 1) * POR_PAGINA + 1}–{Math.min(paginaActual * POR_PAGINA, colaboradores.length)} de {colaboradores.length}
+              </span>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={paginaActual <= 1}
+                onClick={() => setPagina(paginaActual - 1)} aria-label="Página anterior">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <Button variant="ghost" size="icon" className="h-8 w-8" disabled={paginaActual >= totalPaginas}
+                onClick={() => setPagina(paginaActual + 1)} aria-label="Página siguiente">
+                <ChevronRight className="h-4 w-4" />
+              </Button>
+            </div>
+          )}
+        </SeccionAjustes>
       </div>
 
       <ColaboradorDialog

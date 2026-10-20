@@ -9,7 +9,7 @@ import {
   Clock, Check, Save, ImageIcon, Upload, Trash2, Loader2,
   ShieldCheck, CreditCard, PenLine, ScanFace, Workflow,
   Lock, Bell, Info, Link2, Copy, QrCode, Printer, ClipboardList,
-  MapPin, HeartPulse, Sparkles,
+  MapPin, HeartPulse, Sparkles, Timer,
   ChevronDown, ChevronUp, Camera,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -21,6 +21,10 @@ import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import type { ConfiguracionFacial } from '@/types/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FiltroProfesionalesPorProcedimiento } from '@/components/configuracion/FiltroProfesionalesPorProcedimiento'
+import { FlujoRecepcion } from '@/components/configuracion/FlujoRecepcion'
+import {
+  avisarGuardado, BarraGuardado, EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes,
+} from '@/components/configuracion/ajustes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,7 +52,7 @@ const WIZARD_STEPS: {
   {
     key: 'paso_checkin',
     label: 'Verificación de llegada',
-    description: 'Confirma la presencia del paciente vía código OTP por WhatsApp o foto.',
+    description: 'Confirma que el paciente llegó, con un código que recibe por WhatsApp o con una foto.',
     icon: ScanFace,
     esAddon: true,
     addonKey: 'whatsapp_habilitado',
@@ -103,6 +107,9 @@ const schema = z.object({
   telefono: z.string().optional(),
 })
 type FormData = z.infer<typeof schema>
+
+const OPCIONES_INTERVALO = INTERVAL_OPTIONS.map((v) => ({ value: String(v), label: 'Cada ' + v + ' min' }))
+const OPCIONES_RECORDATORIO = INTERVALO_RECORDATORIO_OPTIONS.map((o) => ({ value: String(o.value), label: o.label + ' antes' }))
 
 export type SeccionClinica = 'general' | 'agenda' | 'atencion' | 'pacientes' | 'biometria'
 
@@ -185,6 +192,10 @@ export function ClinicaConfig({
     onError: (err) => { aplicarErroresDeCampo(err, setError, ['nombre', 'nit', 'telefono']) },
   })
 
+  const guardarDatos = handleSubmit((data) =>
+    updateMutation.mutate(data, { onSuccess: () => { reset(data); avisarGuardado() } }),
+  )
+
   // ── Logo ─────────────────────────────────────────────────────────────────
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [logoError, setLogoError] = useState<string | null>(null)
@@ -210,7 +221,7 @@ export function ClinicaConfig({
     e.target.value = ''
   }
 
-  // ── Frecuencia de turnos ─────────────────────────────────────────────────
+  // ── Frecuencia de turnos (se guarda al elegirla) ─────────────────────────
   const [selectedInterval, setSelectedInterval] = useState<number>(15)
   useEffect(() => { if (clinica?.slot_interval_min) setSelectedInterval(clinica.slot_interval_min) }, [clinica])
 
@@ -220,10 +231,21 @@ export function ClinicaConfig({
       qc.invalidateQueries({ queryKey: ['clinica', clinicaId] })
       qc.invalidateQueries({ queryKey: ['slot_interval', clinicaId] })
     },
+    onError: () => {
+      setSelectedInterval(clinica?.slot_interval_min ?? 15)
+      toast.error('No se pudo guardar', 'Intenta de nuevo.')
+    },
   })
-  const isIntervalDirty = clinica?.slot_interval_min !== selectedInterval
 
-  // ── Recordatorios ────────────────────────────────────────────────────────
+  /** Guarda la frecuencia; con `deshacerA`, el aviso ofrece volver a ese valor. */
+  function cambiarIntervalo(valor: number, deshacerA?: number) {
+    setSelectedInterval(valor)
+    intervalMutation.mutate(valor, {
+      onSuccess: () => avisarGuardado(deshacerA !== undefined ? () => cambiarIntervalo(deshacerA) : undefined),
+    })
+  }
+
+  // ── Recordatorios (se guardan al cambiarlos) ─────────────────────────────
   const { data: recordatorioConfig, isLoading: loadingRecordatorio, isError: errorRecordatorio, refetch: recargarRecordatorio } = useQuery({
     queryKey: ['recordatorio_config', clinicaId],
     queryFn: () => clinicasApi.recordatorioConfig.get(clinicaId!),
@@ -240,18 +262,31 @@ export function ClinicaConfig({
     }
   }, [recordatorioConfig])
 
-  const isRecordatorioDirty = !!recordatorioConfig && (
-    recordatorioConfig.recordatorios_automaticos !== recordatoriosActivos ||
-    recordatorioConfig.intervalo_recordatorio_horas !== recordatorioIntervalo
-  )
-
   const recordatorioMutation = useMutation({
-    mutationFn: () => clinicasApi.recordatorioConfig.update(clinicaId!, {
-      recordatorios_automaticos: recordatoriosActivos,
-      intervalo_recordatorio_horas: recordatorioIntervalo,
-    }),
+    mutationFn: (datos: { recordatorios_automaticos: boolean; intervalo_recordatorio_horas: number }) =>
+      clinicasApi.recordatorioConfig.update(clinicaId!, datos),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['recordatorio_config', clinicaId] }),
+    onError: () => {
+      if (recordatorioConfig) {
+        setRecordatoriosActivos(recordatorioConfig.recordatorios_automaticos)
+        setRecordatorioIntervalo(recordatorioConfig.intervalo_recordatorio_horas)
+      }
+      toast.error('No se pudo guardar', 'Intenta de nuevo.')
+    },
   })
+
+  // Antes el interruptor solo cambiaba en pantalla hasta pulsar "Guardar", y
+  // quien salía sin guardar creía haber apagado los recordatorios.
+  function guardarRecordatorios(cambio: { activos?: boolean; horas?: number }, conDeshacer = true) {
+    const antes = { activos: recordatoriosActivos, horas: recordatorioIntervalo }
+    const despues = { ...antes, ...cambio }
+    setRecordatoriosActivos(despues.activos)
+    setRecordatorioIntervalo(despues.horas)
+    recordatorioMutation.mutate(
+      { recordatorios_automaticos: despues.activos, intervalo_recordatorio_horas: despues.horas },
+      { onSuccess: () => avisarGuardado(conDeshacer ? () => guardarRecordatorios(antes, false) : undefined) },
+    )
+  }
 
   // ── Wizard ───────────────────────────────────────────────────────────────
   const { data: wizardConfig, isLoading: loadingWizard } = useQuery({
@@ -262,9 +297,17 @@ export function ClinicaConfig({
   const wizardMutation = useMutation({
     mutationFn: (data: Partial<WizardConfig>) => clinicasApi.wizardConfig.update(data),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['wizard-config'] }),
+    onError: () => toast.error('No se pudo guardar', 'Intenta de nuevo.'),
   })
 
   const effectiveWizard: WizardConfig = wizardConfig ?? DEFAULT_WIZARD_CONFIG
+
+  /** Prende o apaga un paso de recepción; el aviso permite volver atrás. */
+  function cambiarPaso(clave: keyof WizardConfig, valor: boolean, conDeshacer = true) {
+    wizardMutation.mutate({ [clave]: valor }, {
+      onSuccess: () => avisarGuardado(conDeshacer ? () => cambiarPaso(clave, !valor, false) : undefined),
+    })
+  }
   const pasoFacialActivo = wizardConfig?.paso_verificacion_facial ?? false
 
   // ── Configuración facial ─────────────────────────────────────────────────
@@ -274,9 +317,21 @@ export function ClinicaConfig({
     enabled: pasoFacialActivo,
   })
 
+  // La pestaña Verificación facial guarda junto la configuración facial y la
+  // foto de control obligatoria (que vive en la configuración de recepción).
   const facialMutation = useMutation({
-    mutationFn: (data: Partial<ConfiguracionFacial>) => clinicasApi.facialConfig.update(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['facial-config'] }),
+    mutationFn: async ({ data, foto }: { data: Partial<ConfiguracionFacial>; foto: boolean }) => {
+      await clinicasApi.facialConfig.update(data)
+      if (foto !== effectiveWizard.foto_control_obligatoria) {
+        await clinicasApi.wizardConfig.update({ foto_control_obligatoria: foto })
+      }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['facial-config'] })
+      qc.invalidateQueries({ queryKey: ['wizard-config'] })
+      avisarGuardado()
+    },
+    onError: () => toast.error('No se pudo guardar', 'Intenta de nuevo.'),
   })
 
   // ── Autoregistro ─────────────────────────────────────────────────────────
@@ -308,6 +363,15 @@ export function ClinicaConfig({
     },
   })
 
+  function cambiarRequerido(campo: 'personal' | 'salud', valor: boolean, conDeshacer = true) {
+    if (campo === 'personal') setTabPersonalReq(valor)
+    else setTabSaludReq(valor)
+    tabsRegMutation.mutate(
+      campo === 'personal' ? { tab_personal_requerido: valor } : { tab_salud_requerido: valor },
+      { onSuccess: () => avisarGuardado(conDeshacer ? () => cambiarRequerido(campo, !valor, false) : undefined) },
+    )
+  }
+
   // ─────────────────────────────────────────────────────────────────────────
   if (!user) return null
   if (!clinicaId) {
@@ -323,98 +387,85 @@ export function ClinicaConfig({
     <div className="space-y-6">
       <PageHeader helpSlug={helpSlug} title={title} description={description} />
 
-      <div className="space-y-5">
+      <div className="space-y-7">
 
           {/* ── TAB: General ── */}
           {tituloSeccion('general')}
           {ver('general') && (
             <>
-              {/* Logo */}
-              <Section title="Logo de la clínica">
-                <div className="flex items-center gap-6">
-                  <div className="h-24 w-40 rounded-lg border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden shrink-0 relative">
+              <SeccionAjustes titulo="Logo" descripcion="PNG o JPG de máximo 2 MB. Se ve mejor con fondo transparente.">
+                <div className="flex items-center gap-4 px-4 py-3.5">
+                  <div className="relative flex h-16 w-28 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-dashed bg-muted/40">
                     {logoMutation.isPending ? (
                       <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
                     ) : clinica?.logo_url ? (
-                      <Image src={resolveMediaUrl(clinica.logo_url)!} alt={clinica.nombre ?? 'Logo'} fill className="object-contain p-2" unoptimized />
+                      <Image src={resolveMediaUrl(clinica.logo_url)!} alt={clinica.nombre ?? 'Logo'} fill className="object-contain p-1.5" unoptimized />
                     ) : (
-                      <ImageIcon className="h-8 w-8 text-gray-300" />
+                      <ImageIcon className="h-6 w-6 text-muted-foreground" />
                     )}
                   </div>
                   {isAdmin && (
-                    <div className="space-y-2">
-                      <div className="flex gap-2">
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex flex-wrap gap-2">
                         <Button type="button" variant="outline" size="sm" disabled={logoMutation.isPending} onClick={() => fileInputRef.current?.click()}>
-                          <Upload className="h-3.5 w-3.5 mr-1.5" />
+                          <Upload className="mr-1.5 h-3.5 w-3.5" />
                           {clinica?.logo_url ? 'Cambiar logo' : 'Subir logo'}
                         </Button>
                         {clinica?.logo_url && (
                           <Button
                             type="button" variant="ghost" size="sm"
                             disabled={eliminarLogoMutation.isPending}
-                            className="text-destructive hover:text-destructive hover:bg-destructive/5"
+                            className="text-destructive hover:bg-destructive/5 hover:text-destructive"
                             onClick={() => { if (confirm('¿Eliminar el logo de la clínica?')) eliminarLogoMutation.mutate() }}
                           >
-                            {eliminarLogoMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5 mr-1.5" />}
+                            {eliminarLogoMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
                             Eliminar
                           </Button>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">PNG o JPG · máx. 2 MB · fondo transparente recomendado</p>
-                      {logoError && <p className="text-xs text-destructive">{logoError}</p>}
+                      {logoError && <p className="text-[13px] text-destructive">{logoError}</p>}
                     </div>
                   )}
                 </div>
                 <input ref={fileInputRef} type="file" accept="image/png,image/jpeg" className="hidden" onChange={handleFileChange} />
-              </Section>
+              </SeccionAjustes>
 
-              {/* Datos */}
-              <Section title="Datos de la clínica">
-                <form onSubmit={handleSubmit((data) => updateMutation.mutate(data))} className="space-y-4">
-                  {isLoading ? (
-                    <div className="space-y-4">
-                      {[1, 2, 3].map(i => (
-                        <div key={i} className="space-y-1.5">
-                          <div className="h-3 w-20 rounded bg-gray-100 animate-pulse" />
-                          <div className="h-9 w-full rounded-lg bg-gray-100 animate-pulse" />
-                        </div>
-                      ))}
+              <SeccionAjustes titulo="Datos de la clínica" descripcion="Nombre, NIT y teléfono de contacto.">
+                {isLoading ? (
+                  <FilasCargando filas={2} />
+                ) : (
+                  <form onSubmit={guardarDatos} className="grid gap-4 px-4 py-4 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label htmlFor="nombre" className="text-[13px] font-medium">Nombre de la clínica</Label>
+                      <Input id="nombre" {...register('nombre')} disabled={!isAdmin} placeholder="Ej. Clínica Estética Bella" aria-describedby="nombre-ayuda" />
+                      {errors.nombre
+                        ? <p className="text-[13px] text-destructive">{errors.nombre.message}</p>
+                        : <p id="nombre-ayuda" className="text-[13px] text-muted-foreground">Este será el nombre que se enviará en los mensajes de WhatsApp.</p>}
                     </div>
-                  ) : (
-                    <>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="nombre" className="text-xs text-gray-500">Nombre de la clínica</Label>
-                        <Input id="nombre" {...register('nombre')} disabled={!isAdmin} placeholder="Ej. Clínica Estética Bella" />
-                        {errors.nombre && <p className="text-xs text-red-500">{errors.nombre.message}</p>}
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="nit" className="text-xs text-gray-500">NIT *</Label>
-                          <Input id="nit" {...register('nit')} disabled={!isAdmin} placeholder="Ej. 901234567-8" />
-                          {errors.nit && <p className="text-xs text-red-500">{errors.nit.message}</p>}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="telefono" className="text-xs text-gray-500">Teléfono</Label>
-                          <Input id="telefono" {...register('telefono')} disabled={!isAdmin} placeholder="Ej. 3001234567" />
-                        </div>
-                      </div>
-                    </>
-                  )}
-                  {updateMutation.isError && !errors.nit && !errors.nombre && (
-                    <p className="text-sm text-red-500">{mensajeDeError(updateMutation.error, 'No se pudo guardar. Intenta de nuevo.')}</p>
-                  )}
-                  {isAdmin && (
-                    <div className="flex items-center gap-3 pt-2 border-t">
-                      <Button type="submit" disabled={!isFormDirty || updateMutation.isPending} className="gap-1.5">
-                        {updateMutation.isPending ? 'Guardando…' : <><Save className="h-4 w-4" /> Guardar cambios</>}
-                      </Button>
-                      {updateMutation.isSuccess && !isFormDirty && (
-                        <span className="text-sm text-emerald-600 font-medium">Guardado correctamente</span>
-                      )}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="nit" className="text-[13px] font-medium">NIT</Label>
+                      <Input id="nit" {...register('nit')} disabled={!isAdmin} placeholder="Ej. 901234567-8" />
+                      {errors.nit && <p className="text-[13px] text-destructive">{errors.nit.message}</p>}
                     </div>
-                  )}
-                </form>
-              </Section>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="telefono" className="text-[13px] font-medium">
+                        Teléfono <span className="font-normal text-muted-foreground">(opcional)</span>
+                      </Label>
+                      <Input id="telefono" {...register('telefono')} disabled={!isAdmin} placeholder="Ej. 3001234567" />
+                    </div>
+                    {updateMutation.isError && !errors.nit && !errors.nombre && (
+                      <p className="text-sm text-destructive sm:col-span-2">{mensajeDeError(updateMutation.error, 'No se pudo guardar. Intenta de nuevo.')}</p>
+                    )}
+                  </form>
+                )}
+              </SeccionAjustes>
+
+              <BarraGuardado
+                visible={isAdmin && isFormDirty}
+                guardando={updateMutation.isPending}
+                onGuardar={guardarDatos}
+                onDescartar={() => reset()}
+              />
             </>
           )}
 
@@ -422,362 +473,176 @@ export function ClinicaConfig({
           {tituloSeccion('agenda')}
           {ver('agenda') && (
             <>
-              {/* Frecuencia de turnos */}
-              <Section
-                title="Frecuencia de turnos"
-                description="Define cada cuántos minutos se ofrecen opciones de cita al consultar disponibilidad."
-              >
-                {isLoading ? (
-                  <div className="flex gap-2 flex-wrap">
-                    {INTERVAL_OPTIONS.map(v => <div key={v} className="h-10 w-16 rounded-lg bg-gray-100 animate-pulse" />)}
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    <div>
-                      <Label className="text-xs text-gray-400 mb-3 block">Minutos entre turnos</Label>
-                      <div className="flex gap-2 flex-wrap">
-                        {INTERVAL_OPTIONS.map(v => (
-                          <button
-                            key={v}
-                            type="button"
-                            disabled={!isAdmin}
-                            onClick={() => setSelectedInterval(v)}
-                            className={cn(
-                              'h-10 w-16 rounded-lg border text-sm font-medium transition-all',
-                              selectedInterval === v
-                                ? 'border-rose-500 bg-rose-50 text-rose-700'
-                                : 'border-gray-200 bg-white text-gray-600 hover:border-rose-300 hover:text-rose-600',
-                              !isAdmin && 'opacity-50 cursor-not-allowed',
-                            )}
-                          >
-                            {v} min
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                    {intervalMutation.isError && <p className="text-sm text-red-500">Error al guardar. Intenta de nuevo.</p>}
-                    {isAdmin && (
-                      <div className="flex items-center gap-3 pt-2 border-t">
-                        <Button type="button" onClick={() => intervalMutation.mutate(selectedInterval)} disabled={!isIntervalDirty || intervalMutation.isPending} className="gap-1.5">
-                          {intervalMutation.isPending ? 'Guardando…' : <><Check className="h-4 w-4" /> Guardar</>}
-                        </Button>
-                        {intervalMutation.isSuccess && !isIntervalDirty && (
-                          <span className="text-sm text-emerald-600 font-medium">Guardado correctamente</span>
-                        )}
-                      </div>
-                    )}
-                  </div>
+              <SeccionAjustes titulo="Turnos" descripcion="Cómo se ofrecen las horas al agendar una cita.">
+                {isLoading ? <FilasCargando filas={2} /> : (
+                  <>
+                    <FilaAjuste
+                      icono={Clock}
+                      titulo="Frecuencia de turnos"
+                      descripcion="Cada cuántos minutos se ofrecen horas disponibles."
+                    >
+                      <SelectAjuste
+                        etiqueta="Frecuencia de turnos"
+                        valor={String(selectedInterval)}
+                        opciones={OPCIONES_INTERVALO}
+                        onCambiar={(v) => cambiarIntervalo(Number(v), selectedInterval)}
+                        deshabilitado={!isAdmin || intervalMutation.isPending}
+                      />
+                    </FilaAjuste>
+                    <FiltroProfesionalesPorProcedimiento
+                      clinicaId={clinicaId}
+                      activo={clinica?.filtrar_profesionales_por_procedimiento ?? false}
+                      puedeEditar={isAdmin}
+                    />
+                  </>
                 )}
-              </Section>
+              </SeccionAjustes>
 
-              {/* Recordatorios */}
-              <Section
-                title="Recordatorios automáticos"
-                description="Configura cuándo se envían recordatorios a tus pacientes antes de su cita."
-                icon={Bell}
-              >
-                {loadingRecordatorio ? (
-                  <div className="space-y-3">
-                    <div className="h-5 w-64 rounded bg-gray-100 animate-pulse" />
-                    <div className="h-4 w-80 rounded bg-gray-100 animate-pulse" />
-                  </div>
-                ) : errorRecordatorio ? (
-                  <div className="flex items-center gap-3 text-sm text-red-600">
-                    No se pudo cargar la configuración de recordatorios.
+              <SeccionAjustes titulo="Recordatorios" descripcion="Mensajes de WhatsApp que le recuerdan la cita al paciente.">
+                {loadingRecordatorio ? <FilasCargando filas={2} /> : errorRecordatorio ? (
+                  <FilaAjuste titulo="No se pudo cargar la configuración de recordatorios.">
                     <Button type="button" variant="outline" size="sm" onClick={() => recargarRecordatorio()}>Reintentar</Button>
-                  </div>
+                  </FilaAjuste>
                 ) : (
-                  <div className="space-y-5">
-                    <div className="flex items-start gap-4">
-                      <Switch checked={recordatoriosActivos} onCheckedChange={setRecordatoriosActivos} disabled={!isAdmin} />
-                      <div>
-                        <p className="text-sm font-medium text-gray-700">
-                          {recordatoriosActivos ? 'Recordatorios activados' : 'Recordatorios desactivados'}
-                        </p>
-                        <p className="mt-0.5 text-xs text-gray-400">
-                          {recordatoriosActivos
-                            ? 'El sistema enviará recordatorios automáticos al teléfono del paciente.'
-                            : 'Los pacientes no recibirán recordatorios automáticos.'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className={cn('space-y-3 transition-opacity', !recordatoriosActivos && 'opacity-40 pointer-events-none')}>
-                      <p className="text-xs font-medium text-gray-500">Tiempo de anticipación</p>
-                      <div className="flex gap-2 flex-wrap">
-                        {INTERVALO_RECORDATORIO_OPTIONS.map(o => (
-                          <button
-                            key={o.value}
-                            type="button"
-                            disabled={!isAdmin}
-                            onClick={() => setRecordatorioIntervalo(o.value)}
-                            className={cn(
-                              'h-9 px-3 rounded-lg border text-xs font-medium transition-all',
-                              recordatorioIntervalo === o.value
-                                ? 'border-rose-500 bg-rose-50 text-rose-700'
-                                : 'border-gray-200 bg-white text-gray-600 hover:border-rose-300 hover:text-rose-600',
-                              !isAdmin && 'opacity-50 cursor-not-allowed',
-                            )}
-                          >
-                            {o.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    <div className="flex items-start gap-2.5 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                      <Info className="h-3.5 w-3.5 text-blue-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-blue-600">
-                        También puedes enviar recordatorios manualmente desde el detalle de cualquier cita.
-                        Se envían por WhatsApp ·{' '}
-                        <Link href="/configuracion/whatsapp" className="font-medium underline-offset-2 hover:underline">
-                          Ver número de envío
-                        </Link>
-                      </p>
-                    </div>
-
-                    {isAdmin && (
-                      <div className="flex items-center gap-3 pt-2 border-t">
-                        <Button type="button" onClick={() => recordatorioMutation.mutate()} disabled={!isRecordatorioDirty || recordatorioMutation.isPending} className="gap-1.5">
-                          {recordatorioMutation.isPending ? 'Guardando…' : <><Check className="h-4 w-4" /> Guardar</>}
-                        </Button>
-                        {recordatorioMutation.isSuccess && !isRecordatorioDirty && <span className="text-sm text-emerald-600 font-medium">Guardado</span>}
-                        {recordatorioMutation.isError && <span className="text-sm text-red-500">Error al guardar</span>}
-                      </div>
-                    )}
-                  </div>
+                  <>
+                    <FilaAjuste
+                      icono={Bell}
+                      apagada={!recordatoriosActivos}
+                      titulo="Recordatorios automáticos"
+                      descripcion={recordatoriosActivos
+                        ? 'Se envían solos por WhatsApp antes de cada cita.'
+                        : 'Apagado: los pacientes no reciben recordatorios automáticos.'}
+                    >
+                      <Switch
+                        checked={recordatoriosActivos}
+                        onCheckedChange={(activos) => guardarRecordatorios({ activos })}
+                        disabled={!isAdmin || recordatorioMutation.isPending}
+                        aria-label="Recordatorios automáticos"
+                      />
+                    </FilaAjuste>
+                    <FilaAjuste
+                      icono={Timer}
+                      apagada={!recordatoriosActivos}
+                      titulo="Cuándo enviarlo"
+                      descripcion="Tiempo antes de la cita."
+                    >
+                      <SelectAjuste
+                        etiqueta="Cuándo enviar el recordatorio"
+                        valor={String(recordatorioIntervalo)}
+                        opciones={OPCIONES_RECORDATORIO}
+                        onCambiar={(v) => guardarRecordatorios({ horas: Number(v) })}
+                        deshabilitado={!isAdmin || !recordatoriosActivos || recordatorioMutation.isPending}
+                      />
+                    </FilaAjuste>
+                    <NotaAjuste>
+                      También puedes enviar un recordatorio a mano desde el detalle de la cita.{' '}
+                      <Link href="/configuracion/whatsapp" className="font-medium text-primary underline-offset-2 hover:underline">
+                        Ver número de envío
+                      </Link>
+                    </NotaAjuste>
+                  </>
                 )}
-              </Section>
-
-              {/* Profesionales por procedimiento */}
-              <Section
-                title="Profesionales por procedimiento"
-                description="Decide si, al agendar, se ofrecen todos los profesionales de la sede o solo los que realizan el procedimiento elegido."
-              >
-                <FiltroProfesionalesPorProcedimiento
-                  clinicaId={clinicaId}
-                  activo={clinica?.filtrar_profesionales_por_procedimiento ?? false}
-                  puedeEditar={isAdmin}
-                />
-              </Section>
+              </SeccionAjustes>
             </>
           )}
 
           {/* ── TAB: Atención ── */}
           {tituloSeccion('atencion')}
           {ver('atencion') && (
-            <Section
-              title="Pasos de recepción antes de atender"
-              description="Define qué pasos debe completar recepción antes de que el profesional inicie cada atención. El orden es fijo."
-              icon={Workflow}
-            >
-              {loadingWizard ? (
-                <div className="rounded-lg border divide-y overflow-hidden">
-                  {[1, 2, 3, 4].map(i => (
-                    <div key={i} className="flex items-center gap-4 px-4 py-3.5">
-                      <div className="h-8 w-8 rounded-lg bg-gray-100 animate-pulse shrink-0" />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="h-3 w-32 rounded bg-gray-100 animate-pulse" />
-                        <div className="h-2.5 w-56 rounded bg-gray-100 animate-pulse" />
-                      </div>
-                      <div className="h-6 w-10 rounded-full bg-gray-100 animate-pulse" />
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded-lg border divide-y overflow-hidden">
-                  {WIZARD_STEPS.map((step, idx) => {
-                    const Icon = step.icon
-                    const enabled = effectiveWizard[step.key]
-                    const bloqueado = step.toggleBloqueado
-                    const addonNoHabilitado = step.esAddon && !(step.addonKey && miClinica?.[step.addonKey])
-                    return (
-                      <div
-                        key={step.key}
-                        className={cn(
-                          'flex items-center gap-4 px-4 py-4 transition-colors',
-                          addonNoHabilitado ? 'bg-gray-50/40' : !enabled && 'bg-gray-50/60',
-                        )}
-                      >
-                        {/* Step number + icon */}
-                        <div className="flex items-center gap-3 shrink-0">
-                          <span className="text-xs font-semibold text-gray-300 w-4 text-right">{idx + 1}</span>
-                          <div className={cn(
-                            'h-8 w-8 rounded-lg flex items-center justify-center transition-colors',
-                            addonNoHabilitado ? 'bg-gray-100 text-gray-300'
-                              : enabled ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-400',
-                          )}>
-                            <Icon className="h-4 w-4" />
-                          </div>
-                        </div>
+            <>
+              <SeccionAjustes
+                titulo="Pasos al llegar el paciente"
+                descripcion="El recorrido del paciente desde que llega. Apaga un paso y el recorrido lo salta."
+              >
+                {loadingWizard ? <FilasCargando filas={4} /> : (
+                  <FlujoRecepcion
+                    deshabilitado={!isAdmin || wizardMutation.isPending}
+                    onCambiar={(clave, valor) => cambiarPaso(clave as keyof WizardConfig, valor)}
+                    pasos={WIZARD_STEPS.map((step) => {
+                      const addonNoHabilitado = step.esAddon && !(step.addonKey && miClinica?.[step.addonKey])
+                      return {
+                        clave: step.key,
+                        titulo: step.label,
+                        icono: step.icon,
+                        activo: effectiveWizard[step.key],
+                        bloqueado: addonNoHabilitado ? 'plan' as const : step.toggleBloqueado ? 'fijo' as const : undefined,
+                        extra: step.esAddon
+                          ? <EtiquetaAjuste tono={addonNoHabilitado ? 'neutro' : 'addon'} icono={Sparkles}>Add-on</EtiquetaAjuste>
+                          : undefined,
+                        descripcion: addonNoHabilitado ? (
+                          step.addonLockedCopy ?? 'Contáctanos para habilitar este módulo en tu plan.'
+                        ) : step.key === 'paso_checkin' ? (
+                          <>
+                            {step.description} El código sale del número de CliniQ, aunque tengas{' '}
+                            <Link href="/configuracion/whatsapp" className="font-medium text-primary hover:underline">número propio</Link>.
+                          </>
+                        ) : step.description,
+                      }
+                    })}
+                  />
+                )}
+              </SeccionAjustes>
 
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2">
-                            <p className={cn(
-                              'text-sm font-medium leading-tight',
-                              addonNoHabilitado ? 'text-gray-400' : !enabled ? 'text-gray-400' : 'text-gray-900',
-                            )}>
-                              {step.label}
-                            </p>
-                            {step.esAddon && (
-                              <span className={cn(
-                                'inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10px] font-semibold',
-                                step.addonKey && miClinica?.[step.addonKey] ? 'bg-violet-100 text-violet-700' : 'bg-gray-100 text-gray-400',
-                              )}>
-                                <Sparkles className="h-2.5 w-2.5" />Add-on
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{step.description}</p>
-                          {step.key === 'paso_checkin' && !addonNoHabilitado && (
-                            <p className="text-[11px] text-muted-foreground mt-0.5">
-                              El código siempre se envía desde el número de CliniQ, aunque tu clínica tenga{' '}
-                              <Link href="/configuracion/whatsapp" className="font-medium text-primary hover:underline">número propio</Link>.
-                            </p>
-                          )}
-                          {addonNoHabilitado && (
-                            <p className="text-[11px] text-gray-400 mt-0.5">
-                              {step.addonLockedCopy ?? 'Contáctanos para habilitar este módulo en tu plan.'}
-                            </p>
-                          )}
-                        </div>
-
-                        {bloqueado ? (
-                          <div className="flex items-center gap-1.5 text-muted-foreground/50" title="No se puede desactivar aún">
-                            <Lock className="h-3 w-3" /><Switch checked disabled />
-                          </div>
-                        ) : addonNoHabilitado ? (
-                          <div className="flex items-center gap-1.5 text-muted-foreground/40" title="Módulo no habilitado en tu plan">
-                            <Lock className="h-3 w-3" /><Switch checked={false} disabled />
-                          </div>
-                        ) : (
-                          <Switch
-                            checked={enabled}
-                            disabled={!isAdmin || wizardMutation.isPending}
-                            onCheckedChange={(val) => wizardMutation.mutate({ [step.key]: val })}
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-
-              {!loadingWizard && effectiveWizard.paso_verificacion_facial && miClinica?.facial_verificacion_habilitada && (
-                <div className="mt-4 rounded-lg border bg-white">
-                  <div className={cn(
-                    'flex items-center gap-4 px-4 py-4 transition-colors',
-                    !effectiveWizard.foto_control_obligatoria && 'bg-gray-50/60',
-                  )}>
-                    <div className={cn(
-                      'h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors',
-                      effectiveWizard.foto_control_obligatoria ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-400',
-                    )}>
-                      <Camera className="h-4 w-4" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className={cn(
-                        'text-sm font-medium leading-tight',
-                        effectiveWizard.foto_control_obligatoria ? 'text-gray-900' : 'text-gray-400',
-                      )}>
-                        Foto de control obligatoria al registrar paciente
-                      </p>
-                      <p className="text-xs text-muted-foreground mt-0.5 leading-snug">
-                        {effectiveWizard.foto_control_obligatoria
-                          ? 'Recepción debe tomar la foto de control antes de terminar el registro. No se puede omitir.'
-                          : 'Recepción puede omitir la foto y tomarla más tarde desde la ficha del paciente.'}
-                      </p>
-                    </div>
-                    <Switch
-                      checked={effectiveWizard.foto_control_obligatoria}
-                      disabled={!isAdmin || wizardMutation.isPending}
-                      onCheckedChange={(val) => wizardMutation.mutate({ foto_control_obligatoria: val })}
-                    />
-                  </div>
-                  <div className="border-t px-4 py-2.5">
-                    <Link href="/configuracion/biometria" className="text-xs font-medium text-primary hover:underline">
-                      Ajustar umbrales y check-in automático en Biometría
-                    </Link>
-                  </div>
-                </div>
-              )}
-
-            </Section>
+            </>
           )}
 
           {/* ── TAB: Pacientes ── */}
           {tituloSeccion('pacientes')}
           {ver('pacientes') && (
-            <>
-              {/* Formulario de autoregistro */}
-              {miClinica?.registro_publico_token ? (
-                <>
-                  <Section
-                    title="Formulario de autoregistro"
-                    description="Define qué secciones del formulario son obligatorias para los pacientes."
-                    icon={ClipboardList}
-                  >
-                    <div className="rounded-lg border divide-y overflow-hidden">
-                      {[
-                        {
-                          key: 'personal' as const,
-                          icon: MapPin,
-                          label: 'Datos personales',
-                          description: 'Dirección, ciudad, estado civil, ocupación, responsable.',
-                          value: tabPersonalReq,
-                          onChange: (v: boolean) => { setTabPersonalReq(v); tabsRegMutation.mutate({ tab_personal_requerido: v }) },
-                        },
-                        {
-                          key: 'salud' as const,
-                          icon: HeartPulse,
-                          label: 'Salud y afiliación',
-                          description: 'EPS, tipo de afiliado, régimen, grupo sanguíneo.',
-                          value: tabSaludReq,
-                          onChange: (v: boolean) => { setTabSaludReq(v); tabsRegMutation.mutate({ tab_salud_requerido: v }) },
-                        },
-                      ].map(({ key, icon: Icon, label, description, value, onChange }) => (
-                        <div key={key} className={cn('flex items-center gap-4 px-4 py-4 transition-colors', !value && 'bg-gray-50/60')}>
-                          <div className={cn(
-                            'h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors',
-                            value ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-400',
-                          )}>
-                            <Icon className="h-4 w-4" />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className={cn('text-sm font-medium leading-tight', !value ? 'text-gray-400' : 'text-gray-900')}>{label}</p>
-                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug">{description}</p>
-                          </div>
-                          <Switch checked={value} disabled={!isAdmin || tabsRegMutation.isPending} onCheckedChange={onChange} />
-                        </div>
-                      ))}
-                    </div>
-                    <div className="flex items-start gap-2.5 rounded-lg border border-blue-100 bg-blue-50 p-3">
-                      <Info className="h-3.5 w-3.5 text-blue-400 mt-0.5 shrink-0" />
-                      <p className="text-xs text-blue-600">
-                        Si una sección está activa y el paciente no la llena, el formulario le pedirá completarla antes de enviar.
-                      </p>
-                    </div>
-                  </Section>
+            miClinica?.registro_publico_token ? (
+              <>
+                <SeccionAjustes titulo="Formulario de registro" descripcion="Qué partes del formulario debe llenar el paciente sí o sí.">
+                  {[
+                    {
+                      campo: 'personal' as const,
+                      icono: MapPin,
+                      titulo: 'Datos personales obligatorios',
+                      descripcion: 'Dirección, ciudad, estado civil, ocupación y responsable.',
+                      valor: tabPersonalReq,
+                    },
+                    {
+                      campo: 'salud' as const,
+                      icono: HeartPulse,
+                      titulo: 'Salud y afiliación obligatorias',
+                      descripcion: 'EPS, tipo de afiliado, régimen y grupo sanguíneo.',
+                      valor: tabSaludReq,
+                    },
+                  ].map(({ campo, icono, titulo, descripcion, valor }) => (
+                    <FilaAjuste key={campo} icono={icono} apagada={!valor} titulo={titulo} descripcion={descripcion}>
+                      <Switch
+                        checked={valor}
+                        disabled={!isAdmin || tabsRegMutation.isPending}
+                        onCheckedChange={(v) => cambiarRequerido(campo, v)}
+                        aria-label={titulo}
+                      />
+                    </FilaAjuste>
+                  ))}
+                  <NotaAjuste>Si una parte es obligatoria y el paciente no la llena, el formulario no lo deja enviar.</NotaAjuste>
+                </SeccionAjustes>
 
-                  {/* Link de autoregistro */}
-                  <Section title="Link de autoregistro" description="Comparte este link para que los pacientes se registren por su cuenta." icon={Link2}>
+                <SeccionAjustes titulo="Link para registrarse" descripcion="Compártelo por WhatsApp o imprime el QR para la sala de espera.">
+                  <div className="px-4 py-3.5">
                     <LinkAutoregistro token={miClinica.registro_publico_token!} nombreClinica={clinica?.nombre ?? ''} />
-                  </Section>
-                </>
-              ) : (
-                <div className="rounded-xl border bg-gray-50 p-8 text-center space-y-1">
-                  <p className="text-sm font-medium text-gray-500">Autoregistro no configurado</p>
-                  <p className="text-xs text-gray-400">Esta clínica no tiene habilitado el formulario de autoregistro público.</p>
-                </div>
-              )}
-            </>
+                  </div>
+                </SeccionAjustes>
+              </>
+            ) : (
+              <SeccionAjustes titulo="Formulario de registro">
+                <FilaAjuste
+                  icono={ClipboardList}
+                  apagada
+                  titulo="El registro por link no está habilitado"
+                  descripcion="Esta clínica no tiene activo el formulario para que los pacientes se registren solos."
+                />
+              </SeccionAjustes>
+            )
           )}
 
           {/* ── TAB: Biometría ── */}
           {tituloSeccion('biometria')}
           {ver('biometria') && (
             loadingWizard || !miClinica ? (
-              <div className="h-40 rounded-xl border bg-gray-50 animate-pulse" />
+              <SeccionAjustes titulo="Nivel de coincidencia"><FilasCargando filas={3} /></SeccionAjustes>
             ) : !facialHabilitado ? (
               <AvisoBiometria
                 titulo="La verificación facial es un add-on"
@@ -786,18 +651,17 @@ export function ClinicaConfig({
             ) : !pasoFacialActivo ? (
               <AvisoBiometria
                 titulo="La verificación facial está desactivada"
-                texto="Actívala como un paso de Recepción para que se pida cuando llega el paciente. Después ajustarás aquí sus umbrales y el check-in automático."
+                texto="Actívala como un paso de Recepción para que se pida cuando llega el paciente. Después ajustarás aquí el nivel de coincidencia y el check-in automático."
                 accion={{ label: 'Ir a Pasos de recepción', onClick: () => router.push('/configuracion/recepcion') }}
               />
             ) : (
               <TabBiometria
                 config={facialConfig}
+                fotoObligatoria={effectiveWizard.foto_control_obligatoria}
                 isLoading={loadingFacial}
                 isAdmin={isAdmin}
                 isPending={facialMutation.isPending}
-                isSuccess={facialMutation.isSuccess}
-                isError={facialMutation.isError}
-                onSave={(data) => facialMutation.mutate(data)}
+                onSave={(data, foto) => facialMutation.mutate({ data, foto })}
               />
             )
           )}
@@ -820,16 +684,15 @@ function AvisoBiometria({
   accion?: { label: string; onClick: () => void }
 }) {
   return (
-    <div className="rounded-xl border bg-gray-50 p-8 text-center space-y-2">
-      <ShieldCheck className="h-6 w-6 mx-auto text-gray-300" />
-      <p className="text-sm font-medium text-gray-700">{titulo}</p>
-      <p className="text-xs text-gray-500 max-w-md mx-auto">{texto}</p>
-      {accion && (
-        <Button type="button" variant="outline" size="sm" onClick={accion.onClick} className="mt-2">
-          {accion.label}
-        </Button>
-      )}
-    </div>
+    <SeccionAjustes titulo="Verificación facial">
+      <VacioAjustes
+        titulo={titulo}
+        descripcion={texto}
+        accion={accion && (
+          <Button type="button" variant="outline" size="sm" onClick={accion.onClick}>{accion.label}</Button>
+        )}
+      />
+    </SeccionAjustes>
   )
 }
 
@@ -849,250 +712,223 @@ const DEFAULTS: ConfiguracionFacial = {
   updated_at: '',
 }
 
+type CamposFacial = Omit<ConfiguracionFacial, 'updated_at' | 'checkin_automatico'>
+
+const REQUISITOS_FOTO: {
+  campo: keyof CamposFacial; titulo: string; descripcion: string
+  min: number; max: number; paso: number; mostrar: (v: number) => string
+}[] = [
+  { campo: 'min_det_score', titulo: 'Certeza de que hay una cara', descripcion: 'Qué tan seguro debe estar el sistema de ver una cara.', min: 0.5, max: 0.99, paso: 0.01, mostrar: (v) => Math.round(v * 100) + '%' },
+  { campo: 'min_blur_score', titulo: 'Nitidez', descripcion: 'Rechaza fotos movidas o borrosas. Más alto, más exigente.', min: 0, max: 150, paso: 5, mostrar: (v) => String(v) },
+  { campo: 'min_brightness', titulo: 'Brillo mínimo', descripcion: 'Rechaza fotos muy oscuras.', min: 0, max: 150, paso: 5, mostrar: (v) => String(v) },
+  { campo: 'max_brightness', titulo: 'Brillo máximo', descripcion: 'Rechaza fotos sobreexpuestas o con flash directo.', min: 150, max: 255, paso: 5, mostrar: (v) => String(v) },
+  { campo: 'max_yaw', titulo: 'Giro de lado', descripcion: 'Cuánto puede girar la cabeza a izquierda o derecha.', min: 5, max: 60, paso: 5, mostrar: (v) => v + '°' },
+  { campo: 'max_pitch', titulo: 'Inclinación arriba o abajo', descripcion: 'Cuánto puede levantar o agachar la cabeza.', min: 5, max: 60, paso: 5, mostrar: (v) => v + '°' },
+  { campo: 'max_roll', titulo: 'Inclinación lateral', descripcion: 'Cuánto puede ladear la cabeza.', min: 5, max: 60, paso: 5, mostrar: (v) => v + '°' },
+  { campo: 'min_face_area_pct', titulo: 'Tamaño de la cara', descripcion: 'Parte mínima de la foto que debe ocupar la cara.', min: 2, max: 40, paso: 1, mostrar: (v) => v + '%' },
+  { campo: 'min_resolution', titulo: 'Resolución mínima', descripcion: 'Lado más corto de la foto, en píxeles.', min: 100, max: 1000, paso: 50, mostrar: (v) => v + ' px' },
+]
+
+function valoresFacial(c: ConfiguracionFacial): CamposFacial {
+  const { updated_at: _u, checkin_automatico: _c, ...campos } = c
+  return campos
+}
+
 function TabBiometria({
-  config, isLoading, isAdmin, isPending, isSuccess, isError, onSave,
+  config, fotoObligatoria, isLoading, isAdmin, isPending, onSave,
 }: {
   config?: ConfiguracionFacial
+  /** Foto de control obligatoria al registrar (vive en la configuración de recepción). */
+  fotoObligatoria: boolean
   isLoading: boolean
   isAdmin: boolean
   isPending: boolean
-  isSuccess: boolean
-  isError: boolean
-  onSave: (data: Partial<ConfiguracionFacial>) => void
+  onSave: (data: Partial<ConfiguracionFacial>, fotoObligatoria: boolean) => void
 }) {
-  const src = config ?? DEFAULTS
-  const [umbralAlta,  setUmbralAlta]  = useState(src.umbral_alta)
-  const [umbralMedia, setUmbralMedia] = useState(src.umbral_media)
-  const [checkinAuto, setCheckinAuto] = useState(src.checkin_automatico)
+  const guardados = valoresFacial(config ?? DEFAULTS)
+  const [valores, setValores] = useState<CamposFacial>(guardados)
+  const [foto, setFoto] = useState(fotoObligatoria)
   const [avanzado, setAvanzado] = useState(false)
-  // calidad avanzada
-  const [minDet,    setMinDet]    = useState(src.min_det_score)
-  const [minBlur,   setMinBlur]   = useState(src.min_blur_score)
-  const [minBright, setMinBright] = useState(src.min_brightness)
-  const [maxBright, setMaxBright] = useState(src.max_brightness)
-  const [maxYaw,    setMaxYaw]    = useState(src.max_yaw)
-  const [maxPitch,  setMaxPitch]  = useState(src.max_pitch)
-  const [maxRoll,   setMaxRoll]   = useState(src.max_roll)
-  const [minArea,   setMinArea]   = useState(src.min_face_area_pct)
-  const [minRes,    setMinRes]    = useState(src.min_resolution)
 
-  useEffect(() => {
-    if (config) {
-      setUmbralAlta(config.umbral_alta)
-      setUmbralMedia(config.umbral_media)
-      setCheckinAuto(config.checkin_automatico)
-      setMinDet(config.min_det_score)
-      setMinBlur(config.min_blur_score)
-      setMinBright(config.min_brightness)
-      setMaxBright(config.max_brightness)
-      setMaxYaw(config.max_yaw)
-      setMaxPitch(config.max_pitch)
-      setMaxRoll(config.max_roll)
-      setMinArea(config.min_face_area_pct)
-      setMinRes(config.min_resolution)
-    }
-  }, [config])
+  useEffect(() => { if (config) setValores(valoresFacial(config)) }, [config])
+  useEffect(() => { setFoto(fotoObligatoria) }, [fotoObligatoria])
 
-  const umbralError = umbralMedia >= umbralAlta
-    ? 'El umbral "Media" debe ser menor al umbral "Alta".'
-    : null
-
-  const isDirty = config && (
-    config.umbral_alta !== umbralAlta ||
-    config.umbral_media !== umbralMedia ||
-    config.checkin_automatico !== checkinAuto ||
-    config.min_det_score !== minDet ||
-    config.min_blur_score !== minBlur ||
-    config.min_brightness !== minBright ||
-    config.max_brightness !== maxBright ||
-    config.max_yaw !== maxYaw ||
-    config.max_pitch !== maxPitch ||
-    config.max_roll !== maxRoll ||
-    config.min_face_area_pct !== minArea ||
-    config.min_resolution !== minRes
+  const poner = (campo: keyof CamposFacial, valor: number | boolean) => setValores((v) => ({ ...v, [campo]: valor }))
+  const hayCambios = !!config && (
+    foto !== fotoObligatoria ||
+    (Object.keys(valores) as (keyof CamposFacial)[]).some((k) => valores[k] !== guardados[k])
   )
-
-  function handleSave() {
-    if (umbralError) return
-    onSave({
-      umbral_alta: umbralAlta,
-      umbral_media: umbralMedia,
-      checkin_automatico: checkinAuto,
-      min_det_score: minDet,
-      min_blur_score: minBlur,
-      min_brightness: minBright,
-      max_brightness: maxBright,
-      max_yaw: maxYaw,
-      max_pitch: maxPitch,
-      max_roll: maxRoll,
-      min_face_area_pct: minArea,
-      min_resolution: minRes,
-    })
-  }
 
   if (isLoading) {
-    return (
-      <div className="rounded-xl border bg-white p-6 space-y-4">
-        {[1, 2, 3].map(i => <div key={i} className="h-10 w-full rounded-lg bg-gray-100 animate-pulse" />)}
-      </div>
-    )
+    return <SeccionAjustes titulo="Foto de control"><FilasCargando filas={3} /></SeccionAjustes>
   }
 
-  const altaPct  = Math.round(umbralAlta * 100)
-  const mediaPct = Math.round(umbralMedia * 100)
+  const altaPct = Math.round(valores.umbral_alta * 100)
+  const mediaPct = Math.round(valores.umbral_media * 100)
 
   return (
-    <div className="space-y-5">
-      {/* Umbrales de confianza */}
-      <Section title="Umbrales de confianza" icon={ShieldCheck} description="Define el puntaje mínimo de similitud facial para cada nivel de verificación.">
-        <div className="space-y-5">
-          {/* Preview visual de zonas */}
-          <div className="relative h-8 rounded-full overflow-hidden border flex">
-            <div className="bg-red-100 flex items-center justify-center text-[10px] font-semibold text-red-500" style={{ width: `${mediaPct}%` }}>
-              {mediaPct > 12 ? 'Baja' : ''}
-            </div>
-            <div className="bg-amber-100 flex items-center justify-center text-[10px] font-semibold text-amber-600" style={{ width: `${altaPct - mediaPct}%` }}>
-              {altaPct - mediaPct > 12 ? 'Media' : ''}
-            </div>
-            <div className="bg-green-100 flex items-center justify-center text-[10px] font-semibold text-green-600 flex-1">
-              Alta
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-5">
-            <UmbralInput
-              label="Confianza alta (≥)"
-              description="Por encima de este valor la identidad se considera verificada."
-              value={umbralAlta}
-              onChange={setUmbralAlta}
-              disabled={!isAdmin}
-              color="green"
-            />
-            <UmbralInput
-              label="Confianza media (≥)"
-              description="Entre este valor y el de alta, la recepcionista debe confirmar manualmente."
-              value={umbralMedia}
-              onChange={setUmbralMedia}
-              disabled={!isAdmin}
-              color="amber"
-            />
-          </div>
-          {umbralError && (
-            <p className="text-xs text-red-500">{umbralError}</p>
-          )}
-        </div>
-      </Section>
-
-      {/* Check-in automático */}
-      <Section title="Check-in automático" description="Si la confianza es alta, el paso se completa sin que recepción presione 'Continuar'.">
-        <div className="flex items-center gap-4">
-          <Switch checked={checkinAuto} onCheckedChange={setCheckinAuto} disabled={!isAdmin} />
-          <p className="text-sm text-gray-600">
-            {checkinAuto ? 'Activado — el paso avanza automáticamente con confianza alta.' : 'Desactivado — recepción confirma siempre manualmente.'}
-          </p>
-        </div>
-      </Section>
-
-      {/* Calidad de foto — sección colapsable */}
-      <div className="rounded-xl border bg-white overflow-hidden">
-        <button
-          type="button"
-          onClick={() => setAvanzado(v => !v)}
-          className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-50 transition-colors text-left"
+    <>
+      <SeccionAjustes titulo="Foto de control" descripcion="La foto con la que se compara al paciente cada vez que llega.">
+        <FilaAjuste
+          icono={Camera}
+          apagada={!foto}
+          titulo="Pedirla siempre al registrar un paciente"
+          descripcion={foto
+            ? 'Al crear un paciente nuevo hay que tomarle la foto; no se puede saltar.'
+            : 'Apagado: se puede tomar después desde la ficha, o se pide en su primera llegada.'}
         >
-          <div>
-            <p className="text-sm font-semibold text-gray-800">Requisitos de la foto de control</p>
-            <p className="text-xs text-gray-400 mt-0.5">Qué tan exigente es el sistema al aceptar una foto nueva.</p>
-          </div>
-          {avanzado ? <ChevronUp className="h-4 w-4 text-gray-400 shrink-0" /> : <ChevronDown className="h-4 w-4 text-gray-400 shrink-0" />}
-        </button>
+          <Switch checked={foto} onCheckedChange={setFoto} disabled={!isAdmin} aria-label="Pedir la foto de control al registrar un paciente" />
+        </FilaAjuste>
+      </SeccionAjustes>
 
-        {avanzado && (
-          <div className="px-6 pb-6 border-t pt-5 space-y-5">
-            <div className="space-y-4">
-              <CalidadBarra label="Certeza de que hay una cara" hint="Qué tan seguro debe estar el sistema de haber detectado una cara en la foto." value={minDet} onChange={setMinDet} min={0.5} max={0.99} step={0.01} display={v => `${Math.round(v * 100)}%`} disabled={!isAdmin} />
-              <CalidadBarra label="Nitidez de la imagen" hint="Rechaza fotos movidas o borrosas. Más alto = más exigente." value={minBlur} onChange={setMinBlur} min={0} max={150} step={5} display={v => `${v}`} disabled={!isAdmin} />
-              <CalidadBarra label="Brillo mínimo" hint="Rechaza fotos muy oscuras." value={minBright} onChange={setMinBright} min={0} max={150} step={5} display={v => `${v}`} disabled={!isAdmin} />
-              <CalidadBarra label="Brillo máximo" hint="Rechaza fotos sobreexpuestas o con flash directo." value={maxBright} onChange={setMaxBright} min={150} max={255} step={5} display={v => `${v}`} disabled={!isAdmin} />
-              <CalidadBarra label="Giro de lado permitido" hint="Cuánto puede estar girada la cabeza hacia la izquierda o derecha. Menos grados = más de frente." value={maxYaw} onChange={setMaxYaw} min={5} max={60} step={5} display={v => `${v}°`} disabled={!isAdmin} />
-              <CalidadBarra label="Inclinación arriba/abajo permitida" hint="Cuánto puede estar levantada o agachada la cabeza." value={maxPitch} onChange={setMaxPitch} min={5} max={60} step={5} display={v => `${v}°`} disabled={!isAdmin} />
-              <CalidadBarra label="Inclinación lateral permitida" hint="Cuánto puede estar inclinada la cabeza de lado, como ladeándola." value={maxRoll} onChange={setMaxRoll} min={5} max={60} step={5} display={v => `${v}°`} disabled={!isAdmin} />
-              <CalidadBarra label="Tamaño mínimo de la cara en la foto" hint="La cara debe ocupar al menos este porcentaje de la imagen. Más alto = el paciente debe acercarse más a la cámara." value={minArea} onChange={setMinArea} min={2} max={40} step={1} display={v => `${v}%`} disabled={!isAdmin} />
-              <CalidadBarra label="Resolución mínima de la foto" hint="Rechaza fotos de muy baja resolución (lado más chico de la imagen, en píxeles)." value={minRes} onChange={setMinRes} min={100} max={1000} step={50} display={v => `${v}px`} disabled={!isAdmin} />
-            </div>
-          </div>
-        )}
-      </div>
+      <SeccionAjustes
+        titulo="Nivel de coincidencia"
+        descripcion="Qué tanto debe parecerse el paciente a su foto. Arrastra las dos marcas."
+      >
+        <div className="space-y-3 px-4 py-4">
+          <RangoNiveles
+            media={valores.umbral_media}
+            alta={valores.umbral_alta}
+            onMedia={(v) => poner('umbral_media', v)}
+            onAlta={(v) => poner('umbral_alta', v)}
+            deshabilitado={!isAdmin}
+          />
+          <ul className="grid gap-1.5 text-[13px] sm:grid-cols-3">
+            <li className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-red-300" /><span><span className="font-medium tabular-nums">Menos de {mediaPct}%</span> · no se verifica</span></li>
+            <li className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-300" /><span><span className="font-medium tabular-nums">{mediaPct}% a {altaPct - 1}%</span> · recepción confirma</span></li>
+            <li className="flex items-center gap-2"><span className="h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-400" /><span><span className="font-medium tabular-nums">{altaPct}% o más</span> · verificada</span></li>
+          </ul>
+        </div>
+      </SeccionAjustes>
 
-      {/* Guardar */}
-      {isAdmin && (
-        <div className="flex items-center gap-3">
-          <Button onClick={handleSave} disabled={!isDirty || isPending || !!umbralError} className="gap-1.5">
-            {isPending ? 'Guardando…' : <><Check className="h-4 w-4" /> Guardar</>}
+      <SeccionAjustes
+        titulo="Requisitos de la foto de control"
+        descripcion="Qué tan exigente es el sistema al aceptar una foto nueva."
+        accion={
+          <Button type="button" variant="ghost" size="sm" onClick={() => setAvanzado((v) => !v)} aria-expanded={avanzado}>
+            {avanzado ? 'Ocultar' : 'Ver requisitos'}
+            {avanzado ? <ChevronUp className="ml-1 h-4 w-4" /> : <ChevronDown className="ml-1 h-4 w-4" />}
           </Button>
-          {isSuccess && !isDirty && <span className="text-sm text-emerald-600 font-medium">Guardado correctamente</span>}
-          {isError && <span className="text-sm text-red-500">Error al guardar. Intenta de nuevo.</span>}
-        </div>
+        }
+      >
+        {avanzado ? REQUISITOS_FOTO.map((r) => (
+          <FilaAjuste key={r.campo} titulo={r.titulo} descripcion={r.descripcion}>
+            <Deslizante etiqueta={r.titulo} valor={valores[r.campo] as number} min={r.min} max={r.max} paso={r.paso}
+              mostrar={r.mostrar} onCambiar={(v) => poner(r.campo, v)} deshabilitado={!isAdmin} />
+          </FilaAjuste>
+        )) : (
+          <FilaAjuste
+            titulo="9 requisitos de calidad"
+            descripcion="Nitidez, brillo, ángulo de la cabeza y tamaño de la cara. Los valores por defecto sirven para la mayoría de clínicas."
+          />
+        )}
+      </SeccionAjustes>
+
+      {isAdmin && (
+        <BarraGuardado
+          visible={hayCambios}
+          guardando={isPending}
+          onGuardar={() => onSave(valores, foto)}
+          onDescartar={() => { setValores(guardados); setFoto(fotoObligatoria) }}
+        />
       )}
-    </div>
+    </>
   )
 }
 
-function UmbralInput({
-  label, description, value, onChange, disabled, color,
-}: {
-  label: string; description: string; value: number; onChange: (v: number) => void; disabled: boolean; color: 'green' | 'amber'
-}) {
-  const pct = Math.round(value * 100)
-  const colorClass = color === 'green' ? 'text-green-600 border-green-300 bg-green-50' : 'text-amber-600 border-amber-300 bg-amber-50'
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs text-gray-500">{label}</Label>
-      <div className="flex items-center gap-2">
-        <input
-          type="range"
-          min={0.5} max={0.99} step={0.01}
-          value={value}
-          onChange={e => onChange(parseFloat(e.target.value))}
-          disabled={disabled}
-          className="flex-1"
-        />
-        <span className={cn('text-sm font-semibold tabular-nums rounded-md border px-2 py-0.5 min-w-[3.5rem] text-center', colorClass)}>
-          {pct}%
-        </span>
-      </div>
-      <p className="text-[11px] text-gray-400 leading-snug">{description}</p>
-    </div>
-  )
-}
+const RANGO_MIN = 0.5
+const RANGO_MAX = 0.99
+/** Distancia mínima entre las dos marcas, para que siempre haya franja de "confirmar". */
+const SEPARACION = 0.05
 
-function CalidadBarra({
-  label, hint, value, onChange, min, max, step, display, disabled,
+/**
+ * Las dos marcas (media y alta) sobre la misma barra de colores: el color de
+ * cada franja empieza justo donde está la marca. La barra se recorta el radio
+ * de la marca en cada lado, que es por donde viaja el centro de la marca nativa.
+ */
+function RangoNiveles({
+  media, alta, onMedia, onAlta, deshabilitado,
 }: {
-  label: string; hint: string; value: number; onChange: (v: number) => void
-  min: number; max: number; step: number; display: (v: number) => string; disabled: boolean
+  media: number; alta: number
+  onMedia: (v: number) => void; onAlta: (v: number) => void
+  deshabilitado: boolean
 }) {
-  const pct = ((value - min) / (max - min)) * 100
+  const pos = (v: number) => ((v - RANGO_MIN) / (RANGO_MAX - RANGO_MIN)) * 100
+  const marca = cn(
+    'pointer-events-none absolute inset-0 h-full w-full appearance-none bg-transparent focus-visible:outline-none disabled:cursor-not-allowed',
+    '[&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:h-5 [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:cursor-grab [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-foreground/70 [&::-webkit-slider-thumb]:bg-white [&::-webkit-slider-thumb]:shadow-[0_1px_4px_rgba(0,0,0,0.25)]',
+    '[&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:cursor-grab [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-foreground/70 [&::-moz-range-thumb]:bg-white',
+    'focus-visible:[&::-webkit-slider-thumb]:ring-4 focus-visible:[&::-webkit-slider-thumb]:ring-primary/30',
+  )
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium text-gray-700">{label}</p>
-        <span className="text-sm font-semibold text-rose-600 tabular-nums min-w-[3rem] text-right">{display(value)}</span>
-      </div>
-      <div className="relative">
-        {/* Barra visual */}
-        <div className="h-2 rounded-full bg-gray-100 overflow-hidden pointer-events-none">
-          <div className="h-full bg-rose-400 rounded-full transition-all" style={{ width: `${pct}%` }} />
+    <div>
+      <div className="relative h-6">
+        <div className="absolute inset-x-2.5 top-1/2 flex h-2.5 -translate-y-1/2 overflow-hidden rounded-full" aria-hidden>
+          <div className="bg-red-300" style={{ width: pos(media) + '%' }} />
+          <div className="bg-amber-300" style={{ width: (pos(alta) - pos(media)) + '%' }} />
+          <div className="flex-1 bg-emerald-400" />
         </div>
-        {/* Slider encima, transparente */}
         <input
-          type="range" min={min} max={max} step={step} value={value}
-          onChange={e => onChange(parseFloat(e.target.value))}
-          disabled={disabled}
-          className="absolute inset-0 w-full opacity-0 h-2 cursor-pointer disabled:cursor-not-allowed"
+          type="range" min={RANGO_MIN} max={RANGO_MAX} step={0.01} value={media}
+          onChange={(e) => onMedia(Math.min(parseFloat(e.target.value), +(alta - SEPARACION).toFixed(2)))}
+          disabled={deshabilitado}
+          aria-label="Desde aquí recepción confirma"
+          aria-valuetext={Math.round(media * 100) + '%'}
+          className={marca}
+        />
+        <input
+          type="range" min={RANGO_MIN} max={RANGO_MAX} step={0.01} value={alta}
+          onChange={(e) => onAlta(Math.max(parseFloat(e.target.value), +(media + SEPARACION).toFixed(2)))}
+          disabled={deshabilitado}
+          aria-label="Desde aquí se da por verificada"
+          aria-valuetext={Math.round(alta * 100) + '%'}
+          className={marca}
         />
       </div>
-      <p className="text-[11px] text-gray-400 leading-snug">{hint}</p>
+      <div className="mt-1 flex justify-between px-0.5 text-xs tabular-nums text-muted-foreground" aria-hidden>
+        <span>{Math.round(RANGO_MIN * 100)}%</span>
+        <span>{Math.round(RANGO_MAX * 100)}%</span>
+      </div>
     </div>
+  )
+}
+
+/** Control deslizante con su valor a la derecha, para el lado derecho de una FilaAjuste. */
+function Deslizante({
+  etiqueta, valor, min, max, paso, mostrar, onCambiar, deshabilitado,
+}: {
+  etiqueta: string; valor: number; min: number; max: number; paso: number
+  mostrar: (v: number) => string; onCambiar: (v: number) => void; deshabilitado: boolean
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <input
+        type="range" min={min} max={max} step={paso} value={valor}
+        onChange={(e) => onCambiar(parseFloat(e.target.value))}
+        disabled={deshabilitado}
+        aria-label={etiqueta}
+        className="w-28 accent-primary disabled:cursor-not-allowed sm:w-44"
+      />
+      <span className="w-12 text-right text-sm font-medium tabular-nums">{mostrar(valor)}</span>
+    </div>
+  )
+}
+
+/** Filas grises mientras cargan los datos de una SeccionAjustes. */
+function FilasCargando({ filas }: { filas: number }) {
+  return (
+    <>
+      {Array.from({ length: filas }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-64 max-w-full animate-pulse rounded bg-muted" />
+          </div>
+          <div className="h-6 w-10 animate-pulse rounded-full bg-muted" />
+        </div>
+      ))}
+    </>
   )
 }
 

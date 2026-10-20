@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2 } from 'lucide-react'
+import { Loader2, UserCheck } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
 import { clinicasApi } from '@/lib/api/clinicas'
 import type { ProcedimientosSinProfesional } from '@/lib/api/clinicas'
@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from '@/components/ui/dialog'
-import { toast } from '@/hooks/use-toast'
+import { avisarGuardado, FilaAjuste } from './ajustes'
 
 const MAX_NOMBRES = 6
 
@@ -39,10 +39,9 @@ export function FiltroProfesionalesPorProcedimiento({ clinicaId, activo, puedeEd
     onSuccess: async (_, { valor, asignar }) => {
       setResumen(null)
       setError(null)
-      toast.success(
-        valor ? 'Filtro por procedimiento activado' : 'Filtro por procedimiento desactivado',
-        asignar ? 'Los procedimientos sin profesional quedaron asignados a todos.' : undefined,
-      )
+      avisarGuardado(undefined, asignar
+        ? 'Guardado. Los procedimientos sin profesional quedaron asignados a todos.'
+        : 'Guardado')
       qc.invalidateQueries({ queryKey: ['clinica', clinicaId] })
       qc.invalidateQueries({ queryKey: ['mi-clinica', clinicaId] })
       qc.invalidateQueries({ queryKey: ['setup-checklist'] })
@@ -70,28 +69,24 @@ export function FiltroProfesionalesPorProcedimiento({ clinicaId, activo, puedeEd
   const sinAsignar = resumen?.procedimientos ?? []
 
   return (
-    <div className="space-y-3">
-      <div className="flex items-start gap-4">
+    <>
+      <FilaAjuste
+        icono={UserCheck}
+        apagada={!activo}
+        titulo="Solo profesionales que hacen el procedimiento"
+        descripcion={activo
+          ? 'Al agendar se ofrecen solo los profesionales asignados al procedimiento elegido.'
+          : 'Apagado: al agendar se ofrece cualquier profesional de la sede.'}
+        contenido={error && !resumen ? <p className="text-sm text-destructive">{error}</p> : undefined}
+      >
+        {ocupado && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
         <Switch
           checked={activo}
           disabled={!puedeEditar || ocupado}
           onCheckedChange={(valor) => (valor ? revisar.mutate() : actualizar.mutate({ valor: false }))}
-          aria-label="Filtrar profesionales por procedimiento"
+          aria-label="Solo profesionales que hacen el procedimiento"
         />
-        <div>
-          <p className="text-sm font-medium text-gray-700">
-            {activo ? 'Solo los profesionales que realizan el procedimiento' : 'Cualquier profesional de la sede'}
-          </p>
-          <p className="mt-0.5 text-xs text-gray-400">
-            {activo
-              ? 'Al agendar se elige primero la sede y el procedimiento, y luego el profesional. Un procedimiento sin profesionales asignados no se puede agendar.'
-              : 'Cualquier profesional de la sede puede atender cualquier procedimiento.'}
-          </p>
-        </div>
-        {ocupado && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground mt-0.5" />}
-      </div>
-
-      {error && !resumen && <p className="text-sm text-red-500">{error}</p>}
+      </FilaAjuste>
 
       <Dialog open={resumen !== null} onOpenChange={(abierto) => { if (!abierto && !actualizar.isPending) setResumen(null) }}>
         <DialogContent className="max-w-md">
@@ -142,6 +137,6 @@ export function FiltroProfesionalesPorProcedimiento({ clinicaId, activo, puedeEd
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   )
 }

@@ -47,10 +47,16 @@ export interface GoogleLoginRequest {
   credential: string // ID token de Google Identity Services
 }
 
+/** El token de renovación ya no viene en el cuerpo: va en una cookie HttpOnly. */
 export interface LoginResponse {
   access: string
-  refresh: string
   user: AuthUser
+}
+
+export interface SuplantacionResponse {
+  access: string
+  user: AuthUser
+  expira_en: string
 }
 
 export interface TokenRefreshResponse {

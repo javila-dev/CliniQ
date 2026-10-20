@@ -81,6 +81,12 @@ export interface PlantillaOrden {
   contenido: string
   permite_edicion_profesional: boolean
   activa: boolean
+  /** Falso: personal, solo la ve quien la creó. */
+  compartida: boolean
+  es_mia: boolean
+  created_by_nombre?: string | null
+  /** Solo en /sugeridas/: veces que se usó en el procedimiento de la cita. */
+  usos_procedimiento?: number
 }
 
 export interface OrdenMedica {
@@ -90,6 +96,8 @@ export interface OrdenMedica {
   nota?: string | null        // H26: FK a NotaClinica
   plantilla_origen: string | null
   plantilla_nombre: string | null
+  /** Título del PDF, fijado al emitir. */
+  titulo: string
   contenido: string
   fue_editada: boolean
   profesional_nombre: string

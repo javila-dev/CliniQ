@@ -36,10 +36,11 @@ interface Props {
   mostrarProfesional?: boolean
   /** Botón del estado vacío; sin él (p. ej. sin permiso de agendar) no se muestra. */
   accionVacia?: { href: string; label: string; crear?: boolean }
+  className?: string
 }
 
 /** Citas de hoy en poco espacio: cómo va el día y lo que sigue ahora. */
-export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accionVacia }: Props) {
+export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accionVacia, className }: Props) {
   const ahora = Date.now()
   const activas = (citas ?? []).filter((c) => c.estado !== 'cancelada')
   const conteo = (estado: EstadoCita) => activas.filter((c) => c.estado === estado).length
@@ -61,8 +62,10 @@ export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accio
     atrasadas.length > 0 && `${atrasadas.length} sin cerrar`,
   ].filter(Boolean)
 
+  // Columna flexible: si la vecina de fila es más alta, el espacio queda bajo la
+  // lista y el pie sigue abajo, en vez de un hueco debajo de la tarjeta.
   return (
-    <div className="bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+    <div className={cn('flex flex-col bg-white rounded-xl border shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md', className)}>
       <div className="flex items-center justify-between px-5 py-4 border-b">
         <div className="flex items-center gap-2">
           <CalendarDays className="h-4 w-4 text-primary" />
@@ -79,7 +82,7 @@ export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accio
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-10 w-full rounded-lg" />)}
         </div>
       ) : total === 0 ? (
-        <div className="flex flex-col items-center py-10 text-center px-4">
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center px-4">
           <CalendarDays className="h-10 w-10 text-muted-foreground/20 mb-3" />
           <p className="text-sm text-muted-foreground font-medium">Sin citas para hoy</p>
           {accionVacia && (
@@ -122,7 +125,7 @@ export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accio
           </div>
 
           {/* Ahora y lo que sigue */}
-          <div className="border-t divide-y">
+          <div className="flex-1 border-t divide-y">
             {filas.length === 0 ? (
               <p className="px-5 py-4 text-sm text-muted-foreground">
                 {atrasadas.length > 0 ? 'No quedan citas por venir, pero hay citas sin cerrar.' : 'No quedan citas por hoy.'}

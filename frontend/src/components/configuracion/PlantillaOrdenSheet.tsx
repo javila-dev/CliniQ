@@ -14,11 +14,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import type { PlantillaOrden } from '@/types/historia'
+import { toast } from '@/hooks/use-toast'
+import { mensajeDeError } from '@/lib/errores'
 
 const schema = z.object({
   nombre: z.string().min(1, 'El nombre es requerido'),
   contenido: z.string().min(10, 'El contenido debe tener al menos 10 caracteres'),
   permite_edicion_profesional: z.boolean(),
+  compartida: z.boolean(),
 })
 
 type FormValues = z.infer<typeof schema>
@@ -35,14 +38,14 @@ export function PlantillaOrdenSheet({ open, onClose, plantilla }: Props) {
 
   const { register, handleSubmit, reset, watch, setValue, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(schema),
-    defaultValues: { nombre: '', contenido: '', permite_edicion_profesional: true },
+    defaultValues: { nombre: '', contenido: '', permite_edicion_profesional: true, compartida: true },
   })
 
   useEffect(() => {
     if (open) {
       reset(plantilla
-        ? { nombre: plantilla.nombre, contenido: plantilla.contenido, permite_edicion_profesional: plantilla.permite_edicion_profesional }
-        : { nombre: '', contenido: '', permite_edicion_profesional: true }
+        ? { nombre: plantilla.nombre, contenido: plantilla.contenido, permite_edicion_profesional: plantilla.permite_edicion_profesional, compartida: plantilla.compartida }
+        : { nombre: '', contenido: '', permite_edicion_profesional: true, compartida: true }
       )
     }
   }, [open, plantilla, reset])
@@ -56,9 +59,11 @@ export function PlantillaOrdenSheet({ open, onClose, plantilla }: Props) {
       queryClient.invalidateQueries({ queryKey: ['plantillas-ordenes'] })
       onClose()
     },
+    onError: (err) => toast.error('No se pudo guardar la plantilla', mensajeDeError(err)),
   })
 
   const permiteEdicion = watch('permite_edicion_profesional')
+  const compartida = watch('compartida')
 
   return (
     <Sheet open={open} onOpenChange={(o) => !o && onClose()}>
@@ -83,9 +88,10 @@ export function PlantillaOrdenSheet({ open, onClose, plantilla }: Props) {
               id="contenido"
               rows={12}
               className="resize-none text-sm h-full min-h-[200px]"
-              placeholder="Escriba aquí el contenido de la orden médica. Puede usar variables como {{nombre_paciente}}, {{fecha}}, etc."
+              placeholder="Escribe el texto de la orden médica."
               {...register('contenido')}
             />
+
             {errors.contenido && <p className="text-xs text-destructive">{errors.contenido.message}</p>}
           </div>
 
@@ -98,7 +104,26 @@ export function PlantillaOrdenSheet({ open, onClose, plantilla }: Props) {
             </div>
             <Switch
               checked={permiteEdicion}
-              onCheckedChange={(v) => setValue('permite_edicion_profesional', v)}
+              onCheckedChange={(v) => setValue('permite_edicion_profesional', v, { shouldDirty: true })}
+              aria-label="Permite edición por el profesional"
+            />
+          </div>
+
+          <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+            <div>
+              <p className="text-sm font-medium">Compartida con toda la clínica</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {compartida
+                  ? 'Todos los profesionales la ven al emitir una orden.'
+                  : plantilla?.created_by_nombre
+                    ? `Personal: solo la ve ${plantilla.created_by_nombre}.`
+                    : 'Personal: solo la ve quien la creó.'}
+              </p>
+            </div>
+            <Switch
+              checked={compartida}
+              onCheckedChange={(v) => setValue('compartida', v, { shouldDirty: true })}
+              aria-label="Compartida con toda la clínica"
             />
           </div>
         </form>

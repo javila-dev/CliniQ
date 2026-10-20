@@ -3,6 +3,18 @@
 import { create } from 'zustand'
 import type { AuthUser } from '@/types/auth'
 import { authApi } from '@/lib/api/auth'
+import {
+  avisarOtrasPestanas,
+  getAccessToken,
+  limpiarTokensViejos,
+  renovarSesion,
+  setAccessToken,
+  setSuplantando,
+} from '@/lib/api/sesion'
+
+// Los tokens ya no se guardan en localStorage (ver lib/api/sesion.ts): el de
+// acceso vive en memoria y el de renovación en una cookie HttpOnly. Aquí solo
+// queda la clínica, que no es secreta y viaja en la cabecera X-Clinica-Id.
 
 interface AuthState {
   user: AuthUser | null
@@ -15,12 +27,23 @@ interface AuthState {
 
   login: (email: string, password: string) => Promise<void>
   loginWithGoogle: (credential: string) => Promise<void>
+  /** Sesión ya abierta por el backend (p. ej. al activar una invitación). */
+  iniciarConToken: (access: string, clinicaId?: string | null) => Promise<void>
   logout: () => Promise<void>
+  /** Otra pestaña cerró la sesión: se limpia esta sin llamar al backend. */
+  cerrarLocal: () => void
   loadUser: () => Promise<void>
   setUser: (user: AuthUser) => void
   impersonate: (userId: string) => Promise<void>
   stopImpersonating: () => Promise<void>
 }
+
+function guardarClinica(clinicaId: string | null | undefined) {
+  if (clinicaId) localStorage.setItem('clinica_id', clinicaId)
+  else localStorage.removeItem('clinica_id')
+}
+
+const statusDe = (err: unknown) => (err as { response?: { status?: number } })?.response?.status
 
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
@@ -34,10 +57,11 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true })
     try {
       const data = await authApi.login({ email, password })
-      localStorage.setItem('access_token', data.access)
-      localStorage.setItem('refresh_token', data.refresh)
-      if (data.user.clinica_id) localStorage.setItem('clinica_id', data.user.clinica_id)
+      setAccessToken(data.access)
+      limpiarTokensViejos()
+      guardarClinica(data.user.clinica_id)
       set({ user: data.user, isAuthenticated: true, hasCheckedAuth: true })
+      avisarOtrasPestanas('login')
     } finally {
       set({ isLoading: false })
     }
@@ -47,13 +71,22 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ isLoading: true })
     try {
       const data = await authApi.loginWithGoogle(credential)
-      localStorage.setItem('access_token', data.access)
-      localStorage.setItem('refresh_token', data.refresh)
-      if (data.user.clinica_id) localStorage.setItem('clinica_id', data.user.clinica_id)
+      setAccessToken(data.access)
+      limpiarTokensViejos()
+      guardarClinica(data.user.clinica_id)
       set({ user: data.user, isAuthenticated: true, hasCheckedAuth: true })
+      avisarOtrasPestanas('login')
     } finally {
       set({ isLoading: false })
     }
+  },
+
+  iniciarConToken: async (access, clinicaId) => {
+    setAccessToken(access)
+    limpiarTokensViejos()
+    guardarClinica(clinicaId)
+    await get().loadUser()
+    avisarOtrasPestanas('login')
   },
 
   logout: async () => {
@@ -62,36 +95,44 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     } catch {
       // ignore — we logout locally regardless
     } finally {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-      localStorage.removeItem('clinica_id')
-      localStorage.removeItem('original_access_token')
-      localStorage.removeItem('original_refresh_token')
-      localStorage.removeItem('original_clinica_id')
-      set({ user: null, isAuthenticated: false, isImpersonating: false, hasCheckedAuth: true })
+      get().cerrarLocal()
+      avisarOtrasPestanas('logout')
     }
   },
 
+  cerrarLocal: () => {
+    setAccessToken(null)
+    setSuplantando(false)
+    limpiarTokensViejos()
+    localStorage.removeItem('clinica_id')
+    set({ user: null, isAuthenticated: false, isImpersonating: false, hasCheckedAuth: true })
+  },
+
   loadUser: async () => {
-    const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null
-    if (!token) {
-      set({ isAuthenticated: false, isLoading: false, hasCheckedAuth: true })
-      return
-    }
     set({ isLoading: true, errorConexion: false })
     try {
+      // Al recargar la página el token de acceso no está (vivía en memoria): se
+      // pide otro con la cookie. Sin cookie válida, no hay sesión.
+      if (!getAccessToken()) {
+        try {
+          await renovarSesion()
+        } catch (err) {
+          if (statusDe(err) === 401) {
+            set({ user: null, isAuthenticated: false, hasCheckedAuth: true })
+            return
+          }
+          throw err
+        }
+      }
       const user = await authApi.me()
-      if (user.clinica_id) localStorage.setItem('clinica_id', user.clinica_id)
-      const isImpersonating = !!localStorage.getItem('original_access_token')
-      set({ user, isAuthenticated: true, isImpersonating, hasCheckedAuth: true })
+      guardarClinica(user.clinica_id)
+      set({ user, isAuthenticated: true, hasCheckedAuth: true })
     } catch (err) {
       // Solo una sesión inválida cierra la sesión. Sin red o con el servidor caído
-      // se conservan los tokens: antes recargar con mala conexión te sacaba.
-      const status = (err as { response?: { status?: number } })?.response?.status
+      // se conserva: antes recargar con mala conexión te sacaba.
+      const status = statusDe(err)
       if (status === 401 || status === 403) {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('clinica_id')
+        setAccessToken(null)
         set({ user: null, isAuthenticated: false, hasCheckedAuth: true })
       } else {
         set({ user: null, isAuthenticated: false, hasCheckedAuth: true, errorConexion: true })
@@ -103,47 +144,27 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   setUser: (user) => set({ user }),
 
+  // El superadmin entra con un token corto de la otra persona, solo en memoria.
+  // Su propia sesión sigue en la cookie: al salir (o si recarga la página)
+  // vuelve a ella. Antes sus tokens quedaban guardados en localStorage.
   impersonate: async (userId) => {
     const data = await authApi.impersonate(userId)
-
-    // Preserve current session tokens before replacing them
-    const currentAccess = localStorage.getItem('access_token')
-    const currentRefresh = localStorage.getItem('refresh_token')
-    const currentClinica = localStorage.getItem('clinica_id')
-    if (currentAccess)  localStorage.setItem('original_access_token', currentAccess)
-    if (currentRefresh) localStorage.setItem('original_refresh_token', currentRefresh)
-    if (currentClinica) localStorage.setItem('original_clinica_id', currentClinica)
-    else                localStorage.removeItem('original_clinica_id')
-
-    localStorage.setItem('access_token', data.access)
-    localStorage.setItem('refresh_token', data.refresh)
-    if (data.user.clinica_id) localStorage.setItem('clinica_id', data.user.clinica_id)
-    else                       localStorage.removeItem('clinica_id')
-
+    setAccessToken(data.access)
+    setSuplantando(true)
+    guardarClinica(data.user.clinica_id)
     set({ user: data.user, isAuthenticated: true, isImpersonating: true, hasCheckedAuth: true })
   },
 
   stopImpersonating: async () => {
-    const originalAccess  = localStorage.getItem('original_access_token')
-    const originalRefresh = localStorage.getItem('original_refresh_token')
-    const originalClinica = localStorage.getItem('original_clinica_id')
-
-    if (originalAccess)  localStorage.setItem('access_token', originalAccess)
-    if (originalRefresh) localStorage.setItem('refresh_token', originalRefresh)
-    if (originalClinica) localStorage.setItem('clinica_id', originalClinica)
-    else                 localStorage.removeItem('clinica_id')
-
-    localStorage.removeItem('original_access_token')
-    localStorage.removeItem('original_refresh_token')
-    localStorage.removeItem('original_clinica_id')
-
-    set({ isLoading: true })
     try {
-      const user = await authApi.me()
-      if (user.clinica_id) localStorage.setItem('clinica_id', user.clinica_id)
-      set({ user, isAuthenticated: true, isImpersonating: false, hasCheckedAuth: true })
-    } finally {
-      set({ isLoading: false })
+      await authApi.terminarSuplantacion()
+    } catch {
+      // Ya vencida o revocada: igual se vuelve a la sesión propia.
     }
+    setSuplantando(false)
+    setAccessToken(null)
+    localStorage.removeItem('clinica_id')
+    set({ isImpersonating: false })
+    await get().loadUser()
   },
 }))

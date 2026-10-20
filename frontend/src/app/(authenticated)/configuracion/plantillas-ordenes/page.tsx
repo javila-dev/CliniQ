@@ -2,14 +2,19 @@
 
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, Pencil, Trash2, FileText, CheckCircle2, XCircle } from 'lucide-react'
+import { FileText, MoreHorizontal, Pencil, Plus, Power, PowerOff } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { LoadingState } from '@/components/shared/LoadingState'
 import { PlantillaOrdenSheet } from '@/components/configuracion/PlantillaOrdenSheet'
+import {
+  avisarGuardado, EtiquetaAjuste, FilaAjuste, SeccionAjustes, VacioAjustes,
+} from '@/components/configuracion/ajustes'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
+import { mensajeDeError } from '@/lib/errores'
 import type { PlantillaOrden } from '@/types/historia'
 
 export default function PlantillasOrdenesPage() {
@@ -23,11 +28,22 @@ export default function PlantillasOrdenesPage() {
     queryFn: () => historiaClinicaApi.plantillasOrdenes.listAll(),
   })
 
-  const { mutate: desactivar } = useMutation({
-    mutationFn: (id: string) => historiaClinicaApi.plantillasOrdenes.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['plantillas-ordenes'] }),
+  // Activar o desactivar se guarda al tocarlo y se puede deshacer desde el aviso.
+  const cambiarEstado = useMutation({
+    mutationFn: async ({ id, activa }: { id: string; activa: boolean; conDeshacer?: boolean }): Promise<void> => {
+      if (activa) await historiaClinicaApi.plantillasOrdenes.patch(id, { activa: true })
+      else await historiaClinicaApi.plantillasOrdenes.delete(id)
+    },
+    onSuccess: (_, { id, activa, conDeshacer = true }) => {
+      queryClient.invalidateQueries({ queryKey: ['plantillas-ordenes'] })
+      avisarGuardado(
+        conDeshacer ? () => cambiarEstado.mutate({ id, activa: !activa, conDeshacer: false }) : undefined,
+        activa ? 'Plantilla activada' : 'Plantilla desactivada',
+      )
+    },
   })
 
+  const inactivas = plantillas.filter((p) => !p.activa).length
   const visibles = mostrarInactivas ? plantillas : plantillas.filter((p) => p.activa)
 
   function abrirEdicion(p: PlantillaOrden) {
@@ -40,102 +56,103 @@ export default function PlantillasOrdenesPage() {
     setSheetOpen(true)
   }
 
+  const botonNueva = (
+    <Button size="sm" onClick={abrirNueva}>
+      <Plus className="mr-1.5 h-4 w-4" />Nueva plantilla
+    </Button>
+  )
+
   return (
     <div className="space-y-6">
       <PageHeader
         helpSlug="ordenes-medicas-y-examenes"
         title="Plantillas de órdenes"
-        description="Crea y gestiona las plantillas que los profesionales usarán para generar órdenes médicas."
-        action={
-          <Button size="sm" onClick={abrirNueva}>
-            <Plus className="h-4 w-4 mr-1.5" />Nueva plantilla
-          </Button>
-        }
+        description="Las compartidas las ven todos los profesionales; las personales, solo quien las creó. Los profesionales también guardan sus órdenes como plantilla al atender."
       />
 
-      {isLoading ? (
-        <LoadingState rows={4} />
-      ) : visibles.length === 0 ? (
-        <div className="rounded-xl border bg-white p-10 text-center space-y-3">
-          <FileText className="h-8 w-8 text-muted-foreground/40 mx-auto" />
-          <p className="text-sm text-muted-foreground">
-            {mostrarInactivas ? 'No hay plantillas registradas.' : 'No hay plantillas activas.'}
-          </p>
-          <Button size="sm" onClick={abrirNueva}>
-            <Plus className="h-3.5 w-3.5 mr-1.5" />Crear primera plantilla
-          </Button>
-        </div>
-      ) : (
-        <div className="rounded-xl border bg-white divide-y overflow-hidden">
-          {/* Encabezado tabla */}
-          <div className="hidden md:grid grid-cols-[1fr_80px_100px_80px] gap-4 px-5 py-2.5 bg-gray-50 text-xs font-medium text-muted-foreground">
-            <span>Nombre</span>
-            <span className="text-center">Editable</span>
-            <span className="text-center">Estado</span>
-            <span />
-          </div>
-
-          {visibles.map((p) => (
-            <div key={p.id} className="grid grid-cols-1 md:grid-cols-[1fr_80px_100px_80px] gap-3 items-center px-5 py-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium truncate">{p.nombre}</p>
-                <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{p.contenido}</p>
-              </div>
-
-              <div className="flex justify-start md:justify-center">
-                {p.permite_edicion_profesional ? (
-                  <span className="flex items-center gap-1 text-xs text-emerald-600">
-                    <CheckCircle2 className="h-3.5 w-3.5" />Sí
-                  </span>
-                ) : (
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <XCircle className="h-3.5 w-3.5" />No
+      <div className="space-y-7">
+        <SeccionAjustes
+          titulo="Plantillas"
+          descripcion="Se eligen al generar una orden médica en la atención."
+          accion={botonNueva}
+        >
+          {isLoading ? (
+            <FilasCargando filas={3} />
+          ) : visibles.length === 0 ? (
+            <VacioAjustes
+              titulo={inactivas > 0 && !mostrarInactivas ? 'No hay plantillas activas' : 'Aún no hay plantillas'}
+              descripcion="Crea una para que el profesional no tenga que escribir cada orden desde cero."
+              accion={botonNueva}
+            />
+          ) : (
+            visibles.map((p) => (
+              <FilaAjuste
+                key={p.id}
+                icono={FileText}
+                apagada={!p.activa}
+                titulo={p.nombre}
+                descripcion={<span className="block truncate">{p.contenido}</span>}
+                extra={(!p.activa || !p.compartida) ? (
+                  <>
+                    {!p.activa && <EtiquetaAjuste>Inactiva</EtiquetaAjuste>}
+                    {!p.compartida && (
+                      <EtiquetaAjuste tono="aviso">
+                        {p.created_by_nombre ? 'Personal de ' + p.created_by_nombre : 'Personal'}
+                      </EtiquetaAjuste>
+                    )}
+                  </>
+                ) : undefined}
+              >
+                {p.permite_edicion_profesional && (
+                  <span className="hidden sm:inline-flex">
+                    <EtiquetaAjuste tono="marca">Editable al usarla</EtiquetaAjuste>
                   </span>
                 )}
-              </div>
-
-              <div className="flex justify-start md:justify-center">
-                <Badge variant={p.activa ? 'success' : 'secondary'}>
-                  {p.activa ? 'Activa' : 'Inactiva'}
-                </Badge>
-              </div>
-
-              <div className="flex justify-end gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7 text-muted-foreground hover:text-foreground"
-                  title="Editar"
-                  onClick={() => abrirEdicion(p)}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                {p.activa && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive hover:bg-destructive/5"
-                    title="Desactivar"
-                    onClick={() => {
-                      if (confirm(`¿Desactivar la plantilla "${p.nombre}"?`)) desactivar(p.id)
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-              </div>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground"
+                      aria-label={`Opciones de ${p.nombre}`}
+                    >
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => abrirEdicion(p)}>
+                      <Pencil className="mr-2 h-3.5 w-3.5" />Editar
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={cambiarEstado.isPending}
+                      onClick={() => cambiarEstado.mutate({ id: p.id, activa: !p.activa })}
+                    >
+                      {p.activa
+                        ? <><PowerOff className="mr-2 h-3.5 w-3.5" />Desactivar</>
+                        : <><Power className="mr-2 h-3.5 w-3.5" />Activar</>}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </FilaAjuste>
+            ))
+          )}
+          {!isLoading && (inactivas > 0 || mostrarInactivas) && (
+            <div className="px-4 py-2.5">
+              <button
+                type="button"
+                className="text-[13px] font-medium text-primary underline-offset-2 hover:underline"
+                onClick={() => setMostrarInactivas((v) => !v)}
+              >
+                {mostrarInactivas ? 'Ocultar inactivas' : `Mostrar inactivas (${inactivas})`}
+              </button>
             </div>
-          ))}
-        </div>
-      )}
+          )}
+        </SeccionAjustes>
 
-      {/* Toggle inactivas */}
-      <button
-        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-        onClick={() => setMostrarInactivas((v) => !v)}
-      >
-        {mostrarInactivas ? 'Ocultar inactivas' : 'Mostrar plantillas inactivas'}
-      </button>
+        {cambiarEstado.isError && (
+          <p className="-mt-4 text-sm text-destructive">
+            {mensajeDeError(cambiarEstado.error, 'No se pudo guardar el cambio. Intenta de nuevo.')}
+          </p>
+        )}
+      </div>
 
       <PlantillaOrdenSheet
         open={sheetOpen}
@@ -143,5 +160,23 @@ export default function PlantillasOrdenesPage() {
         plantilla={seleccionada}
       />
     </div>
+  )
+}
+
+/** Filas grises mientras carga la lista. */
+function FilasCargando({ filas }: { filas: number }) {
+  return (
+    <>
+      {Array.from({ length: filas }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-64 max-w-full animate-pulse rounded bg-muted" />
+          </div>
+          <div className="h-8 w-8 animate-pulse rounded bg-muted" />
+        </div>
+      ))}
+    </>
   )
 }

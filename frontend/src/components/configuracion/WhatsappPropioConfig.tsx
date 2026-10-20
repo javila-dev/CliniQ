@@ -3,16 +3,22 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  AlertTriangle, ArrowRight, Building2, CalendarClock, Check, CheckCircle2, ChevronRight, CreditCard, ExternalLink, Info, Loader2,
-  MapPin, MessageCircle, Plus, RefreshCw, ShieldCheck, Smartphone, Sparkles, Star, X,
+  AlertTriangle, ArrowRight, Building2, CalendarClock, Check, CheckCircle2, ChevronRight, CreditCard, ExternalLink, Loader2,
+  MapPin, MessageCircle, MoreHorizontal, Plus, RefreshCw, Smartphone, Star, X,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { whatsappPropioApi } from '@/lib/api/whatsappPropio'
 import { EmbeddedSignupCancelado, useEmbeddedSignup } from '@/hooks/useEmbeddedSignup'
 import { cn } from '@/lib/utils'
+import {
+  avisarGuardado, EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes,
+} from './ajustes'
 import type {
   ConectarWhatsappRequest, ConfigurarWhatsappPropioRequest, NumeroWhatsapp, SedeWhatsapp, WhatsappPropioEstado,
 } from '@/types/whatsappPropio'
@@ -70,17 +76,17 @@ function numeroEfectivo(sede: SedeWhatsapp | null, estado: WhatsappPropioEstado)
 }
 
 function EstadoBadge({ numero }: { numero: NumeroWhatsapp }) {
-  const conf = numero.bloqueo === 'limite' ? { texto: 'En pausa hoy', clase: 'bg-amber-50 text-amber-700' } : {
-    activo: { texto: 'Activo', clase: 'bg-emerald-50 text-emerald-700' },
-    conectado: { texto: 'En aprobación', clase: 'bg-amber-50 text-amber-700' },
-    plantillas_pendientes: { texto: 'En aprobación', clase: 'bg-amber-50 text-amber-700' },
-    error: { texto: 'Requiere acción', clase: 'border border-red-200 text-red-700' },
-  }[numero.estado]
-  return (
-    <span className={cn('shrink-0 whitespace-nowrap rounded-full px-2.5 py-0.5 text-[11.5px] font-medium', conf.clase)}>
-      {conf.texto}
-    </span>
-  )
+  if (numero.bloqueo === 'limite') return <EtiquetaAjuste tono="aviso">En pausa hoy</EtiquetaAjuste>
+  if (numero.estado === 'activo') return <EtiquetaAjuste tono="activo">Activo</EtiquetaAjuste>
+  if (numero.estado === 'error') {
+    // EtiquetaAjuste no tiene tono de error: misma forma, en rojo.
+    return (
+      <span className="inline-flex items-center whitespace-nowrap rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
+        Requiere acción
+      </span>
+    )
+  }
+  return <EtiquetaAjuste tono="aviso">En aprobación</EtiquetaAjuste>
 }
 
 function useConfigurar() {
@@ -125,28 +131,20 @@ function NumeroEnUso({ estado }: { estado: WhatsappPropioEstado }) {
   }
 
   return (
-    <section className={cn(
-      'flex items-center gap-4 rounded-xl border p-4',
-      propio ? 'border-emerald-200 bg-emerald-50/60' : 'bg-white',
-    )}>
-      <div className={cn(
-        'flex h-10 w-10 shrink-0 items-center justify-center rounded-full',
-        propio ? 'bg-emerald-100 text-emerald-700' : 'bg-muted text-muted-foreground',
-      )}>
-        {propio ? <Building2 className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}
-      </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground">Tus pacientes reciben los mensajes</p>
-        <p className="text-[15px] font-semibold">{titulo}</p>
-        <p className="mt-0.5 text-[12.5px] leading-relaxed text-muted-foreground">{detalle}</p>
-      </div>
-      <span className={cn(
-        'shrink-0 rounded-full px-2.5 py-0.5 text-[11.5px] font-medium',
-        propio ? 'bg-emerald-100 text-emerald-800' : pendientes ? 'bg-amber-50 text-amber-700' : 'bg-muted text-muted-foreground',
-      )}>
-        {propio ? 'Número propio' : pendientes ? 'En aprobación' : 'Número de CliniQ'}
-      </span>
-    </section>
+    <SeccionAjustes titulo="Número en uso" descripcion="Desde dónde reciben hoy tus pacientes los mensajes.">
+      <FilaAjuste
+        icono={propio ? Building2 : MessageCircle}
+        apagada={!propio}
+        titulo={titulo}
+        descripcion={detalle}
+        extra={
+          <EtiquetaAjuste tono={propio ? 'activo' : pendientes ? 'aviso' : 'neutro'}>
+            {propio ? 'Número propio' : pendientes ? 'En aprobación' : 'Número de CliniQ'}
+          </EtiquetaAjuste>
+        }
+      />
+      <NotaAjuste>Los códigos de check-in siempre salen desde el número de CliniQ.</NotaAjuste>
+    </SeccionAjustes>
   )
 }
 
@@ -159,10 +157,11 @@ const COMPARACION: { cliniq: string; propio: string }[] = [
   { cliniq: 'Consume el cupo de mensajes de tu plan.', propio: 'No consume cupo: Meta cobra los mensajes a tu cuenta.' },
 ]
 
+/** Las dos columnas de la comparación, como contenido de una SeccionAjustes. */
 function ComparacionNumeros() {
   return (
-    <div className="grid gap-3 md:grid-cols-2">
-      <div className="rounded-lg border bg-white p-3.5">
+    <div className="grid divide-y divide-border/70 md:grid-cols-2 md:divide-x md:divide-y-0">
+      <div className="px-4 py-3.5">
         <p className="mb-2 text-[13px] font-semibold text-muted-foreground">Número de CliniQ</p>
         <ul className="space-y-1.5">
           {COMPARACION.map((c) => (
@@ -172,7 +171,7 @@ function ComparacionNumeros() {
           ))}
         </ul>
       </div>
-      <div className="rounded-lg border border-primary/30 bg-white p-3.5">
+      <div className="px-4 py-3.5">
         <p className="mb-2 text-[13px] font-semibold text-primary">Número de tu clínica</p>
         <ul className="space-y-1.5">
           {COMPARACION.map((c) => (
@@ -189,58 +188,45 @@ function ComparacionNumeros() {
 /** Sin el add-on: se promociona el número propio. */
 function PromoNumeroPropio({ estado }: { estado: WhatsappPropioEstado }) {
   return (
-    <section className="space-y-4 rounded-xl border bg-primary/[0.03] p-5">
-      <div>
-        <p className="flex items-center gap-2 text-base font-semibold">
-          <Sparkles className="h-4 w-4 text-primary" /> Envía desde el número de tu clínica
-        </p>
-        <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">
-          Conecta el WhatsApp Business que ya usas y sigue respondiendo desde tu teléfono: CliniQ envía los
-          recordatorios, cotizaciones y documentos desde tu número.
-        </p>
-      </div>
+    <SeccionAjustes
+      titulo="Envía desde el número de tu clínica"
+      descripcion="Conecta el WhatsApp Business que ya usas y sigue respondiendo desde tu teléfono."
+      accion={estado.contacto_ventas_url && (
+        <Button asChild size="sm">
+          <a href={estado.contacto_ventas_url} target="_blank" rel="noreferrer">
+            <MessageCircle className="mr-1.5 h-4 w-4" /> Quiero mi número propio
+          </a>
+        </Button>
+      )}
+    >
       <ComparacionNumeros />
-      <div className="flex flex-wrap items-center gap-3">
-        {estado.contacto_ventas_url ? (
-          <Button asChild>
-            <a href={estado.contacto_ventas_url} target="_blank" rel="noreferrer">
-              <MessageCircle className="mr-1.5 h-4 w-4" /> Quiero mi número propio
-            </a>
-          </Button>
-        ) : (
-          <p className="text-[13px] font-medium">Escríbenos para activarlo en tu plan.</p>
-        )}
-        <p className="text-[12px] text-muted-foreground">
-          {estado.whatsapp_habilitado
-            ? 'Es un add-on de tu plan. Mientras tanto, todo se sigue enviando desde el número de CliniQ.'
-            : 'Es un add-on que requiere tener activos los envíos por WhatsApp en tu plan.'}
-        </p>
-      </div>
-    </section>
+      <NotaAjuste>
+        {!estado.contacto_ventas_url && 'Escríbenos para activarlo en tu plan. '}
+        {estado.whatsapp_habilitado
+          ? 'Es un add-on de tu plan. Mientras tanto, todo se sigue enviando desde el número de CliniQ.'
+          : 'Es un add-on que requiere tener activos los envíos por WhatsApp en tu plan.'}
+      </NotaAjuste>
+    </SeccionAjustes>
   )
 }
 
 /** Con el add-on pero sin números conectados. */
 function CambiarANumeroPropio({ onConectar }: { onConectar: () => void }) {
   return (
-    <section className="space-y-4 rounded-xl border bg-white p-5">
-      <div>
-        <p className="flex items-center gap-2 text-base font-semibold">
-          <Sparkles className="h-4 w-4 text-primary" /> Cambia a tu número propio
-        </p>
-        <p className="mt-1 max-w-[62ch] text-[13px] leading-relaxed text-muted-foreground">
-          Tu plan ya incluye el número propio. Conecta el WhatsApp Business de tu clínica en unos minutos: todas tus
-          sedes lo usarán. Hasta que Meta apruebe tus mensajes, cada envío te pide confirmar si sale desde el número
-          de CliniQ.
-        </p>
-      </div>
-      <ComparacionNumeros />
-      <div className="flex justify-end">
-        <Button onClick={onConectar}>
+    <SeccionAjustes
+      titulo="Cambia a tu número propio"
+      descripcion="Tu plan ya lo incluye. Conéctalo en unos minutos y todas tus sedes lo usarán."
+      accion={
+        <Button size="sm" onClick={onConectar}>
           Conectar mi número <ArrowRight className="ml-1.5 h-4 w-4" />
         </Button>
-      </div>
-    </section>
+      }
+    >
+      <ComparacionNumeros />
+      <NotaAjuste>
+        Hasta que Meta apruebe tus mensajes, cada envío te pide confirmar si sale desde el número de CliniQ.
+      </NotaAjuste>
+    </SeccionAjustes>
   )
 }
 
@@ -497,14 +483,14 @@ function DarDeBajaDialog({ numero, estado, onClose }: {
 
 // ─── Tus números ─────────────────────────────────────────────
 
-/** Límite diario de Meta del número y cómo ampliarlo, en una línea. */
+/** Límite diario de Meta del número y cómo ampliarlo, en una línea (va dentro del texto de la fila). */
 function LimiteDiario({ numero }: { numero: NumeroWhatsapp }) {
   if (numero.limite_mensajes === 'TIER_UNLIMITED') {
-    return <p className="mt-0.5 text-[12px] text-muted-foreground">Sin límite diario de Meta.</p>
+    return <span className="mt-0.5 block">Sin límite diario de Meta.</span>
   }
   if (numero.limite_diario === null) return null
   return (
-    <p className="mt-0.5 text-[12px] text-muted-foreground">
+    <span className="mt-0.5 block">
       Meta te deja escribir a {numero.limite_diario.toLocaleString('es-CO')} pacientes distintos al día.
       {numero.limite_diario <= LIMITE_SIN_VERIFICAR && (
         <>
@@ -515,7 +501,7 @@ function LimiteDiario({ numero }: { numero: NumeroWhatsapp }) {
           </a>
         </>
       )}
-    </p>
+    </span>
   )
 }
 
@@ -532,105 +518,102 @@ function TusNumeros({ estado, onConectar, onReconectar, onDarDeBaja }: {
   // confirma aquí. Si sigue sin pago, el próximo envío vuelve a bloquear el número.
   const pago = useConfigurar()
   return (
-    <section className="overflow-hidden rounded-xl border bg-white">
-      <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-        <p className="text-[13.5px] font-semibold">Tus números</p>
-        <span className="text-[12px] tabular-nums text-muted-foreground">
-          {estado.numeros.length} de {estado.numeros_incluidos} incluidos en tu plan
-        </span>
-      </div>
-      <div className="divide-y divide-border/60">
-        {estado.numeros.map((n) => {
-          const pausa = n.bloqueo === 'limite'
-          const conError = n.estado === 'error' && !pausa
-          return (
-          <div key={n.id} className={cn(
-            'flex items-center gap-3 px-4 py-3.5', conError && 'bg-red-50/60', pausa && 'bg-amber-50/60',
-          )}>
-            <MessageCircle className={cn(
-              'h-4 w-4 shrink-0', conError ? 'text-red-600' : pausa ? 'text-amber-600' : 'text-muted-foreground',
-            )} />
-            <div className="min-w-0 flex-1">
-              <p className="flex items-center gap-2 text-sm font-medium">
-                {etiquetaNumero(n)}
-                {n.es_por_defecto && estado.numeros.length > 1 && (
-                  <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-px text-[11px] font-medium text-primary">
-                    <Star className="h-3 w-3" /> Por defecto
-                  </span>
-                )}
-              </p>
-              <p className={cn(
-                'mt-0.5 text-[12.5px] leading-relaxed',
-                conError ? 'text-red-700' : pausa ? 'text-amber-800' : 'text-muted-foreground',
-              )}>
-                {n.estado === 'activo' && 'Enviando mensajes.'}
-                {(n.estado === 'conectado' || n.estado === 'plantillas_pendientes')
-                  && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.'}
-                {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.')}
-              </p>
-              <LimiteDiario numero={n} />
-              {n.bloqueo === 'conexion' && (
-                <Button size="sm" variant="outline" className="mt-2" onClick={() => onReconectar(n)}>
-                  <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Reconectar
-                </Button>
+    <SeccionAjustes
+      titulo="Tus números"
+      descripcion={`${estado.numeros.length} de ${estado.numeros_incluidos} incluidos en tu plan.`}
+      accion={!lleno && !topeMeta && (
+        <Button size="sm" variant="outline" onClick={onConectar}>
+          <Plus className="mr-1 h-3.5 w-3.5" /> Conectar otro número
+        </Button>
+      )}
+    >
+      {estado.numeros.map((n) => {
+        const pausa = n.bloqueo === 'limite'
+        const conError = n.estado === 'error' && !pausa
+        const acciones = n.bloqueo === 'conexion' || n.bloqueo === 'pago'
+        return (
+          <div key={n.id} className={cn(conError && 'bg-red-50/60', pausa && 'bg-amber-50/60')}>
+            <FilaAjuste
+              icono={MessageCircle}
+              titulo={etiquetaNumero(n)}
+              extra={n.es_por_defecto && estado.numeros.length > 1 && (
+                <EtiquetaAjuste tono="marca" icono={Star}>Por defecto</EtiquetaAjuste>
               )}
-              {n.bloqueo === 'pago' && (
-                <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5">
-                  <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-[12.5px] font-medium text-primary hover:underline">
-                    Abrir pagos en Meta <ExternalLink className="h-3.5 w-3.5" />
-                  </a>
-                  <Button size="sm" variant="outline" disabled={pago.isPending}
-                    onClick={() => pago.mutate({ pago_meta_configurado: true })}>
-                    {pago.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-                    Ya agregué el método de pago
-                  </Button>
+              descripcion={
+                <>
+                  <span className={cn('block', conError ? 'text-red-700' : pausa && 'text-amber-800')}>
+                    {n.estado === 'activo' && 'Enviando mensajes.'}
+                    {(n.estado === 'conectado' || n.estado === 'plantillas_pendientes')
+                      && 'Meta está aprobando tus mensajes (de minutos a un día). Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.'}
+                    {n.estado === 'error' && (n.ultimo_error || 'Este número tiene un problema. Mientras tanto, cada envío te pide confirmar si sale desde el número de CliniQ.')}
+                  </span>
+                  <LimiteDiario numero={n} />
+                </>
+              }
+              contenido={acciones && (
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
+                  {n.bloqueo === 'conexion' && (
+                    <Button size="sm" variant="outline" onClick={() => onReconectar(n)}>
+                      <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Reconectar
+                    </Button>
+                  )}
+                  {n.bloqueo === 'pago' && (
+                    <>
+                      <a href={PAGOS_META_URL} target="_blank" rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-[13px] font-medium text-primary hover:underline">
+                        Abrir pagos en Meta <ExternalLink className="h-3.5 w-3.5" />
+                      </a>
+                      <Button size="sm" variant="outline" disabled={pago.isPending}
+                        onClick={() => pago.mutate({ pago_meta_configurado: true })}>
+                        {pago.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                        Ya agregué el método de pago
+                      </Button>
+                    </>
+                  )}
                 </div>
               )}
-              <button
-                type="button"
-                onClick={() => onDarDeBaja(n)}
-                className="mt-1.5 text-[12px] text-muted-foreground underline-offset-2 hover:text-red-600 hover:underline"
-              >
-                Dar de baja este número
-              </button>
-            </div>
-            <EstadoBadge numero={n} />
+            >
+              <EstadoBadge numero={n} />
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Acciones de ${etiquetaNumero(n)}`}>
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => onDarDeBaja(n)} className="text-red-600 focus:text-red-600">
+                    Dar de baja este número
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </FilaAjuste>
           </div>
-          )
-        })}
-      </div>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-t px-4 py-3">
-        {!lleno && topeMeta ? (
-          <>
-            <p className="text-[12.5px] text-muted-foreground">
-              Meta permite {estado.numeros_permitidos_meta} números a los negocios sin verificar.
-            </p>
-            <a href={VERIFICAR_NEGOCIO_URL} target="_blank" rel="noreferrer"
-              className="inline-flex items-center gap-1 text-[12.5px] font-medium text-primary hover:underline">
-              Verificar mi negocio <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </>
-        ) : lleno ? (
-          <>
-            <p className="text-[12.5px] text-muted-foreground">
-              ¿Quieres un número para otra sede? Tu plan incluye {estado.numeros_incluidos}{' '}
-              {estado.numeros_incluidos === 1 ? 'número' : 'números'}.
-            </p>
-            {estado.contacto_ventas_url && (
+        )
+      })}
+      {!lleno && topeMeta ? (
+        <NotaAjuste>
+          Meta permite {estado.numeros_permitidos_meta} números a los negocios sin verificar.{' '}
+          <a href={VERIFICAR_NEGOCIO_URL} target="_blank" rel="noreferrer"
+            className="inline-flex items-center gap-1 font-medium text-primary hover:underline">
+            Verificar mi negocio <ExternalLink className="h-3 w-3" />
+          </a>
+        </NotaAjuste>
+      ) : lleno ? (
+        <NotaAjuste>
+          ¿Quieres un número para otra sede? Tu plan incluye {estado.numeros_incluidos}{' '}
+          {estado.numeros_incluidos === 1 ? 'número' : 'números'}.
+          {estado.contacto_ventas_url && (
+            <>
+              {' '}
               <a href={estado.contacto_ventas_url} target="_blank" rel="noreferrer"
-                className="text-[12.5px] font-medium text-primary hover:underline">
+                className="font-medium text-primary hover:underline">
                 Pedir otro número
               </a>
-            )}
-          </>
-        ) : (
-          <Button size="sm" variant="outline" onClick={onConectar}>
-            <Plus className="mr-1 h-3.5 w-3.5" /> Conectar otro número
-          </Button>
-        )}
-      </div>
-    </section>
+            </>
+          )}
+        </NotaAjuste>
+      ) : null}
+    </SeccionAjustes>
   )
 }
 
@@ -641,108 +624,109 @@ function valorSede(s: SedeWhatsapp) {
 }
 
 /** Desde qué número envía cada sede. Con un solo número y una sola sede no
- *  hay nada que elegir y no se muestra. */
+ *  hay nada que elegir y no se muestra. Cada lista se guarda al elegir y el
+ *  aviso ofrece deshacer. */
 function Asignacion({ estado }: { estado: WhatsappPropioEstado }) {
   const configurar = useConfigurar()
   const porDefecto = estado.numeros.find((n) => n.es_por_defecto) ?? null
   const variosNumeros = estado.numeros.length > 1
   if (!variosNumeros && estado.sedes.length <= 1) return null
 
-  const cambiarSede = (sede: SedeWhatsapp, valor: string) => {
+  const cambiarSede = (sede: SedeWhatsapp, valor: string, antes?: string) => {
     const [tipo, numeroId] = valor.split(':') as [SedeWhatsapp['tipo'], string | undefined]
-    configurar.mutate({ asignaciones: [{ sede_id: sede.id, tipo, numero_id: numeroId ?? null }] })
+    configurar.mutate(
+      { asignaciones: [{ sede_id: sede.id, tipo, numero_id: numeroId ?? null }] },
+      { onSuccess: () => avisarGuardado(antes ? () => cambiarSede(sede, antes) : undefined) },
+    )
+  }
+
+  const cambiarPorDefecto = (id: string, antes?: string | null) => {
+    configurar.mutate(
+      { numero_por_defecto_id: id },
+      { onSuccess: () => avisarGuardado(antes ? () => cambiarPorDefecto(antes) : undefined) },
+    )
   }
 
   return (
-    <section className="overflow-hidden rounded-xl border bg-white">
-      <div className="border-b px-4 py-3">
-        <p className="text-[13.5px] font-semibold">Asignación</p>
-        <p className="text-[12.5px] text-muted-foreground">Elige desde qué número envía cada sede.</p>
-      </div>
-      <div className="divide-y divide-border/60">
-        {variosNumeros && (
-          <div className="flex flex-wrap items-center gap-3 px-4 py-3.5">
-            <Star className="h-4 w-4 shrink-0 text-muted-foreground" />
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium">Número por defecto</p>
-              <p className="text-[12.5px] text-muted-foreground">
-                Para sedes nuevas, documentos sin sede y cuando el número de una sede tiene un problema.
-              </p>
-            </div>
+    <SeccionAjustes titulo="Asignación" descripcion="Elige desde qué número envía cada sede.">
+      {variosNumeros && (
+        <FilaAjuste
+          icono={Star}
+          titulo="Número por defecto"
+          descripcion="Para sedes nuevas, documentos sin sede y cuando el número de una sede tiene un problema."
+        >
+          <Select
+            value={estado.numero_por_defecto_id ?? undefined}
+            onValueChange={(id) => cambiarPorDefecto(id, estado.numero_por_defecto_id)}
+            disabled={configurar.isPending}
+          >
+            <SelectTrigger className="h-9 w-[8.25rem] sm:w-56" aria-label="Número por defecto">
+              <SelectValue placeholder="Elige un número" />
+            </SelectTrigger>
+            <SelectContent>
+              {estado.numeros.map((n) => (
+                <SelectItem key={n.id} value={n.id}>
+                  {etiquetaNumero(n)}{n.estado !== 'activo' ? ' (en aprobación)' : ''}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </FilaAjuste>
+      )}
+      {estado.sedes.map((sede) => {
+        const efectivo = numeroEfectivo(sede, estado)
+        return (
+          <FilaAjuste
+            key={sede.id}
+            icono={MapPin}
+            titulo={sede.nombre}
+            descripcion={efectivo
+              ? `Enviando desde ${etiquetaNumero(efectivo)}`
+              : sede.tipo === 'cliniq'
+                ? 'Enviando desde el número de CliniQ'
+                : 'Tu número aún no está disponible: cada envío pide confirmar si sale desde el de CliniQ'}
+          >
             <Select
-              value={estado.numero_por_defecto_id ?? undefined}
-              onValueChange={(id) => configurar.mutate({ numero_por_defecto_id: id })}
+              value={valorSede(sede)}
+              onValueChange={(v) => cambiarSede(sede, v, valorSede(sede))}
               disabled={configurar.isPending}
             >
-              <SelectTrigger className="w-56"><SelectValue placeholder="Elige un número" /></SelectTrigger>
+              <SelectTrigger className="h-9 w-[8.25rem] sm:w-56" aria-label={`Número de ${sede.nombre}`}>
+                <SelectValue />
+              </SelectTrigger>
               <SelectContent>
-                {estado.numeros.map((n) => (
-                  <SelectItem key={n.id} value={n.id}>
+                <SelectItem value="por_defecto">
+                  {variosNumeros ? 'Número por defecto' : 'Número de tu clínica'}
+                  {porDefecto ? ` (${etiquetaNumero(porDefecto)})` : ''}
+                </SelectItem>
+                {variosNumeros && estado.numeros.map((n) => (
+                  <SelectItem key={n.id} value={`numero:${n.id}`}>
                     {etiquetaNumero(n)}{n.estado !== 'activo' ? ' (en aprobación)' : ''}
                   </SelectItem>
                 ))}
+                <SelectItem value="cliniq">Número de CliniQ</SelectItem>
               </SelectContent>
             </Select>
-          </div>
-        )}
-        {estado.sedes.map((sede) => {
-          const efectivo = numeroEfectivo(sede, estado)
-          return (
-            <div key={sede.id} className="flex flex-wrap items-center gap-3 px-4 py-3.5">
-              <MapPin className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{sede.nombre}</p>
-                <p className="text-[12.5px] text-muted-foreground">
-                  {efectivo
-                    ? `Enviando desde ${etiquetaNumero(efectivo)}`
-                    : sede.tipo === 'cliniq'
-                      ? 'Enviando desde el número de CliniQ'
-                      : 'Tu número aún no está disponible: cada envío pide confirmar si sale desde el de CliniQ'}
-                </p>
-              </div>
-              <Select
-                value={valorSede(sede)}
-                onValueChange={(v) => cambiarSede(sede, v)}
-                disabled={configurar.isPending}
-              >
-                <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="por_defecto">
-                    {variosNumeros ? 'Número por defecto' : 'Número de tu clínica'}
-                    {porDefecto ? ` (${etiquetaNumero(porDefecto)})` : ''}
-                  </SelectItem>
-                  {variosNumeros && estado.numeros.map((n) => (
-                    <SelectItem key={n.id} value={`numero:${n.id}`}>
-                      {etiquetaNumero(n)}{n.estado !== 'activo' ? ' (en aprobación)' : ''}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="cliniq">Número de CliniQ</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-          )
-        })}
-      </div>
+          </FilaAjuste>
+        )
+      })}
       {configurar.isError && (
-        <p className="border-t px-4 py-2.5 text-sm text-red-600">{mensajeError(configurar.error)}</p>
+        <p className="px-4 py-2.5 text-sm text-destructive">{mensajeError(configurar.error)}</p>
       )}
-      <div className="space-y-1 border-t bg-blue-50/60 px-4 py-3 text-[12.5px] leading-relaxed text-blue-900">
-        <p className="flex items-center gap-1.5 font-medium"><Info className="h-3.5 w-3.5" /> ¿Qué número se usa?</p>
-        <p>
-          Los documentos sin sede (consentimientos, órdenes médicas, firmas) usan la sede de la cita relacionada o,
-          si no hay, la última sede donde se atendió el paciente. Si el número de una sede tiene un problema, el
-          mensaje sale desde el número por defecto. Si ninguno está disponible, CliniQ te pregunta antes de enviarlo
-          desde su número; si Meta lo rechaza después de enviado, lo verás en el inicio como un envío que no salió.
-        </p>
-      </div>
-    </section>
+      <NotaAjuste>
+        Los documentos sin sede (consentimientos, órdenes médicas, firmas) usan la sede de la cita relacionada o,
+        si no hay, la última sede donde se atendió el paciente. Si el número de una sede tiene un problema, el
+        mensaje sale desde el número por defecto. Si ninguno está disponible, CliniQ te pregunta antes de enviarlo
+        desde su número; si Meta lo rechaza después de enviado, lo verás en el inicio como un envío que no salió.
+      </NotaAjuste>
+    </SeccionAjustes>
   )
 }
 
 // ─── Página ──────────────────────────────────────────────────
 
 export function WhatsappPropioConfig() {
-  const { data: estado, isLoading, isError } = useQuery({
+  const { data: estado, isLoading, isError, refetch } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: whatsappPropioApi.estado,
   })
@@ -750,13 +734,31 @@ export function WhatsappPropioConfig() {
   const [reconectando, setReconectando] = useState<NumeroWhatsapp | null>(null)
   const [dandoDeBaja, setDandoDeBaja] = useState<NumeroWhatsapp | null>(null)
 
-  if (isLoading) return <div className="h-48 animate-pulse rounded-xl border bg-muted/40" />
+  if (isLoading) {
+    return (
+      <SeccionAjustes titulo="Número en uso" descripcion="Desde dónde reciben hoy tus pacientes los mensajes.">
+        <div className="flex items-center gap-4 px-4 py-3.5">
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-48 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-72 max-w-full animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+      </SeccionAjustes>
+    )
+  }
   if (isError || !estado) {
-    return <p className="rounded-xl border bg-white px-4 py-6 text-sm text-muted-foreground">No pudimos cargar la configuración de WhatsApp.</p>
+    return (
+      <SeccionAjustes titulo="Número en uso">
+        <FilaAjuste icono={AlertTriangle} titulo="No pudimos cargar la configuración de WhatsApp.">
+          <Button type="button" variant="outline" size="sm" onClick={() => refetch()}>Reintentar</Button>
+        </FilaAjuste>
+      </SeccionAjustes>
+    )
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-7">
       <NumeroEnUso estado={estado} />
 
       {!estado.habilitado ? (
@@ -775,10 +777,6 @@ export function WhatsappPropioConfig() {
           <Asignacion estado={estado} />
         </>
       )}
-
-      <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
-        <ShieldCheck className="h-3.5 w-3.5" /> Los códigos de check-in siempre salen desde el número de CliniQ.
-      </p>
 
       {estado.habilitado && (
         <ConectarDialog

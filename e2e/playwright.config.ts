@@ -3,6 +3,9 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: '.',
   fullyParallel: false,
+  // Un solo worker: la sesión es única por usuario (un login cierra la anterior)
+  // y cada test sigue la cadena de tokens del anterior (ver fixtures/sesion.ts).
+  workers: 1,
   retries: 1,
   timeout: 30_000,
   reporter: [['list'], ['html', { open: 'never', outputFolder: 'playwright-report' }]],
@@ -15,11 +18,6 @@ export default defineConfig({
   },
 
   projects: [
-    // ── Setup: hacer login para cada perfil ──────────────────────────────────
-    { name: 'setup:admin',       testMatch: /fixtures\/auth\.setup\.admin\.ts/ },
-    { name: 'setup:profesional', testMatch: /fixtures\/auth\.setup\.profesional\.ts/ },
-    { name: 'setup:recepcion',   testMatch: /fixtures\/auth\.setup\.recepcion\.ts/ },
-
     // ── Tests sin sesión (login form) ────────────────────────────────────────
     {
       name: 'login',
@@ -31,20 +29,20 @@ export default defineConfig({
     {
       name: 'admin',
       testMatch: /tests\/admin\/.+\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], storageState: 'playwright/.auth/admin.json' },
-      dependencies: ['setup:admin'],
+      // La sesión la abre fixtures/sesion.ts según el nombre del proyecto.
+      use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'profesional',
       testMatch: /tests\/profesional\/.+\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], storageState: 'playwright/.auth/profesional.json' },
-      dependencies: ['setup:profesional'],
+      // La sesión la abre fixtures/sesion.ts según el nombre del proyecto.
+      use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'recepcion',
       testMatch: /tests\/recepcion\/.+\.spec\.ts/,
-      use: { ...devices['Desktop Chrome'], storageState: 'playwright/.auth/recepcion.json' },
-      dependencies: ['setup:recepcion'],
+      // La sesión la abre fixtures/sesion.ts según el nombre del proyecto.
+      use: { ...devices['Desktop Chrome'] },
     },
   ],
 

@@ -152,7 +152,7 @@ export default function RegistroClinicaPage() {
                 </p>
               </div>
 
-              <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+              <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
                 <div className="space-y-1.5">
                   <Label htmlFor="nombre_clinica">Nombre de la clínica</Label>
                   <Input

@@ -7,6 +7,7 @@ import {
   ArrowRight, DollarSign,
   FileText, UserX, ChevronRight, AlertTriangle, Wallet, BellOff, Check,
   ChevronDown, Search, ShoppingBag, CalendarX,
+  type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
 import {
@@ -601,6 +602,11 @@ export default function DashboardPage() {
  *  toda la sede. Antes esta vista exigía no tener reportes y nunca se veía. */
 function DashboardProfesional() {
   const { user } = useAuthStore()
+  const accesos = [
+    { href: '/atenciones', icon: CheckCircle2, label: 'Atenciones', desc: 'Cola de atenciones', visible: canAccess.atenciones(user) },
+    { href: '/agenda', icon: CalendarDays, label: 'Agenda', desc: 'Ver mi agenda del día', visible: canAccess.agenda(user) },
+    { href: '/pacientes', icon: Users, label: 'Pacientes', desc: 'Buscar pacientes', visible: canAccess.pacientes(user) },
+  ].filter((a) => a.visible)
   const { data: citasHoyData, isLoading: citasLoading } = useQuery({
     queryKey: ['citas', 'hoy', 'mias', user?.id],
     queryFn: () => agendaApi.citas.list({ fecha_inicio__date: todayISO(), profesional: user!.id, page_size: 100 }),
@@ -617,7 +623,8 @@ function DashboardProfesional() {
       <div className="w-[90%] mx-auto space-y-6">
         {/* Hero */}
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
-          <div className="relative z-10">
+          <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+          <div>
             <p className="text-white/70 text-sm mb-0.5 capitalize">{todayLong()}</p>
             <h1 className="text-2xl font-bold">{greeting()}, {user?.first_name}</h1>
             <p className="text-white/80 text-sm mt-1">
@@ -628,6 +635,8 @@ function DashboardProfesional() {
                   : <><span className="font-semibold text-white">{totalCitas}</span> cita{totalCitas !== 1 ? 's' : ''} agendada{totalCitas !== 1 ? 's' : ''} para hoy</>
               }
             </p>
+          </div>
+          <AccesosRapidos accesos={accesos} />
           </div>
           <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
           <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
@@ -658,47 +667,35 @@ function DashboardProfesional() {
           />
         </div>
 
-        {/* Citas + accesos */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2">
-            <CitasHoyCard
-              citas={citasHoy}
-              loading={citasLoading}
-              titulo="Mis citas de hoy"
-              accionVacia={canAccess.agenda(user) ? { href: '/agenda', label: 'Ver agenda' } : undefined}
-            />
-          </div>
-
-          <div className="space-y-4">
-            <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-              <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
-              <div className="space-y-2">
-                {[
-                  { href: '/atenciones', icon: CheckCircle2, label: 'Atenciones', desc: 'Cola de atenciones', visible: canAccess.atenciones(user) },
-                  { href: '/agenda', icon: CalendarDays, label: 'Agenda', desc: 'Ver mi agenda del día', visible: canAccess.agenda(user) },
-                  { href: '/pacientes', icon: Users, label: 'Pacientes', desc: 'Buscar pacientes', visible: canAccess.pacientes(user) },
-                ].filter((a) => a.visible).map(({ href, icon: Icon, label, desc }) => (
-                  <Link
-                    key={href}
-                    href={href}
-                    className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
-                  >
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                      <Icon className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-sm font-medium">{label}</p>
-                      <p className="text-xs text-muted-foreground">{desc}</p>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </Link>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
+        <CitasHoyCard
+          citas={citasHoy}
+          loading={citasLoading}
+          titulo="Mis citas de hoy"
+          accionVacia={canAccess.agenda(user) ? { href: '/agenda', label: 'Ver agenda' } : undefined}
+        />
       </div>
     )
+}
+
+/** Accesos rápidos en el encabezado: botones en vez de una tarjeta aparte, que
+ *  dejaba un hueco al lado de las citas del día. */
+function AccesosRapidos({ accesos }: { accesos: { href: string; icon: LucideIcon; label: string; desc: string }[] }) {
+  if (accesos.length === 0) return null
+  return (
+    <nav aria-label="Accesos rápidos" className="flex flex-wrap gap-2">
+      {accesos.map(({ href, icon: Icon, label, desc }) => (
+        <Link
+          key={href}
+          href={href}
+          title={desc}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-white/15 px-3 py-1.5 text-sm font-medium text-white ring-1 ring-inset ring-white/25 transition-colors hover:bg-white/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+        >
+          <Icon className="h-4 w-4" />
+          {label}
+        </Link>
+      ))}
+    </nav>
+  )
 }
 
 /** Sin permiso de reportes: accesos a lo que sí puede usar, en vez de
@@ -722,7 +719,7 @@ function DashboardSinReportes() {
       </div>
       <AutorizacionesPendientesBanner />
       {accesos.length > 0 ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className={cn('grid gap-3', accesos.length === 2 ? 'sm:grid-cols-2' : accesos.length === 4 ? 'sm:grid-cols-2 lg:grid-cols-4' : accesos.length > 1 && 'sm:grid-cols-3')}>
           {accesos.map((a) => (
             <Link key={a.href} href={a.href} className="rounded-xl border bg-white p-4 transition-colors hover:bg-muted/40">
               <p className="font-medium">{a.label}</p>
@@ -945,8 +942,10 @@ function DashboardContent() {
   // Etiqueta corta para el tab de "Ocupación" (que comparte espacio con "Hoy").
   const periodoTabCorto: Record<PeriodoKey, string> = { hoy: 'Hoy', mes: 'Mes', '3m': '3M', '6m': '6M', '1a': '1A' }
 
-  const ocupacionActiva = tabOcupacion === 'mes' ? ocupacionMes : ocupacionHoy
-  const ocupacionLoading = tabOcupacion === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
+  // Con el periodo "Hoy" el tab del periodo ya es el día: no se ofrece el otro.
+  const tabOcupacionActivo = periodo === 'hoy' ? 'mes' : tabOcupacion
+  const ocupacionActiva = tabOcupacionActivo === 'mes' ? ocupacionMes : ocupacionHoy
+  const ocupacionLoading = tabOcupacionActivo === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
 
   const sinReagendar = pacientesSinReagendar ?? []
   const canVerSinReagendar = hasPermission(user, PERM.REPORTES_VER)
@@ -1089,7 +1088,8 @@ function DashboardContent() {
 
       {/* Hero */}
       <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-primary to-primary/70 p-6 text-white shadow-md">
-        <div className="relative z-10">
+        <div className="relative z-10 flex flex-wrap items-end justify-between gap-4">
+        <div>
           <p className="text-white/70 text-sm mb-0.5 capitalize">{todayLong()}</p>
           <h1 className="text-2xl font-bold">
             {greeting()}, {user?.first_name}
@@ -1102,6 +1102,8 @@ function DashboardContent() {
                 : <><span className="font-semibold text-white">{totalCitas}</span> cita{totalCitas !== 1 ? 's' : ''} agendada{totalCitas !== 1 ? 's' : ''} para hoy</>
             }
           </p>
+        </div>
+        <AccesosRapidos accesos={accesosRapidos} />
         </div>
         <div className="absolute -right-8 -top-8 h-36 w-36 rounded-full bg-white/10" />
         <div className="absolute -right-2 -bottom-10 h-24 w-24 rounded-full bg-white/10" />
@@ -1119,57 +1121,38 @@ function DashboardContent() {
       {/* Filtros (sede + periodo) — encima de los KPI */}
       {filtrosLinea}
 
-      {/* Checklist + KPIs */}
+      {/* Checklist + KPIs. En 2 columnas, una tarjeta impar al final ocupa la fila
+          entera en vez de dejar medio hueco. */}
       {!checklistDone ? (
         <div className="grid grid-cols-1 lg:grid-cols-[300px_1fr] gap-4 items-start">
           <SetupChecklist />
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-4 [&>*:last-child:nth-child(odd)]:col-span-2">
             {kpiCards}
           </div>
         </div>
       ) : (
-        <div className={cn('grid grid-cols-2 gap-4', nKpis >= 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
+        <div className={cn('grid grid-cols-2 gap-4 max-lg:[&>*:last-child:nth-child(odd)]:col-span-2', nKpis >= 5 ? 'lg:grid-cols-5' : 'lg:grid-cols-4')}>
           {kpiCards}
         </div>
       )}
 
-      {/* Citas del día + Accesos rápidos: segunda fila, justo después de los KPI */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-        {veAgenda && <div className="lg:col-span-2">
-          <CitasHoyCard
-            citas={citasHoy}
-            loading={citasLoading}
-            titulo="Citas de hoy"
-            mostrarProfesional
-            accionVacia={hasPermission(user, PERM.AGENDA_CREAR) ? { href: '/agenda', label: 'Agendar cita', crear: true } : undefined}
-          />
-        </div>}
-
-        <div className="space-y-4">
+      {/* Citas del día + a quién contactar: segunda fila, justo después de los KPI.
+          Si falta una de las dos, la otra ocupa todo el ancho. */}
+      {(veAgenda || canVerSeguimiento) && (
+        <div className={cn('grid grid-cols-1 gap-4', veAgenda && canVerSeguimiento && 'lg:grid-cols-3')}>
+          {veAgenda && (
+            <CitasHoyCard
+              className={canVerSeguimiento ? 'lg:col-span-2' : undefined}
+              citas={citasHoy}
+              loading={citasLoading}
+              titulo="Citas de hoy"
+              mostrarProfesional
+              accionVacia={hasPermission(user, PERM.AGENDA_CREAR) ? { href: '/agenda', label: 'Agendar cita', crear: true } : undefined}
+            />
+          )}
           {canVerSeguimiento && <ParaHoyResumen sede={sede} />}
-          {accesosRapidos.length > 0 && <div className="bg-white rounded-xl border shadow-sm p-5 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-            <h2 className="font-semibold text-sm mb-3">Accesos rápidos</h2>
-            <div className="space-y-2">
-              {accesosRapidos.map(({ href, icon: Icon, label, desc }) => (
-                <Link
-                  key={href}
-                  href={href}
-                  className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 border border-transparent hover:border-border transition-all group"
-                >
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
-                    <Icon className="h-4 w-4 text-primary" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium">{label}</p>
-                    <p className="text-xs text-muted-foreground">{desc}</p>
-                  </div>
-                  <ArrowRight className="h-3.5 w-3.5 text-muted-foreground ml-auto shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                </Link>
-              ))}
-            </div>
-          </div>}
         </div>
-      </div>
+      )}
 
       {/* Comercial (cotizado vs vendido) + Cartera */}
       <div className={cn('grid grid-cols-1 gap-4', canVerFinanzas && 'lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]')}>
@@ -1312,40 +1295,43 @@ function DashboardContent() {
         </Link>
       )}
 
-      {/* Ingresos acumulados por origen + Cobros de hoy por medio de pago */}
+      {/* Ingresos acumulados por origen, con los cobros de hoy por medio de pago al
+          lado en la misma tarjeta (aparte quedaban como una tarjeta alta casi vacía) */}
       {canVerFinanzas && (
-      <div className={cn('grid grid-cols-1 gap-6', canVerFinanzas && 'lg:grid-cols-3')}>
         <IngresosAcumuladosCard
           data={ingresos}
           loading={ingresosLoading}
           titulo={ingRango.titulo}
           comparadoCon={ingRango.comparadoCon}
-        />
-
-        <div className="bg-white rounded-xl border shadow-sm p-5 space-y-4 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
-          <h2 className="font-semibold text-sm">Cobros de hoy por medio</h2>
-          {kpisLoading ? (
-            <div className="space-y-2">
-              {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
-            </div>
-          ) : !kpis?.cobros_hoy?.por_medio_pago.length ? (
-            <p className="text-sm text-muted-foreground">Sin cobros registrados hoy</p>
-          ) : (
-            <div className="space-y-2">
-              {kpis.cobros_hoy.por_medio_pago.map(({ medio, total }) => (
-                <div key={medio} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-                  <span className="text-sm text-muted-foreground">{medio}</span>
-                  <span className="text-sm font-semibold">{COP.format(Number(total))}</span>
+          lateral={
+            <>
+              <h2 className="font-semibold text-sm">Cobros de hoy por medio</h2>
+              {kpisLoading ? (
+                <div className="mt-3 space-y-2">
+                  {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
                 </div>
-              ))}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-sm font-semibold">Total</span>
-                <span className="text-sm font-bold text-primary">{COP.format(Number(kpis.cobros_hoy.total_cop))}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+              ) : !kpis?.cobros_hoy?.por_medio_pago.length ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 py-6 text-center">
+                  <Wallet className="h-8 w-8 text-muted-foreground/25" />
+                  <p className="text-sm text-muted-foreground">Sin cobros registrados hoy</p>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-1">
+                  {kpis.cobros_hoy.por_medio_pago.map(({ medio, total }) => (
+                    <div key={medio} className="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
+                      <span className="text-sm text-muted-foreground">{medio}</span>
+                      <span className="text-sm font-semibold tabular-nums">{COP.format(Number(total))}</span>
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between pt-1">
+                    <span className="text-sm font-semibold">Total</span>
+                    <span className="text-sm font-bold tabular-nums text-primary">{COP.format(Number(kpis.cobros_hoy.total_cop))}</span>
+                  </div>
+                </div>
+              )}
+            </>
+          }
+        />
       )}
 
       {/* Tablas: servicios + ocupación */}
@@ -1409,12 +1395,16 @@ function DashboardContent() {
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between px-5 py-4 border-b">
             <h2 className="font-semibold text-sm">Ocupación por profesional</h2>
-            <Tabs value={tabOcupacion} onValueChange={v => setTabOcupacion(v as 'mes' | 'hoy')}>
-              <TabsList className="h-7">
-                <TabsTrigger value="mes" className="text-xs px-3 h-5">{periodoTabCorto[periodo]}</TabsTrigger>
-                <TabsTrigger value="hoy" className="text-xs px-3 h-5">Hoy</TabsTrigger>
-              </TabsList>
-            </Tabs>
+            {periodo === 'hoy' ? (
+              <span className="text-xs text-muted-foreground">Hoy</span>
+            ) : (
+              <Tabs value={tabOcupacion} onValueChange={v => setTabOcupacion(v as 'mes' | 'hoy')}>
+                <TabsList className="h-7">
+                  <TabsTrigger value="mes" className="text-xs px-3 h-5">{periodoTabCorto[periodo]}</TabsTrigger>
+                  <TabsTrigger value="hoy" className="text-xs px-3 h-5">Hoy</TabsTrigger>
+                </TabsList>
+              </Tabs>
+            )}
           </div>
           {ocupacionLoading ? (
             <div className="p-4 space-y-2">

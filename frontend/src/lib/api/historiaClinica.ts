@@ -247,6 +247,13 @@ export const historiaClinicaApi = {
       })
       return Array.isArray(res.data) ? res.data : (res.data as any).results ?? []
     },
+    /** Las más usadas: primero en el procedimiento de la cita, luego por quien pide, luego en la clínica. */
+    sugeridas: async (citaId?: string, limite = 5): Promise<PlantillaOrden[]> => {
+      const res = await apiClient.get<PlantillaOrden[]>('/historia-clinica/plantillas-ordenes/sugeridas/', {
+        params: { limite, ...(citaId ? { cita: citaId } : {}) },
+      })
+      return res.data
+    },
     listAll: async (): Promise<PlantillaOrden[]> => {
       // Sin 'activa' el backend devuelve solo las activas: "Mostrar inactivas" salía vacío.
       const res = await apiClient.get<PlantillaOrden[]>('/historia-clinica/plantillas-ordenes/', {
@@ -254,11 +261,11 @@ export const historiaClinicaApi = {
       })
       return Array.isArray(res.data) ? res.data : (res.data as any).results ?? []
     },
-    create: async (data: { nombre: string; contenido: string; permite_edicion_profesional: boolean }): Promise<PlantillaOrden> => {
+    create: async (data: { nombre: string; contenido: string; permite_edicion_profesional: boolean; compartida?: boolean }): Promise<PlantillaOrden> => {
       const res = await apiClient.post<PlantillaOrden>('/historia-clinica/plantillas-ordenes/', data)
       return res.data
     },
-    patch: async (id: string, data: Partial<{ nombre: string; contenido: string; permite_edicion_profesional: boolean; activa: boolean }>): Promise<PlantillaOrden> => {
+    patch: async (id: string, data: Partial<{ nombre: string; contenido: string; permite_edicion_profesional: boolean; activa: boolean; compartida: boolean }>): Promise<PlantillaOrden> => {
       const res = await apiClient.patch<PlantillaOrden>(`/historia-clinica/plantillas-ordenes/${id}/`, data)
       return res.data
     },
@@ -274,8 +281,13 @@ export const historiaClinicaApi = {
       })
       return Array.isArray(res.data) ? res.data : (res.data as any).results ?? []
     },
-    create: async (data: { historia: string; contenido: string; cita?: string; nota?: string; plantilla_origen?: string }): Promise<OrdenMedica> => {
+    create: async (data: { historia: string; contenido: string; titulo?: string; cita?: string; nota?: string; plantilla_origen?: string }): Promise<OrdenMedica> => {
       const res = await apiClient.post<OrdenMedica>('/historia-clinica/ordenes-medicas/', data)
+      return res.data
+    },
+    /** Crea una plantilla con el texto de una orden emitida (los datos del paciente pasan a variables). */
+    guardarComoPlantilla: async (id: string, data: { nombre: string; compartida: boolean }): Promise<PlantillaOrden> => {
+      const res = await apiClient.post<PlantillaOrden>(`/historia-clinica/ordenes-medicas/${id}/guardar_como_plantilla/`, data)
       return res.data
     },
     enviarWhatsapp: (id: string): Promise<{ enviado: boolean }> =>

@@ -53,6 +53,12 @@ export function ConfiguracionShell({ children }: { children: React.ReactNode }) 
   const registrarAyuda = useCallback((slug: string | undefined) => setAyuda(slug), [])
 
   const pestanas = categoria ? pestanasDe(categoria) : []
+  // La pestaña de la ruta más larga que contiene a la actual: en
+  // /whatsapp/consumo se marca "Consumo", no también "Número de WhatsApp".
+  const rutaActiva = pestanas
+    .map((p) => rutaDe(p.href))
+    .filter((ruta) => pathname === ruta || pathname.startsWith(ruta + '/'))
+    .sort((a, b) => b.length - a.length)[0]
   // Solo la página principal de cada pestaña va "enmarcada"; subpáginas como
   // /consentimientos/nuevo conservan su propio encabezado con Volver.
   const pestanaActual = pestanas.find((p) => rutaDe(p.href) === pathname)
@@ -101,7 +107,7 @@ export function ConfiguracionShell({ children }: { children: React.ReactNode }) 
               <nav className="flex gap-1 overflow-x-auto border-b [scrollbar-width:none]" aria-label={categoria.label}>
                 {pestanas.map((p) => {
                   const ruta = rutaDe(p.href)
-                  const activa = pathname === ruta || pathname.startsWith(`${ruta}/`)
+                  const activa = ruta === rutaActiva
                   return (
                     <Link
                       key={ruta}

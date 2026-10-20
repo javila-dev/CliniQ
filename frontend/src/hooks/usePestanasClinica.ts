@@ -53,8 +53,15 @@ function usePestanas<T extends string>(campo: Campo, todas: T[]) {
     todas.map((slug) => [slug, activas ? activas.includes(slug) : true]),
   ) as Record<T, boolean>
 
-  const setTabActivo = (tab: T, activo: boolean) => {
-    mutation.mutate(todas.filter((slug) => (slug === tab ? activo : tabsActivos[slug])))
+  // Parte de lo que hay en caché al momento de llamar (no del render), para que
+  // "Deshacer" desde el aviso no pise cambios hechos después.
+  const setTabActivo = (tab: T, activo: boolean, alGuardar?: () => void) => {
+    const actuales = qc.getQueryData<ConfiguracionPestanas>(QUERY_KEY)?.[campo]
+    const estaActiva = (slug: T) => (actuales ? actuales.includes(slug) : true)
+    mutation.mutate(
+      todas.filter((slug) => (slug === tab ? activo : estaActiva(slug))),
+      { onSuccess: () => alGuardar?.() },
+    )
   }
 
   return { tabsActivos, setTabActivo, isLoading, guardando: mutation.isPending, error: mutation.error }

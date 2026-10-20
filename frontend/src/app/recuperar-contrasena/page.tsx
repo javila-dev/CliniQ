@@ -40,7 +40,7 @@ function RecuperarContrasenaContent() {
   const router = useRouter()
   const token = searchParams.get('token') ?? ''
 
-  const { loadUser } = useAuthStore()
+  const { iniciarConToken } = useAuthStore()
   const [pageState, setPageState] = useState<PageState>('loading')
   const [serverError, setServerError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
@@ -77,11 +77,9 @@ function RecuperarContrasenaContent() {
     try {
       const res = await authApi.restablecerPassword(token, nueva_password, confirmar_password)
 
-      if (res.auto_login && res.access && res.refresh) {
-        localStorage.setItem('access_token', res.access)
-        localStorage.setItem('refresh_token', res.refresh)
-        if (res.clinica_id) localStorage.setItem('clinica_id', res.clinica_id)
-        await loadUser()
+      // El token de renovación ya quedó en la cookie HttpOnly; el de acceso, en memoria.
+      if (res.auto_login && res.access) {
+        await iniciarConToken(res.access, res.clinica_id)
         router.replace('/dashboard')
         return
       }
@@ -153,7 +151,7 @@ function RecuperarContrasenaContent() {
               </p>
             </div>
 
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
                 <Label htmlFor="nueva_password">Nueva contraseña</Label>
                 <div className="relative">

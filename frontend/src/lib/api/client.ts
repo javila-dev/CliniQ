@@ -1,17 +1,20 @@
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios'
+import { estaSuplantando, getAccessToken, renovarSesion, setAccessToken } from './sesion'
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v1'
 
 export const apiClient = axios.create({
   baseURL: BASE_URL,
   headers: { 'Content-Type': 'application/json' },
+  // La cookie HttpOnly con el token de renovación (en local el API está en otro puerto).
+  withCredentials: true,
 })
 
-// Attach access token and clinic context to every request
+// Token de acceso (en memoria, ver sesion.ts) y clínica en cada petición.
 apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
+  const token = getAccessToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
   if (typeof window !== 'undefined') {
-    const token = localStorage.getItem('access_token')
-    if (token) config.headers.Authorization = `Bearer ${token}`
     const clinicaId = localStorage.getItem('clinica_id')
     if (clinicaId) config.headers['X-Clinica-Id'] = clinicaId
 
@@ -30,18 +33,7 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
   return config
 })
 
-// Refresh token on 401 — one retry per request
-let isRefreshing = false
-let queue: Array<{ resolve: (token: string) => void; reject: (err: unknown) => void }> = []
-
-function processQueue(error: unknown, token: string | null) {
-  queue.forEach(({ resolve, reject }) => {
-    if (error) reject(error)
-    else resolve(token!)
-  })
-  queue = []
-}
-
+// Ante un 401 se pide otro token de acceso con la cookie y se reintenta una vez.
 apiClient.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
@@ -51,64 +43,43 @@ apiClient.interceptors.response.use(
       return Promise.reject(error)
     }
 
+    // Suplantación vencida o terminada: no se renueva, porque la cookie es la
+    // del superadmin y seguiría como él sin saberlo. Se vuelve a su sesión.
+    if (estaSuplantando()) {
+      if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('cliniq:suplantacion-terminada'))
+      return Promise.reject(error)
+    }
+
     // Sesion cerrada porque el usuario inicio sesion en otro dispositivo: no
     // tiene sentido intentar refrescar (el refresh token ya quedo invalidado
     // y de todas formas cargaria el mismo 'sid' viejo). Cerrar sesion directo
     // y avisar con el motivo especifico.
     const body = error.response?.data as { code?: string; error?: string } | undefined
     if (body?.code === 'SESION_CERRADA_OTRO_DISPOSITIVO') {
+      setAccessToken(null)
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('access_token')
-        localStorage.removeItem('refresh_token')
         window.dispatchEvent(new CustomEvent('cliniq:session-closed-elsewhere', { detail: body.error }))
       }
       return Promise.reject(error)
     }
 
     // Don't try to refresh on the login or refresh endpoints themselves
-    if (original.url?.includes('/auth/login') || original.url?.includes('/auth/refresh')) {
+    if (['/auth/login', '/auth/refresh', '/auth/google'].some((ruta) => original.url?.includes(ruta))) {
       return Promise.reject(error)
     }
 
-    if (isRefreshing) {
-      return new Promise((resolve, reject) => {
-        queue.push({ resolve, reject })
-      }).then((token) => {
-        original.headers.Authorization = `Bearer ${token}`
-        return apiClient(original)
-      })
-    }
-
     original._retry = true
-    isRefreshing = true
-
     try {
-      const refresh = typeof window !== 'undefined' ? localStorage.getItem('refresh_token') : null
-      if (!refresh) throw new Error('No refresh token')
-
-      const { data } = await axios.post<{ access: string; refresh?: string }>(`${BASE_URL}/auth/refresh/`, {
-        refresh,
-      })
-
-      localStorage.setItem('access_token', data.access)
-      // El backend rota el refresh (ROTATE_REFRESH_TOKENS) y pone el viejo en la
-      // lista negra: si no se guarda el nuevo, el siguiente refresh falla y la
-      // sesión se cierra sola.
-      if (data.refresh) localStorage.setItem('refresh_token', data.refresh)
-      processQueue(null, data.access)
-      original.headers.Authorization = `Bearer ${data.access}`
+      const token = await renovarSesion()
+      original.headers.Authorization = `Bearer ${token}`
       return apiClient(original)
     } catch (refreshError) {
-      processQueue(refreshError, null)
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
+      setAccessToken(null)
       // Soft logout: notify app instead of hard-navigating (preserves React state and next param)
       if (typeof window !== 'undefined') {
         window.dispatchEvent(new CustomEvent('cliniq:session-expired'))
       }
       return Promise.reject(refreshError)
-    } finally {
-      isRefreshing = false
     }
   }
 )

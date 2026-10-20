@@ -1,25 +1,26 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Wallet, Tag, Plus, Pencil, Check, X, ArrowLeft } from 'lucide-react'
+import { Wallet, Tag, Plus, Pencil, Check, X, MoreHorizontal, Power } from 'lucide-react'
 import { cajaApi } from '@/lib/api/caja'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { LoadingState } from '@/components/shared/LoadingState'
-import { Card, CardContent } from '@/components/ui/card'
+import {
+  avisarGuardado, EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes,
+} from '@/components/configuracion/ajustes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
-import { cn } from '@/lib/utils'
 import type { Caja } from '@/types/caja'
+import type { Paginated } from '@/types/common'
 
 const SIN_RESPONSABLE = '__none__'
 
@@ -28,15 +29,6 @@ export default function CajasConfigPage() {
     <RoleGuard check={(u) => hasPermission(u, PERM.CAJA_CAJAS_GESTIONAR)}>
       <CajasConfigContent />
     </RoleGuard>
-  )
-}
-
-function SectionTitle({ title, hint }: { title: string; hint: string }) {
-  return (
-    <div className="flex items-baseline gap-2.5">
-      <h2 className="text-sm font-semibold text-gray-800">{title}</h2>
-      <span className="text-xs text-gray-400">{hint}</span>
-    </div>
   )
 }
 
@@ -62,132 +54,143 @@ function CajasConfigContent() {
   }, [cajasData])
   const responsables = (colabsData?.results ?? []).map((c) => ({ id: c.user, nombre: c.nombre_completo }))
 
-  if (loadingSedes || loadingCajas) return <LoadingState rows={4} />
-
   return (
-    <div className="space-y-8 max-w-4xl mx-auto">
+    <div className="space-y-6">
       <PageHeader
         helpSlug="abrir-y-cerrar-la-caja"
         title="Cajas y categorías"
         description="Configura la caja física de cada sede y el catálogo de categorías de gasto."
-        action={
-          <Button asChild variant="outline" size="sm">
-            <Link href="/configuracion">
-              <ArrowLeft className="h-3.5 w-3.5 mr-1.5" />
-              Volver
-            </Link>
-          </Button>
-        }
       />
 
-      <section className="space-y-3">
-        <SectionTitle title="Caja por sede" hint="Responsable y estado de la caja de cada sede" />
-        {!sedes.length ? (
-          <Card><CardContent className="py-10 text-center text-sm text-muted-foreground">No hay sedes activas.</CardContent></Card>
-        ) : (
-          <div className="grid gap-4 sm:grid-cols-2">
-            {sedes.map((s) => (
-              <CajaCard
+      <div className="space-y-7">
+        <SeccionAjustes
+          titulo="Caja por sede"
+          descripcion="Quién responde por la caja de cada sede y si se usa."
+        >
+          {loadingSedes || loadingCajas ? <FilasCargando filas={2} /> : !sedes.length ? (
+            <VacioAjustes titulo="No hay sedes activas" descripcion="Activa o crea una sede para configurar su caja." />
+          ) : (
+            sedes.map((s) => (
+              <FilaCaja
                 key={s.id}
                 sedeId={s.id}
                 sedeNombre={s.nombre}
                 caja={cajaPorSede.get(s.id) ?? null}
                 responsables={responsables}
               />
-            ))}
-          </div>
-        )}
-      </section>
+            ))
+          )}
+        </SeccionAjustes>
 
-      <CategoriasSection />
+        <CategoriasSection />
+      </div>
     </div>
   )
 }
 
 // ─── Caja por sede ───────────────────────────────────────────
 
-function CajaCard({ sedeId, sedeNombre, caja, responsables }: {
+function FilaCaja({ sedeId, sedeNombre, caja, responsables }: {
   sedeId: string
   sedeNombre: string
   caja: Caja | null
   responsables: { id: string; nombre: string }[]
 }) {
   const qc = useQueryClient()
-  const [responsable, setResponsable] = useState(caja?.responsable ?? SIN_RESPONSABLE)
-  const [activa, setActiva] = useState(caja?.activa ?? true)
-
-  const responsableNorm = responsable === SIN_RESPONSABLE ? null : responsable
-  const sesionAbierta = !!caja?.sesion_abierta_id
-  const sucia = caja
-    ? responsableNorm !== caja.responsable || activa !== caja.activa
-    : true
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: ['cajas', 'config'] })
     qc.invalidateQueries({ queryKey: ['caja-actual'] })
   }
 
-  const guardar = useMutation({
-    mutationFn: () => {
-      return caja
-        ? cajaApi.cajas.update(caja.id, { responsable: responsableNorm, activa })
-        : cajaApi.cajas.create({ sede: sedeId, saldo_inicial: 0, responsable: responsableNorm, activa })
-    },
+  const crear = useMutation({
+    mutationFn: () => cajaApi.cajas.create({ sede: sedeId, saldo_inicial: 0, responsable: null, activa: true }),
     onSuccess: () => {
       invalidate()
-      toast.success(caja ? 'Caja actualizada' : `Caja creada para ${sedeNombre}`)
+      toast.success(`Caja creada para ${sedeNombre}`)
     },
     onError: () => toast.error('No se pudo guardar'),
   })
 
-  const estado = !caja ? 'Sin configurar'
-    : sesionAbierta ? 'Sesión abierta ahora'
-    : activa ? 'Activa' : 'Inactiva'
+  const actualizar = useMutation({
+    mutationFn: (data: { responsable?: string | null; activa?: boolean }) => cajaApi.cajas.update(caja!.id, data),
+    onSuccess: (guardada) => {
+      // Se actualiza la lista ya, para que la fila no vuelva un instante al valor anterior.
+      qc.setQueryData<Paginated<Caja>>(['cajas', 'config'], (prev) => prev && {
+        ...prev, results: prev.results.map((c) => (c.id === guardada.id ? { ...c, ...guardada } : c)),
+      })
+      invalidate()
+    },
+    onError: () => toast.error('No se pudo guardar', 'Intenta de nuevo.'),
+  })
+
+  // Mientras se guarda se muestra el valor nuevo, no el anterior.
+  const pendiente = actualizar.isPending ? actualizar.variables : undefined
+  const responsable = pendiente && 'responsable' in pendiente ? pendiente.responsable ?? null : caja?.responsable ?? null
+  const activa = pendiente?.activa ?? caja?.activa ?? true
+
+  function cambiarResponsable(valor: string | null, anterior?: string | null) {
+    actualizar.mutate({ responsable: valor }, {
+      onSuccess: () => avisarGuardado(anterior !== undefined ? () => cambiarResponsable(anterior) : undefined),
+    })
+  }
+
+  function cambiarActiva(valor: boolean, conDeshacer = true) {
+    actualizar.mutate({ activa: valor }, {
+      onSuccess: () => avisarGuardado(conDeshacer ? () => cambiarActiva(!valor, false) : undefined),
+    })
+  }
+
+  // El responsable actual puede no estar entre los colaboradores activos.
+  const opciones = [
+    { value: SIN_RESPONSABLE, label: 'Sin asignar' },
+    ...responsables.map((r) => ({ value: r.id, label: r.nombre })),
+  ]
+  if (responsable && !responsables.some((r) => r.id === responsable)) {
+    opciones.push({ value: responsable, label: caja?.responsable_nombre ?? 'Responsable actual' })
+  }
+
+  const sesionAbierta = !!caja?.sesion_abierta_id
 
   return (
-    <Card>
-      <CardContent className="pt-5 space-y-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <span className={cn(
-              'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg',
-              caja ? 'bg-green-50 text-green-600' : 'bg-muted text-muted-foreground',
-            )}>
-              <Wallet className="h-4 w-4" />
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-semibold truncate">{sedeNombre}</p>
-              <p className={cn(
-                'text-xs',
-                !caja ? 'text-amber-600' : sesionAbierta ? 'text-emerald-600' : 'text-muted-foreground',
-              )}>{estado}</p>
-            </div>
-          </div>
-          <Switch checked={activa} onCheckedChange={setActiva} />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label>Responsable</Label>
-          <Select value={responsable} onValueChange={setResponsable}>
-            <SelectTrigger><SelectValue placeholder="Sin asignar" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={SIN_RESPONSABLE}>Sin asignar</SelectItem>
-              {responsables.map((r) => <SelectItem key={r.id} value={r.id}>{r.nombre}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="flex justify-end">
-          <Button
-            size="sm"
-            disabled={guardar.isPending || (!!caja && !sucia)}
-            onClick={() => guardar.mutate()}
-          >
-            {guardar.isPending ? 'Guardando…' : caja ? 'Guardar' : 'Crear caja'}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+    <FilaAjuste
+      icono={Wallet}
+      apagada={!caja || !activa}
+      titulo={sedeNombre}
+      extra={!caja ? <EtiquetaAjuste tono="aviso">Sin configurar</EtiquetaAjuste>
+        : sesionAbierta ? <EtiquetaAjuste tono="activo">Abierta ahora</EtiquetaAjuste>
+        : !activa ? <EtiquetaAjuste tono="aviso">Inactiva</EtiquetaAjuste>
+        : undefined}
+      descripcion={!caja
+        ? 'Esta sede aún no tiene caja. Créala para abrirla y registrar cobros y gastos.'
+        : 'Quién abre y cierra la caja.'}
+    >
+      {!caja ? (
+        <Button size="sm" variant="outline" disabled={crear.isPending} onClick={() => crear.mutate()}>
+          {crear.isPending ? 'Creando…' : 'Crear caja'}
+        </Button>
+      ) : (
+        <>
+          <SelectAjuste
+            etiqueta={`Responsable de la caja de ${sedeNombre}`}
+            valor={responsable ?? SIN_RESPONSABLE}
+            opciones={opciones}
+            deshabilitado={actualizar.isPending}
+            onCambiar={(v) => {
+              const nuevo = v === SIN_RESPONSABLE ? null : v
+              if (nuevo !== responsable) cambiarResponsable(nuevo, responsable)
+            }}
+            ancho="w-[8.25rem] sm:w-48"
+          />
+          <Switch
+            checked={activa}
+            disabled={actualizar.isPending}
+            onCheckedChange={(v) => cambiarActiva(v)}
+            aria-label={`Caja de ${sedeNombre} activa`}
+          />
+        </>
+      )}
+    </FilaAjuste>
   )
 }
 
@@ -195,6 +198,7 @@ function CajaCard({ sedeId, sedeNombre, caja, responsables }: {
 
 function CategoriasSection() {
   const qc = useQueryClient()
+  const [agregando, setAgregando] = useState(false)
   const [nueva, setNueva] = useState('')
   const [editId, setEditId] = useState<string | null>(null)
   const [editVal, setEditVal] = useState('')
@@ -222,100 +226,146 @@ function CategoriasSection() {
     onError: (e: any) => toast.error('No se pudo renombrar', errMsg(e, 'Revisa el nombre.')),
   })
   const toggle = useMutation({
-    mutationFn: (c: { id: string; activa: boolean }) => cajaApi.categorias.update(c.id, { activa: !c.activa }),
+    mutationFn: (c: { id: string; activa: boolean }) => cajaApi.categorias.update(c.id, { activa: c.activa }),
     onSuccess: invalidate,
+    onError: () => toast.error('No se pudo guardar', 'Intenta de nuevo.'),
   })
+
+  function cambiarActiva(c: { id: string; nombre: string }, activa: boolean, conDeshacer = true) {
+    toggle.mutate({ id: c.id, activa }, {
+      onSuccess: () => avisarGuardado(
+        conDeshacer ? () => cambiarActiva(c, !activa, false) : undefined,
+        activa ? `${c.nombre} activada` : `${c.nombre} desactivada`,
+      ),
+    })
+  }
 
   const activas = cats.filter((c) => c.activa)
   const inactivas = cats.filter((c) => !c.activa)
 
+  const botonNueva = (
+    <Button size="sm" onClick={() => setAgregando(true)} disabled={agregando}>
+      <Plus className="mr-1.5 h-3.5 w-3.5" />
+      Nueva categoría
+    </Button>
+  )
+
   return (
-    <section className="space-y-3">
-      <SectionTitle title="Categorías de gasto" hint="Únicas por nombre — se comparten en toda la clínica" />
-
-      <Card>
-        <CardContent className="pt-5 space-y-4">
-          <form
-            className="flex gap-2"
-            onSubmit={(e) => { e.preventDefault(); if (nueva.trim()) crear.mutate() }}
+    <SeccionAjustes
+      titulo="Categorías de gasto"
+      descripcion="Para clasificar los gastos de caja. Se comparten en toda la clínica."
+      accion={cats.length > 0 || agregando ? botonNueva : undefined}
+    >
+      {agregando && (
+        <form
+          className="flex items-center gap-2 px-4 py-3"
+          onSubmit={(e) => { e.preventDefault(); if (nueva.trim()) crear.mutate() }}
+        >
+          <div className="relative flex-1">
+            <Tag className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={nueva}
+              onChange={(e) => setNueva(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Escape') { setAgregando(false); setNueva('') } }}
+              placeholder="Ej. Arriendo, Servicios públicos"
+              aria-label="Nombre de la nueva categoría"
+              className="h-9 pl-9"
+              maxLength={100}
+              autoFocus
+            />
+          </div>
+          <Button type="submit" size="sm" disabled={!nueva.trim() || crear.isPending}>
+            {crear.isPending ? 'Agregando…' : 'Agregar'}
+          </Button>
+          <Button
+            type="button" size="icon" variant="ghost" className="h-8 w-8" aria-label="Cancelar"
+            onClick={() => { setAgregando(false); setNueva('') }}
           >
-            <div className="relative flex-1">
-              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <X className="h-4 w-4" />
+          </Button>
+        </form>
+      )}
+
+      {isLoading ? (
+        <FilasCargando filas={3} />
+      ) : !cats.length ? (
+        !agregando && (
+          <VacioAjustes
+            titulo="Aún no hay categorías"
+            descripcion="Crea las categorías con las que clasificas los gastos (arriendo, insumos, servicios…)."
+            accion={botonNueva}
+          />
+        )
+      ) : (
+        <>
+          {[...activas, ...inactivas].map((c) => editId === c.id ? (
+            <div key={c.id} className="flex items-center gap-2 px-4 py-3">
               <Input
-                value={nueva}
-                onChange={(e) => setNueva(e.target.value)}
-                placeholder="Nueva categoría (ej. Arriendo, Servicios públicos)"
-                className="pl-9"
+                value={editVal}
+                onChange={(e) => setEditVal(e.target.value)}
+                className="h-9 flex-1"
                 maxLength={100}
+                aria-label={`Nuevo nombre de ${c.nombre}`}
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && editVal.trim()) renombrar.mutate({ id: c.id, nombre: editVal.trim() })
+                  if (e.key === 'Escape') setEditId(null)
+                }}
               />
+              <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600" aria-label="Guardar nombre"
+                disabled={!editVal.trim() || renombrar.isPending}
+                onClick={() => renombrar.mutate({ id: c.id, nombre: editVal.trim() })}>
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button size="icon" variant="ghost" className="h-8 w-8" aria-label="Cancelar" onClick={() => setEditId(null)}>
+                <X className="h-4 w-4" />
+              </Button>
             </div>
-            <Button type="submit" disabled={!nueva.trim() || crear.isPending}>
-              <Plus className="h-4 w-4 mr-1" />
-              {crear.isPending ? 'Agregando…' : 'Agregar'}
-            </Button>
-          </form>
-
-          {isLoading ? (
-            <LoadingState rows={3} />
-          ) : !cats.length ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">Aún no hay categorías.</p>
           ) : (
-            <div className="rounded-lg border divide-y">
-              {[...activas, ...inactivas].map((c) => (
-                <div key={c.id} className="flex items-center gap-2 px-3 py-2">
-                  {editId === c.id ? (
-                    <>
-                      <Input
-                        value={editVal}
-                        onChange={(e) => setEditVal(e.target.value)}
-                        className="h-8 flex-1"
-                        maxLength={100}
-                        autoFocus
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' && editVal.trim()) renombrar.mutate({ id: c.id, nombre: editVal.trim() })
-                          if (e.key === 'Escape') setEditId(null)
-                        }}
-                      />
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-emerald-600"
-                        disabled={!editVal.trim() || renombrar.isPending}
-                        onClick={() => renombrar.mutate({ id: c.id, nombre: editVal.trim() })}>
-                        <Check className="h-4 w-4" />
-                      </Button>
-                      <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => setEditId(null)}>
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      <span className={cn('flex-1 text-sm', !c.activa && 'text-muted-foreground line-through')}>
-                        {c.nombre}
-                      </span>
-                      {!c.activa && (
-                        <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                          Inactiva
-                        </span>
-                      )}
-                      <Button size="icon" variant="ghost" className="h-8 w-8 text-muted-foreground" title="Renombrar"
-                        onClick={() => { setEditId(c.id); setEditVal(c.nombre) }}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="sm" variant="ghost" className="h-8 w-[92px] text-xs"
-                        disabled={toggle.isPending}
-                        onClick={() => toggle.mutate(c)}>
-                        {c.activa ? 'Desactivar' : 'Activar'}
-                      </Button>
-                    </>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+            <FilaAjuste
+              key={c.id}
+              icono={Tag}
+              apagada={!c.activa}
+              titulo={c.nombre}
+              extra={!c.activa ? <EtiquetaAjuste tono="aviso">Inactiva</EtiquetaAjuste> : undefined}
+            >
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Acciones de ${c.nombre}`}>
+                    <MoreHorizontal className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => { setEditId(c.id); setEditVal(c.nombre) }}>
+                    <Pencil className="mr-2 h-3.5 w-3.5" />Renombrar
+                  </DropdownMenuItem>
+                  <DropdownMenuItem disabled={toggle.isPending} onClick={() => cambiarActiva(c, !c.activa)}>
+                    <Power className="mr-2 h-3.5 w-3.5" />{c.activa ? 'Desactivar' : 'Activar'}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </FilaAjuste>
+          ))}
+          <NotaAjuste>Desactivar una categoría la oculta al registrar gastos nuevos, pero conserva el histórico.</NotaAjuste>
+        </>
+      )}
+    </SeccionAjustes>
+  )
+}
 
-          <p className="text-xs text-muted-foreground">
-            Desactivar una categoría la oculta al registrar gastos nuevos, pero conserva el histórico.
-          </p>
-        </CardContent>
-      </Card>
-    </section>
+/** Filas grises mientras cargan los datos (igual que en ClinicaConfig). */
+function FilasCargando({ filas }: { filas: number }) {
+  return (
+    <>
+      {Array.from({ length: filas }, (_, i) => (
+        <div key={i} className="flex items-center gap-4 px-4 py-3.5">
+          <div className="h-8 w-8 shrink-0 animate-pulse rounded-lg bg-muted" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-2.5 w-64 max-w-full animate-pulse rounded bg-muted" />
+          </div>
+        </div>
+      ))}
+    </>
   )
 }

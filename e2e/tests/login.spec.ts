@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../fixtures/sesion'
 
 // Este test corre SIN sesión guardada — valida el flujo real de login
 test.use({ storageState: { cookies: [], origins: [] } })

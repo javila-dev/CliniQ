@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect } from '../fixtures/sesion'
 
 test('agenda carga y muestra la vista de calendario', async ({ page }) => {
   await page.goto('/agenda')

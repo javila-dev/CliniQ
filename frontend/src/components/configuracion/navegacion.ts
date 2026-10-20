@@ -84,14 +84,14 @@ export const CATEGORIAS: CategoriaConfig[] = [
     icon: CalendarClock,
     ajustes: [
       {
-        href: '/configuracion/agenda#agenda',
+        href: '/configuracion/agenda',
         label: 'Agenda y recordatorios',
-        description: 'Frecuencia de turnos, recordatorios y profesionales por procedimiento.',
+        description: 'Frecuencia de turnos, profesionales por procedimiento y recordatorios.',
         keywords: 'turnos intervalo citas recordatorio whatsapp confirmar anticipacion filtrar profesionales procedimiento',
         perm: PERM.CLINICAS_EDITAR,
       },
       {
-        href: '/configuracion/agenda#pacientes',
+        href: '/configuracion/registro-pacientes',
         label: 'Registro de pacientes',
         description: 'Formulario y link para que los pacientes se registren solos.',
         keywords: 'autoregistro formulario link qr publico datos personales salud eps',
@@ -102,14 +102,22 @@ export const CATEGORIAS: CategoriaConfig[] = [
   {
     id: 'comercial',
     label: 'Comercial',
-    description: 'Seguimiento a interesados y paquetes',
+    description: 'Seguimiento a interesados y cotizaciones',
     icon: PhoneCall,
+    // Dos secciones apiladas en una sola página (sin pestañas).
     ajustes: [
       {
-        href: '/configuracion/seguimiento',
+        href: '/configuracion/comercial#seguimiento',
         label: 'Seguimiento',
         description: 'Cuándo avisar que un paciente ya debió agendar su sesión.',
         keywords: 'seguimiento para hoy paquetes atrasados sesiones tolerancia dias compra frecuencia ritmo aviso',
+        perm: PERM.CLINICAS_EDITAR,
+      },
+      {
+        href: '/configuracion/comercial#cotizaciones',
+        label: 'Cotizaciones',
+        description: 'Aceptación y compromiso de pago al aceptar una cotización.',
+        keywords: 'compromiso de pago cartera cuotas cotizacion aceptacion firma documento mora deuda otros documentos',
         perm: PERM.CLINICAS_EDITAR,
       },
     ],
@@ -129,8 +137,8 @@ export const CATEGORIAS: CategoriaConfig[] = [
       },
       {
         href: '/configuracion/biometria',
-        label: 'Biometría',
-        description: 'Verificación facial del paciente, umbrales y check-in automático.',
+        label: 'Verificación facial',
+        description: 'La foto de control del paciente y qué tanto debe parecerse a ella al llegar.',
         keywords: 'facial rostro foto de control identidad umbral confianza verificacion biometrica',
         perm: PERM.CLINICAS_EDITAR,
       },
@@ -144,16 +152,9 @@ export const CATEGORIAS: CategoriaConfig[] = [
     ajustes: [
       {
         href: '/configuracion/atencion',
-        label: 'Pantalla del profesional',
-        description: 'Elige qué pestañas ve el profesional durante una atención.',
-        keywords: 'pestañas profesional atencion historia nota consulta',
-        perm: PERM.CLINICAS_EDITAR,
-      },
-      {
-        href: '/configuracion/historia-clinica',
-        label: 'Historia clínica',
-        description: 'Activa o desactiva las pestañas de la historia de cada paciente.',
-        keywords: 'pestañas secciones modulos estetico obesidad',
+        label: 'Pestañas de la atención',
+        description: 'Qué pestañas ve el profesional al atender y cuáles se muestran en la historia del paciente.',
+        keywords: 'pestañas profesional atencion historia clinica nota consulta secciones modulos estetico obesidad',
         perm: PERM.CLINICAS_EDITAR,
       },
       {
@@ -167,8 +168,8 @@ export const CATEGORIAS: CategoriaConfig[] = [
   },
   {
     id: 'documentos',
-    label: 'Documentos',
-    description: 'Firmas electrónicas de pacientes',
+    label: 'Consentimientos',
+    description: 'Documentos que firman los pacientes',
     icon: FileSignature,
     ajustes: [
       {
@@ -177,13 +178,6 @@ export const CATEGORIAS: CategoriaConfig[] = [
         description: 'Sube PDFs, mapea campos de firma y asócialos a procedimientos.',
         keywords: 'firma pdf plantillas documenso campos consentimiento informado',
         perm: PERM.CONSENTIMIENTOS_PLANTILLAS_VER,
-      },
-      {
-        href: '/configuracion/cartera',
-        label: 'Otros documentos',
-        description: 'Aceptación y compromiso de pago al aceptar una cotización.',
-        keywords: 'compromiso de pago cartera cuotas cotizacion aceptacion mora deuda',
-        perm: PERM.CLINICAS_EDITAR,
       },
     ],
   },
@@ -203,7 +197,7 @@ export const CATEGORIAS: CategoriaConfig[] = [
       {
         href: '/configuracion/cajas',
         label: 'Cajas y categorías',
-        description: 'Fondo inicial y responsable de la caja de cada sede, y el catálogo de categorías de gasto.',
+        description: 'Responsable de la caja de cada sede y el catálogo de categorías de gasto.',
         keywords: 'caja fondo inicial categorias gasto egresos responsable',
         perm: PERM.CAJA_CAJAS_GESTIONAR,
       },
@@ -240,9 +234,9 @@ export const CATEGORIAS: CategoriaConfig[] = [
       },
       {
         href: '/configuracion/log-acciones',
-        label: 'Log de acciones',
-        description: 'Historial auditable de quién hizo qué y cuándo en el sistema.',
-        keywords: 'auditoria historial registro cambios actividad',
+        label: 'Registro de actividad',
+        description: 'Quién hizo qué y cuándo en el sistema.',
+        keywords: 'auditoria historial registro cambios actividad log acciones inicios de sesion',
         perm: PERM.CORE_VER_LOG_ACCIONES,
       },
     ],

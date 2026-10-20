@@ -6,8 +6,8 @@ import { ClinicaConfig } from './ClinicaConfig'
 
 /** Antes todas las secciones vivían aquí como ?tab=…; esos enlaces siguen funcionando. */
 const DESTINO_TAB_ANTIGUO: Record<string, string> = {
-  agenda:    '/configuracion/agenda#agenda',
-  pacientes: '/configuracion/agenda#pacientes',
+  agenda:    '/configuracion/agenda',
+  pacientes: '/configuracion/registro-pacientes',
   atencion:  '/configuracion/recepcion',
   biometria: '/configuracion/biometria',
 }

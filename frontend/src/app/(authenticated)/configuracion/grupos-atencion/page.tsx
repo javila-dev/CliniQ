@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Check, ChevronsUpDown, Info, Loader2, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
+import Link from 'next/link'
+import { AlertTriangle, Check, ChevronsUpDown, Loader2, Pencil, Plus, Search, Trash2, Users, X } from 'lucide-react'
 import { colaboradoresApi } from '@/lib/api/colaboradores'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
@@ -19,6 +20,7 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
+import { EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
 import { cn, scrollWheelFallback, toTitleCase } from '@/lib/utils'
 import type { GrupoAtencion } from '@/types/colaboradores'
 
@@ -288,15 +290,25 @@ function GrupoDialog({ open, onOpenChange, grupo, puedeAsignarProcedimientos }: 
 const LIMITE_CHIPS = 6
 
 function Chips({ items, vacio }: { items: { id: string; nombre: string; apagado?: boolean }[]; vacio: string }) {
-  if (!items.length) return <p className="text-xs text-muted-foreground">{vacio}</p>
+  if (!items.length) return <span className="text-[13px] text-muted-foreground">{vacio}</span>
   return (
-    <div className="flex flex-wrap gap-1.5">
+    <>
       {items.slice(0, LIMITE_CHIPS).map((i) => (
-        <span key={i.id} className={cn('rounded-md bg-muted px-2 py-0.5 text-xs', i.apagado && 'text-muted-foreground line-through')}>
+        <span key={i.id} className={cn('rounded-md bg-muted px-2 py-0.5 text-xs text-foreground/80', i.apagado && 'text-muted-foreground line-through')}>
           {i.nombre}
         </span>
       ))}
       {items.length > LIMITE_CHIPS && <span className="px-1 text-xs text-muted-foreground">+{items.length - LIMITE_CHIPS}</span>}
+    </>
+  )
+}
+
+/** Una línea "Miembros: chips" dentro de la fila del grupo. */
+function LineaChips({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="w-[7.5rem] shrink-0 text-[13px] text-muted-foreground">{titulo}</span>
+      {children}
     </div>
   )
 }
@@ -326,98 +338,93 @@ export default function GruposAtencionPage() {
     },
   })
 
+  const nuevo = () => setEditando({ open: true, grupo: null })
+
   return (
-    <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <PageHeader
-          title="Grupos de atención"
-          description="Reúne a los profesionales que hacen lo mismo y asígnalos en bloque a los procedimientos. No cambia lo que pueden ver en el sistema: eso lo definen los roles."
-        />
-        {puedeGestionar && (
-          <Button onClick={() => setEditando({ open: true, grupo: null })} className="shrink-0">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Nuevo grupo
-          </Button>
-        )}
-      </div>
+    <div className="space-y-6">
+      <PageHeader
+        title="Grupos de atención"
+        description="Reúne a los profesionales que hacen lo mismo y asígnalos en bloque a los procedimientos. No cambia lo que pueden ver en el sistema: eso lo definen los roles."
+      />
 
-      {!filtroActivo && (
-        <div className="flex items-start gap-2 rounded-lg border border-sky-200 bg-sky-50 px-3.5 py-2.5 text-sm text-sky-800">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
-          <span>
-            Hoy tu clínica ofrece todos los profesionales al agendar. Los grupos se aplican cuando actives
-            «Profesionales por procedimiento» en Configuración → Agenda y pacientes → Agenda y recordatorios.
-          </span>
-        </div>
-      )}
-
-      {isLoading ? (
-        <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
-      ) : grupos.length === 0 ? (
-        <div className="rounded-xl border border-dashed bg-white px-6 py-12 text-center">
-          <Users className="mx-auto h-9 w-9 text-muted-foreground/40" />
-          <p className="mt-3 text-sm font-medium">Aún no hay grupos de atención</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-muted-foreground">
-            Por ejemplo, «Esteticistas» con los faciales y peelings, o «Médicos estéticos» con los inyectables.
-            Cuando entre alguien nuevo, basta con agregarlo a su grupo.
-          </p>
-          {puedeGestionar && (
-            <Button variant="outline" size="sm" className="mt-4" onClick={() => setEditando({ open: true, grupo: null })}>
-              <Plus className="mr-1.5 h-3.5 w-3.5" />
-              Crear el primero
+      <div className="space-y-7">
+        <SeccionAjustes
+          titulo="Grupos"
+          descripcion="Cuando entre alguien nuevo, basta con agregarlo a su grupo."
+          accion={puedeGestionar && grupos.length > 0 ? (
+            <Button size="sm" onClick={nuevo}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Nuevo grupo
             </Button>
-          )}
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {grupos.map((g) => {
-            const sinMiembros = g.procedimientos.length > 0 && g.miembros_disponibles === 0
-            return (
-              <div key={g.id} className="rounded-xl border bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="font-medium">{g.nombre}</p>
-                    {g.descripcion && <p className="text-xs text-muted-foreground">{g.descripcion}</p>}
-                  </div>
+          ) : undefined}
+        >
+          {isLoading ? (
+            <div className="flex justify-center py-8"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+          ) : grupos.length === 0 ? (
+            <VacioAjustes
+              titulo="Aún no hay grupos de atención"
+              descripcion="Por ejemplo, «Esteticistas» con los faciales y peelings, o «Médicos estéticos» con los inyectables."
+              accion={puedeGestionar ? (
+                <Button size="sm" onClick={nuevo}>
+                  <Plus className="mr-1.5 h-4 w-4" />
+                  Crear el primero
+                </Button>
+              ) : undefined}
+            />
+          ) : (
+            grupos.map((g) => {
+              const sinMiembros = g.procedimientos.length > 0 && g.miembros_disponibles === 0
+              return (
+                <FilaAjuste
+                  key={g.id}
+                  icono={Users}
+                  apagada={sinMiembros}
+                  titulo={g.nombre}
+                  descripcion={g.descripcion || undefined}
+                  extra={sinMiembros ? (
+                    <span title="Sus procedimientos no se pueden agendar con este grupo.">
+                      <EtiquetaAjuste tono="aviso" icono={AlertTriangle}>Sin miembros disponibles</EtiquetaAjuste>
+                    </span>
+                  ) : undefined}
+                  contenido={
+                    <div className="space-y-1.5">
+                      <LineaChips titulo={`Miembros (${g.miembros_disponibles})`}>
+                        <Chips
+                          items={g.miembros_detalle.map((m) => ({ id: m.id, nombre: toTitleCase(m.nombre), apagado: !m.disponible }))}
+                          vacio="Sin miembros"
+                        />
+                      </LineaChips>
+                      <LineaChips titulo={`Procedimientos (${g.procedimientos.length})`}>
+                        <Chips items={g.procedimientos_detalle} vacio="Aún no está asignado a procedimientos" />
+                      </LineaChips>
+                    </div>
+                  }
+                >
                   {puedeGestionar && (
-                    <div className="flex shrink-0 gap-1">
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0" onClick={() => setEditando({ open: true, grupo: g })} aria-label={`Editar ${g.nombre}`}>
+                    <>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditando({ open: true, grupo: g })} aria-label={`Editar ${g.nombre}`}>
                         <Pencil className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive" onClick={() => setEliminando(g)} aria-label={`Eliminar ${g.nombre}`}>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive" onClick={() => setEliminando(g)} aria-label={`Eliminar ${g.nombre}`}>
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
-                    </div>
+                    </>
                   )}
-                </div>
-                {sinMiembros && (
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-amber-700">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Sin miembros disponibles: sus procedimientos no se pueden agendar con este grupo.
-                  </p>
-                )}
-                <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Miembros ({g.miembros_disponibles})
-                    </p>
-                    <Chips
-                      items={g.miembros_detalle.map((m) => ({ id: m.id, nombre: toTitleCase(m.nombre), apagado: !m.disponible }))}
-                      vacio="Sin miembros"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                      Procedimientos ({g.procedimientos.length})
-                    </p>
-                    <Chips items={g.procedimientos_detalle} vacio="Aún no está asignado a procedimientos" />
-                  </div>
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      )}
+                </FilaAjuste>
+              )
+            })
+          )}
+          {!filtroActivo && (
+            <NotaAjuste>
+              Hoy se ofrecen todos los profesionales al agendar. Los grupos se aplican cuando actives
+              «Solo profesionales que hacen el procedimiento» en{' '}
+              <Link href="/configuracion/agenda" className="font-medium text-foreground underline underline-offset-2 hover:text-primary">
+                Agenda y recordatorios
+              </Link>.
+            </NotaAjuste>
+          )}
+        </SeccionAjustes>
+      </div>
 
       <GrupoDialog
         open={editando.open}

@@ -1,116 +1,17 @@
 'use client'
 
-import { Stethoscope } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
-import { Switch } from '@/components/ui/switch'
-import { useAtencionConfig, type TabAtencion } from '@/hooks/usePestanasClinica'
-
-interface TabConfig {
-  value: TabAtencion
-  label: string
-  description: string
-  obligatorio?: boolean
-}
-
-const TABS_CONFIG: TabConfig[] = [
-  {
-    value: 'datos-generales',
-    label: 'Datos Generales',
-    description: 'Identificación del paciente y datos complementarios.',
-    obligatorio: true,
-  },
-  {
-    value: 'motivo-consulta',
-    label: 'Motivo de Consulta',
-    description: 'Notas clínicas, anamnesis, diagnóstico y evolución del paciente.',
-  },
-  {
-    value: 'antecedentes',
-    label: 'Antecedentes',
-    description: 'Antecedentes personales, ginecoobstétricos y familiares.',
-  },
-  {
-    value: 'examenes',
-    label: 'Exámenes',
-    description: 'Resultados de laboratorio, imágenes diagnósticas y otros exámenes.',
-  },
-  {
-    value: 'plan-manejo',
-    label: 'Plan de Manejo',
-    description: 'Plan de tratamiento y seguimiento del paciente.',
-  },
-  {
-    value: 'ordenes',
-    label: 'Órdenes Médicas',
-    description: 'Órdenes médicas generadas a partir de plantillas.',
-  },
-  {
-    value: 'fotos',
-    label: 'Fotos',
-    description: 'Galería fotográfica antes, durante y después de los procedimientos.',
-  },
-  {
-    value: 'mediciones',
-    label: 'Seguimiento',
-    description: 'Signos vitales y medidas corporales registradas en cada control.',
-  },
-  {
-    value: 'insumos',
-    label: 'Insumos',
-    description: 'Insumos consumidos durante la atención, descontados del inventario.',
-  },
-]
+import { PestanasClinicaAjustes } from '@/components/configuracion/PestanasClinicaAjustes'
 
 export default function ConfiguracionAtencionPage() {
-  const { tabsActivos, setTabActivo, isLoading, guardando, error } = useAtencionConfig()
-
   return (
     <div className="space-y-6">
       <PageHeader
         helpSlug="que-pestanas-mostrar-en-historia-y-atencion"
-        title="Pantalla del profesional"
-        description="Configura qué pestañas ve el profesional durante una atención."
+        title="Pestañas de la atención"
+        description="Qué pestañas ve el profesional al atender y cuáles se muestran en la historia del paciente."
       />
-
-      <div className="rounded-lg border divide-y">
-        {TABS_CONFIG.map(({ value, label, description, obligatorio }) => {
-          const activo = tabsActivos[value] ?? true
-          return (
-            <div key={value} className="flex items-start justify-between gap-4 px-5 py-4">
-              <div className="flex items-start gap-3">
-                <Stethoscope className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-                <div>
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-medium">{label}</p>
-                    {obligatorio && (
-                      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
-                        Obligatorio
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
-                </div>
-              </div>
-              <Switch
-                checked={obligatorio ? true : activo}
-                disabled={obligatorio || isLoading || guardando}
-                onCheckedChange={(checked) => {
-                  if (!obligatorio) setTabActivo(value, checked)
-                }}
-              />
-            </div>
-          )
-        })}
-      </div>
-
-      {error && (
-        <p className="text-sm text-red-600">No se pudo guardar el cambio. Intenta de nuevo.</p>
-      )}
-
-      <p className="text-xs text-muted-foreground">
-        Los cambios se aplican inmediatamente. La pestaña <strong>Datos Generales</strong> siempre
-        está activa y no puede desactivarse.
-      </p>
+      <PestanasClinicaAjustes />
     </div>
   )
 }

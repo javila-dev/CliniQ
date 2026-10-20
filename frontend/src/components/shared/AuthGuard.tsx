@@ -3,12 +3,13 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useAuthStore } from '@/store/authStore'
+import { escucharOtrasPestanas } from '@/lib/api/sesion'
 import { Skeleton } from '@/components/ui/skeleton'
 import { isSuperAdmin } from '@/lib/permissions'
 import { toast } from '@/hooks/use-toast'
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, logout, user, errorConexion } = useAuthStore()
+  const { hasCheckedAuth, isAuthenticated, isLoading, loadUser, logout, user, errorConexion, stopImpersonating } = useAuthStore()
   const router = useRouter()
 
   useEffect(() => {
@@ -41,6 +42,34 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     window.addEventListener('cliniq:session-expired', onSessionExpired)
     return () => window.removeEventListener('cliniq:session-expired', onSessionExpired)
   }, [logout])
+
+  // La sesión como otro usuario venció (1 hora) o se cerró: el superadmin vuelve
+  // a la suya, que sigue en su cookie.
+  useEffect(() => {
+    const onSuplantacionTerminada = () => {
+      // Varias peticiones pueden fallar a la vez: se sale una sola vez.
+      if (!useAuthStore.getState().isImpersonating) return
+      useAuthStore.setState({ isImpersonating: false })
+      toast.error('Terminó la sesión como otro usuario', 'Volviste a tu sesión de superadmin.')
+      stopImpersonating().then(() => router.push('/equipo/personal'))
+    }
+    window.addEventListener('cliniq:suplantacion-terminada', onSuplantacionTerminada)
+    return () => window.removeEventListener('cliniq:suplantacion-terminada', onSuplantacionTerminada)
+  }, [stopImpersonating, router])
+
+  // Otra pestaña de este navegador cerró o abrió sesión (ver lib/api/sesion.ts).
+  useEffect(() => {
+    return escucharOtrasPestanas((cambio) => {
+      if (cambio === 'logout') {
+        if (!useAuthStore.getState().isAuthenticated) return
+        toast({ title: 'Sesión cerrada', description: 'Cerraste sesión en otra pestaña.' })
+        useAuthStore.getState().cerrarLocal()
+      } else if (cambio === 'login') {
+        // Puede ser otra persona: se recarga para no mostrar datos de la anterior.
+        window.location.reload()
+      }
+    })
+  }, [])
 
   // Sesión cerrada porque el usuario inició sesión en otro dispositivo
   useEffect(() => {
