@@ -1,11 +1,10 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import Link from 'next/link'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   Plus, Send, Loader2, FileText, X, Info, AlertTriangle, CheckCircle2, Download, ChevronDown,
-  MoreHorizontal, RotateCcw, BookmarkPlus, Settings2, Search,
+  MoreHorizontal, RotateCcw, BookmarkPlus, Search,
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -332,22 +331,13 @@ export function TabOrdenesMedicas({ historia, notaId, citaId }: TabOrdenesMedica
 
   return (
     <div className="space-y-4 max-w-2xl">
-      {(gestionaPlantillas || !agregando) && (
-        <div className="flex items-center justify-end gap-1.5">
-          {gestionaPlantillas && (
-            <Button asChild size="sm" variant="ghost" className="text-muted-foreground">
-              <Link href="/configuracion/plantillas-ordenes">
-                <Settings2 className="h-3.5 w-3.5 mr-1.5" />
-                Administrar plantillas
-              </Link>
-            </Button>
-          )}
-          {!agregando && (
-            <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Nueva orden
-            </Button>
-          )}
+      {/* Al escribir una orden no hay nada encima: el formulario queda arriba. */}
+      {!agregando && (
+        <div className="flex justify-end">
+          <Button size="sm" variant="outline" onClick={() => setAgregando(true)}>
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Nueva orden
+          </Button>
         </div>
       )}
 

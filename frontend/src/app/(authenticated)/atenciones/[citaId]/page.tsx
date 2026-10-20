@@ -97,16 +97,9 @@ export default function AtencionCitaPage({ params }: Props) {
     enabled: Boolean(pacienteId),
   })
 
-  const servicioId = cita?.servicio ?? null
-
-  const { data: gruposProcedimiento = [] } = useQuery({
-    queryKey: ['procedimiento-grupos', servicioId],
-    queryFn: () => clinicasApi.procedimientos.grupos.list(servicioId!),
-    enabled: Boolean(servicioId),
-    staleTime: 5 * 60_000,
-  })
-
-  const tieneZonas = gruposProcedimiento.length > 0 || Boolean(cita?.sesion_tratamiento?.tiene_zonas)
+  // Zonas aparece en toda atención (antes solo si el procedimiento tenía grupos
+  // de zonas); la clínica la puede apagar en Configuración.
+  const tieneZonas = tabsActivos.zonas ?? true
 
   const { data: historiaData } = useQuery({
     queryKey: ['historias', pacienteId],
@@ -588,15 +581,19 @@ export default function AtencionCitaPage({ params }: Props) {
                 className="flex-1 min-w-0 overflow-x-auto scroll-smooth"
                 style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
               >
-                <TabsList className="h-auto bg-white rounded-full p-1 gap-1 w-max">
+                <TabsList className="h-auto bg-white rounded-full p-1 gap-1 w-max flex mx-auto">
+                  {/* Solo el ícono; el nombre se ve en la pestaña activa y se
+                      despliega al pasar el mouse o al llegar con el teclado. */}
                   {tabs.map((t) => (
                     <TabsTrigger
                       key={t.value}
                       value={t.value}
-                      className="rounded-full px-3.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-200 data-[state=active]:bg-primary data-[state=active]:text-white data-[state=active]:font-semibold"
+                      className="group rounded-full px-2.5 py-1.5 text-sm font-medium whitespace-nowrap text-muted-foreground transition-colors duration-200 hover:text-foreground data-[state=active]:bg-primary data-[state=active]:px-3.5 data-[state=active]:text-white data-[state=active]:font-semibold"
                     >
-                      <t.icon className="h-3.5 w-3.5 mr-1.5 -ml-0.5 inline-block align-[-2px]" />
-                      {t.label}
+                      <t.icon className="h-4 w-4 shrink-0" />
+                      <span className="max-w-0 overflow-hidden opacity-0 transition-[max-width,opacity,margin] duration-[350ms] ease-out group-hover:ml-1.5 group-hover:max-w-[12rem] group-hover:opacity-100 group-focus-visible:ml-1.5 group-focus-visible:max-w-[12rem] group-focus-visible:opacity-100 group-data-[state=active]:ml-1.5 group-data-[state=active]:max-w-[12rem] group-data-[state=active]:opacity-100">
+                        {t.label}
+                      </span>
                     </TabsTrigger>
                   ))}
                 </TabsList>

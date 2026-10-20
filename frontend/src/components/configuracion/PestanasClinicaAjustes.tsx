@@ -25,12 +25,12 @@ const PESTANAS = [
   { valor: 'ordenes', icono: FileText, titulo: 'Órdenes médicas', descripcion: 'Órdenes generadas desde las plantillas.' },
   { valor: 'fotos', icono: Camera, titulo: 'Fotos', descripcion: 'Antes, durante y después de cada procedimiento.' },
   { valor: 'insumos', icono: Package, titulo: 'Insumos', descripcion: 'Lo gastado en la atención; se descuenta del inventario. Solo existe al atender.' },
-  { valor: 'zonas', icono: PersonStanding, titulo: 'Zonas', descripcion: 'Zonas del cuerpo tratadas en cada visita. Solo existe en la historia.' },
+  { valor: 'zonas', icono: PersonStanding, titulo: 'Zonas', descripcion: 'Zonas del cuerpo tratadas en cada visita. Al atender, el profesional elige los diagramas que usa.' },
 ] as const
 
 const EN_ATENCION: readonly string[] = [
   'datos-generales', 'motivo-consulta', 'antecedentes', 'mediciones', 'examenes',
-  'plan-manejo', 'ordenes', 'fotos', 'insumos',
+  'plan-manejo', 'ordenes', 'fotos', 'insumos', 'zonas',
 ] satisfies readonly TabAtencion[]
 const EN_HISTORIA: readonly string[] = [
   'datos-generales', 'motivo-consulta', 'antecedentes', 'mediciones', 'examenes',

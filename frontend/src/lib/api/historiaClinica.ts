@@ -14,6 +14,7 @@ import type {
   OrdenMedica,
   AnotacionZona,
   ZonasNota,
+  OpcionesZonas,
   ZonasVisita,
   ConsumoInsumo,
 } from '@/types/historia'
@@ -96,6 +97,18 @@ export const historiaClinicaApi = {
   zonas: {
     get: async (notaId: string): Promise<ZonasNota> => {
       const res = await apiClient.get<ZonasNota>(`/historia-clinica/notas/${notaId}/zonas/`)
+      return res.data
+    },
+    opciones: async (notaId: string): Promise<OpcionesZonas> => {
+      const res = await apiClient.get<OpcionesZonas>(`/historia-clinica/notas/${notaId}/zonas/opciones/`)
+      return res.data
+    },
+    agregar: async (notaId: string, diagramas: string[]): Promise<ZonasNota> => {
+      const res = await apiClient.post<ZonasNota>(`/historia-clinica/notas/${notaId}/zonas/agregar/`, { diagramas })
+      return res.data
+    },
+    quitar: async (notaId: string, diagrama: string): Promise<ZonasNota> => {
+      const res = await apiClient.post<ZonasNota>(`/historia-clinica/notas/${notaId}/zonas/quitar/`, { diagrama })
       return res.data
     },
     create: async (data: { nota: string; diagrama: string; x: number; y: number; radio: number; texto: string; tipo_aplicacion?: string; parametros?: Record<string, string> }): Promise<AnotacionZona> => {

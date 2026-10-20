@@ -30,6 +30,14 @@ export interface ZonasNota {
   anotaciones: AnotacionZona[]
 }
 
+/** Lo que se puede agregar a la pestaña Zonas de una atención. */
+export interface OpcionesZonas {
+  grupos: { id: string; nombre: string; diagramas: string[] }[]
+  diagramas: DiagramaConAnotaciones[]
+  /** Atención anterior del paciente con zonas marcadas, para repetirlas. */
+  anterior: { nota_id: string; fecha: string; servicio: string | null; diagramas: string[] } | null
+}
+
 export interface ZonasVisita {
   nota_id: string
   fecha: string

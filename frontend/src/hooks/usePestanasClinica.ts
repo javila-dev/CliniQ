@@ -14,13 +14,13 @@ export type TabHistoria =
 
 export type TabAtencion =
   | 'datos-generales' | 'motivo-consulta' | 'antecedentes' | 'examenes' | 'plan-manejo'
-  | 'ordenes' | 'fotos' | 'mediciones' | 'insumos'
+  | 'ordenes' | 'fotos' | 'mediciones' | 'insumos' | 'zonas'
 
 const HISTORIA_TABS: TabHistoria[] = [
   'datos-generales', 'motivo-consulta', 'antecedentes', 'mediciones', 'examenes', 'plan-manejo', 'ordenes', 'fotos', 'zonas',
 ]
 const ATENCION_TABS: TabAtencion[] = [
-  'datos-generales', 'motivo-consulta', 'antecedentes', 'examenes', 'plan-manejo', 'ordenes', 'fotos', 'mediciones', 'insumos',
+  'datos-generales', 'motivo-consulta', 'antecedentes', 'examenes', 'plan-manejo', 'ordenes', 'fotos', 'mediciones', 'insumos', 'zonas',
 ]
 
 const QUERY_KEY = ['configuracion', 'pestanas']

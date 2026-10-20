@@ -3,11 +3,13 @@
 import { useState, useRef, useCallback, useEffect, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Trash2, MapPin, Check, X } from 'lucide-react'
+import { Trash2, MapPin, Check, X, Plus, History, Search, Loader2 } from 'lucide-react'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { Button } from '@/components/ui/button'
-import { cn } from '@/lib/utils'
-import type { AnotacionZona, DiagramaConAnotaciones, TipoAplicacion } from '@/types/historia'
+import { Input } from '@/components/ui/input'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { cn, formatFechaLocal, scrollWheelFallback } from '@/lib/utils'
+import type { AnotacionZona, DiagramaConAnotaciones, OpcionesZonas, TipoAplicacion } from '@/types/historia'
 import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
 
@@ -387,12 +389,15 @@ function PinBubble({
 // ─── DiagramaPanel ───────────────────────────────────────────────────────────
 
 function DiagramaPanel({
-  diagrama, anotaciones, notaId, readOnly,
+  diagrama, anotaciones, notaId, readOnly, onQuitar, quitando,
 }: {
   diagrama: DiagramaConAnotaciones
   anotaciones: AnotacionZona[]
   notaId: string
   readOnly?: boolean
+  /** Solo llega si el diagrama no tiene marcas. */
+  onQuitar?: () => void
+  quitando?: boolean
 }) {
   const qc = useQueryClient()
   const imgRef = useRef<HTMLDivElement>(null)
@@ -490,7 +495,20 @@ function DiagramaPanel({
 
   return (
     <div className="space-y-2">
-      <p className="text-xs font-medium text-muted-foreground">{diagrama.nombre}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">{diagrama.nombre}</p>
+        {onQuitar && (
+          <button
+            type="button"
+            onClick={onQuitar}
+            disabled={quitando}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50"
+          >
+            <X className="h-3 w-3" />
+            Quitar
+          </button>
+        )}
+      </div>
 
       <div
         ref={imgRef}
@@ -580,10 +598,35 @@ function DiagramaPanel({
 // ─── TabZonas ────────────────────────────────────────────────────────────────
 
 export function TabZonas({ notaId, readOnly }: Props) {
+  const qc = useQueryClient()
+  const qKey = ['nota-zonas', notaId]
+  const [eligiendo, setEligiendo] = useState(false)
+
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['nota-zonas', notaId],
+    queryKey: qKey,
     queryFn: () => historiaClinicaApi.zonas.get(notaId),
     staleTime: 30_000,
+  })
+  // Clave aparte: marcar zonas invalida la de arriba y no debe recargar esto.
+  const { data: opciones, isLoading: cargandoOpciones } = useQuery({
+    queryKey: ['nota-zonas-opciones', notaId],
+    queryFn: () => historiaClinicaApi.zonas.opciones(notaId),
+    enabled: !readOnly,
+    staleTime: 5 * 60_000,
+  })
+
+  const agregarMut = useMutation({
+    mutationFn: (ids: string[]) => historiaClinicaApi.zonas.agregar(notaId, ids),
+    onSuccess: (zonas) => {
+      qc.setQueryData(qKey, zonas)
+      setEligiendo(false)
+    },
+    onError: (err) => toast.error('No se pudieron agregar las zonas', mensajeDeError(err)),
+  })
+  const quitarMut = useMutation({
+    mutationFn: (diagramaId: string) => historiaClinicaApi.zonas.quitar(notaId, diagramaId),
+    onSuccess: (zonas) => qc.setQueryData(qKey, zonas),
+    onError: (err) => toast.error('No se pudo quitar la zona', mensajeDeError(err)),
   })
 
   if (isLoading) {
@@ -604,26 +647,267 @@ export function TabZonas({ notaId, readOnly }: Props) {
     )
   }
 
-  if (!data || data.diagramas.length === 0) {
-    return (
-      <div className="flex flex-col items-center justify-center py-16 text-center px-6">
-        <MapPin className="h-8 w-8 text-muted-foreground/30 mb-2" />
-        <p className="text-sm text-muted-foreground">Sin diagramas configurados para este procedimiento.</p>
-      </div>
-    )
-  }
+  const diagramas = data?.diagramas ?? []
+  const presentes = new Set(diagramas.map((d) => d.id))
+  const anterior = opciones?.anterior
+  const faltanDeAnterior = anterior?.diagramas.filter((id) => !presentes.has(id)) ?? []
+
+  const acciones = !readOnly && (
+    <div className="flex flex-wrap items-center justify-end gap-2">
+      {faltanDeAnterior.length > 0 && anterior && (
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={agregarMut.isPending}
+          onClick={() => agregarMut.mutate(faltanDeAnterior)}
+          title={anterior.servicio ?? undefined}
+        >
+          <History className="mr-1.5 h-3.5 w-3.5" />
+          Usar las de la sesión del {formatFechaLocal(anterior.fecha, { day: 'numeric', month: 'short' })}
+        </Button>
+      )}
+      <Button size="sm" variant={diagramas.length > 0 ? 'outline' : 'default'} onClick={() => setEligiendo(true)}>
+        <Plus className="mr-1.5 h-3.5 w-3.5" />
+        Agregar zona
+      </Button>
+    </div>
+  )
 
   return (
-    <div className={cn('grid gap-6 p-4', data.diagramas.length > 1 && 'sm:grid-cols-2')}>
-      {data.diagramas.map((d) => (
-        <DiagramaPanel
-          key={d.id}
-          diagrama={d}
-          anotaciones={data.anotaciones.filter((a) => a.diagrama === d.id)}
-          notaId={notaId}
-          readOnly={readOnly}
+    <div className="space-y-4 p-4">
+      {diagramas.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-3 py-14 text-center">
+          <MapPin className="h-8 w-8 text-muted-foreground/30" />
+          <p className="text-sm text-muted-foreground">
+            {readOnly ? 'No se registraron zonas en esta atención.' : 'Elige el diagrama de la zona que vas a trabajar.'}
+          </p>
+          {acciones}
+        </div>
+      ) : (
+        <>
+          {acciones}
+          <div className={cn('grid gap-6', diagramas.length > 1 && 'sm:grid-cols-2')}>
+            {diagramas.map((d) => {
+              const marcas = data!.anotaciones.filter((a) => a.diagrama === d.id)
+              return (
+                <DiagramaPanel
+                  key={d.id}
+                  diagrama={d}
+                  anotaciones={marcas}
+                  notaId={notaId}
+                  readOnly={readOnly}
+                  // Solo se quita si no tiene marcas (las marcas se borran una a una).
+                  onQuitar={!readOnly && marcas.length === 0 ? () => quitarMut.mutate(d.id) : undefined}
+                  quitando={quitarMut.isPending && quitarMut.variables === d.id}
+                />
+              )
+            })}
+          </div>
+        </>
+      )}
+
+      {!readOnly && (
+        <SelectorZonas
+          abierto={eligiendo}
+          onCerrar={() => setEligiendo(false)}
+          opciones={opciones}
+          cargando={cargandoOpciones}
+          presentes={presentes}
+          agregando={agregarMut.isPending}
+          onAgregar={(ids) => agregarMut.mutate(ids)}
         />
-      ))}
+      )}
     </div>
+  )
+}
+
+// ─── Selector de zonas ───────────────────────────────────────────────────────
+
+function sinTildes(texto: string) {
+  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+}
+
+const OTRAS = 'otras'
+
+/** Los diagramas se ven por grupo (uno a la vez); la búsqueda recorre todos. */
+function SelectorZonas({
+  abierto, onCerrar, opciones, cargando, presentes, agregando, onAgregar,
+}: {
+  abierto: boolean
+  onCerrar: () => void
+  opciones: OpcionesZonas | undefined
+  cargando: boolean
+  presentes: Set<string>
+  agregando: boolean
+  onAgregar: (ids: string[]) => void
+}) {
+  const [busqueda, setBusqueda] = useState('')
+  const [seleccion, setSeleccion] = useState<string[]>([])
+  const [grupoActivo, setGrupoActivo] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!abierto) {
+      setBusqueda('')
+      setSeleccion([])
+      setGrupoActivo(null)
+    }
+  }, [abierto])
+
+  const grupos = opciones?.grupos ?? []
+  const todos = opciones?.diagramas ?? []
+  const porId = new Map(todos.map((d) => [d.id, d]))
+  const agrupados = new Set(grupos.flatMap((g) => g.diagramas))
+  const sueltos = todos.filter((d) => !agrupados.has(d.id))
+  // Pestañas: los grupos y, si hay diagramas fuera de todo grupo, "Otras".
+  const pestanas = [
+    ...grupos.map((g) => ({ id: g.id, nombre: g.nombre, ids: g.diagramas })),
+    ...(sueltos.length > 0 ? [{ id: OTRAS, nombre: 'Otras', ids: sueltos.map((d) => d.id) }] : []),
+  ]
+  const activa = pestanas.find((p) => p.id === grupoActivo) ?? pestanas[0]
+
+  const q = sinTildes(busqueda.trim())
+  const visibles = q
+    ? todos.filter((d) => sinTildes(d.nombre).includes(q))
+    : (activa?.ids ?? []).map((id) => porId.get(id)).filter((d): d is DiagramaConAnotaciones => Boolean(d))
+
+  const alternar = (ids: string[]) => {
+    const nuevos = ids.filter((id) => !presentes.has(id))
+    if (nuevos.length === 0) return
+    const yaElegidos = nuevos.every((id) => seleccion.includes(id))
+    setSeleccion((s) => (yaElegidos ? s.filter((id) => !nuevos.includes(id)) : [...s, ...nuevos.filter((id) => !s.includes(id))]))
+  }
+
+  const nuevosDeActiva = (activa?.ids ?? []).filter((id) => !presentes.has(id))
+  const activaCompleta = nuevosDeActiva.length > 0 && nuevosDeActiva.every((id) => seleccion.includes(id))
+
+  return (
+    <Dialog open={abierto} onOpenChange={(v) => !v && onCerrar()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>Agregar zona</DialogTitle>
+          <DialogDescription>Elige un grupo y marca los diagramas que vas a usar.</DialogDescription>
+        </DialogHeader>
+
+        <div className="relative">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            placeholder="Buscar en todos los grupos"
+            className="pl-9"
+            aria-label="Buscar zona"
+          />
+        </div>
+
+        {!q && pestanas.length > 1 && (
+          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Grupos de zonas">
+            {pestanas.map((p) => {
+              const elegidos = p.ids.filter((id) => seleccion.includes(id)).length
+              const actual = p.id === activa?.id
+              return (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={actual}
+                  onClick={() => setGrupoActivo(p.id)}
+                  className={cn(
+                    'flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm transition-colors',
+                    actual ? 'border-primary bg-primary text-primary-foreground' : 'hover:border-primary/50',
+                  )}
+                >
+                  {p.nombre}
+                  {elegidos > 0 && (
+                    <span className={cn(
+                      'rounded-full px-1.5 text-[11px] font-semibold tabular-nums',
+                      actual ? 'bg-white/25' : 'bg-primary/10 text-primary',
+                    )}>
+                      {elegidos}
+                    </span>
+                  )}
+                </button>
+              )
+            })}
+          </div>
+        )}
+
+        <div className="max-h-[50vh] space-y-2 overflow-y-auto pr-1" onWheel={scrollWheelFallback}>
+          {cargando ? (
+            <div className="grid grid-cols-3 gap-3">
+              {Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-32 animate-pulse rounded-lg bg-muted" />)}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {q
+                    ? `${visibles.length} resultado${visibles.length !== 1 ? 's' : ''} en todos los grupos`
+                    : `${visibles.length} diagrama${visibles.length !== 1 ? 's' : ''} en ${activa?.nombre ?? ''}`}
+                </p>
+                {!q && nuevosDeActiva.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => alternar(nuevosDeActiva)}
+                    className="text-xs font-medium text-primary hover:underline"
+                  >
+                    {activaCompleta ? 'Quitar todos' : 'Elegir todos'}
+                  </button>
+                )}
+              </div>
+              {visibles.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  {q ? 'Ninguna zona coincide con la búsqueda.' : 'No hay diagramas disponibles.'}
+                </p>
+              ) : (
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  {visibles.map((d) => {
+                    const yaEsta = presentes.has(d.id)
+                    const elegido = seleccion.includes(d.id)
+                    return (
+                      <button
+                        key={d.id}
+                        type="button"
+                        disabled={yaEsta}
+                        aria-pressed={elegido}
+                        onClick={() => alternar([d.id])}
+                        className={cn(
+                          'relative overflow-hidden rounded-lg border bg-white text-left transition-shadow',
+                          elegido ? 'border-primary ring-2 ring-primary/40' : 'hover:border-primary/50',
+                          yaEsta && 'cursor-default opacity-50',
+                        )}
+                      >
+                        <div className="flex h-24 items-center justify-center bg-muted/30 p-1.5">
+                          {d.imagen_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={d.imagen_url} alt="" className="max-h-full max-w-full object-contain" draggable={false} />
+                          ) : (
+                            <MapPin className="h-6 w-6 text-muted-foreground/30" />
+                          )}
+                        </div>
+                        <p className="truncate px-2 py-1.5 text-xs font-medium">{d.nombre}</p>
+                        {(elegido || yaEsta) && (
+                          <span className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-medium text-primary-foreground">
+                            <Check className="h-3 w-3" />
+                            {yaEsta && 'Ya está'}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCerrar}>Cancelar</Button>
+          <Button disabled={seleccion.length === 0 || agregando} onClick={() => onAgregar(seleccion)}>
+            {agregando && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            {seleccion.length > 0 ? `Agregar ${seleccion.length}` : 'Agregar'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
