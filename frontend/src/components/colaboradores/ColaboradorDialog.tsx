@@ -1053,7 +1053,9 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                       <h3 className="text-base font-semibold">{pasoActual.titulo}</h3>
                       <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{pasoActual.explicacion}</p>
                     </div>
-                    <div className="grid content-start gap-4 sm:grid-cols-2">
+                    {/* `key` por paso: sin ella React reutiliza los Controller por posición
+                        y se cruzan los valores (el UUID del rol terminaba en «Nombres»). */}
+                    <div key={pasoActual.id} className="grid content-start gap-4 sm:grid-cols-2">
                       {pasoActual.id === 'atencion' && avisoSinFiltro}
                       {b[pasoActual.id]}
                     </div>
@@ -1087,12 +1089,15 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               Cancelar
             </Button>
             {!isEdit && !esUltimoPaso ? (
-              <Button type="button" onClick={siguientePaso} disabled={!puedeAgregar}>
+              // `key` distinta al botón de crear: si React reutiliza el mismo <button>,
+              // al llegar al último paso se vuelve submit antes de terminar el clic y envía.
+              <Button key="siguiente" type="button" onClick={siguientePaso} disabled={!puedeAgregar}>
                 Siguiente
                 <ArrowRight className="h-4 w-4 ml-1.5" />
               </Button>
             ) : (
               <Button
+                key="guardar"
                 form="colaborador-form"
                 type="submit"
                 disabled={
