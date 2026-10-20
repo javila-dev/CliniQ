@@ -36,6 +36,8 @@ El orden sigue el recorrido de un día en la clínica: entrar → configurar →
 | M5 | Comercial: cotizaciones, ventas, seguimiento | [m5-comercial.md](m5-comercial.md) | Revisado |
 | M6 | Dinero: cobros, cartera, caja, resultados | [m6-dinero.md](m6-dinero.md) | Revisado |
 | M7 | Inventario, compras, notificaciones y plataforma | [m7-inventario-plataforma.md](m7-inventario-plataforma.md) | Revisado |
+| QA | Prueba simulada por perfiles (14/10/2026) | [qa-perfiles.md](qa-perfiles.md) | Revisado |
+| FC | Flujo crítico cotización → agenda → atención (15/10/2026) | [revision-flujo-critico.md](revision-flujo-critico.md) | Revisado |
 
 Los estados posibles son: Pendiente, Revisado (hallazgos listados), En corrección, Corregido y Probado por usuario.
 

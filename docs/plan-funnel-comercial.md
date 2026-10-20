@@ -747,6 +747,18 @@ Confirmadas (2026-10-07 y 2026-10-08):
 - **D-F13.** Sin botones en las plantillas ni lectura de respuestas (Lyvio no
   los soporta). Autorización y baja por link a una página pública. Las
   plantillas no se pueden borrar en Meta, solo archivar en CliniQ.
+  *Ajustada por D-F15:* los mensajes entrantes sí se leen, solo para registrar
+  interesados.
+- **D-F15 (16/10/2026).** Quien escribe al número propio de la clínica entra
+  solo a Seguimiento (`seguimiento/whatsapp_entrante.py`, desde el webhook
+  `message_created` entrante de Chatwoot). Activo en toda clínica con número
+  propio conectado, sin interruptor. Teléfono sin paciente → interesado sin
+  ficha, motivo "Escribió por WhatsApp", el primer mensaje (200 caracteres) como
+  interés, sede la del número si la usa una sola. Interesado abierto con ese
+  teléfono → no se duplica; perdido → se reabre. Paciente sin seguimiento
+  abierto → Recompra (o se reabre su última oportunidad perdida). No entran los
+  teléfonos del equipo ni los marcados "No es cliente" (acción de la fila, guarda
+  el teléfono en `TelefonoDescartado`).
 - **KPI.** Los indicadores del dashboard tienen que separar cotizaciones de
   ventas (ver [KPI](#kpi-del-dashboard)).
 
