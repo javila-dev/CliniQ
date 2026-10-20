@@ -628,6 +628,13 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   const onCreateSubmit = (data: CreateForm) => createMut.mutate(
     data.es_profesional ? data : { ...data, grupos: [], especialidades: [] },
   )
+  // Si algo no pasa la validación, lleva al paso donde está el error: los demás
+  // pasos no se ven y crear "no hacía nada".
+  const onCreateInvalid = (errors: Record<string, unknown>) => {
+    const indice = pasos.findIndex((p) => p.campos.some((c) => c in errors))
+    if (indice >= 0) setPaso(indice)
+    else toast({ title: 'Revisa los datos', description: 'Hay un campo con error que no se puede corregir en este paso.' })
+  }
   const onEditSubmit = (data: EditForm) => {
     if (!colaborador) return
     // La API prohíbe enviar sedes_ids cuando sede_principal es null
@@ -642,12 +649,26 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   // Si el backend devolvió errores por campo (email, etc.) ya se muestran junto al input;
   // el mensaje genérico de abajo solo aplica cuando no hay un campo conocido que los muestre.
   const serverErrorData = serverError?.response?.data
-  const knownFormFields = Object.keys(isEdit ? editSchema.shape : createSchema.shape)
+  // Campos que se ven ahora mismo y muestran su error junto al input. Las sedes
+  // adicionales solo aparecen con más de una sede; "Qué atiende", solo si atiende.
+  const camposVisibles = (isEdit ? Object.keys(editSchema.shape) : pasoActual.campos).filter((c) =>
+    (c !== 'sedes_ids' || sedes.length > 1) &&
+    (!['grupos', 'especialidades'].includes(c) || !!(isEdit ? editForm.watch('es_profesional') : createForm.watch('es_profesional'))),
+  )
+  // Errores del backend sin un campo visible donde mostrarse: van al aviso general.
+  const erroresSinCampo =
+    serverErrorData && typeof serverErrorData === 'object' && !Array.isArray(serverErrorData)
+      ? Object.entries(serverErrorData)
+          .filter(([k]) => !camposVisibles.includes(k) && !['detail', 'error', 'code'].includes(k))
+          .map(([, v]) => (Array.isArray(v) ? String(v[0]) : typeof v === 'string' ? v : ''))
+          .filter(Boolean)
+      : []
   const hasFieldSpecificError =
     !!serverErrorData &&
     typeof serverErrorData === 'object' &&
     !Array.isArray(serverErrorData) &&
-    Object.keys(serverErrorData).some((k) => knownFormFields.includes(k))
+    Object.keys(serverErrorData).some((k) => camposVisibles.includes(k)) &&
+    erroresSinCampo.length === 0
 
   // Campos compartidos entre crear y editar, agrupados en bloques. La edición los
   // muestra como secciones de un formulario; la creación, como pasos de un asistente.
@@ -684,7 +705,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
             <Controller name="numero_documento" control={control}
               render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="CC / NIT / Pasaporte" />} />
           </Campo>
-          <Campo label="Teléfono">
+          <Campo label="Teléfono" error={errors.telefono?.message}>
             <Controller name="telefono" control={control}
               render={({ field }) => <Input {...field} value={field.value ?? ''} placeholder="+57 300 000 0000" />} />
           </Campo>
@@ -795,7 +816,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
             <Controller name="fecha_ingreso" control={control}
               render={({ field }) => <Input type="date" {...field} value={field.value ?? ''} />} />
           </Campo>
-          <Campo label="Tipo de contrato">
+          <Campo label="Tipo de contrato" error={errors.tipo_contrato?.message}>
             <Controller name="tipo_contrato" control={control}
               render={({ field }) => (
                 <Select value={field.value} onValueChange={field.onChange}>
@@ -980,7 +1001,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               onSubmit={(e) => {
                 // Enter en un paso intermedio avanza en vez de crear.
                 if (!esUltimoPaso) { e.preventDefault(); siguientePaso(); return }
-                createForm.handleSubmit(onCreateSubmit)(e)
+                createForm.handleSubmit(onCreateSubmit, onCreateInvalid)(e)
               }}
               className="space-y-6"
             >
@@ -1047,7 +1068,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
               <p className="text-sm text-destructive">
                 {serverError?.response?.data?.detail ||
                   serverError?.response?.data?.error ||
-                  serverError?.response?.data?.non_field_errors?.[0] ||
+                  erroresSinCampo.join(' ') ||
                   'Ocurrió un error. Verifica los datos e intenta de nuevo.'}
               </p>
             </div>

@@ -28,6 +28,11 @@ class UserAttributeField(serializers.Field):
         self.inner_field = inner_field
         super().__init__(**kwargs)
 
+    def get_attribute(self, instance):
+        # El atributo vive en instance.user, no en el colaborador. Sin esto DRF
+        # no lo encuentra y, al no ser obligatorio, omite el campo en silencio.
+        return instance
+
     def to_representation(self, value):
         return self.inner_field.to_representation(getattr(value.user, self.attr_name))
 

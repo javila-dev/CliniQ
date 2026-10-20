@@ -272,6 +272,26 @@ class ColaboradorApiTests(ColaboradoresBaseTests):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.json()["especialidades_detalle"]), 2)
 
+    def test_detalle_devuelve_atiende_pacientes_tras_guardarlo(self):
+        # El formulario de edición lee "Atiende pacientes" del detalle: si no viene,
+        # aparece apagado y al volver a guardar se desactiva de verdad.
+        colaborador = self._crear_colaborador_profesional()
+        colaborador.user.es_profesional = False
+        colaborador.user.save(update_fields=["es_profesional"])
+        self.client.force_authenticate(self.admin)
+
+        response = self.client.patch(
+            f"/api/v1/colaboradores/{colaborador.id}/",
+            {"es_profesional": True},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+
+        body = self.client.get(f"/api/v1/colaboradores/{colaborador.id}/").json()
+        self.assertIs(body["es_profesional"], True)
+        self.assertEqual(body["first_name"], "Prof")
+        self.assertEqual(body["email"], "prof.colab@test.com")
+
 
 class HorarioColaboradorApiTests(ColaboradoresBaseTests):
     def setUp(self):
