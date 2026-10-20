@@ -27,6 +27,9 @@ ATENCION_TABS_DISPONIBLES = [
     ("fotos", "Fotos", False),
     ("mediciones", "Seguimiento", False),
     ("insumos", "Insumos", False),
+    # Desde 20/10/2026 la pestana Zonas aparece en toda atencion (antes solo si
+    # el procedimiento tenia grupos de zonas) y se puede apagar aqui.
+    ("zonas", "Zonas", False),
 ]
 
 

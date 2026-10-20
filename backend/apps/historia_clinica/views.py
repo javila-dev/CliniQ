@@ -74,6 +74,7 @@ from apps.notificaciones.services import (
 )
 from apps.pacientes.serializers import enmascarar_cola
 from apps.historia_clinica.autoria import exigir_documentable, puede_documentar
+from apps.historia_clinica import zonas as zonas_nota
 from apps.users.authorization import atiende_solo_lo_propio, user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
 
@@ -483,7 +484,7 @@ class NotaClinicaViewSet(
     http_method_names = ["get", "post", "patch"]
 
     def get_permissions(self):
-        if self.action in {"create", "partial_update", "completar"}:
+        if self.action in {"create", "partial_update", "completar", "zonas_agregar", "zonas_quitar"}:
             permission_classes = (NotaClinicaAccessPermission,)
         else:
             permission_classes = (RequirePermission("historia.ver"),)
@@ -538,63 +539,107 @@ class NotaClinicaViewSet(
             # Idempotente: si el cierre de la atención falló después de completar
             # la nota, reintentar no puede quedar trabado en un 400 (AT-03).
             return Response(NotaClinicaSerializer(nota, context={"request": request}).data, status=status.HTTP_200_OK)
+        # Antes de cerrarla se guardan sus diagramas: si luego cambian los grupos
+        # del procedimiento, la nota sigue mostrando los que tenía.
+        zonas_nota.inicializar(nota)
         nota.estado = NotaClinica.EstadoNota.COMPLETADA
         nota.save(update_fields=["estado", "updated_at"])
         registrar_accion(request, "nota.completar", nota, {"historia_id": str(nota.historia_id)})
         serializer = NotaClinicaSerializer(nota, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
-    @action(detail=True, methods=["get"], url_path="zonas")
-    def zonas(self, request, pk=None):
-        """
-        Devuelve los diagramas del servicio de la cita + las anotaciones existentes de esta nota.
-        Es el endpoint principal que carga la pestaña de zonas tratadas.
-        """
+    @staticmethod
+    def _diagrama_data(diagrama, orden):
         from apps.core.storage import get_public_url
-        nota = self.get_object()
+
+        return {
+            "id": str(diagrama.id),
+            "nombre": diagrama.nombre,
+            "imagen_url": get_public_url(diagrama.imagen.name) if diagrama.imagen else None,
+            "orden": orden,
+        }
+
+    def _zonas_response(self, nota):
         anotaciones = (
             AnotacionZona.objects
             .filter(nota=nota, activo=True)
             .select_related("diagrama")
             .order_by("created_at")
         )
-        anotaciones_data = AnotacionZonaSerializer(anotaciones, many=True).data
+        diagramas = [self._diagrama_data(d, i) for i, d in enumerate(zonas_nota.diagramas_de_nota(nota), start=1)]
+        return Response({"diagramas": diagramas, "anotaciones": AnotacionZonaSerializer(anotaciones, many=True).data})
 
-        # Los diagramas salen del/los procedimiento(s) de la cita. Para citas de
-        # tratamiento (sin servicio propio) se agregan las zonas de TODOS los
-        # procedimientos del tipo de sesión, deduplicadas por diagrama.
-        servicio_ids = []
-        if nota.cita_id:
-            from apps.protocolos.services import contexto_sesion_para_cita
+    @action(detail=True, methods=["get"], url_path="zonas")
+    def zonas(self, request, pk=None):
+        """Diagramas de la pestaña Zonas de esta nota y sus marcas (ver zonas.py)."""
+        return self._zonas_response(self.get_object())
 
-            contexto = contexto_sesion_para_cita(nota.cita)
-            if contexto and contexto["procedimientos"]:
-                servicio_ids = [p["id"] for p in contexto["procedimientos"]]
-            elif nota.cita.servicio_id:
-                servicio_ids = [str(nota.cita.servicio_id)]
+    @action(detail=True, methods=["get"], url_path="zonas/opciones")
+    def zonas_opciones(self, request, pk=None):
+        """Lo que el profesional puede agregar: grupos de zonas, diagramas sueltos
+        y los diagramas marcados en la atención anterior del paciente."""
+        from apps.clinicas.models import DiagramaCorporal, GrupoZonas
 
-        diagramas = []
-        if servicio_ids:
-            from apps.clinicas.models import ServicioGrupoZonas
-            grupos_rels = (
-                ServicioGrupoZonas.objects
-                .filter(servicio_id__in=servicio_ids, activo=True)
-                .prefetch_related("grupo__diagramas__diagrama")
-                .order_by("orden")
-            )
-            seen = set()
-            for srel in grupos_rels:
-                for gd in srel.grupo.diagramas.order_by("orden"):
-                    if gd.diagrama_id not in seen:
-                        seen.add(gd.diagrama_id)
-                        diagramas.append({
-                            "id": str(gd.diagrama_id),
-                            "nombre": gd.diagrama.nombre,
-                            "imagen_url": get_public_url(gd.diagrama.imagen.name) if gd.diagrama.imagen else None,
-                            "orden": gd.orden,
-                        })
+        nota = self.get_object()
+        diagramas = list(DiagramaCorporal.objects.filter(activo=True).order_by("orden", "nombre"))
+        activos = {d.id for d in diagramas}
+        grupos = []
+        for grupo in GrupoZonas.objects.filter(activo=True).prefetch_related("diagramas").order_by("nombre"):
+            ids = [str(gd.diagrama_id) for gd in grupo.diagramas.order_by("orden") if gd.diagrama_id in activos]
+            if ids:
+                grupos.append({"id": str(grupo.id), "nombre": grupo.nombre, "diagramas": ids})
 
-        return Response({"diagramas": diagramas, "anotaciones": anotaciones_data})
+        anterior = None
+        encontrada = zonas_nota.zonas_anteriores(nota)
+        if encontrada:
+            nota_anterior, ids = encontrada
+            cita = nota_anterior.cita
+            anterior = {
+                "nota_id": str(nota_anterior.id),
+                "fecha": nota_anterior.created_at,
+                "servicio": cita.servicio.nombre if cita and cita.servicio_id else (cita.servicio_nombre if cita else None),
+                "diagramas": [i for i in ids if uuid.UUID(i) in activos],
+            }
+        return Response({
+            "grupos": grupos,
+            "diagramas": [self._diagrama_data(d, d.orden) for d in diagramas],
+            "anterior": anterior,
+        })
+
+    @action(detail=True, methods=["post"], url_path="zonas/agregar")
+    def zonas_agregar(self, request, pk=None):
+        from apps.clinicas.models import DiagramaCorporal
+
+        nota = self.get_object()
+        exigir_documentable(request.user, nota)
+        ids = request.data.get("diagramas")
+        if not isinstance(ids, list) or not ids:
+            raise serializers.ValidationError({"diagramas": "Elige al menos una zona."})
+        try:
+            pedidos = [str(uuid.UUID(str(i))) for i in ids]
+        except ValueError:
+            raise serializers.ValidationError({"diagramas": "Zona no válida."})
+        existentes = {str(i) for i in DiagramaCorporal.objects.filter(id__in=pedidos, activo=True).values_list("id", flat=True)}
+        if len(existentes) != len(set(pedidos)):
+            raise serializers.ValidationError({"diagramas": "Alguna de las zonas ya no existe."})
+        zonas_nota.agregar(nota, pedidos)
+        return self._zonas_response(nota)
+
+    @action(detail=True, methods=["post"], url_path="zonas/quitar")
+    def zonas_quitar(self, request, pk=None):
+        nota = self.get_object()
+        exigir_documentable(request.user, nota)
+        try:
+            diagrama_id = str(uuid.UUID(str(request.data.get("diagrama"))))
+        except ValueError:
+            raise serializers.ValidationError({"diagrama": "Indica la zona a quitar."})
+        if zonas_nota.tiene_marcas(nota, diagrama_id):
+            raise serializers.ValidationError({
+                "error": "Esta zona tiene marcas: bórralas primero si quieres quitarla.",
+                "code": "ZONA_CON_MARCAS",
+            })
+        zonas_nota.quitar(nota, diagrama_id)
+        return self._zonas_response(nota)
 
 
 class FotoClinicaAccessPermission(BasePermission):
@@ -1274,8 +1319,11 @@ class AnotacionZonaViewSet(
         return queryset
 
     def perform_create(self, serializer):
-        exigir_documentable(self.request.user, serializer.validated_data.get("nota"))
-        serializer.save()
+        nota = serializer.validated_data.get("nota")
+        exigir_documentable(self.request.user, nota)
+        anotacion = serializer.save()
+        # Una marca siempre queda en un diagrama de la pestaña.
+        zonas_nota.agregar(nota, [str(anotacion.diagrama_id)])
 
     def perform_update(self, serializer):
         exigir_documentable(self.request.user, serializer.instance.nota)

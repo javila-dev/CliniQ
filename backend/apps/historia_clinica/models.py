@@ -124,6 +124,10 @@ class NotaClinica(BaseModel):
         related_name="notas_firmadas",
     )
     firmada_en = models.DateTimeField(null=True, blank=True)
+    # True cuando ya se guardó qué diagramas usa la pestaña Zonas (NotaDiagramaZona).
+    # Las notas anteriores quedan en False y arman su lista la primera vez, con
+    # los diagramas del procedimiento, que es lo que mostraban antes.
+    zonas_inicializadas = models.BooleanField(default=False)
 
     class Meta:
         db_table = "notas_clinicas"
@@ -490,3 +494,29 @@ class AnotacionZona(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.nota_id} ({self.diagrama.nombre}) x={self.x:.3f} y={self.y:.3f}"
+
+
+class NotaDiagramaZona(BaseModel):
+    """Diagramas que usa una atención en la pestaña Zonas. Antes salían siempre
+    de los grupos del procedimiento; ahora el procedimiento solo los propone y el
+    profesional agrega (o quita, si no tienen marcas) los que necesite."""
+
+    nota = models.ForeignKey(
+        NotaClinica,
+        on_delete=models.CASCADE,
+        related_name="diagramas_zona",
+    )
+    diagrama = models.ForeignKey(
+        "clinicas.DiagramaCorporal",
+        on_delete=models.PROTECT,
+        related_name="notas_zona",
+    )
+    orden = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "notas_diagramas_zona"
+        ordering = ["orden", "created_at"]
+        unique_together = (("nota", "diagrama"),)
+
+    def __str__(self) -> str:
+        return f"{self.nota_id} → {self.diagrama_id}"
