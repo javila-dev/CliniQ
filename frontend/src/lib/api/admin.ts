@@ -6,10 +6,47 @@ import type {
   DiagramaCorporal,
   Plan, CreatePlanRequest, UpdatePlanRequest,
   ConsoleUsuario, CreateConsoleUsuarioRequest,
+  SoporteAtencion, SoportePaciente, TrasladoPrevisualizacion, TrasladarAtencionRequest,
+  EliminacionPrevisualizacion, EliminarAtencionRequest, CorreccionSoporte, TipoCorreccionSoporte,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
 export const adminApi = {
+  soporte: {
+    pacientes: async (clinica: string, q: string): Promise<SoportePaciente[]> => {
+      const res = await apiClient.get<SoportePaciente[]>('/admin/soporte/pacientes/', { params: { clinica, q } })
+      return res.data
+    },
+    atenciones: async (clinica: string, paciente: string): Promise<SoporteAtencion[]> => {
+      const res = await apiClient.get<SoporteAtencion[]>('/admin/soporte/atenciones/', { params: { clinica, paciente } })
+      return res.data
+    },
+    previsualizarTraslado: async (
+      data: Pick<TrasladarAtencionRequest, 'clinica' | 'cita' | 'paciente_destino'>,
+    ): Promise<TrasladoPrevisualizacion> => {
+      const res = await apiClient.post<TrasladoPrevisualizacion>('/admin/soporte/trasladar-atencion/previsualizar/', data)
+      return res.data
+    },
+    trasladar: async (data: TrasladarAtencionRequest): Promise<{ id: string; cita: string }> => {
+      const res = await apiClient.post<{ id: string; cita: string }>('/admin/soporte/trasladar-atencion/', data)
+      return res.data
+    },
+    previsualizarEliminacion: async (
+      data: Pick<EliminarAtencionRequest, 'clinica' | 'cita'>,
+    ): Promise<EliminacionPrevisualizacion> => {
+      const res = await apiClient.post<EliminacionPrevisualizacion>('/admin/soporte/eliminar-atencion/previsualizar/', data)
+      return res.data
+    },
+    eliminar: async (data: EliminarAtencionRequest): Promise<{ id: string; cita: string }> => {
+      const res = await apiClient.post<{ id: string; cita: string }>('/admin/soporte/eliminar-atencion/', data)
+      return res.data
+    },
+    correcciones: async (clinica: string, tipo?: TipoCorreccionSoporte): Promise<CorreccionSoporte[]> => {
+      const res = await apiClient.get<CorreccionSoporte[]>('/admin/soporte/correcciones/', { params: { clinica, tipo } })
+      return res.data
+    },
+  },
+
   tenants: {
     list: async (params?: {
       search?: string

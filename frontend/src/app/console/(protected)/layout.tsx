@@ -5,7 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Building2, CreditCard, PersonStanding, LifeBuoy, Users, LogOut, Gauge, Receipt, Menu, X,
+  Building2, CreditCard, PersonStanding, LifeBuoy, Users, LogOut, Gauge, Receipt, Menu, X, Wrench,
 } from 'lucide-react'
 
 import { canAccess, defaultRoute, isSuperAdmin } from '@/lib/permissions'
@@ -69,6 +69,7 @@ const GRUPOS = [
       { href: '/console/clinicas', label: 'Clínicas', icon: Building2, soloSuperadmin: true },
       { href: '/console/pruebas', label: 'Pruebas', icon: Gauge, soloSuperadmin: true },
       { href: '/console/pagos', label: 'Pagos', icon: Receipt, soloSuperadmin: true },
+      { href: '/console/soporte', label: 'Soporte', icon: Wrench, soloSuperadmin: true },
     ],
   },
   {
