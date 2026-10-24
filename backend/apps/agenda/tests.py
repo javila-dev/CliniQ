@@ -265,6 +265,22 @@ class CitaEnEsperaFlowTests(TestCase):
             format="json",
         )
 
+        # Con el consentimiento al día, frenan los pasos de recepción encendidos
+        # (pago y firma de asistencia vienen activos por defecto).
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["code"], "PASOS_RECEPCION_PENDIENTES")
+
+        from apps.configuracion.models import ConfiguracionWizard
+
+        ConfiguracionWizard.objects.update_or_create(
+            clinica=self.clinica, defaults={"paso_pago": False, "paso_firma_asistencia": False},
+        )
+        response = self.client.post(
+            f"/api/v1/agenda/citas/{self.cita.id}/cambiar_estado/",
+            {"estado": Cita.Estado.EN_CURSO},
+            format="json",
+        )
+
         self.assertEqual(response.status_code, 200)
         self.cita.refresh_from_db()
         self.assertEqual(self.cita.estado, Cita.Estado.EN_CURSO)

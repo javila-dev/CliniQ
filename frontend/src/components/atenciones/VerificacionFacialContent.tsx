@@ -37,6 +37,22 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
   const [enrollWarnings, setEnrollWarnings] = useState<string[]>([])
   const [badgeVisible, setBadgeVisible] = useState(false)
   const [verificacionFallida, setVerificacionFallida] = useState(false)
+  const [omitiendo, setOmitiendo] = useState(false)
+
+  // La verificación es obligatoria para iniciar la atención: saltarla cuando el
+  // servicio falla deja registrado quién lo hizo, y eso cuenta como paso hecho.
+  async function continuarSinVerificar() {
+    if (!citaId) return onCompletado()
+    setOmitiendo(true)
+    try {
+      await apiClient.post(`/pacientes/${pacienteId}/omitir_verificacion/`, { cita_id: citaId })
+      onCompletado()
+    } catch (err) {
+      setError(mensajeDeError(err, 'No se pudo registrar que se continúa sin verificar. Intenta de nuevo.'))
+    } finally {
+      setOmitiendo(false)
+    }
+  }
 
   const { data: paciente, isLoading: cargandoPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
@@ -327,7 +343,14 @@ export function VerificacionFacialContent({ pacienteId, citaId, onCompletado }: 
       {error && <p className="text-xs text-red-500 text-center">{error}</p>}
       <CamaraCaptura onCaptura={enviarFoto} labelCapturar="Capturar y verificar" />
       {verificacionFallida && (
-        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={onCompletado}>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-muted-foreground"
+          disabled={omitiendo}
+          onClick={continuarSinVerificar}
+        >
+          {omitiendo && <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />}
           Continuar sin verificar
         </Button>
       )}
