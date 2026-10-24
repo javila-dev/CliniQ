@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import Image from 'next/image'
 import Link from 'next/link'
-import { CalendarDays, FileText, Users, Sparkles, Loader2, CheckCircle2, ArrowLeft } from 'lucide-react'
+import { CalendarDays, FileText, Users, Sparkles, Loader2, CheckCircle2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -16,14 +16,30 @@ import { registroPublicoApi } from '@/lib/api/clinicas'
 
 const schema = z.object({
   nombre_clinica: z.string().min(2, 'Mínimo 2 caracteres'),
-  nit: z.string().min(5, 'NIT inválido'),
   nombre_admin: z.string().min(2, 'Mínimo 2 caracteres'),
   apellido_admin: z.string().min(2, 'Mínimo 2 caracteres'),
   email: z.string().email('Correo inválido'),
-  telefono: z.string().min(6, 'Teléfono requerido'),
+  telefono: z.string({ error: 'Teléfono requerido' }).min(6, 'Teléfono requerido'),
+  cargo: z.string().min(1, 'Elige tu rol en la clínica'),
+  acepta_whatsapp: z.boolean().optional(),
 })
 
+// Rol de quien registra la clínica: al seguimiento comercial le importa saber si
+// habla con quien decide la compra. Mismas claves que CARGOS_REGISTRO del backend.
+const CARGOS = [
+  ['duenio', 'Dueño(a) o socio(a)'],
+  ['director_medico', 'Director(a) médico(a)'],
+  ['administrador', 'Administrador(a) o gerente'],
+  ['profesional', 'Profesional que atiende'],
+  ['recepcion', 'Recepción o asistente'],
+  ['otro', 'Otro'],
+] as const
+
 type FormData = z.infer<typeof schema>
+
+// 16 px en celular (iOS no hace zoom al enfocar) y 14 px desde sm.
+const CAMPO = 'text-base sm:text-sm'
+const ERROR = 'border-destructive focus-visible:ring-destructive/30'
 
 const features = [
   { icon: CalendarDays, label: 'Agenda inteligente', desc: 'Vistas día, semana y mes' },
@@ -112,12 +128,16 @@ export default function RegistroClinicaPage() {
       </div>
 
       {/* ── Right panel ── */}
-      <div className="flex-1 flex items-center justify-center bg-white px-8 py-12">
+      {/* Compacto a propósito: el formulario entero cabe en una pantalla de portátil
+          (768 px de alto) y de celular. En celular los campos usan 16 px de letra:
+          con menos, iOS hace zoom al tocar el campo. */}
+      <div className="flex flex-1 items-start justify-center bg-white px-5 py-6 sm:items-center sm:px-8 sm:py-8">
         <div className="w-full max-w-md">
 
           {/* Mobile logo */}
-          <div className="mb-8 lg:hidden">
-            <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={112} height={35} className="h-auto w-[112px] object-contain" />
+          <div className="mb-5 flex items-center justify-between gap-3 lg:hidden">
+            <Image src="/brand/cliniq-logo-horizontal.svg" alt="CliniQ" width={104} height={32} className="h-auto w-[104px] object-contain" />
+            <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-600">14 días gratis · sin tarjeta</span>
           </div>
 
           {submitted ? (
@@ -137,81 +157,84 @@ export default function RegistroClinicaPage() {
             </div>
           ) : (
             <>
-              <Link
-                href="/login"
-                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Volver al login
-              </Link>
-
-              <div className="mb-7">
+              <div className="mb-5">
                 <h1 className="text-2xl font-bold text-foreground">Crea tu clínica</h1>
-                <p className="text-sm text-muted-foreground mt-1">
+                <p className="mt-1 text-sm text-muted-foreground">
                   Empieza tu prueba gratuita de 14 días. Sin compromisos.
                 </p>
               </div>
 
-              <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-                <div className="space-y-1.5">
+              <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+                <div className="space-y-1">
                   <Label htmlFor="nombre_clinica">Nombre de la clínica</Label>
                   <Input
                     id="nombre_clinica"
                     placeholder="Clínica Estética Ejemplo"
-                    className={cn(errors.nombre_clinica && 'border-destructive focus-visible:ring-destructive/30')}
+                    autoComplete="organization"
+                    className={cn(CAMPO, errors.nombre_clinica && ERROR)}
                     {...register('nombre_clinica')}
                   />
                   {errors.nombre_clinica && <p className="text-xs text-destructive">{errors.nombre_clinica.message}</p>}
                 </div>
 
-                <div className="space-y-1.5">
-                  <Label htmlFor="nit">NIT</Label>
-                  <Input
-                    id="nit"
-                    placeholder="900123456-7"
-                    className={cn(errors.nit && 'border-destructive focus-visible:ring-destructive/30')}
-                    {...register('nit')}
-                  />
-                  {errors.nit && <p className="text-xs text-destructive">{errors.nit.message}</p>}
-                </div>
-
                 <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="nombre_admin">Nombre</Label>
+                  <div className="space-y-1">
+                    <Label htmlFor="nombre_admin">Tu nombre</Label>
                     <Input
                       id="nombre_admin"
                       placeholder="Ana"
-                      className={cn(errors.nombre_admin && 'border-destructive focus-visible:ring-destructive/30')}
+                      autoComplete="given-name"
+                      className={cn(CAMPO, errors.nombre_admin && ERROR)}
                       {...register('nombre_admin')}
                     />
                     {errors.nombre_admin && <p className="text-xs text-destructive">{errors.nombre_admin.message}</p>}
                   </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="apellido_admin">Apellido</Label>
+                  <div className="space-y-1">
+                    <Label htmlFor="apellido_admin">Tu apellido</Label>
                     <Input
                       id="apellido_admin"
                       placeholder="García"
-                      className={cn(errors.apellido_admin && 'border-destructive focus-visible:ring-destructive/30')}
+                      autoComplete="family-name"
+                      className={cn(CAMPO, errors.apellido_admin && ERROR)}
                       {...register('apellido_admin')}
                     />
                     {errors.apellido_admin && <p className="text-xs text-destructive">{errors.apellido_admin.message}</p>}
                   </div>
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
+                  <Label htmlFor="cargo">Tu rol en la clínica</Label>
+                  <select
+                    id="cargo"
+                    defaultValue=""
+                    className={cn(
+                      'flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+                      CAMPO,
+                      errors.cargo && ERROR,
+                    )}
+                    {...register('cargo')}
+                  >
+                    <option value="" disabled>Elige una opción</option>
+                    {CARGOS.map(([valor, etiqueta]) => <option key={valor} value={valor}>{etiqueta}</option>)}
+                  </select>
+                  {errors.cargo && <p className="text-xs text-destructive">{errors.cargo.message}</p>}
+                </div>
+
+                <div className="space-y-1">
                   <Label htmlFor="email">Correo electrónico</Label>
                   <Input
                     id="email"
                     type="email"
                     placeholder="ana@miclinica.com"
                     autoComplete="email"
-                    className={cn(errors.email && 'border-destructive focus-visible:ring-destructive/30')}
+                    inputMode="email"
+                    className={cn(CAMPO, errors.email && ERROR)}
                     {...register('email')}
                   />
                   {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
                 </div>
 
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <Label htmlFor="telefono">Teléfono</Label>
                   <Controller
                     name="telefono"
@@ -222,11 +245,22 @@ export default function RegistroClinicaPage() {
                         value={field.value ?? ''}
                         onChange={field.onChange}
                         error={!!errors.telefono}
+                        className="[&_input]:h-10 [&_input]:text-base sm:[&_input]:text-sm [&_select]:h-10 [&_select]:text-base sm:[&_select]:text-sm"
                       />
                     )}
                   />
                   {errors.telefono && <p className="text-xs text-destructive">{errors.telefono.message}</p>}
                 </div>
+
+                <label htmlFor="acepta_whatsapp" className="flex cursor-pointer items-start gap-2.5 pt-1 text-xs leading-relaxed text-muted-foreground">
+                  <input
+                    id="acepta_whatsapp"
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 shrink-0 rounded border-input accent-primary"
+                    {...register('acepta_whatsapp')}
+                  />
+                  Acepto que CliniQ me escriba por WhatsApp sobre mi cuenta y mi prueba. Puedo pedir que no me escriban cuando quiera.
+                </label>
 
                 {serverError && (
                   <div className="rounded-lg bg-destructive/8 border border-destructive/15 px-3.5 py-2.5">
@@ -234,7 +268,7 @@ export default function RegistroClinicaPage() {
                   </div>
                 )}
 
-                <Button type="submit" className="w-full h-10 font-semibold mt-1" disabled={isSubmitting}>
+                <Button type="submit" className="h-11 w-full font-semibold sm:h-10" disabled={isSubmitting}>
                   {isSubmitting ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -245,9 +279,11 @@ export default function RegistroClinicaPage() {
                   )}
                 </Button>
 
-                <p className="text-center text-xs text-muted-foreground pt-1">
-                  Al registrarte aceptas los{' '}
-                  <span className="text-rose-500">términos de servicio</span> de CliniQ.
+                <p className="text-center text-xs leading-relaxed text-muted-foreground">
+                  Al registrarte aceptas los <span className="text-rose-500">términos de servicio</span> de CliniQ.
+                  <br />
+                  ¿Ya tienes cuenta?{' '}
+                  <Link href="/login" className="font-medium text-foreground underline-offset-2 hover:underline">Inicia sesión</Link>
                 </p>
               </form>
             </>

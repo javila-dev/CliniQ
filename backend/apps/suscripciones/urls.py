@@ -1,0 +1,51 @@
+from django.urls import path
+
+from .views_pago import (
+    AdminCobrosView,
+    AdminFacturaView,
+    AdminPagosView,
+    CambiarPlanView,
+    CambiarTarjetaView,
+    CancelarView,
+    CobroDetalleView,
+    CobrosView,
+    ConfigPagoView,
+    ContratarView,
+    DatosFacturacionView,
+    FacturaPdfView,
+    WebhookWompiView,
+)
+from .views import (
+    AdminEmbudoView,
+    AdminExtenderPruebaView,
+    AdminNotasSeguimientoView,
+    AdminPagoManualView,
+    AdminSeguimientoView,
+    AdminSuscripcionView,
+    MiSuscripcionView,
+    PerfilBienvenidaView,
+)
+
+urlpatterns = [
+    path("", MiSuscripcionView.as_view(), name="mi-suscripcion"),
+    path("perfil/", PerfilBienvenidaView.as_view(), name="mi-suscripcion-perfil"),
+    path("pago/config/", ConfigPagoView.as_view(), name="pago-config"),
+    path("pago/contratar/", ContratarView.as_view(), name="pago-contratar"),
+    path("pago/facturacion/", DatosFacturacionView.as_view(), name="pago-facturacion"),
+    path("pago/cobros/", CobrosView.as_view(), name="pago-cobros"),
+    path("pago/cobros/<str:referencia>/", CobroDetalleView.as_view(), name="pago-cobro"),
+    path("pago/cobros/<str:referencia>/factura/", FacturaPdfView.as_view(), name="pago-factura"),
+    path("pago/tarjeta/", CambiarTarjetaView.as_view(), name="pago-tarjeta"),
+    path("pago/cambiar-plan/", CambiarPlanView.as_view(), name="pago-cambiar-plan"),
+    path("pago/cancelar/", CancelarView.as_view(), name="pago-cancelar"),
+    path("webhooks/wompi/", WebhookWompiView.as_view(), name="webhook-wompi"),
+    path("admin/pagos/", AdminPagosView.as_view(), name="admin-pagos"),
+    path("admin/cobros/<str:referencia>/factura/", AdminFacturaView.as_view(), name="admin-factura"),
+    path("admin/seguimiento/", AdminSeguimientoView.as_view(), name="admin-suscripcion-seguimiento"),
+    path("admin/embudo/", AdminEmbudoView.as_view(), name="admin-suscripcion-embudo"),
+    path("admin/<uuid:clinica_id>/", AdminSuscripcionView.as_view(), name="admin-suscripcion"),
+    path("admin/<uuid:clinica_id>/cobros/", AdminCobrosView.as_view(), name="admin-suscripcion-cobros"),
+    path("admin/<uuid:clinica_id>/notas/", AdminNotasSeguimientoView.as_view(), name="admin-suscripcion-notas"),
+    path("admin/<uuid:clinica_id>/extender-prueba/", AdminExtenderPruebaView.as_view(), name="admin-suscripcion-extender"),
+    path("admin/<uuid:clinica_id>/pago-manual/", AdminPagoManualView.as_view(), name="admin-suscripcion-pago-manual"),
+]

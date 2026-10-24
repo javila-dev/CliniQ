@@ -51,7 +51,15 @@ export const authApi = {
     await apiClient.post('/auth/recuperar-password/', { email })
   },
 
-  validarTokenRecuperacion: async (token: string): Promise<{ ok: boolean; email?: string; expires_at?: string; error?: string }> => {
+  validarTokenRecuperacion: async (token: string): Promise<{
+    ok: boolean
+    email?: string
+    expires_at?: string
+    error?: string
+    /** invite = cuenta nueva (registro o invitación); reset = recuperar contraseña. */
+    proposito?: 'invite' | 'reset'
+    nombre?: string
+  }> => {
     const res = await apiClient.get(`/auth/recuperar-password/${token}/`)
     return res.data
   },

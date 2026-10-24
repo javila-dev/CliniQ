@@ -42,14 +42,17 @@ def pidio_numero_cliniq(request) -> bool:
 
 
 def _envios_que_cuentan_cupo(clinica, hoy):
-    """Envios del mes que descuentan cupo: solo la ruta compartida (los envios
-    por numero propio los paga la clinica a Meta)."""
-    return EnvioWhatsApp.objects.filter(
-        clinica=clinica,
-        ruta=EnvioWhatsApp.Ruta.COMPARTIDO,
-        created_at__year=hoy.year,
-        created_at__month=hoy.month,
-    )
+    """Envios que descuentan cupo: solo la ruta compartida (los envios por
+    numero propio los paga la clinica a Meta). Del mes calendario o, en la
+    prueba gratuita, de toda la prueba (su cupo no se renueva al cambiar de mes)."""
+    envios = EnvioWhatsApp.objects.filter(clinica=clinica, ruta=EnvioWhatsApp.Ruta.COMPARTIDO)
+    if getattr(clinica, "en_prueba", None) and clinica.en_prueba():
+        from apps.suscripciones.models import Suscripcion
+
+        inicio = Suscripcion.objects.filter(clinica_id=clinica.pk).values_list("created_at", flat=True).first()
+        if inicio is not None:
+            return envios.filter(created_at__gte=inicio)
+    return envios.filter(created_at__year=hoy.year, created_at__month=hoy.month)
 
 
 def verificar_disponibilidad_whatsapp(clinica) -> None:
@@ -64,8 +67,9 @@ def verificar_disponibilidad_whatsapp(clinica) -> None:
         hoy = timezone.now()
         usados = _envios_que_cuentan_cupo(clinica, hoy).count()
         if usados >= cupo:
+            periodo = "de tu prueba" if clinica.en_prueba() else "de este mes"
             raise WhatsAppNoDisponibleError(
-                "Se agotó el cupo de envíos de WhatsApp de este mes.", code="WHATSAPP_CUPO_AGOTADO",
+                f"Se agotó el cupo de envíos de WhatsApp {periodo}.", code="WHATSAPP_CUPO_AGOTADO",
             )
 
 

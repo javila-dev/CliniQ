@@ -1,16 +1,13 @@
-from datetime import timedelta
-
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
-from django.utils.html import escape
 
 from apps.notificaciones.services import email_backend_requires_password, enviar_email
+from apps.suscripciones.services import crear_prueba
 from apps.users.models import Rol, User
 
-from .models import Clinica, RegistroPendiente
+from .models import Clinica, RegistroPendiente, Sede
 
-TRIAL_DAYS = 14
 VERIFICATION_TOKEN_TTL_HOURS = 24
 
 
@@ -41,7 +38,8 @@ def _send_verification_email(registro: RegistroPendiente) -> None:
         preview="Un solo clic y tu clínica estará lista para configurarse.",
         greeting_name=nombre,
         intro=(
-            "Gracias por registrar <strong>" + escape(registro.nombre_clinica) + "</strong> en CliniQ. "
+            # La plantilla escapa el texto: el nombre va sin etiquetas (antes se veía "<strong>").
+            f"Gracias por registrar {registro.nombre_clinica} en CliniQ. "
             "Para completar el proceso y activar tu cuenta, confirma tu dirección de correo electrónico."
         ),
         button_label="Confirmar correo",
@@ -57,11 +55,13 @@ def _send_verification_email(registro: RegistroPendiente) -> None:
 def iniciar_registro_clinica(
     *,
     nombre_clinica: str,
-    nit: str,
+    nit: str = "",
     nombre_admin: str,
     apellido_admin: str,
     email: str,
     telefono: str,
+    acepta_whatsapp: bool = False,
+    cargo: str = "",
 ) -> RegistroPendiente:
     """
     Paso 1: guarda la solicitud y envía el email de verificación.
@@ -74,6 +74,8 @@ def iniciar_registro_clinica(
         apellido_admin=apellido_admin,
         email=email,
         telefono=telefono,
+        acepta_whatsapp=acepta_whatsapp,
+        cargo=cargo,
     )
     _send_verification_email(registro)
     return registro
@@ -98,7 +100,8 @@ def confirmar_registro_clinica(token: str) -> str:
         # Verificó el correo pero cerró antes de crear la contraseña: al volver a
         # abrir el enlace se le da una invitación nueva en vez de dejarla
         # bloqueada (M7-12).
-        admin = User.objects.filter(email__iexact=registro.email, clinica__nit=registro.nit).first()
+        # El correo es único entre usuarios: identifica al admin aunque la clínica no tenga NIT.
+        admin = User.objects.filter(email__iexact=registro.email, clinica__isnull=False).first()
         if admin is not None and admin_con_invitacion_pendiente(admin):
             return create_password_reset_token(admin, purpose=PasswordResetToken.Purpose.INVITE).token
     if not registro.is_valid():
@@ -110,10 +113,18 @@ def confirmar_registro_clinica(token: str) -> str:
 
         clinica = Clinica.objects.create(
             nombre=registro.nombre_clinica,
-            nit=registro.nit,
+            nit=registro.nit or None,
             telefono=registro.telefono,
-            trial_expires_at=timezone.now() + timedelta(days=TRIAL_DAYS),
         )
+        suscripcion = crear_prueba(clinica)
+        if registro.acepta_whatsapp:
+            suscripcion.whatsapp_autorizado_at = registro.created_at
+        if registro.cargo:
+            suscripcion.perfil = {**suscripcion.perfil, "cargo": registro.cargo}
+        suscripcion.save(update_fields=["whatsapp_autorizado_at", "perfil"])
+        # La primera sede con el nombre de la clínica: dirección y horario quedan
+        # como paso de "Preparar mi clínica" (antes ni siquiera había sede).
+        Sede.objects.create(clinica=clinica, nombre=clinica.nombre, ciudad="", direccion="", telefono=registro.telefono[:20])
 
         ensure_default_roles_for_clinica(clinica)
 
@@ -122,6 +133,7 @@ def confirmar_registro_clinica(token: str) -> str:
             email=registro.email,
             first_name=registro.nombre_admin,
             last_name=registro.apellido_admin,
+            telefono=registro.telefono[:20],
             clinica=clinica,
             rol="admin",
             rol_dinamico=rol_admin,

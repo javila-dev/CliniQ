@@ -21,11 +21,17 @@ class RegistroPendiente(models.Model):
     """
     token = models.CharField(max_length=100, unique=True, editable=False)
     nombre_clinica = models.CharField(max_length=255)
-    nit = models.CharField(max_length=50)
+    # El registro de la prueba ya no pide NIT: se pide al pagar (datos de facturación).
+    nit = models.CharField(max_length=50, blank=True, default="")
     nombre_admin = models.CharField(max_length=150)
     apellido_admin = models.CharField(max_length=150)
     email = models.EmailField()
     telefono = models.CharField(max_length=30)
+    # Autorizó que CliniQ le escriba por WhatsApp sobre su cuenta (casilla del registro).
+    acepta_whatsapp = models.BooleanField(default=False)
+    # Rol de quien se registra (dueño, administrador...): sirve al seguimiento comercial
+    # para saber si habla con quien decide la compra.
+    cargo = models.CharField(max_length=30, blank=True, default="")
     expires_at = models.DateTimeField()
     usado_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -124,6 +130,8 @@ class Plan(BaseModel):
         blank=True,
         help_text="Costo mensual por cada sede por encima de max_sedes. Null si no aplica (ej. plan a medida).",
     )
+    # Pago anual: precio mensual x 12 menos este porcentaje (0 = sin pago anual con descuento).
+    descuento_anual_pct = models.PositiveSmallIntegerField(default=0)
 
     class Meta:
         db_table = "planes"
@@ -153,7 +161,9 @@ class Clinica(BaseModel):
         related_name="clinicas",
     )
     nombre = models.CharField(max_length=255)
-    nit = models.CharField(max_length=50, unique=True)
+    # Opcional: la clínica que se registra sola no lo da hasta pagar. Vacío = None
+    # (varias clínicas sin NIT no chocan con el unique).
+    nit = models.CharField(max_length=50, unique=True, null=True, blank=True)
     email = models.EmailField(blank=True, default="")
     telefono = models.CharField(max_length=30, blank=True)
     logo = models.ImageField(upload_to="clinicas/logos/", null=True, blank=True)
@@ -269,10 +279,35 @@ class Clinica(BaseModel):
     def __str__(self) -> str:
         return self.nombre
 
+    def en_prueba(self) -> bool:
+        """Si la cuenta está en su prueba gratuita (con el estado al día por fechas)."""
+        if not hasattr(self, "_en_prueba"):
+            from apps.suscripciones.models import Suscripcion
+            from apps.suscripciones.services import estado_vigente
+
+            s = Suscripcion.objects.filter(clinica_id=self.pk).first() if self.pk else None
+            self._en_prueba = s is not None and estado_vigente(s)[0] == Suscripcion.Estado.PRUEBA
+        return self._en_prueba
+
+    @property
+    def plan_vigente(self):
+        """El plan cuyos límites y add-ons aplican hoy: el plan de prueba
+        (Consola → Pruebas) mientras la clínica está en prueba y, si no, el
+        contratado. Los overrides por clínica siguen mandando sobre ambos."""
+        if not hasattr(self, "_plan_vigente"):
+            plan = self.plan
+            if self.en_prueba():
+                from apps.core.models import ConfiguracionGlobal
+
+                plan = ConfiguracionGlobal.get_solo().plan_prueba or plan
+            self._plan_vigente = plan
+        return self._plan_vigente
+
     def _addon_efectivo(self, override, plan_field):
         if override is not None:
             return override
-        return bool(self.plan and getattr(self.plan, plan_field))
+        plan = self.plan_vigente
+        return bool(plan and getattr(plan, plan_field))
 
     @property
     def facial_verificacion_habilitada(self):
@@ -294,17 +329,22 @@ class Clinica(BaseModel):
         # nadie antes de este addon (ni siquiera para clinicas en trial sin plan
         # asignado). Sin plan se hereda "habilitado, sin limite" para no cortarle
         # WhatsApp a una clinica en trial el dia del deploy.
-        if self.plan is None:
+        if self.plan_vigente is None:
             return True
-        return self.plan.whatsapp_habilitado
+        return self.plan_vigente.whatsapp_habilitado
 
     @property
     def whatsapp_envios_incluidos(self):
         if self.whatsapp_envios_incluidos_override is not None:
             return self.whatsapp_envios_incluidos_override
-        if self.plan is None:
+        if self.en_prueba():
+            # En prueba el cupo es por toda la prueba, no por mes.
+            from apps.core.models import ConfiguracionGlobal
+
+            return ConfiguracionGlobal.get_solo().whatsapp_envios_prueba
+        if self.plan_vigente is None:
             return 0
-        return self.plan.whatsapp_envios_incluidos
+        return self.plan_vigente.whatsapp_envios_incluidos
 
     @property
     def whatsapp_numero_propio_habilitado(self):
@@ -321,7 +361,7 @@ class Clinica(BaseModel):
             return 0
         if self.whatsapp_numeros_incluidos_override is not None:
             return self.whatsapp_numeros_incluidos_override
-        return self.plan.whatsapp_numeros_incluidos if self.plan else 1
+        return self.plan_vigente.whatsapp_numeros_incluidos if self.plan_vigente else 1
 
 
 class Sede(BaseModel):

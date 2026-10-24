@@ -48,4 +48,12 @@ class ClinicScopedJWTAuthentication(JWTAuthentication):
         if clinica_header != str(user.clinica_id):
             raise AuthenticationFailed("El header X-Clinica-Id no coincide con la clinica del usuario.")
 
+        # Prueba vencida, solo lectura o suspendida: aplica a todas las vistas,
+        # declaren o no sus propios permisos.
+        from apps.suscripciones.acceso import verificar_acceso
+        from apps.suscripciones.activacion import registrar_actividad
+
+        verificar_acceso(request, user, token)
+        registrar_actividad(user, token)
+
         return user, token

@@ -23,6 +23,7 @@ api_urlpatterns = [
     path("ventas/", include("apps.cotizaciones.ventas_urls")),
     path("autorizaciones-precio/", include("apps.cotizaciones.autorizaciones_urls")),
     path("seguimiento/", include("apps.seguimiento.urls")),
+    path("suscripcion/", include("apps.suscripciones.urls")),
     path("protocolos/", include("apps.protocolos.urls")),
     path("notificaciones/", include("apps.notificaciones.urls")),
     path("caja/", include("apps.caja.urls")),

@@ -19,6 +19,8 @@ from apps.pacientes.registro_publico import (
     RegistroPublicoFotoThrottle,
     RegistroPublicoThrottle,
 )
+from apps.suscripciones.models import Suscripcion
+from apps.suscripciones.services import fin_del_dia
 from apps.users.models import Permiso, Rol, RolPermiso
 from apps.users.serializers import build_auth_user_payload
 
@@ -67,17 +69,16 @@ class VerificacionPaso7AltosTests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(datos["id"], str(self.admin.id))
 
     # ── M1-03: la clínica en prueba ve los días que le quedan ──────────────
-    def test_m103_mi_clinica_trae_los_dias_de_prueba(self):
-        self.clinica.trial_expires_at = timezone.now() + timedelta(days=5, hours=3)
-        self.clinica.save(update_fields=["trial_expires_at"])
-        datos = self.client.get("/api/v1/clinicas/mi-clinica/").json()
-        self.assertEqual(datos["trial_days_remaining"], 6)
+    def test_m103_la_suscripcion_trae_los_dias_de_prueba(self):
+        Suscripcion.objects.create(clinica=self.clinica, prueba_termina_el=fin_del_dia(timezone.localdate() + timedelta(days=5)))
+        datos = self.client.get("/api/v1/suscripcion/").json()
+        self.assertEqual(datos["dias_restantes_prueba"], 5)
         self.assertIn("plan_nombre", datos)
 
     def test_m103_el_ultimo_dia_no_figura_como_vencido(self):
-        self.clinica.trial_expires_at = timezone.now() + timedelta(hours=10)
-        self.clinica.save(update_fields=["trial_expires_at"])
-        self.assertEqual(self.client.get("/api/v1/clinicas/mi-clinica/").json()["trial_days_remaining"], 1)
+        Suscripcion.objects.create(clinica=self.clinica, prueba_termina_el=fin_del_dia(timezone.localdate()))
+        datos = self.client.get("/api/v1/suscripcion/").json()
+        self.assertEqual((datos["estado"], datos["dias_restantes_prueba"]), ("prueba", 0))
 
     # ── M1-04: el precio de una sede desactivada no bloquea el guardado ────
     def test_m104_se_guarda_el_procedimiento_con_precio_de_una_sede_inactiva(self):

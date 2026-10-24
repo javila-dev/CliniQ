@@ -1,4 +1,5 @@
 import type { WhatsAppUso } from './clinicas'
+import type { SuscripcionAdmin } from './suscripciones'
 
 export interface Plan {
   id: string
@@ -10,6 +11,7 @@ export interface Plan {
   activo: boolean
   precio_usuario_adicional: string | null
   precio_sede_adicional: string | null
+  descuento_anual_pct: number
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
   modulo_obesidad_habilitado: boolean
@@ -56,6 +58,8 @@ export interface AdminTenant {
   admin_usuario_pendiente: { id: string; email: string } | null
   // true si la clínica no tiene ningún usuario con rol admin (tenant huérfano)
   sin_admin: boolean
+  // null = clínica sin suscripción (sin restricción)
+  suscripcion: SuscripcionAdmin | null
   created_at: string
   updated_at: string
 }
@@ -105,9 +109,13 @@ export interface CreateTenantRequest {
   telefono?: string
   plan?: string       // uuid
   admin_email: string // obligatorio: el tenant siempre nace con su admin
+  // Cómo arranca la cuenta: prueba (vence) o activa con cobro manual
+  inicio?: 'prueba' | 'manual'
+  dias_prueba?: number
+  pagado_hasta?: string | null
 }
 
-export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email'>> & {
+export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email' | 'inicio' | 'dias_prueba' | 'pagado_hasta'>> & {
   activo?: boolean
   plan?: string | null
   facial_verificacion_override?: boolean | null
@@ -128,6 +136,7 @@ export interface CreatePlanRequest {
   precio: number | null
   precio_usuario_adicional?: number | null
   precio_sede_adicional?: number | null
+  descuento_anual_pct?: number
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
   modulo_obesidad_habilitado?: boolean

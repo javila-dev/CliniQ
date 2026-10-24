@@ -38,7 +38,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { cn } from '@/lib/utils'
 import { NavigationProgress } from './NavigationProgress'
 import { ImpersonationBanner } from './ImpersonationBanner'
-import { TrialBanner } from './TrialBanner'
+import { AvisoSoloLecturaDialog, BienvenidaPruebaDialog, CuentaSuspendida, RUTA_PAGAR, SuscripcionBanner, useCuentaSuspendida } from './SuscripcionAviso'
 import { ThemeApplier } from './ThemeApplier'
 import { ConfirmarNumeroCliniqDialog } from './ConfirmarNumeroCliniqDialog'
 import { AvisoAutorizacionesPrecio } from './AvisoAutorizacionesPrecio'
@@ -424,15 +424,27 @@ function SuperadminClinicaBanner() {
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const suspendida = useCuentaSuspendida()
+  const pathname = usePathname()
 
   useEffect(() => {
     useSuperadminClinicaStore.persist.rehydrate()
   }, [])
 
+  if (suspendida) {
+    // Suspendida: solo la pantalla de reactivar y, desde ahí, la de pago.
+    if (pathname.startsWith(RUTA_PAGAR)) {
+      return <main className="min-h-screen bg-gray-50 px-4 py-8 sm:px-6">{children}</main>
+    }
+    return <CuentaSuspendida suscripcion={suspendida} />
+  }
+
   return (
     <div className="flex min-h-screen bg-gray-50 overflow-x-hidden">
       <ThemeApplier />
       <ConfirmarNumeroCliniqDialog />
+      <AvisoSoloLecturaDialog />
+      <BienvenidaPruebaDialog />
       <AvisoAutorizacionesPrecio />
       <aside className={cn('hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 lg:left-0 lg:w-60 z-40', SIDEBAR_BG)}>
         <Sidebar />
@@ -458,7 +470,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <NavigationProgress />
         <ImpersonationBanner />
         <SuperadminClinicaBanner />
-        <TrialBanner />
+        <SuscripcionBanner />
         <SuperadminClinicaGuard>
           <main className="min-w-0 flex-1 flex flex-col overflow-x-hidden px-4 py-6 sm:px-6 lg:px-8">
             {children}

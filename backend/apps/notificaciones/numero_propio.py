@@ -120,16 +120,20 @@ def estado(clinica) -> dict:
         })
 
     ventas = "".join(c for c in settings.CLINIQ_VENTAS_WHATSAPP if c.isdigit())
+    en_prueba = clinica.en_prueba()
+    # En la prueba el número propio se ofrece con acompañamiento: el mensaje pide ayuda
+    # para conectarlo, no que lo activen en el plan.
+    texto_ventas = (
+        f"Hola, estoy probando CliniQ con {clinica.nombre} y quiero conectar nuestro número de WhatsApp. ¿Me ayudan?"
+        if en_prueba else f"Hola, quiero enviar los WhatsApp de {clinica.nombre} desde nuestro propio número."
+    )
     return {
+        "en_prueba": en_prueba,
         "habilitado": clinica.whatsapp_numero_propio_habilitado,
         "whatsapp_habilitado": clinica.whatsapp_habilitado,
         "numeros_incluidos": clinica.whatsapp_numeros_incluidos,
         "numero_cliniq": settings.WHATSAPP_NUMERO_CLINIQ,
-        "contacto_ventas_url": (
-            f"https://wa.me/{ventas}?text="
-            + quote(f"Hola, quiero enviar los WhatsApp de {clinica.nombre} desde nuestro propio número.")
-            if ventas else ""
-        ),
+        "contacto_ventas_url": f"https://wa.me/{ventas}?text=" + quote(texto_ventas) if ventas else "",
         "meta_app_id": settings.LYVIO_WHATSAPP_APP_ID,
         "meta_config_id": settings.LYVIO_WHATSAPP_CONFIG_ID,
         "pago_meta_configurado": bool(conexion and conexion.pago_meta_configurado),

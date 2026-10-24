@@ -53,6 +53,15 @@ export const ACCION_LABEL: Record<string, string> = {
   'whatsapp_propio.actualizar_plantillas': 'Plantillas de WhatsApp actualizadas',
   'whatsapp_propio.revisar_salud':         'Salud de WhatsApp revisada',
   'whatsapp_propio.dar_de_baja':           'Número de WhatsApp dado de baja',
+  'suscripcion.estado':          'Cambio de estado de la cuenta',
+  'suscripcion.extender_prueba': 'Prueba extendida',
+  'suscripcion.pago_manual':     'Pago manual registrado',
+  'suscripcion.pago_aprobado':   'Pago con tarjeta aprobado',
+  'suscripcion.pago_rechazado':  'Pago con tarjeta rechazado',
+  'suscripcion.tarjeta':         'Tarjeta actualizada',
+  'suscripcion.cambio_programado': 'Cambio de plan programado',
+  'suscripcion.cancelar':        'Renovación cancelada',
+  'suscripcion.reanudar':        'Renovación reactivada',
 }
 
 export function accionChipClass(accion: string): string {
@@ -60,6 +69,7 @@ export function accionChipClass(accion: string): string {
   if (accion.startsWith('usuario.'))  return 'bg-emerald-50 text-emerald-600'
   if (accion.startsWith('rol.'))      return 'bg-violet-50 text-violet-600'
   if (accion.startsWith('whatsapp_propio.')) return 'bg-teal-50 text-teal-700'
+  if (accion.startsWith('suscripcion.')) return 'bg-sky-50 text-sky-700'
   if (accion === 'tenant.desactivar') return 'bg-red-50 text-red-600'
   if (accion.startsWith('tenant.'))   return 'bg-amber-50 text-amber-600'
   return 'bg-gray-100 text-gray-600'

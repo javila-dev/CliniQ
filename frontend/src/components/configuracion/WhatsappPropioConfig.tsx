@@ -211,18 +211,33 @@ function PromoNumeroPropio({ estado }: { estado: WhatsappPropioEstado }) {
 }
 
 /** Con el add-on pero sin números conectados. */
-function CambiarANumeroPropio({ onConectar }: { onConectar: () => void }) {
+function CambiarANumeroPropio({ estado, onConectar }: { estado: WhatsappPropioEstado; onConectar: () => void }) {
   return (
     <SeccionAjustes
       titulo="Cambia a tu número propio"
-      descripcion="Tu plan ya lo incluye. Conéctalo en unos minutos y todas tus sedes lo usarán."
+      descripcion={estado.en_prueba
+        ? 'Incluido en tu prueba. Tus pacientes verán el nombre de tu clínica y te responderán a ti.'
+        : 'Tu plan ya lo incluye. Conéctalo en unos minutos y todas tus sedes lo usarán.'}
       accion={
-        <Button size="sm" onClick={onConectar}>
-          Conectar mi número <ArrowRight className="ml-1.5 h-4 w-4" />
-        </Button>
+        <div className="flex flex-wrap justify-end gap-2">
+          {estado.en_prueba && estado.contacto_ventas_url && (
+            <Button asChild size="sm" variant="outline">
+              <a href={estado.contacto_ventas_url} target="_blank" rel="noreferrer">Que me ayuden</a>
+            </Button>
+          )}
+          <Button size="sm" onClick={onConectar}>
+            Conectar mi número <ArrowRight className="ml-1.5 h-4 w-4" />
+          </Button>
+        </div>
       }
     >
       <ComparacionNumeros />
+      {estado.en_prueba && (
+        <NotaAjuste>
+          Conectarlo pide tu cuenta de Meta Business y toma unos 15 minutos: si quieres, lo hacemos contigo por WhatsApp.
+          Si al terminar la prueba tu plan no lo incluye, tus mensajes vuelven a salir por el número de CliniQ y tu número queda guardado.
+        </NotaAjuste>
+      )}
       <NotaAjuste>
         Hasta que Meta apruebe tus mensajes, cada envío te pide confirmar si sale desde el número de CliniQ.
       </NotaAjuste>
@@ -764,7 +779,7 @@ export function WhatsappPropioConfig() {
       {!estado.habilitado ? (
         <PromoNumeroPropio estado={estado} />
       ) : estado.numeros.length === 0 ? (
-        <CambiarANumeroPropio onConectar={() => setConectando(true)} />
+        <CambiarANumeroPropio estado={estado} onConectar={() => setConectando(true)} />
       ) : (
         <>
           <TusNumeros

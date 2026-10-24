@@ -277,7 +277,7 @@ class ClinicaViewSet(ModelViewSet):
         from apps.users.services import contar_usuarios_que_ocupan_cupo
 
         clinica = self._get_request_clinica()
-        plan = getattr(clinica, "plan", None)
+        plan = getattr(clinica, "plan_vigente", None)  # en prueba, el plan de prueba
 
         activos = contar_usuarios_que_ocupan_cupo(clinica)
         sedes_activas = Sede.objects.filter(clinica=clinica, activo=True).count()
@@ -366,7 +366,7 @@ class AdminTenantViewSet(ModelViewSet):
     def get_queryset(self):
         from django.db.models import Count, Q
         return (
-            Clinica.objects.select_related("plan")
+            Clinica.objects.select_related("plan", "suscripcion")
             .annotate(
                 total_usuarios=Count("usuarios", distinct=True),
                 # "Ocupan cupo": activados + invitaciones pendientes (colaborador activo).
@@ -558,7 +558,7 @@ class AdminTenantViewSet(ModelViewSet):
 
         grupo = request.query_params.get("grupo")
         if grupo == "gestion":
-            queryset = queryset.filter(accion__regex=r"^(tenant|usuario|rol)\.")
+            queryset = queryset.filter(accion__regex=r"^(tenant|usuario|rol|suscripcion)\.")
         elif grupo == "accesos":
             queryset = queryset.filter(accion__startswith="auth.")
 
@@ -655,11 +655,11 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
     @staticmethod
     def _validar_limite_de_sedes(clinica_id):
         c = Clinica.objects.select_related("plan").filter(pk=clinica_id).first()
-        if c and c.plan and c.plan.max_sedes > 0:
+        if c and c.plan_vigente and c.plan_vigente.max_sedes > 0:
             total_activas = c.sedes.filter(activo=True).count()
-            if total_activas >= c.plan.max_sedes:
+            if total_activas >= c.plan_vigente.max_sedes:
                 raise ValidationError(
-                    f"La clínica alcanzó el límite de {c.plan.max_sedes} sedes de su plan '{c.plan.nombre}'."
+                    f"La clínica alcanzó el límite de {c.plan_vigente.max_sedes} sedes de su plan '{c.plan_vigente.nombre}'."
                 )
 
     def perform_destroy(self, instance):
@@ -1608,11 +1608,12 @@ class RegistroClinicaView(APIView):
         try:
             iniciar_registro_clinica(
                 nombre_clinica=d["nombre_clinica"],
-                nit=d["nit"],
                 nombre_admin=d["nombre_admin"],
                 apellido_admin=d["apellido_admin"],
                 email=d["email"],
                 telefono=d["telefono"],
+                acepta_whatsapp=d["acepta_whatsapp"],
+                cargo=d["cargo"],
             )
         except Exception:
             logger.exception("Registro de clinica fallido | email=%s", d["email"])

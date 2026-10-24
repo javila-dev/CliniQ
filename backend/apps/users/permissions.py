@@ -211,36 +211,3 @@ class HasClinicamente:
         if clinica is None:
             return qs.none()
         return qs.filter(clinica=clinica)
-
-
-class TrialNotExpired(BasePermission):
-    """
-    Bloquea el acceso cuando el período de prueba de la clínica ha vencido.
-    Pasa si: el usuario es superadmin, la clínica tiene plan asignado,
-    o trial_expires_at es None o está en el futuro.
-    """
-    message = "El período de prueba ha vencido. Contacta a soporte para continuar."
-
-    def has_permission(self, request, view):
-        user = request.user
-        if not user or not user.is_authenticated:
-            return True  # Otras permission classes manejan auth
-        if user.rol == "superadmin":
-            return True
-        clinica = getattr(user, "clinica", None)
-        if clinica is None:
-            return True
-        # Si tiene plan asignado, el trial no aplica
-        if clinica.plan_id is not None:
-            return True
-        if clinica.trial_expires_at is None:
-            return True
-        from django.utils import timezone
-        if clinica.trial_expires_at >= timezone.now():
-            return True
-        self.message = (
-            f"El período de prueba venció el "
-            f"{clinica.trial_expires_at.strftime('%d/%m/%Y')}. "
-            "Contacta a soporte para activar tu plan."
-        )
-        return False

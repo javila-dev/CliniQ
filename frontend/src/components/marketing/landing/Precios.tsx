@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowRight, RefreshCw } from 'lucide-react'
@@ -11,6 +12,14 @@ const COP_FMT = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'C
 function formatPrecio(precio: string | null) {
   if (precio === null) return 'Cotización'
   return COP_FMT.format(parseFloat(precio))
+}
+
+type Ciclo = 'mensual' | 'anual'
+
+/** Precio mensual a mostrar: en anual, el mes con el descuento del plan. */
+function precioMes(precio: string, ciclo: Ciclo, descuento: number) {
+  const mensual = parseFloat(precio)
+  return ciclo === 'anual' && descuento > 0 ? Math.round(mensual * (1 - descuento / 100)) : mensual
 }
 
 function Punto({ children }: { children: React.ReactNode }) {
@@ -29,6 +38,9 @@ export function Precios() {
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
+  const [ciclo, setCiclo] = useState<Ciclo>('mensual')
+  const hayAnual = !!planes?.some((p) => p.precio !== null && p.descuento_anual_pct > 0)
+  const maxDescuento = Math.max(0, ...(planes ?? []).map((p) => p.descuento_anual_pct))
 
   return (
     <section id="precios" className="scroll-mt-20 border-t border-white/[0.07] py-16 sm:py-32">
@@ -38,6 +50,21 @@ export function Precios() {
             Empieza con <span className="text-[var(--lv3-lit)]">el tamaño que tienes hoy</span>.
           </h2>
           <p className="mt-5 text-base leading-7 text-[var(--lv3-muted)]">Todos los planes incluyen 14 días de prueba sin tarjeta de crédito.</p>
+          {hayAnual && (
+            <div role="group" aria-label="Ciclo de pago" className="mt-8 inline-flex rounded-full border border-white/10 bg-white/[0.03] p-1 text-sm">
+              {(['mensual', 'anual'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={ciclo === c}
+                  onClick={() => setCiclo(c)}
+                  className={`rounded-full px-4 py-1.5 font-medium transition-colors ${ciclo === c ? 'bg-white text-[var(--lv3-bg)]' : 'text-[var(--lv3-muted)] hover:text-[var(--lv3-text)]'}`}
+                >
+                  {c === 'mensual' ? 'Mensual' : `Anual · ahorra hasta ${maxDescuento} %`}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {isLoading ? (
@@ -74,9 +101,18 @@ export function Precios() {
                   <h3 className="lv3-display text-2xl">{plan.nombre}</h3>
                   {plan.descripcion && <p className="mt-2 min-h-[6.5rem] text-[13px] leading-5 text-[var(--lv3-faint)]">{plan.descripcion}</p>}
                   <p className="mt-6 flex items-baseline gap-1">
-                    <span className="lv3-display text-4xl tracking-tight">{formatPrecio(plan.precio)}</span>
+                    <span className="lv3-display text-4xl tracking-tight">
+                      {plan.precio === null ? formatPrecio(null) : COP_FMT.format(precioMes(plan.precio, ciclo, plan.descuento_anual_pct))}
+                    </span>
                     {plan.precio !== null && <span className="text-xs text-[var(--lv3-faint)]">/mes</span>}
                   </p>
+                  {plan.precio !== null && ciclo === 'anual' && (
+                    <p className="mt-1 text-xs text-[var(--lv3-faint)]">
+                      {plan.descuento_anual_pct > 0
+                        ? `${COP_FMT.format(precioMes(plan.precio, 'anual', plan.descuento_anual_pct) * 12)} al año · ahorras ${plan.descuento_anual_pct} %`
+                        : 'Este plan se paga mes a mes'}
+                    </p>
+                  )}
                   <ul className="mt-6 flex-1 space-y-3">
                     <Punto>{plan.max_usuarios > 0 ? `Hasta ${plan.max_usuarios} ${plan.max_usuarios === 1 ? 'usuario' : 'usuarios'}` : 'Usuarios ilimitados'}</Punto>
                     <Punto>{plan.max_sedes > 0 ? `Hasta ${plan.max_sedes} ${plan.max_sedes === 1 ? 'sede' : 'sedes'}` : 'Sedes ilimitadas'}</Punto>

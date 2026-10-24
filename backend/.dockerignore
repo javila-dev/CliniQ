@@ -1,0 +1,35 @@
+# Secretos y entorno
+.env
+.env.*
+!.env.example
+*.env.prod
+*.credentials.json
+apps/claude_export/
+
+# Herramientas locales (agentes, IDE)
+.claude/
+.cursor/
+.vscode/
+.idea/
+
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# Artefactos locales
+tmp/
+staticfiles/
+media/
+db.sqlite3
+*.log
+.coverage
+htmlcov/
+.pytest_cache/

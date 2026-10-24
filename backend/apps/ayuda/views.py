@@ -38,6 +38,9 @@ def es_gestor(request) -> bool:
 class CategoriaAyudaViewSet(viewsets.ModelViewSet):
     serializer_class = CategoriaAyudaSerializer
     lookup_field = "slug"
+    # La ayuda se lee aunque la cuenta esté vencida ("cómo activar mi plan");
+    # editarla es solo del equipo interno.
+    suscripcion_libre = True
 
     def get_permissions(self):
         if self.action in ("list", "retrieve"):
@@ -73,6 +76,7 @@ class CategoriaAyudaViewSet(viewsets.ModelViewSet):
 
 class ArticuloAyudaViewSet(viewsets.ModelViewSet):
     lookup_field = "slug"
+    suscripcion_libre = True
 
     def get_permissions(self):
         if self.action in ("list", "retrieve", "feedback"):

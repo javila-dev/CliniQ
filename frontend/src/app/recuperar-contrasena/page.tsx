@@ -45,6 +45,9 @@ function RecuperarContrasenaContent() {
   const [serverError, setServerError] = useState<string | null>(null)
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
+  // Cuenta nueva (registro de la clínica o invitación al equipo): se crea la
+  // contraseña, no se "recupera".
+  const [cuenta, setCuenta] = useState<{ nueva: boolean; email: string; nombre: string }>({ nueva: false, email: '', nombre: '' })
 
   const {
     register,
@@ -68,7 +71,10 @@ function RecuperarContrasenaContent() {
     }
     authApi
       .validarTokenRecuperacion(token)
-      .then((res) => setPageState(res.ok ? 'valid' : 'invalid'))
+      .then((res) => {
+        setCuenta({ nueva: res.proposito === 'invite', email: res.email ?? '', nombre: res.nombre ?? '' })
+        setPageState(res.ok ? 'valid' : 'invalid')
+      })
       .catch(() => setPageState('invalid'))
   }, [token])
 
@@ -145,15 +151,17 @@ function RecuperarContrasenaContent() {
         {pageState === 'valid' && (
           <>
             <div className="mb-6">
-              <h1 className="text-2xl font-bold text-foreground">Nueva contraseña</h1>
+              <h1 className="text-2xl font-bold text-foreground">{cuenta.nueva ? 'Crea tu contraseña' : 'Nueva contraseña'}</h1>
               <p className="text-sm text-muted-foreground mt-1">
-                Elige una contraseña segura de al menos 8 caracteres.
+                {cuenta.nueva
+                  ? <>{cuenta.nombre ? `${cuenta.nombre}, es` : 'Es'} el último paso. Con esta contraseña y tu correo{cuenta.email && <> <span className="font-medium text-foreground">{cuenta.email}</span></>} entrarás a CliniQ.</>
+                  : 'Elige una contraseña segura de al menos 8 caracteres.'}
               </p>
             </div>
 
             <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="nueva_password">Nueva contraseña</Label>
+                <Label htmlFor="nueva_password">{cuenta.nueva ? 'Contraseña' : 'Nueva contraseña'}</Label>
                 <div className="relative">
                   <Input
                     id="nueva_password"
@@ -225,7 +233,7 @@ function RecuperarContrasenaContent() {
                     Guardando...
                   </>
                 ) : (
-                  'Guardar nueva contraseña'
+                  cuenta.nueva ? 'Crear contraseña y entrar' : 'Guardar nueva contraseña'
                 )}
               </Button>
             </form>

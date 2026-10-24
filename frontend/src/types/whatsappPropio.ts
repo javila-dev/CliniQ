@@ -36,7 +36,9 @@ export interface WhatsappPropioEstado {
   whatsapp_habilitado: boolean     // add-on base de WhatsApp
   numeros_incluidos: number        // cuántos números puede conectar; 0 sin el add-on
   numero_cliniq: string            // número compartido tal como lo ve el paciente; '' si no está configurado
-  contacto_ventas_url: string      // wa.me para pedir el add-on; '' si no está configurado
+  contacto_ventas_url: string      // wa.me para pedir el add-on (o ayuda, en la prueba); '' si no está configurado
+  /** La clínica está en su prueba gratuita: el número propio se ofrece con acompañamiento. */
+  en_prueba: boolean
   meta_app_id: string
   meta_config_id: string
   pago_meta_configurado: boolean

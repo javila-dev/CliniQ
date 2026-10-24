@@ -37,6 +37,7 @@ const planSchema = z.object({
   precio:                     z.string().optional(),
   precio_usuario_adicional:   z.string().optional(),
   precio_sede_adicional:      z.string().optional(),
+  descuento_anual_pct:        z.string().optional(),
   whatsapp_envios_incluidos:  z.string().optional(),
   precio_por_numero_whatsapp: z.string().optional(),
   whatsapp_numeros_incluidos: z.string().optional(),
@@ -68,6 +69,7 @@ function PlanDialog({
       precio:       plan.precio ?? '',
       precio_usuario_adicional: plan.precio_usuario_adicional ?? '',
       precio_sede_adicional:    plan.precio_sede_adicional ?? '',
+      descuento_anual_pct:      plan.descuento_anual_pct ? String(plan.descuento_anual_pct) : '',
       whatsapp_envios_incluidos: plan.whatsapp_envios_incluidos ? String(plan.whatsapp_envios_incluidos) : '',
       precio_por_numero_whatsapp: plan.precio_por_numero_whatsapp ?? '',
       whatsapp_numeros_incluidos: String(plan.whatsapp_numeros_incluidos ?? 1),
@@ -100,6 +102,7 @@ function PlanDialog({
         precio:       data.precio ? parseFloat(data.precio) : null,
         precio_usuario_adicional: data.precio_usuario_adicional ? parseFloat(data.precio_usuario_adicional) : null,
         precio_sede_adicional:    data.precio_sede_adicional ? parseFloat(data.precio_sede_adicional) : null,
+        descuento_anual_pct:      data.descuento_anual_pct ? Math.min(90, Math.max(0, parseInt(data.descuento_anual_pct, 10))) : 0,
         facial_verificacion_habilitada: facialHabilitado,
         modulo_estetico_habilitado: moduloEstetico,
         modulo_obesidad_habilitado: moduloObesidad,
@@ -204,6 +207,12 @@ function PlanDialog({
                 {...register('precio_sede_adicional')}
               />
             </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Descuento por pago anual (%)</Label>
+            <Input type="number" min={0} max={90} step={1} placeholder="0 = sin pago anual" {...register('descuento_anual_pct')} />
+            <p className="text-xs text-muted-foreground">El año cuesta 12 meses menos este porcentaje. 2 meses gratis ≈ 17 %.</p>
           </div>
 
           <div className="rounded-lg border border-violet-100 bg-violet-50/50 p-4 space-y-3">

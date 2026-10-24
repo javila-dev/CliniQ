@@ -30,6 +30,7 @@ import {
   serverErrorMessage, ESTADO_BADGE, HISTORIAL_PAGE_SIZE, HISTORIAL_GRUPOS, HistorialFila,
 } from '../_shared'
 import { WhatsappPropioConsola } from '../_whatsapp'
+import { ESTADO_SUSCRIPCION_BADGE, SuscripcionConsola, resumenSuscripcion } from '../_suscripcion'
 
 // ─── Schema del formulario "General" ──────────────────────────
 
@@ -1001,6 +1002,11 @@ export default function TenantDetailPage() {
               <span className="text-sm text-muted-foreground">Sin plan</span>
             )}
           </div>
+          {tenant.suscripcion && (
+            <Badge variant={ESTADO_SUSCRIPCION_BADGE[tenant.suscripcion.estado]} className="mt-1.5">
+              {resumenSuscripcion(tenant.suscripcion)}
+            </Badge>
+          )}
         </div>
         <div className="bg-white p-3.5">
           <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">Usuarios</p>
@@ -1059,6 +1065,7 @@ export default function TenantDetailPage() {
       <Tabs defaultValue="general">
         <TabsList>
           <TabsTrigger value="general">General</TabsTrigger>
+          <TabsTrigger value="suscripcion">Suscripción</TabsTrigger>
           <TabsTrigger value="addons">Add-ons</TabsTrigger>
           <TabsTrigger value="usuarios">Usuarios</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
@@ -1066,6 +1073,9 @@ export default function TenantDetailPage() {
         </TabsList>
         <TabsContent value="general" className="pt-4">
           <GeneralTab tenant={tenant} />
+        </TabsContent>
+        <TabsContent value="suscripcion" className="pt-4">
+          <SuscripcionConsola tenant={tenant} />
         </TabsContent>
         <TabsContent value="addons" className="pt-4">
           <AddonsTab tenant={tenant} />
