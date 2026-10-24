@@ -183,6 +183,8 @@ def aprobar(cobro: CobroSuscripcion) -> None:
 
     s = Suscripcion.objects.select_for_update().get(pk=cobro.suscripcion_id)
     clinica = cobro.suscripcion.clinica
+    # Si el periodo pagado no sigue al anterior (se reactiva desde solo lectura), el día de cobro se reinicia.
+    contiguo = s.periodo_fin is not None and cobro.periodo_inicio == s.periodo_fin + timedelta(days=1)
     if cobro.concepto == CobroSuscripcion.Concepto.CAMBIO_PLAN:
         s.precio_periodo = precio_periodo(cobro.plan, s.ciclo)
         s.plan_pendiente, s.ciclo_pendiente = None, ""
@@ -192,7 +194,7 @@ def aprobar(cobro: CobroSuscripcion) -> None:
         s.modo_cobro = Suscripcion.ModoCobro.AUTOMATICO
         s.ciclo = cobro.ciclo
         s.periodo_inicio, s.periodo_fin = cobro.periodo_inicio, cobro.periodo_fin
-        s.dia_ancla = s.dia_ancla or cobro.periodo_inicio.day
+        s.dia_ancla = s.dia_ancla if (contiguo and s.dia_ancla) else cobro.periodo_inicio.day
         s.proximo_cobro_el = cobro.periodo_fin
         s.intentos_fallidos = 0
         s.precio_periodo = cobro.monto
@@ -350,7 +352,63 @@ def cambiar_tarjeta(
     registrar_accion(None, "suscripcion.tarjeta", s, {"resumen": f"Tarjeta actualizada a {nueva}"}, clinica=s.clinica, actor=usuario)
     if s.estado == E.EN_GRACIA:
         renovar(s)
+    elif puede_reintentar(s):
+        reintentar_ahora(s, usuario=usuario)
     return nueva
+
+
+# Entre un reintento de la clínica y el siguiente: evita martillar la tarjeta (Wompi y el banco lo penalizan).
+MINUTOS_ENTRE_REINTENTOS_MANUALES = 5
+
+
+def puede_reintentar(s: Suscripcion) -> bool:
+    """En mora, o en solo lectura / suspendida por renovaciones rechazadas, con la tarjeta guardada."""
+    if s.modo_cobro != Suscripcion.ModoCobro.AUTOMATICO or not s.periodo_fin or s.cancelar_al_terminar_periodo:
+        return False
+    if not (s.fuente_pago_id and s.fuente_pago.estado == FuentePago.Estado.DISPONIBLE):
+        return False
+    if s.estado == E.EN_GRACIA:
+        return True
+    return s.estado in (E.SOLO_LECTURA, E.SUSPENDIDA) and s.intentos_fallidos >= INTENTOS_MAXIMOS
+
+
+def reintentar_ahora(s: Suscripcion, *, usuario=None) -> CobroSuscripcion:
+    """La clínica cobra ya el periodo pendiente con su tarjeta guardada. En mora
+    paga el periodo que sigue al último (ya lo estaba usando); desde solo lectura
+    o suspendida el periodo empieza hoy, porque no tuvo acceso completo."""
+    if not puede_reintentar(s):
+        raise CobroNoPermitido("No hay un pago pendiente que se pueda reintentar con tu tarjeta.")
+    if s.cobros.filter(estado=C.PENDIENTE).exists():
+        raise CobroNoPermitido("Hay un pago en proceso. Espera unos segundos y vuelve a intentar.")
+    hace_poco = timezone.now() - timedelta(minutes=MINUTOS_ENTRE_REINTENTOS_MANUALES)
+    if s.cobros.filter(concepto=CobroSuscripcion.Concepto.REINTENTO, created_at__gte=hace_poco).exists():
+        raise CobroNoPermitido(
+            f"Ya intentaste hace poco. Espera {MINUTOS_ENTRE_REINTENTOS_MANUALES} minutos o usa otra tarjeta."
+        )
+    plan = s.plan_pendiente or s.clinica.plan
+    if plan is None:
+        raise CobroNoPermitido("Tu clínica no tiene un plan para cobrar. Escríbenos para ayudarte.")
+    ciclo = s.ciclo_pendiente or s.ciclo
+    cambia = s.plan_pendiente_id is not None or bool(s.ciclo_pendiente)
+    monto = precio_periodo(plan, ciclo) if cambia or s.precio_periodo is None else s.precio_periodo
+    if s.estado == E.EN_GRACIA:
+        inicio = s.periodo_fin + timedelta(days=1)
+        ancla = s.dia_ancla or inicio.day
+    else:
+        inicio = timezone.localdate()
+        ancla = inicio.day
+    cobro = CobroSuscripcion.objects.create(
+        suscripcion=s, referencia=_referencia(s), concepto=CobroSuscripcion.Concepto.REINTENTO,
+        plan=plan, ciclo=ciclo, periodo_inicio=inicio, periodo_fin=fin_de_periodo(inicio, ciclo, ancla),
+        monto_centavos=_centavos(monto), fuente_pago=s.fuente_pago,
+    )
+    registrar_accion(
+        None, "suscripcion.reintento", s, {"resumen": f"La clínica reintentó el pago (${monto:,.0f})"},
+        clinica=s.clinica, actor=usuario,
+    )
+    ejecutar(cobro)
+    cobro.refresh_from_db()
+    return cobro
 
 
 def cambiar_plan(s: Suscripcion, *, plan, ciclo: str, usuario=None) -> CobroSuscripcion | None:
