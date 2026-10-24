@@ -294,3 +294,51 @@ class RegistroConfirmacion(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.cita_id} - {self.estado_resultante} - {self.created_at}"
+
+
+class CorreccionSoporte(BaseModel):
+    """Una corrección que soporte hizo desde el console sobre una atención:
+    trasladarla al paciente correcto o eliminarla. Guarda qué se movió, qué se
+    revirtió y, al eliminar, una copia de lo borrado, para poder explicarlo
+    después; el detalle queda además en LogAccion."""
+
+    class Tipo(models.TextChoices):
+        TRASLADAR_ATENCION = "trasladar_atencion", "Trasladar atención"
+        ELIMINAR_ATENCION = "eliminar_atencion", "Eliminar atención"
+
+    class AccionCobro(models.TextChoices):
+        SIN_COBRO = "sin_cobro", "La cita no tenía cobro"
+        MOVER = "mover", "El cobro pasó al paciente correcto"
+        MANTENER = "mantener", "El cobro siguió en la cita"
+        DESLIGAR = "desligar", "El cobro quedó en el paciente, sin la cita"
+        ANULAR = "anular", "El cobro se anuló"
+
+    clinica = models.ForeignKey("clinicas.Clinica", on_delete=models.CASCADE, related_name="correcciones_soporte")
+    tipo = models.CharField(max_length=30, choices=Tipo.choices)
+    cita = models.ForeignKey(Cita, on_delete=models.PROTECT, related_name="correcciones_soporte")
+    paciente = models.ForeignKey(
+        "pacientes.Paciente", on_delete=models.PROTECT, related_name="correcciones_soporte",
+    )
+    # Solo al trasladar: el paciente que realmente se atendió.
+    paciente_destino = models.ForeignKey(
+        "pacientes.Paciente", on_delete=models.PROTECT, null=True, blank=True, related_name="atenciones_recibidas_por_traslado",
+    )
+    item_origen = models.ForeignKey(
+        "cotizaciones.ItemCotizacion", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    item_destino = models.ForeignKey(
+        "cotizaciones.ItemCotizacion", on_delete=models.SET_NULL, null=True, blank=True, related_name="+",
+    )
+    accion_cobro = models.CharField(max_length=20, choices=AccionCobro.choices, default=AccionCobro.SIN_COBRO)
+    motivo = models.TextField()
+    resumen = models.JSONField(default=dict)
+    realizado_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name="correcciones_soporte",
+    )
+
+    class Meta:
+        db_table = "correcciones_soporte"
+        ordering = ["-created_at"]
+
+    def __str__(self) -> str:
+        return f"{self.tipo} {self.cita_id}"
