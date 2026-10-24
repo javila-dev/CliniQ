@@ -5,7 +5,7 @@ import Link from 'next/link'
 import Image from 'next/image'
 import { usePathname, useRouter } from 'next/navigation'
 import {
-  Building2, CreditCard, PersonStanding, LifeBuoy, Users, LogOut,
+  Building2, CreditCard, PersonStanding, LifeBuoy, Users, LogOut, Wrench,
 } from 'lucide-react'
 
 import { canAccess, defaultRoute, isSuperAdmin } from '@/lib/permissions'
@@ -65,6 +65,7 @@ const NAV = [
   { href: '/console/planes',        label: 'Planes',          icon: CreditCard,     soloSuperadmin: true },
   { href: '/console/diagramas',     label: 'Diagramas y zonas', icon: PersonStanding, soloSuperadmin: true },
   { href: '/console/usuarios',      label: 'Usuarios',        icon: Users,          soloSuperadmin: true },
+  { href: '/console/soporte',       label: 'Soporte',         icon: Wrench,         soloSuperadmin: true },
   { href: RUTA_AYUDA,               label: 'Centro de ayuda', icon: LifeBuoy,       soloSuperadmin: false },
 ]
 
