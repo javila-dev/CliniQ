@@ -582,6 +582,16 @@ Sigue pendiente ver la pantalla de pago en el navegador: el servidor de desarrol
   - **Al elegir plan:** cada plan dice "Dejas de tener: …" con las funciones que la clínica tiene hoy y ese plan no incluye. Si el uso actual (usuarios o sedes) supera el plan, el plan aparece deshabilitado con el motivo.
   - **Consola → Pruebas:** marca "Conectó su WhatsApp" en las clínicas que conectaron su número.
   - **Pendiente:** al darse de baja una prueba que conectó su número, limpiar el inbox de Lyvio (hoy queda hasta que alguien lo dé de baja).
+- **Invitación a poner tarjeta (D4, 2026-10-24):** para clínicas activas con cobro manual.
+  - **En la app**, solo quien administra: aviso arriba ("Ya puedes pagar CliniQ con tarjeta…") que se puede cerrar y vuelve a los 30 días, y en Configuración → Plan la fila "Paga con tarjeta" con "Registrar tarjeta".
+  - **Cuándo empieza el cobro:** con "pagado hasta", el periodo con tarjeta empieza al día siguiente (se cobra al registrarla). Sin fecha, empieza ese día. La pantalla de pago lo dice.
+  - **En la consola**, pestaña Suscripción de la clínica: "Cobro manual, sin tarjeta" con "Copiar enlace" a `/configuracion/plan/pagar`. Si no tiene fecha de pagado hasta, avisa que se le cobraría ese día y que, si ya pagó, conviene registrar antes el pago manual con su fecha.
+  - El superadmin que entra como una clínica ahora ve su estado de cuenta, avisos incluidos, pero nunca la pantalla de suspendida.
+- **Reintentar el pago con la tarjeta guardada (2026-10-24):** `POST /suscripcion/pago/reintentar/`, botón "Reintentar pago" en el aviso de arriba, en Configuración → Plan ("Pago pendiente"), en el diálogo de solo lectura y en la pantalla de suspendida.
+  - **Cuándo se puede:** en mora, o en solo lectura / suspendida por 3 renovaciones rechazadas, con la tarjeta guardada disponible (`cobros.puede_reintentar`). Una prueba vencida no tiene tarjeta: ahí sigue "Elegir plan".
+  - **Qué periodo cobra:** en mora, el que sigue al último (lo estaba usando). Desde solo lectura o suspendida, uno que empieza hoy, y el día de cobro se reinicia.
+  - **Si se rechaza:** el cobro queda con concepto `reintento` y no suma intentos ni cambia la cuenta; los reintentos automáticos siguen igual. Entre un reintento de la clínica y el siguiente hay que esperar 5 minutos.
+  - **"Cambiar tarjeta"** en mora ahora lleva a cambiar la tarjeta (antes llevaba a contratar, que el backend rechazaba). Cambiarla en solo lectura por rechazos también cobra de inmediato.
 - **Ids que se proponen para el `.env`:** `ALEGRA_NUMBER_TEMPLATE_ID=15`, `ALEGRA_ITEM_ID=1`, `ALEGRA_TAX_ID=2` con `ALEGRA_IVA_PCT=0` (si el contador confirma la exclusión) y `ALEGRA_BANK_ACCOUNT_ID=3`.
 
 **Queda fuera de F3:** el Hito 5 del plan de activación (recepción con interruptores por paso). Es un trabajo propio, de una semana o más, con decisiones abiertas (ver `docs/plan-activacion-y-puesta-en-marcha.md`).
@@ -600,6 +610,8 @@ Comando `procesar_suscripciones`, idempotente. Hace:
 - facturas pendientes;
 - hitos;
 - mensajes.
+
+Al terminar guarda la hora en `ConfiguracionGlobal.suscripciones_procesadas_el`. Consola → Pruebas, en la tarjeta de correos, muestra si corrió en las últimas 2 horas; si no, avisa con el comando y el horario (`0 * * * *`) para crearla. Con `--simular` no se guarda la hora.
 
 Se programa en **Dokploy** (tarea programada sobre el contenedor del backend) en lugar de n8n → endpoint, porque mueve dinero y así no queda expuesto por HTTP. Si se prefiere uniformidad con lo actual, la alternativa es un endpoint protegido con `X-N8N-Secret` llamado por n8n.
 

@@ -97,7 +97,7 @@ export default function PagosConsolaPage() {
         <Filtro etiqueta="Factura" valor={filtros.factura ?? ''} onChange={v => cambiar({ factura: v })}
           opciones={[['emitida', 'Emitida'], ['pendiente', 'Pendiente'], ['error', 'En error'], ['sin_factura', 'Aprobado sin factura']]} />
         <Filtro etiqueta="Concepto" valor={filtros.concepto ?? ''} onChange={v => cambiar({ concepto: v })}
-          opciones={[['primer_pago', 'Primer pago'], ['renovacion', 'Renovación'], ['cambio_plan', 'Cambio de plan']]} />
+          opciones={[['primer_pago', 'Primer pago'], ['renovacion', 'Renovación'], ['cambio_plan', 'Cambio de plan'], ['reintento', 'Reintento de pago']]} />
       </div>
 
       {r && (

@@ -104,6 +104,11 @@ export const suscripcionesApi = {
     const res = await apiClient.post<{ cobro: CobroSuscripcion | null; suscripcion: Suscripcion }>('/suscripcion/pago/cambiar-plan/', data)
     return res.data
   },
+  /** Cobra ya, con la tarjeta guardada, el periodo que quedó sin pagar (mora o solo lectura). */
+  reintentarPago: async (): Promise<CobroSuscripcion & { suscripcion: Suscripcion }> => {
+    const res = await apiClient.post<CobroSuscripcion & { suscripcion: Suscripcion }>('/suscripcion/pago/reintentar/')
+    return res.data
+  },
   cancelarRenovacion: async (cancelar: boolean): Promise<Suscripcion> => {
     const res = await apiClient.post<Suscripcion>('/suscripcion/pago/cancelar/', { cancelar })
     return res.data

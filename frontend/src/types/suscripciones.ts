@@ -49,6 +49,10 @@ export type SuscripcionConContacto = Suscripcion & {
   pago_en_linea: boolean
   /** Con cobro automático: faltan datos para la factura electrónica. */
   facturacion_incompleta: boolean
+  /** En mora, o en solo lectura por renovaciones rechazadas: puede cobrar ya con la tarjeta guardada. */
+  puede_reintentar_pago: boolean
+  /** Motivo del último rechazo, si lo hay (p. ej. "Fondos insuficientes"). */
+  ultimo_rechazo: string
 }
 
 /** Respuesta de /suscripcion/: sin suscripción, la cuenta no tiene restricción. */
@@ -164,7 +168,7 @@ export interface FiltrosPagos {
   hasta?: string
   estado?: '' | 'aprobado' | 'fallido' | 'pendiente'
   factura?: '' | 'emitida' | 'pendiente' | 'error' | 'sin_factura'
-  concepto?: '' | 'primer_pago' | 'renovacion' | 'cambio_plan'
+  concepto?: '' | 'primer_pago' | 'renovacion' | 'cambio_plan' | 'reintento'
   q?: string
   page?: number
 }
@@ -252,7 +256,7 @@ export interface TarjetaNueva {
 
 export interface CobroSuscripcion {
   referencia: string
-  concepto: 'primer_pago' | 'renovacion' | 'cambio_plan'
+  concepto: 'primer_pago' | 'renovacion' | 'cambio_plan' | 'reintento'
   concepto_label: string
   plan_nombre: string
   ciclo: Ciclo

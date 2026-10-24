@@ -4,14 +4,16 @@ import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { AlertTriangle, Clock, Lock, LogOut, MessageCircle } from 'lucide-react'
+import { AlertTriangle, Clock, CreditCard, Loader2, Lock, LogOut, MessageCircle, RotateCw, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { useToast } from '@/hooks/use-toast'
 import { suscripcionesApi } from '@/lib/api/suscripciones'
 import { isAdminOrSuperAdmin, isSuperAdmin } from '@/lib/permissions'
 import { cn } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
-import type { MiSuscripcion, PerfilBienvenida, SuscripcionConContacto } from '@/types/suscripciones'
+import { useSuperadminClinicaStore } from '@/store/superadminClinicaStore'
+import type { MiSuscripcion, PerfilBienvenida, Suscripcion, SuscripcionConContacto } from '@/types/suscripciones'
 
 // Estado de la cuenta (prueba, mora, solo lectura, suspendida). El backend
 // bloquea por su cuenta; esto solo lo explica: aviso fijo arriba, diálogo
@@ -28,18 +30,99 @@ export function conEstado(s: MiSuscripcion | undefined): SuscripcionConContacto 
   return s && s.estado !== null ? (s as SuscripcionConContacto) : null
 }
 
-export function useMiSuscripcion() {
+/** La clínica cuya suscripción se muestra: la del usuario o, para el superadmin,
+ *  la clínica en la que está operando ("Entrar como clínica"). */
+function useClinicaDeLaSuscripcion(): string | null {
   const user = useAuthStore((s) => s.user)
-  const habilitada = !!user && !isSuperAdmin(user) && !!user.clinica_id
+  const clinicaActiva = useSuperadminClinicaStore((s) => s.clinicaActiva)
+  if (!user) return null
+  return isSuperAdmin(user) ? clinicaActiva?.id ?? null : user.clinica_id ?? null
+}
+
+export function useMiSuscripcion() {
+  const clinicaId = useClinicaDeLaSuscripcion()
   return useQuery({
-    queryKey: MI_SUSCRIPCION_KEY,
+    // Con el id: al cambiar de clínica el superadmin no ve la anterior.
+    queryKey: [...MI_SUSCRIPCION_KEY, clinicaId],
     queryFn: suscripcionesApi.mia,
-    enabled: habilitada,
+    enabled: !!clinicaId,
     staleTime: 5 * 60 * 1000,
   })
 }
 
 export const RUTA_PAGAR = '/configuracion/plan/pagar'
+
+/** Clínica activa con cobro manual que se puede pasar a tarjeta (decisión D4 del plan). */
+export function invitarATarjeta(s: Pick<Suscripcion, 'estado' | 'modo_cobro'> | null | undefined): boolean {
+  return !!s && s.estado === 'activa' && s.modo_cobro === 'manual'
+}
+
+const hoyISO = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+/** Desde cuándo corre el primer periodo con tarjeta: el backend lo empieza al día
+ *  siguiente de lo pagado a mano o, si no hay fecha, el mismo día del pago. */
+export function inicioConTarjeta(s: Pick<Suscripcion, 'periodo_fin'>): string | null {
+  if (!s.periodo_fin || s.periodo_fin < hoyISO()) return null
+  const d = new Date(`${s.periodo_fin}T12:00:00`)
+  d.setDate(d.getDate() + 1)
+  return FECHA.format(d)
+}
+
+// El aviso de pasar a tarjeta se puede cerrar; vuelve a los 30 días.
+const DESCARTE_TARJETA_MS = 30 * 24 * 60 * 60 * 1000
+const claveDescarte = (clinicaId: string) => `cliniq:invitacion-tarjeta:${clinicaId}`
+
+function useInvitacionDescartada(clinicaId: string | null | undefined) {
+  const [descartada, setDescartada] = useState(true)
+  useEffect(() => {
+    if (!clinicaId) return
+    try {
+      const cuando = Number(localStorage.getItem(claveDescarte(clinicaId)) || 0)
+      setDescartada(Date.now() - cuando < DESCARTE_TARJETA_MS)
+    } catch {
+      setDescartada(false)
+    }
+  }, [clinicaId])
+  const descartar = () => {
+    setDescartada(true)
+    try {
+      if (clinicaId) localStorage.setItem(claveDescarte(clinicaId), String(Date.now()))
+    } catch { /* sin almacenamiento: solo se oculta en esta visita */ }
+  }
+  return [descartada, descartar] as const
+}
+
+/** Botón grande de "Reintentar pago con mi tarjeta" (diálogo, pantalla de suspendida, Configuración → Plan). */
+export function BotonReintentar({ onHecho, size }: { onHecho?: () => void; size?: 'sm' | 'default' }) {
+  const reintentar = useReintentarPago()
+  return (
+    <Button size={size} disabled={reintentar.isPending} onClick={() => reintentar.mutate(undefined, { onSuccess: () => onHecho?.() })}>
+      {reintentar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RotateCw className="mr-2 h-4 w-4" />}
+      Reintentar pago
+    </Button>
+  )
+}
+
+/** Invita a quien administra una clínica con cobro manual a registrar tarjeta. */
+function InvitacionTarjeta({ onCerrar }: { onCerrar: () => void }) {
+  return (
+    <div className="flex items-center gap-2.5 border-b bg-white px-4 py-2 text-sm text-foreground">
+      <CreditCard className="h-4 w-4 shrink-0 text-primary" />
+      <span className="min-w-0 flex-1">
+        Ya puedes pagar CliniQ con tarjeta: se renueva solo y recibes la factura electrónica de cada pago.
+      </span>
+      <Link href="/configuracion/plan" className="shrink-0 rounded-md bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90">
+        Ver cómo
+      </Link>
+      <button type="button" onClick={onCerrar} aria-label="Cerrar aviso" className="shrink-0 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground">
+        <X className="h-4 w-4" />
+      </button>
+    </div>
+  )
+}
 
 /** "Elegir plan": la pantalla de pago si hay pago en línea; si no, WhatsApp con ventas. */
 export function ElegirPlanLink({ s, className, children, onClick }: {
@@ -60,15 +143,59 @@ export function ElegirPlanLink({ s, className, children, onClick }: {
 function BotonElegirPlan({ s, className }: { s: SuscripcionConContacto; className?: string }) {
   return (
     <ElegirPlanLink s={s} className={cn('shrink-0 rounded-md bg-white/90 px-2.5 py-1 text-xs font-semibold text-gray-900 hover:bg-white', className)}>
-      {s.estado === 'en_gracia' ? 'Actualizar tarjeta' : 'Elegir plan'}
+      Elegir plan
     </ElegirPlanLink>
+  )
+}
+
+const errorDe = (err: unknown) =>
+  (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? 'No se pudo hacer el cobro. Intenta de nuevo.'
+
+/** Cobra ya el periodo pendiente con la tarjeta guardada y avisa cómo terminó. */
+export function useReintentarPago() {
+  const queryClient = useQueryClient()
+  const { toast } = useToast()
+  return useMutation({
+    mutationFn: suscripcionesApi.reintentarPago,
+    onSuccess: (cobro) => {
+      queryClient.invalidateQueries({ queryKey: MI_SUSCRIPCION_KEY })
+      queryClient.invalidateQueries({ queryKey: ['pago-cobros'] })
+      if (cobro.estado === 'aprobado') toast({ title: 'Pago aprobado', description: 'Tu cuenta quedó al día.' })
+      else if (cobro.estado === 'pendiente') toast({ title: 'Pago en proceso', description: 'El banco aún no responde. Te avisamos aquí apenas se apruebe.' })
+      else toast({ title: 'El banco rechazó el pago', description: cobro.mensaje || 'Prueba con otra tarjeta.', variant: 'destructive' })
+    },
+    onError: (err) => toast({ title: 'No se pudo reintentar', description: errorDe(err), variant: 'destructive' }),
+  })
+}
+
+/** "Reintentar pago" + "Cambiar tarjeta", para la mora o la solo lectura por cobros rechazados. */
+function AccionesCobroPendiente({ claro }: { claro?: boolean }) {
+  const reintentar = useReintentarPago()
+  const base = 'inline-flex shrink-0 items-center rounded-md px-2.5 py-1 text-xs font-semibold'
+  return (
+    <div className="flex shrink-0 items-center gap-1.5">
+      <Link href={`${RUTA_PAGAR}?modo=tarjeta`} className={cn(base, claro ? 'text-amber-800 hover:bg-amber-500/10' : 'text-white hover:bg-white/15')}>
+        Cambiar tarjeta
+      </Link>
+      <button
+        type="button"
+        disabled={reintentar.isPending}
+        onClick={() => reintentar.mutate()}
+        className={cn(base, 'gap-1 disabled:opacity-70', claro ? 'bg-amber-600 text-white hover:bg-amber-700' : 'bg-white/90 text-gray-900 hover:bg-white')}
+      >
+        {reintentar.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RotateCw className="h-3.5 w-3.5" />}
+        Reintentar pago
+      </button>
+    </div>
   )
 }
 
 /** Aviso fijo bajo la cabecera según el estado de la cuenta. */
 export function SuscripcionBanner() {
   const { data } = useMiSuscripcion()
-  const puedeElegir = isAdminOrSuperAdmin(useAuthStore((s) => s.user))
+  const user = useAuthStore((s) => s.user)
+  const puedeElegir = isAdminOrSuperAdmin(user)
+  const [invitacionDescartada, descartarInvitacion] = useInvitacionDescartada(useClinicaDeLaSuscripcion())
   const s = conEstado(data)
   if (!s) return null
 
@@ -83,10 +210,16 @@ export function SuscripcionBanner() {
       : dias === 1 ? 'Tu período de prueba termina mañana.' : `Te quedan ${dias} días de prueba gratuita.`
   } else if (s.estado === 'en_gracia') {
     tono = 'urgente'
-    texto = `Hay un pago pendiente. Si no se resuelve, el ${fecha(s.solo_lectura_el)} tu cuenta quedará en solo lectura.`
+    texto = s.puede_reintentar_pago
+      ? `No se pudo cobrar la renovación${s.ultimo_rechazo ? ` (${s.ultimo_rechazo})` : ''}. Si no se resuelve, el ${fecha(s.solo_lectura_el)} tu cuenta quedará en solo lectura.`
+      : `Hay un pago pendiente. Si no se resuelve, el ${fecha(s.solo_lectura_el)} tu cuenta quedará en solo lectura.`
   } else if (s.estado === 'solo_lectura' || s.estado === 'cancelada') {
     tono = 'grave'
-    texto = `Tu cuenta está en solo lectura: puedes consultar tu información, pero no crear ni modificar nada. Se suspenderá el ${fecha(s.suspension_el)}.`
+    texto = s.puede_reintentar_pago
+      ? `Tu cuenta está en solo lectura porque no se pudo cobrar la renovación${s.ultimo_rechazo ? ` (${s.ultimo_rechazo})` : ''}. Se suspenderá el ${fecha(s.suspension_el)}.`
+      : `Tu cuenta está en solo lectura: puedes consultar tu información, pero no crear ni modificar nada. Se suspenderá el ${fecha(s.suspension_el)}.`
+  } else if (invitarATarjeta(s) && s.pago_en_linea && puedeElegir && !invitacionDescartada) {
+    return <InvitacionTarjeta onCerrar={descartarInvitacion} />
   } else {
     return null
   }
@@ -110,7 +243,9 @@ export function SuscripcionBanner() {
           </>
         )}
       </span>
-      {puedeElegir && <BotonElegirPlan s={s} className={tono === 'suave' ? 'bg-amber-600 text-white hover:bg-amber-700' : undefined} />}
+      {puedeElegir && (s.puede_reintentar_pago
+        ? <AccionesCobroPendiente />
+        : <BotonElegirPlan s={s} className={tono === 'suave' ? 'bg-amber-600 text-white hover:bg-amber-700' : undefined} />)}
     </div>
   )
 }
@@ -146,13 +281,17 @@ export function AvisoSoloLecturaDialog() {
           <DialogDescription className="leading-relaxed">{mensaje}</DialogDescription>
         </DialogHeader>
         <p className="rounded-lg bg-muted/60 px-3 py-2.5 text-[13px] leading-relaxed text-muted-foreground">
-          {puedeElegir
+          {puedeElegir && s?.puede_reintentar_pago
+            ? 'Tu información está a salvo. Al pagar la renovación con tu tarjeta (o con otra) vuelves a trabajar con normalidad, sin perder nada.'
+            : puedeElegir
             ? 'Tu información está a salvo. Al activar un plan vuelves a trabajar con normalidad, sin perder nada.'
             : 'Tu información está a salvo. Avísale a quien administra la clínica para que active un plan.'}
         </p>
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={() => setMensaje(null)}>Entendido</Button>
-          {puedeElegir && s && (s.pago_en_linea || s.contacto_ventas_url) && (
+          {puedeElegir && s?.puede_reintentar_pago ? (
+            <BotonReintentar onHecho={() => setMensaje(null)} />
+          ) : puedeElegir && s && (s.pago_en_linea || s.contacto_ventas_url) && (
             <Button asChild>
               <ElegirPlanLink s={s} onClick={() => setMensaje(null)}>Elegir plan</ElegirPlanLink>
             </Button>
@@ -268,11 +407,18 @@ export function CuentaSuspendida({ suscripcion }: { suscripcion: SuscripcionConC
         </div>
         <h1 className="mt-4 text-xl font-semibold">La cuenta de {suscripcion.clinica_nombre} está suspendida</h1>
         <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-          Tu información está a salvo: no se ha borrado nada. Elige un plan para reactivar la cuenta y volver a
-          trabajar con todo tal como lo dejaste.
+          {suscripcion.puede_reintentar_pago
+            ? `Tu información está a salvo: no se ha borrado nada. No se pudo cobrar la renovación${suscripcion.ultimo_rechazo ? ` (${suscripcion.ultimo_rechazo})` : ''}; al pagarla vuelves a trabajar con todo tal como lo dejaste.`
+            : 'Tu información está a salvo: no se ha borrado nada. Elige un plan para reactivar la cuenta y volver a trabajar con todo tal como lo dejaste.'}
         </p>
         <div className="mt-6 flex flex-col gap-2">
-          {(suscripcion.pago_en_linea || suscripcion.contacto_ventas_url) && (
+          {suscripcion.puede_reintentar_pago && (
+            <>
+              <BotonReintentar />
+              <Button asChild variant="outline"><Link href={`${RUTA_PAGAR}?modo=tarjeta`}>Pagar con otra tarjeta</Link></Button>
+            </>
+          )}
+          {!suscripcion.puede_reintentar_pago && (suscripcion.pago_en_linea || suscripcion.contacto_ventas_url) && (
             <Button asChild>
               <ElegirPlanLink s={suscripcion}>
                 <MessageCircle className="mr-2 h-4 w-4" />
@@ -294,6 +440,8 @@ export function CuentaSuspendida({ suscripcion }: { suscripcion: SuscripcionConC
 export function useCuentaSuspendida() {
   const { data } = useMiSuscripcion()
   const isImpersonating = useAuthStore((s) => s.isImpersonating)
+  // El superadmin entra igual (el backend no lo bloquea): ve la clínica, no la pantalla de suspendida.
+  const superadmin = isSuperAdmin(useAuthStore((s) => s.user))
   const s = conEstado(data)
-  return s && s.acceso === 'ninguno' && !isImpersonating ? s : null
+  return s && s.acceso === 'ninguno' && !isImpersonating && !superadmin ? s : null
 }

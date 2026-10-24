@@ -23,7 +23,7 @@ export const coreApi = {
       const res = await apiClient.get<ConfiguracionGlobal>('/core/configuracion-global/')
       return res.data
     },
-    update: async (data: Partial<Omit<ConfiguracionGlobal, 'updated_at'>>): Promise<ConfiguracionGlobal> => {
+    update: async (data: Partial<Omit<ConfiguracionGlobal, 'updated_at' | 'suscripciones_procesadas_el'>>): Promise<ConfiguracionGlobal> => {
       const res = await apiClient.patch<ConfiguracionGlobal>('/core/configuracion-global/', data)
       return res.data
     },
