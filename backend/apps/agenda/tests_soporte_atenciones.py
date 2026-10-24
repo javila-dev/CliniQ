@@ -221,6 +221,12 @@ class EliminarAtencionTests(AtencionDeTratamientoMixin, TestCase):
         self.assertTrue(datos["cobro"]["cuenta_para_el_plan"])
 
     def test_eliminar_borra_lo_clinico_devuelve_la_sesion_y_guarda_copia(self):
+        from apps.historia_clinica.models import ArchivoResultadoExamen
+
+        ArchivoResultadoExamen.objects.create(
+            resultado=ResultadoExamen.objects.get(nota=self.nota), archivo="examenes/2026/10/previo.pdf",
+            nombre="previo.pdf", subido_por=self.profesional,
+        )
         restantes = self.item_a.citas_restantes()
         r = self.client.post(self.URL, self._datos(
             estado_cita="cancelada", accion_cobro="anular", motivo="La paciente nunca llegó, se abrió por error",
@@ -243,6 +249,9 @@ class EliminarAtencionTests(AtencionDeTratamientoMixin, TestCase):
         correccion = CorreccionSoporte.objects.get(cita=self.cita, tipo=CorreccionSoporte.Tipo.ELIMINAR_ATENCION)
         self.assertEqual(correccion.resumen["copia"]["notas"][0]["motivo_consulta"], "Laser en mejillas")
         self.assertEqual(correccion.resumen["copia"]["ordenes"][0]["contenido"], "Hemograma")
+        examen = correccion.resumen["copia"]["examenes"][0]
+        self.assertEqual(examen["archivos"][0]["archivo"], "examenes/2026/10/previo.pdf")
+        self.assertEqual(examen["archivos"][0]["subido_por"], self.profesional.nombre_completo)
         self.assertTrue(LogAccion.objects.filter(accion="cita.eliminar_atencion", clinica=self.clinica).exists())
         self.assertEqual(
             self.client.get(f"{BASE}/atenciones/", {"clinica": str(self.clinica.id), "paciente": str(self.a.id)}).json(), [],

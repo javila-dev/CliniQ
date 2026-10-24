@@ -97,8 +97,25 @@ def _copia(cita, notas) -> dict:
             for f in FotoClinica.objects.filter(nota_id__in=nota_ids)
         ],
         "examenes": [
-            {"titulo": e.titulo, "fecha": str(e.fecha), "descripcion": e.descripcion, "archivo": _ruta(getattr(e, "archivo", None))}
+            {
+                "titulo": e.titulo,
+                "fecha": str(e.fecha),
+                "descripcion": e.descripcion,
+                "activo": e.activo,
+                "cargado_por": e.created_by.nombre_completo if e.created_by_id else None,
+                "archivos": [
+                    {
+                        "nombre": a.nombre,
+                        "archivo": _ruta(a.archivo),
+                        "subido_por": a.subido_por.nombre_completo if a.subido_por_id else None,
+                        "activo": a.activo,
+                    }
+                    for a in e.archivos.all()
+                ],
+            }
             for e in ResultadoExamen.objects.filter(nota_id__in=nota_ids)
+            .select_related("created_by")
+            .prefetch_related("archivos__subido_por")
         ],
         "ordenes": [
             {"titulo": o.titulo, "contenido": o.contenido, "creada": o.created_at.isoformat()}
