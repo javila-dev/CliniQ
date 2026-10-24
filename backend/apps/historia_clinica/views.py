@@ -5,7 +5,6 @@ import uuid
 import requests
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
-from django.core.files.storage import default_storage
 from django.db import transaction
 from django.db.models import Count, IntegerField, Value
 from django.db.models import Prefetch
@@ -22,6 +21,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet, ReadOnlyModelV
 from weasyprint import HTML
 
 from apps.historia_clinica.models import (
+    ArchivoResultadoExamen,
     AnotacionZona,
     ConsentimientoInformado,
     ConsumoInsumo,
@@ -33,6 +33,7 @@ from apps.historia_clinica.models import (
     ResultadoExamen,
 )
 from apps.historia_clinica.serializers import (
+    AgregarArchivosExamenSerializer,
     AnotacionZonaSerializer,
     ConsentimientoInformadoSerializer,
     ConsumoInsumoSerializer,
@@ -73,7 +74,12 @@ from apps.notificaciones.services import (
     resolver_ruta_whatsapp,
 )
 from apps.pacientes.serializers import enmascarar_cola
-from apps.historia_clinica.autoria import exigir_documentable, puede_documentar
+from apps.historia_clinica.autoria import (
+    PERM_CARGAR_EXAMENES,
+    exigir_documentable,
+    exigir_modificable_examen,
+    puede_documentar,
+)
 from apps.historia_clinica import zonas as zonas_nota
 from apps.users.authorization import atiende_solo_lo_propio, user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
@@ -266,7 +272,7 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
         notas = (
             historia.notas
             .select_related("firmada_por", "cita", "cita__profesional")
-            .prefetch_related("fotos", "examenes", "ordenes")
+            .prefetch_related("fotos", "examenes", "examenes__archivos", "ordenes")
             .all()
         )
         serializer = NotaClinicaSerializer(notas, many=True, context={"request": request})
@@ -480,7 +486,7 @@ class NotaClinicaViewSet(
         "firmada_por",
         "cita",
         "cita__profesional",
-    ).prefetch_related("fotos", "examenes", "ordenes").all()
+    ).prefetch_related("fotos", "examenes", "examenes__archivos", "ordenes").all()
     http_method_names = ["get", "post", "patch"]
 
     def get_permissions(self):
@@ -1013,13 +1019,24 @@ class ConsentimientoInformadoViewSet(
 
 
 class ResultadoExamenViewSet(ModelViewSet):
+    """Resultados de exámenes de una historia.
+
+    Se cargan en la atención (con `nota`) o después, desde la historia, cuando el
+    paciente los envía (sin `nota`). Eliminar solo los desactiva: el registro de
+    quién los cargó queda siempre, además del log de acciones.
+    """
+
     serializer_class = ResultadoExamenSerializer
-    queryset = ResultadoExamen.objects.select_related("historia", "historia__clinica", "created_by").distinct()
+    queryset = (
+        ResultadoExamen.objects.filter(activo=True)
+        .select_related("historia", "historia__clinica", "historia__paciente", "nota", "nota__cita", "created_by")
+        .prefetch_related("archivos", "archivos__subido_por")
+    )
     http_method_names = ["get", "post", "patch", "delete"]
 
     def get_permissions(self):
-        if self.action in {"create", "partial_update", "destroy"}:
-            return [RequirePermission("historia.notas.crear")()]
+        if self.action in {"create", "partial_update", "destroy", "archivos", "quitar_archivo"}:
+            return [RequirePermission(PERM_CARGAR_EXAMENES)()]
         return [RequirePermission("historia.ver")()]
 
     def get_queryset(self):
@@ -1036,39 +1053,88 @@ class ResultadoExamenViewSet(ModelViewSet):
             queryset = queryset.filter(historia_id=historia_id)
         return queryset
 
+    def _registrar(self, accion, resultado, detalle=None):
+        registrar_accion(
+            self.request,
+            accion,
+            resultado,
+            {
+                "paciente_nombre": resultado.historia.paciente.nombre_completo,
+                "historia_id": str(resultado.historia_id),
+                "titulo": resultado.titulo,
+                "cargado_por": resultado.created_by.nombre_completo if resultado.created_by_id else None,
+                **(detalle or {}),
+            },
+        )
+
+    def _guardar_archivos(self, resultado, archivos):
+        for archivo in archivos:
+            ArchivoResultadoExamen.objects.create(
+                resultado=resultado, archivo=archivo, nombre=archivo.name[:255], subido_por=self.request.user,
+            )
+
     def perform_create(self, serializer):
         nota = serializer.validated_data.get("nota")
         if nota is not None:
             if nota.historia_id != serializer.validated_data["historia"].id:
                 raise serializers.ValidationError({"nota": "La nota no es de esta historia."})
             exigir_documentable(self.request.user, nota)
-        serializer.save(created_by=self.request.user)
-
-    def _exigir_que_sea_suyo(self, instance):
-        """Editar o borrar un examen: el de una atención abierta propia, o uno que
-        cargó el mismo usuario; el admin, cualquiera. Antes cualquiera que atiende
-        borraba para siempre exámenes de otras visitas (AT-01)."""
-        user = self.request.user
-        if not atiende_solo_lo_propio(user):
-            return
-        if instance.nota_id:
-            exigir_documentable(user, instance.nota)
-        elif instance.created_by_id != user.id:
-            raise PermissionDenied("Solo puedes modificar los exámenes que cargaste tú.")
+        archivos = serializer.validated_data.pop("adjuntos", [])
+        with transaction.atomic():
+            resultado = serializer.save(created_by=self.request.user)
+            self._guardar_archivos(resultado, archivos)
+        self._registrar(
+            "historia.examen.cargar", resultado,
+            {"en_atencion": bool(resultado.nota_id), "archivos": [a.name for a in archivos]},
+        )
 
     def perform_update(self, serializer):
         instance = serializer.instance
-        self._exigir_que_sea_suyo(instance)
+        exigir_modificable_examen(self.request.user, instance)
         for campo in ("historia", "nota"):
             if campo in serializer.validated_data and serializer.validated_data[campo] != getattr(instance, campo):
                 raise serializers.ValidationError({campo: "No se puede mover un examen a otra historia o nota."})
-        serializer.save()
+        archivos = serializer.validated_data.pop("adjuntos", [])
+        with transaction.atomic():
+            resultado = serializer.save()
+            self._guardar_archivos(resultado, archivos)
+        self._registrar("historia.examen.editar", resultado, {"campos": sorted(serializer.validated_data)})
 
     def perform_destroy(self, instance):
-        self._exigir_que_sea_suyo(instance)
-        if instance.archivo:
-            default_storage.delete(instance.archivo.name)
-        instance.delete()
+        exigir_modificable_examen(self.request.user, instance)
+        instance.activo = False
+        instance.save(update_fields=["activo", "updated_at"])
+        self._registrar("historia.examen.eliminar", instance)
+
+    @action(detail=True, methods=["post"], url_path="archivos")
+    def archivos(self, request, pk=None):
+        """Agrega archivos a un resultado ya cargado (p. ej. una página que llegó después)."""
+        resultado = self.get_object()
+        if resultado.nota_id:
+            exigir_documentable(request.user, resultado.nota)
+        datos = AgregarArchivosExamenSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        archivos = datos.validated_data["adjuntos"]
+        with transaction.atomic():
+            self._guardar_archivos(resultado, archivos)
+        self._registrar("historia.examen.agregar_archivos", resultado, {"archivos": [a.name for a in archivos]})
+        resultado = self.get_queryset().get(pk=resultado.pk)
+        return Response(self.get_serializer(resultado).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["delete"], url_path=r"archivos/(?P<archivo_id>[^/.]+)")
+    def quitar_archivo(self, request, pk=None, archivo_id=None):
+        resultado = self.get_object()
+        archivo = next((a for a in resultado.archivos.all() if str(a.id) == archivo_id and a.activo), None)
+        if archivo is None:
+            return Response({"error": "El archivo no existe."}, status=status.HTTP_404_NOT_FOUND)
+        exigir_modificable_examen(request.user, resultado, autor_id=archivo.subido_por_id)
+        archivo.activo = False
+        archivo.save(update_fields=["activo", "updated_at"])
+        self._registrar(
+            "historia.examen.quitar_archivo", resultado,
+            {"archivo": archivo.nombre, "subido_por": archivo.subido_por.nombre_completo if archivo.subido_por_id else None},
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class PlantillaOrdenViewSet(ModelViewSet):

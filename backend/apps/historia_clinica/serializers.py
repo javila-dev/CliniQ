@@ -8,8 +8,10 @@ from apps.core.storage import get_signed_url
 from apps.inventario.models import Insumo
 from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import get_clinica_activa
+from apps.historia_clinica.autoria import puede_modificar_examen
 from apps.historia_clinica.models import (
     AnotacionZona,
+    ArchivoResultadoExamen,
     ConsentimientoInformado,
     ConsumoInsumo,
     FotoClinica,
@@ -94,16 +96,65 @@ class NotaClinicaResumenSerializer(serializers.ModelSerializer):
         return obj.cita.servicio_nombre if obj.cita_id else ""
 
 
+MAX_ARCHIVO_EXAMEN = MAX_FOTO_CLINICA
+MAX_ARCHIVOS_POR_ENVIO = 10
+TIPOS_ARCHIVO_EXAMEN = TIPOS_FOTO_CLINICA | {"application/pdf"}
+
+
+def validar_archivo_examen(archivo):
+    # Antes se aceptaba cualquier archivo de cualquier tamaño.
+    if archivo.size > MAX_ARCHIVO_EXAMEN:
+        raise serializers.ValidationError(f"{archivo.name}: no puede superar 15 MB.")
+    if (getattr(archivo, "content_type", "") or "").lower() not in TIPOS_ARCHIVO_EXAMEN:
+        raise serializers.ValidationError(f"{archivo.name}: solo se permiten PDF o imágenes JPG, PNG, WebP o HEIC.")
+    return archivo
+
+
+class ArchivosExamenField(serializers.ListField):
+    """Archivos nuevos de un resultado (multipart, el campo repetido)."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("child", serializers.FileField(validators=[validar_archivo_examen]))
+        kwargs.setdefault("max_length", MAX_ARCHIVOS_POR_ENVIO)
+        kwargs.setdefault("error_messages", {"max_length": f"Máximo {MAX_ARCHIVOS_POR_ENVIO} archivos por envío."})
+        super().__init__(**kwargs)
+
+
+class ArchivoResultadoExamenSerializer(serializers.ModelSerializer):
+    url = serializers.SerializerMethodField()
+    subido_por_nombre = serializers.CharField(source="subido_por.nombre_completo", read_only=True, default=None)
+    puede_quitar = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ArchivoResultadoExamen
+        fields = ("id", "nombre", "url", "subido_por", "subido_por_nombre", "puede_quitar", "created_at")
+        read_only_fields = fields
+
+    def get_url(self, obj):
+        return generar_url_firmada_storage(obj.archivo)
+
+    def get_puede_quitar(self, obj) -> bool:
+        request = self.context.get("request")
+        return bool(request and puede_modificar_examen(
+            request.user, obj.resultado, request=request, autor_id=obj.subido_por_id,
+        ))
+
+
+def _archivos_activos(resultado):
+    # Sobre el prefetch: filtrar en la consulta haría una por resultado.
+    return [a for a in resultado.archivos.all() if a.activo]
+
+
 class ResultadoExamenEmbedSerializer(serializers.ModelSerializer):
-    archivo_url = serializers.SerializerMethodField()
+    archivos = serializers.SerializerMethodField()
 
     class Meta:
         model = ResultadoExamen
-        fields = ("id", "titulo", "fecha", "descripcion", "archivo_url")
+        fields = ("id", "titulo", "fecha", "descripcion", "archivos")
         read_only_fields = fields
 
-    def get_archivo_url(self, obj):
-        return generar_url_firmada_storage(obj.archivo)
+    def get_archivos(self, obj):
+        return ArchivoResultadoExamenSerializer(_archivos_activos(obj), many=True).data
 
 
 class OrdenMedicaEmbedSerializer(serializers.ModelSerializer):
@@ -119,7 +170,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
     # La tarjeta de la nota muestra el procedimiento de la cita (M4-27).
     servicio_nombre = serializers.SerializerMethodField()
     fotos = FotoClinicaSerializer(many=True, read_only=True)
-    examenes = ResultadoExamenEmbedSerializer(many=True, read_only=True)
+    examenes = serializers.SerializerMethodField()
     ordenes = OrdenMedicaEmbedSerializer(many=True, read_only=True)
     # Zonas, insumos y mediciones de la nota: también cuentan como contenido al
     # completar la atención (AT-15). Solo en el detalle, para no sumar consultas
@@ -156,6 +207,11 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def get_examenes(self, obj):
+        # Los eliminados quedan en la base (activo=False) pero no se muestran.
+        examenes = [e for e in obj.examenes.all() if e.activo]
+        return ResultadoExamenEmbedSerializer(examenes, many=True).data
 
     def get_otros_registros(self, obj):
         vista = self.context.get("view")
@@ -433,8 +489,12 @@ class ConsentimientoInformadoSerializer(serializers.ModelSerializer):
 
 
 class ResultadoExamenSerializer(serializers.ModelSerializer):
-    archivo_url = serializers.SerializerMethodField()
-    created_by_nombre = serializers.CharField(source="created_by.nombre_completo", read_only=True)
+    archivos = serializers.SerializerMethodField()
+    adjuntos = ArchivosExamenField(write_only=True, required=False)
+    created_by_nombre = serializers.CharField(source="created_by.nombre_completo", read_only=True, default=None)
+    # Fecha de la atención en la que se cargó; null = cargado desde la historia.
+    nota_fecha = serializers.DateTimeField(source="nota.created_at", read_only=True, default=None)
+    puede_modificar = serializers.SerializerMethodField()
 
     class Meta:
         model = ResultadoExamen
@@ -442,20 +502,29 @@ class ResultadoExamenSerializer(serializers.ModelSerializer):
             "id",
             "historia",
             "nota",
+            "nota_fecha",
             "titulo",
             "descripcion",
-            "archivo",
-            "archivo_url",
+            "archivos",
+            "adjuntos",
             "fecha",
             "created_by",
             "created_by_nombre",
+            "puede_modificar",
             "created_at",
             "updated_at",
         )
-        read_only_fields = ("id", "archivo_url", "created_by", "created_by_nombre", "created_at", "updated_at")
+        read_only_fields = (
+            "id", "archivos", "nota_fecha", "created_by", "created_by_nombre", "puede_modificar",
+            "created_at", "updated_at",
+        )
 
-    def get_archivo_url(self, obj):
-        return generar_url_firmada_storage(obj.archivo)
+    def get_archivos(self, obj):
+        return ArchivoResultadoExamenSerializer(_archivos_activos(obj), many=True, context=self.context).data
+
+    def get_puede_modificar(self, obj) -> bool:
+        request = self.context.get("request")
+        return bool(request and puede_modificar_examen(request.user, obj, request=request))
 
     def validate_historia(self, value):
         request = self.context["request"]
@@ -469,6 +538,10 @@ class ResultadoExamenSerializer(serializers.ModelSerializer):
         if nota and historia and nota.historia_id != historia.id:
             raise serializers.ValidationError({"nota": "La nota no pertenece a esta historia."})
         return attrs
+
+
+class AgregarArchivosExamenSerializer(serializers.Serializer):
+    adjuntos = ArchivosExamenField(allow_empty=False)
 
 
 class PlantillaOrdenSerializer(serializers.ModelSerializer):

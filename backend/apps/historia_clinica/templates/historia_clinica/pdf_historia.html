@@ -725,10 +725,7 @@
       {% if nota.examenes %}
       <div class="atencion-section-title">Resultados de exámenes</div>
       {% for ex in nota.examenes %}
-      <div class="ant-block">
-        <div class="ant-label">{{ ex.titulo }} · {{ ex.fecha }}</div>
-        {% if ex.descripcion %}<div class="ant-value">{{ ex.descripcion }}</div>{% endif %}
-      </div>
+      {% include "historia_clinica/_pdf_examen.html" %}
       {% endfor %}
       {% endif %}
 
@@ -774,6 +771,16 @@
   <div class="section">
     <div class="section-heading">Atenciones clínicas</div>
     <p class="muted small">No hay atenciones registradas en esta historia clínica.</p>
+  </div>
+  {% endif %}
+
+  <!-- ══ EXÁMENES CARGADOS FUERA DE UNA ATENCIÓN ═════════════════════════ -->
+  {% if examenes_sin_atencion %}
+  <div class="section">
+    <div class="section-heading">Resultados de exámenes cargados fuera de una atención ({{ examenes_sin_atencion|length }})</div>
+    {% for ex in examenes_sin_atencion %}
+    {% include "historia_clinica/_pdf_examen.html" %}
+    {% endfor %}
   </div>
   {% endif %}
 
