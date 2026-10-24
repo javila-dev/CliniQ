@@ -48,9 +48,11 @@ def build_auth_email_html(
     intro: str,
     button_label: str,
     url: str,
-    expiration_hours: int,
+    expiration_hours: int | None,
     footer_note: str,
 ) -> str:
+    """Correo de la marca con un botón. Sin `expiration_hours` (avisos que no
+    son enlaces de un solo uso) se omite la línea de vencimiento."""
     safe_badge = escape(badge)
     safe_title = escape(title)
     safe_preview = escape(preview)
@@ -59,6 +61,14 @@ def build_auth_email_html(
     safe_button = escape(button_label)
     safe_footer = escape(footer_note)
     safe_url = escape(url, quote=True)
+    vencimiento = (
+        f"""                <p style="margin:0 0 24px; padding-left:14px; border-left:2px solid #e4e4e7; font-size:13px; line-height:1.6; color:#71717a;">
+                  Este enlace vence en {expiration_hours} horas y solo puede usarse una vez.
+                </p>
+"""
+        if expiration_hours is not None
+        else ""
+    )
     return f"""
 <!DOCTYPE html>
 <html lang="es">
@@ -103,11 +113,8 @@ def build_auth_email_html(
                     </td>
                   </tr>
                 </table>
-                <p style="margin:0 0 24px; padding-left:14px; border-left:2px solid #e4e4e7; font-size:13px; line-height:1.6; color:#71717a;">
-                  Este enlace vence en {expiration_hours} horas y solo puede usarse una vez.
-                </p>
-                <p style="margin:0 0 6px; font-size:13px; line-height:1.6; color:#71717a;">
-                  Si el boton no funciona, copia y pega esta URL en tu navegador:
+{vencimiento}                <p style="margin:0 0 6px; font-size:13px; line-height:1.6; color:#71717a;">
+                  Si el botón no funciona, copia y pega esta URL en tu navegador:
                 </p>
                 <p style="margin:0 0 24px; font-size:13px; line-height:1.7; word-break:break-all;">
                   <a href="{safe_url}" style="color:#c7358b; text-decoration:none;">{safe_url}</a>
@@ -120,7 +127,7 @@ def build_auth_email_html(
             <tr>
               <td style="padding:20px 4px 0;">
                 <p style="margin:0; font-size:12px; line-height:1.6; color:#a1a1aa;">
-                  CliniQ &mdash; Plataforma de gestion clinica.
+                  CliniQ &mdash; Plataforma de gestión clínica.
                 </p>
               </td>
             </tr>

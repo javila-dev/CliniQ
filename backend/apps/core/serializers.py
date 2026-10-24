@@ -6,7 +6,10 @@ from apps.core.models import ConfiguracionGlobal, LogAccion
 class ConfiguracionGlobalSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConfiguracionGlobal
-        fields = ["centro_ayuda_habilitado", "updated_at"]
+        fields = [
+            "centro_ayuda_habilitado", "correos_ciclo_vida_habilitados",
+            "dias_prueba", "plan_prueba", "whatsapp_envios_prueba", "updated_at",
+        ]
         read_only_fields = ["updated_at"]
 
 

@@ -67,6 +67,7 @@ LOCAL_APPS = [
     "apps.ayuda",
     "apps.migracion",
     "apps.seguimiento",
+    "apps.suscripciones",
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -128,7 +129,6 @@ REST_FRAMEWORK = {
     ),
     "DEFAULT_PERMISSION_CLASSES": (
         "rest_framework.permissions.IsAuthenticated",
-        "apps.users.permissions.TrialNotExpired",
     ),
     "DEFAULT_FILTER_BACKENDS": (
         "django_filters.rest_framework.DjangoFilterBackend",
@@ -251,6 +251,27 @@ LYVIO_PLANTILLA_PDF_EJEMPLO_URL = config("LYVIO_PLANTILLA_PDF_EJEMPLO_URL", defa
 # propio. Ambos opcionales: vacios, la UI usa textos genericos.
 WHATSAPP_NUMERO_CLINIQ = config("WHATSAPP_NUMERO_CLINIQ", default="")
 CLINIQ_VENTAS_WHATSAPP = config("CLINIQ_VENTAS_WHATSAPP", default="")
+
+# Wompi: cobro recurrente de la suscripción a CliniQ (apps.suscripciones.wompi).
+# Sin llave privada no hay pago en línea y "Elegir plan" sigue yendo a ventas.
+WOMPI_ENV = config("WOMPI_ENV", default="sandbox")  # sandbox | production
+WOMPI_PUBLIC_KEY = config("WOMPI_PUBLIC_KEY", default="")
+WOMPI_PRIVATE_KEY = config("WOMPI_PRIVATE_KEY", default="")
+WOMPI_EVENTS_SECRET = config("WOMPI_EVENTS_SECRET", default="")
+WOMPI_INTEGRITY_SECRET = config("WOMPI_INTEGRITY_SECRET", default="")
+
+# Alegra: factura electrónica de cada pago de la suscripción (apps.suscripciones.facturacion).
+# Los ids se consultan con `python manage.py alegra_configuracion`.
+ALEGRA_EMAIL = config("ALEGRA_EMAIL", default="")
+ALEGRA_TOKEN = config("ALEGRA_TOKEN", default="")
+ALEGRA_NUMBER_TEMPLATE_ID = config("ALEGRA_NUMBER_TEMPLATE_ID", default="")  # numeración DIAN
+ALEGRA_ITEM_ID = config("ALEGRA_ITEM_ID", default="")  # ítem "Suscripción CliniQ"
+ALEGRA_TAX_ID = config("ALEGRA_TAX_ID", default="")  # vacío = sin IVA (pendiente del contador)
+ALEGRA_IVA_PCT = config("ALEGRA_IVA_PCT", default=19, cast=int)  # solo si hay ALEGRA_TAX_ID
+ALEGRA_BANK_ACCOUNT_ID = config("ALEGRA_BANK_ACCOUNT_ID", default="")  # cuenta donde entra el dinero de Wompi
+ALEGRA_MEDIO_PAGO = config("ALEGRA_MEDIO_PAGO", default="CREDIT_CARD")  # medio de pago DIAN de la factura
+# False = la factura se crea sin enviarla a la DIAN (pruebas). En producción, True.
+ALEGRA_EMITIR_DIAN = config("ALEGRA_EMITIR_DIAN", default=False, cast=bool)
 
 EMAIL_BACKEND = config(
     "EMAIL_BACKEND",

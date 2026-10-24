@@ -22,6 +22,7 @@ from django.db.models.deletion import ProtectedError
 
 from apps.clinicas.models import Clinica
 from apps.core.logging import registrar_accion
+from apps.suscripciones.acceso import permitido_en_solo_lectura
 from apps.users import services
 from apps.users.cookie_sesion import borrar_cookie, refresh_de_la_peticion, respuesta_con_sesion
 from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
@@ -59,7 +60,7 @@ logger = logging.getLogger(__name__)
 
 def _check_clinica_user_limit(clinica):
     """Returns (error_message, error_code) si se alcanzó el límite, o None si puede agregar."""
-    plan = getattr(clinica, "plan", None)
+    plan = getattr(clinica, "plan_vigente", None)
     if plan is None or plan.max_usuarios == 0:
         return None
     activos = services.contar_usuarios_que_ocupan_cupo(clinica)
@@ -152,13 +153,29 @@ def _protected_relations_message(exc: ProtectedError) -> str:
 
 
 def _clinica_inactiva_response(user):
-    """Devuelve un error_response si la clinica del usuario esta desactivada, o None."""
+    """Devuelve un error_response si la clinica del usuario esta desactivada
+    (o suspendida, para quien no la administra), o None."""
     if getattr(user, "clinica_id", None):
         clinica = Clinica.objects.filter(id=user.clinica_id).values("activo").first()
         if clinica and not clinica["activo"]:
             return error_response(
                 "La clinica no esta activa. Contacta al administrador.",
                 "CLINICA_INACTIVA",
+                status.HTTP_403_FORBIDDEN,
+            )
+        # Suspendida por falta de pago: solo entra quien puede reactivarla.
+        from apps.suscripciones.models import Suscripcion
+        from apps.suscripciones.services import suscripcion_vigente
+
+        suscripcion = suscripcion_vigente(user.clinica_id)
+        if (
+            suscripcion is not None
+            and suscripcion.estado == Suscripcion.Estado.SUSPENDIDA
+            and not user_is_tenant_admin(user)
+        ):
+            return error_response(
+                "La cuenta de tu clínica está suspendida. Pide a quien la administra que elija un plan para reactivarla.",
+                "SUSCRIPCION_SUSPENDIDA",
                 status.HTTP_403_FORBIDDEN,
             )
     return None
@@ -437,6 +454,10 @@ class PasswordResetValidateView(APIView):
                 "ok": True,
                 "email": reset_token.user.email,
                 "expires_at": reset_token.expires_at,
+                # "invite" = cuenta nueva (registro o invitación): la pantalla dice
+                # "Crea tu contraseña" en vez de "Nueva contraseña".
+                "proposito": reset_token.purpose,
+                "nombre": reset_token.user.first_name,
             },
             status=status.HTTP_200_OK,
         )
@@ -517,6 +538,9 @@ class LogoutView(APIView):
 
 class MeView(APIView):
     permission_classes = (IsAuthenticated,)
+    # El perfil y la sesión responden aunque la cuenta esté suspendida: con eso
+    # el frontend sabe quién es y muestra la pantalla de reactivar.
+    suscripcion_libre = True
 
     def get(self, request, *args, **kwargs):
         serializer = UserSerializer(request.user, context={"request": request})
@@ -593,6 +617,7 @@ class TerminarSuplantacionView(APIView):
     """Cierra la suplantación en curso: su token deja de valer de inmediato."""
 
     permission_classes = (IsAuthenticated,)
+    suscripcion_libre = True
 
     def post(self, request, *args, **kwargs):
         from django.utils import timezone
@@ -1069,6 +1094,7 @@ class UserViewSet(GenericViewSet):
         })
 
     @action(detail=True, methods=["post"], url_path="cambiar_password")
+    @permitido_en_solo_lectura
     def cambiar_password(self, request, pk=None):
         user = self.get_object()
         propia = request.user == user

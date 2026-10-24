@@ -54,6 +54,19 @@ class ConfiguracionGlobal(models.Model):
 
     id = models.PositiveSmallIntegerField(primary_key=True, default=1, editable=False)
     centro_ayuda_habilitado = models.BooleanField(default=False)
+    # Días de prueba gratis al registrarse (ver apps.suscripciones).
+    dias_prueba = models.PositiveSmallIntegerField(default=14)
+    # Correos automáticos de la prueba (bienvenida, "tu prueba vence"...). Nacen
+    # apagados: se encienden cuando se revisen los textos.
+    correos_ciclo_vida_habilitados = models.BooleanField(default=False)
+    # Lo que tiene una clínica mientras está en prueba (límites y add-ons): la
+    # prueba muestra todo y al pagar queda lo del plan elegido. Vacío = sin plan.
+    plan_prueba = models.ForeignKey(
+        "clinicas.Plan", null=True, blank=True, on_delete=models.SET_NULL, related_name="+",
+    )
+    # Envíos por el número compartido de CliniQ durante toda la prueba (0 = sin límite):
+    # sin tope, una prueba que abuse baja la calidad del número de todas las clínicas.
+    whatsapp_envios_prueba = models.PositiveIntegerField(default=100)
     actualizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True, blank=True,

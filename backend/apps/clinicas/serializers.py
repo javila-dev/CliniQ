@@ -41,7 +41,7 @@ class PlanSerializer(serializers.ModelSerializer):
             "modulo_obesidad_habilitado",
             "whatsapp_habilitado", "whatsapp_envios_incluidos",
             "whatsapp_numero_propio_habilitado", "whatsapp_numeros_incluidos", "precio_por_numero_whatsapp",
-            "mostrar_publico",
+            "mostrar_publico", "descuento_anual_pct",
             "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
@@ -84,6 +84,7 @@ class PlanPublicoSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada", "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
             "whatsapp_habilitado", "whatsapp_envios_incluidos",
+            "descuento_anual_pct",
         )
 
 
@@ -95,26 +96,9 @@ class PlanUsageSerializer(serializers.Serializer):
     sin_limite = serializers.BooleanField()
 
 
-def dias_de_prueba_restantes(clinica):
-    """Días que le quedan a la prueba (None si la clínica ya tiene plan).
-
-    Se redondea hacia arriba: con 10 horas por delante todavía queda 1 día, y
-    0 significa que la prueba ya venció.
-    """
-    if clinica.plan_id is not None or not clinica.trial_expires_at:
-        return None
-    import math
-
-    from django.utils import timezone
-
-    segundos = (clinica.trial_expires_at - timezone.now()).total_seconds()
-    return max(0, math.ceil(segundos / 86400))
-
-
 class ClinicaSerializer(serializers.ModelSerializer):
     logo_url = serializers.SerializerMethodField()
     plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
-    trial_days_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = Clinica
@@ -131,8 +115,6 @@ class ClinicaSerializer(serializers.ModelSerializer):
             "bloquear_agenda_por_deuda",
             "dias_gracia_deuda",
             "filtrar_profesionales_por_procedimiento",
-            "trial_expires_at",
-            "trial_days_remaining",
             "onboarding_completado",
             "activo",
             "created_at",
@@ -140,17 +122,16 @@ class ClinicaSerializer(serializers.ModelSerializer):
         )
         read_only_fields = (
             "id", "logo", "logo_url", "plan_nombre",
-            "trial_expires_at", "trial_days_remaining",
             "created_at", "updated_at",
         )
-
-    def get_trial_days_remaining(self, obj):
-        return dias_de_prueba_restantes(obj)
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
 
     def validate_nit(self, value):
+        value = (value or "").strip() or None  # sin NIT: varias clínicas pueden no tenerlo
+        if value is None:
+            return None
         queryset = Clinica.objects.filter(nit=value)
         if self.instance is not None:
             queryset = queryset.exclude(pk=self.instance.pk)
@@ -204,10 +185,8 @@ class MiClinicaSerializer(serializers.ModelSerializer):
     registro_publico = serializers.SerializerMethodField()
     registro_publico_token = serializers.CharField(source="token_registro_publico", read_only=True)
     whatsapp_uso = serializers.SerializerMethodField()
-    # El aviso de prueba (TrialBanner y Configuración → Plan) lee estos campos
-    # de /mi-clinica/; sin ellos la clínica nunca veía "quedan X días".
+    # El estado de la prueba y los días que quedan salen de /suscripcion/.
     plan_nombre = serializers.CharField(source="plan.nombre", read_only=True, allow_null=True)
-    trial_days_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = Clinica
@@ -215,8 +194,6 @@ class MiClinicaSerializer(serializers.ModelSerializer):
             "id",
             "nombre",
             "plan_nombre",
-            "trial_expires_at",
-            "trial_days_remaining",
             "nit",
             "telefono",
             "ciudad",
@@ -238,9 +215,6 @@ class MiClinicaSerializer(serializers.ModelSerializer):
 
     def get_logo_url(self, obj):
         return get_public_url(obj.logo.name if obj.logo else "")
-
-    def get_trial_days_remaining(self, obj):
-        return dias_de_prueba_restantes(obj)
 
     def _get_sede_principal(self, obj):
         return obj.sedes.filter(activo=True).order_by("created_at").first()
@@ -1033,10 +1007,22 @@ class AdminTenantSerializer(serializers.ModelSerializer):
     admin_usuario_pendiente = serializers.SerializerMethodField()
     sin_admin = serializers.SerializerMethodField()
     whatsapp_uso = serializers.SerializerMethodField()
+    suscripcion = serializers.SerializerMethodField()
 
     def get_whatsapp_uso(self, obj):
         from apps.notificaciones.services import uso_whatsapp_mes_actual
         return uso_whatsapp_mes_actual(obj)
+
+    def get_suscripcion(self, obj):
+        from apps.suscripciones.models import Suscripcion
+        from apps.suscripciones.serializers import SuscripcionAdminSerializer
+        from apps.suscripciones.services import actualizar_estado
+
+        try:
+            suscripcion = obj.suscripcion
+        except Suscripcion.DoesNotExist:
+            return None
+        return SuscripcionAdminSerializer(actualizar_estado(suscripcion)).data
 
     def get_sin_admin(self, obj):
         # Tenant huerfano: ningun usuario con rol admin. Requiere annotate
@@ -1092,6 +1078,7 @@ class AdminTenantSerializer(serializers.ModelSerializer):
             "total_sedes",
             "admin_usuario_pendiente",
             "sin_admin",
+            "suscripcion",
             "created_at",
             "updated_at",
         )
@@ -1107,10 +1094,15 @@ class AdminTenantCreateSerializer(serializers.ModelSerializer):
     # Un tenant SIEMPRE se crea con su admin: es obligatorio y se valida antes de
     # persistir nada (ver AdminTenantViewSet.create).
     admin_email = serializers.EmailField(write_only=True, required=True, allow_blank=False)
+    # Cómo arranca la cuenta: en prueba (vence) o activa con cobro manual
+    # (antes una clínica creada aquí nunca vencía).
+    inicio = serializers.ChoiceField(choices=(("prueba", "Prueba"), ("manual", "Cobro manual")), default="prueba", write_only=True)
+    dias_prueba = serializers.IntegerField(min_value=1, max_value=90, required=False, write_only=True)
+    pagado_hasta = serializers.DateField(required=False, allow_null=True, write_only=True)
 
     class Meta:
         model = Clinica
-        fields = ("nombre", "nit", "email", "telefono", "plan", "admin_email")
+        fields = ("nombre", "nit", "email", "telefono", "plan", "admin_email", "inicio", "dias_prueba", "pagado_hasta")
         extra_kwargs = {"telefono": {"required": False}, "email": {"required": False}}
 
     def validate_nit(self, value):
@@ -1126,8 +1118,18 @@ class AdminTenantCreateSerializer(serializers.ModelSerializer):
         return value
 
     def create(self, validated_data):
+        from apps.suscripciones.services import crear_manual, crear_prueba
+
         validated_data.pop("admin_email", None)
-        return Clinica.objects.create(**validated_data)
+        inicio = validated_data.pop("inicio", "prueba")
+        dias = validated_data.pop("dias_prueba", None)
+        pagado_hasta = validated_data.pop("pagado_hasta", None)
+        clinica = Clinica.objects.create(**validated_data)
+        if inicio == "manual":
+            crear_manual(clinica, pagado_hasta=pagado_hasta)
+        else:
+            crear_prueba(clinica, dias)
+        return clinica
 
 
 class AdminTenantUpdateSerializer(serializers.ModelSerializer):
@@ -1159,6 +1161,9 @@ class AdminTenantUpdateSerializer(serializers.ModelSerializer):
         }
 
     def validate_nit(self, value):
+        value = (value or "").strip() or None
+        if value is None:
+            return None
         queryset = Clinica.objects.filter(nit=value)
         if self.instance:
             queryset = queryset.exclude(pk=self.instance.pk)
@@ -1341,18 +1346,29 @@ class PlantillaAsistenciaSerializer(serializers.ModelSerializer):
 
 
 
+# Rol de quien registra la clínica (pregunta del registro de la prueba).
+CARGOS_REGISTRO = (
+    ("duenio", "Dueño(a) o socio(a)"),
+    ("director_medico", "Director(a) médico(a)"),
+    ("administrador", "Administrador(a) o gerente"),
+    ("profesional", "Profesional que atiende"),
+    ("recepcion", "Recepción o asistente"),
+    ("otro", "Otro"),
+)
+
+
 class RegistroClinicaSerializer(serializers.Serializer):
+    # Sin NIT: el registro de la prueba pide lo mínimo; el NIT llega con los
+    # datos de facturación al pagar.
     nombre_clinica = serializers.CharField(max_length=255)
-    nit = serializers.CharField(max_length=50)
     nombre_admin = serializers.CharField(max_length=150)
     apellido_admin = serializers.CharField(max_length=150)
     email = serializers.EmailField()
     telefono = serializers.CharField(max_length=30)
-
-    def validate_nit(self, value):
-        if Clinica.objects.filter(nit=value).exists():
-            raise serializers.ValidationError("Ya existe una clínica con este NIT.")
-        return value
+    acepta_whatsapp = serializers.BooleanField(default=False)
+    cargo = serializers.ChoiceField(
+        choices=CARGOS_REGISTRO, error_messages={"invalid_choice": "Elige tu rol en la clínica.", "required": "Elige tu rol en la clínica."},
+    )
 
     def validate_email(self, value):
         from apps.users.models import User

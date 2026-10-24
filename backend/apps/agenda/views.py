@@ -1032,9 +1032,15 @@ class CitaViewSet(ModelViewSet):
         )
 
         # Unir y deduplicar por ID (una cita puede estar en ambos si coincide el intervalo y tiene flag manual)
+        # Cuentas en solo lectura o suspendidas: no salen recordatorios.
+        from apps.suscripciones.services import clinicas_con_envios_detenidos
+
+        detenidas = clinicas_con_envios_detenidos()
         seen = set()
         citas: list[Cita] = []
         for cita in list(citas_manuales) + list(citas_auto):
+            if cita.sede.clinica_id in detenidas:
+                continue
             if cita.id not in seen:
                 seen.add(cita.id)
                 citas.append(cita)
