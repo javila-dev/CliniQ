@@ -13,6 +13,7 @@ import { Label } from '@/components/ui/label'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { cn } from '@/lib/utils'
 import { registroPublicoApi } from '@/lib/api/clinicas'
+import { urlApp } from '@/lib/dominios'
 
 const schema = z.object({
   nombre_clinica: z.string().min(2, 'Mínimo 2 caracteres'),
@@ -283,7 +284,7 @@ export default function RegistroClinicaPage() {
                   Al registrarte aceptas los <span className="text-rose-500">términos de servicio</span> de CliniQ.
                   <br />
                   ¿Ya tienes cuenta?{' '}
-                  <Link href="/login" className="font-medium text-foreground underline-offset-2 hover:underline">Inicia sesión</Link>
+                  <Link href={urlApp('/login')} className="font-medium text-foreground underline-offset-2 hover:underline">Inicia sesión</Link>
                 </p>
               </form>
             </>

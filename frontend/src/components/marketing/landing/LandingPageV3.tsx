@@ -6,6 +6,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { ChevronRight } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
+import { DOMINIOS_SEPARADOS, INICIO_SITIO, urlApp } from '@/lib/dominios'
 import { display, sans, mono } from './fonts'
 import { CtaPrimary } from './shared'
 import { ProductTheater } from './ProductTheater'
@@ -45,8 +46,10 @@ export function LandingPageV3() {
   const { hasCheckedAuth, isAuthenticated, loadUser } = useAuthStore()
   const [scrolled, setScrolled] = useState(false)
 
-  useEffect(() => { if (!hasCheckedAuth) loadUser() }, [hasCheckedAuth, loadUser])
-  useEffect(() => { if (hasCheckedAuth && isAuthenticated) router.replace('/dashboard') }, [hasCheckedAuth, isAuthenticated, router])
+  // Con dominios separados el sitio público no ve la sesión (la cookie es del
+  // dominio de la app): "Iniciar sesión" lleva a la app y el login redirige solo.
+  useEffect(() => { if (!DOMINIOS_SEPARADOS && !hasCheckedAuth) loadUser() }, [hasCheckedAuth, loadUser])
+  useEffect(() => { if (!DOMINIOS_SEPARADOS && hasCheckedAuth && isAuthenticated) router.replace('/dashboard') }, [hasCheckedAuth, isAuthenticated, router])
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 8)
@@ -75,7 +78,7 @@ export function LandingPageV3() {
         }`}
       >
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-6">
-          <Link href="/landing" aria-label="Ir al inicio de CliniQ">
+          <Link href={INICIO_SITIO} aria-label="Ir al inicio de CliniQ">
             <Image src="/brand/cliniq-logo-on-dark.svg" alt="CliniQ" width={116} height={36} priority className="h-auto w-[92px] sm:w-[104px]" />
           </Link>
           <nav className="hidden items-center gap-6 text-sm text-[var(--lv3-muted)] min-[900px]:flex lg:gap-8" aria-label="Navegación principal">
@@ -85,7 +88,7 @@ export function LandingPageV3() {
             <a href="#precios" className={linkNav}>Planes</a>
           </nav>
           <div className="flex items-center gap-3 sm:gap-4">
-            <Link href="/login" className={`hidden text-sm font-medium text-[var(--lv3-muted)] min-[420px]:inline-flex ${linkNav}`}>Iniciar sesión</Link>
+            <Link href={urlApp('/login')} className={`hidden text-sm font-medium text-[var(--lv3-muted)] min-[420px]:inline-flex ${linkNav}`}>Iniciar sesión</Link>
             <CtaPrimary href="/registro-clinica" compact>Probar 14 días</CtaPrimary>
           </div>
         </div>
@@ -212,7 +215,7 @@ export function LandingPageV3() {
               <a href="#recorrido" className={linkNav}>Cómo funciona</a>
               <a href="#capacidades" className={linkNav}>Funciones</a>
               <a href="#precios" className={linkNav}>Planes</a>
-              <Link href="/login" className={linkNav}>Iniciar sesión</Link>
+              <Link href={urlApp('/login')} className={linkNav}>Iniciar sesión</Link>
             </div>
             <p className="text-xs">© {new Date().getFullYear()} CliniQ. Todos los derechos reservados.</p>
           </div>
