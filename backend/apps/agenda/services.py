@@ -427,8 +427,10 @@ def pasos_recepcion_pendientes(cita) -> list[str]:
     # deja un registro omitido.
     if config.paso_verificacion_facial and clinica.facial_verificacion_habilitada and not cita.checkins.exists():
         pendientes.append("Verificación de identidad")
-    # Una cita de una cotización la cobra la cartera, no recepción.
-    if config.paso_pago and cita.item_cotizacion_id is None and not Cobro.objects.filter(
+    # Una cita de un tratamiento (cotización o sesión vinculada) la cobra la
+    # cartera del tratamiento, no recepción al iniciar la atención.
+    de_tratamiento = cita.item_cotizacion_id is not None or cita.sesiones_protocolo.exists()
+    if config.paso_pago and not de_tratamiento and not Cobro.objects.filter(
         cita=cita, estado__in=[Cobro.Estado.PAGADO, Cobro.Estado.PAGADO_PARCIAL],
     ).exists():
         pendientes.append("Pago")

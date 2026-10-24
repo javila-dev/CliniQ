@@ -17,7 +17,7 @@ import { mensajeDeError } from '@/lib/errores'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion, hasPermission, PERM } from '@/lib/permissions'
 import {
-  NOMBRE_CORTO_PASO, PASOS_RECEPCION, pasosActivos, progresoRecepcion, textoFaltan,
+  NOMBRE_CORTO_PASO, PASOS_RECEPCION, esCitaDeTratamiento, pasosActivos, progresoRecepcion, textoFaltan,
   type PasoRecepcion,
 } from '@/lib/recepcion'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
@@ -81,11 +81,11 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
     refetchIntervalInBackground: true,
   })
 
-  // Cuando la cita viene de una cotización, el cobro lo controla la cotización
-  // (cartera/cuotas): el paso "Pago" no aplica, se muestra como "Tratamiento".
-  const esCitaDeCotizacion = cita?.item_cotizacion_id != null
+  // Cuando la cita es una sesión de un tratamiento, el cobro lo controla la
+  // cartera del tratamiento: el paso "Pago" no cobra, se muestra como "Tratamiento".
+  const esDeTratamiento = cita ? esCitaDeTratamiento(cita) : false
   const stepLabel = (step: WizardStep) =>
-    esCitaDeCotizacion && step === 'pago' ? 'Tratamiento' : NOMBRE_CORTO_PASO[step]
+    esDeTratamiento && step === 'pago' ? 'Tratamiento' : NOMBRE_CORTO_PASO[step]
 
   useEffect(() => {
     if (!esperandoConfirmacionFirma) {

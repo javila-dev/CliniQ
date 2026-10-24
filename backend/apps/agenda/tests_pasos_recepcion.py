@@ -90,6 +90,16 @@ class PasosRecepcionTests(ClinicaFixtureMixin, TestCase):
 
         self.assertEqual(self._iniciar().status_code, 200)
 
+    def test_la_cita_de_una_sesion_de_tratamiento_no_pide_pago(self):
+        """Aunque no tenga ítem de cotización: el cobro va por el tratamiento."""
+        from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
+
+        tratamiento = TratamientoPaciente.objects.create(paciente=self.paciente)
+        SesionProcedimiento.objects.create(tratamiento=tratamiento, cita=self.cita, procedimiento=self.servicio)
+        self._configurar(paso_firma_asistencia=False)
+
+        self.assertEqual(self._iniciar().status_code, 200)
+
     def test_la_verificacion_facial_exige_un_intento_registrado(self):
         self.clinica.facial_verificacion_override = True
         self.clinica.save(update_fields=["facial_verificacion_override", "updated_at"])

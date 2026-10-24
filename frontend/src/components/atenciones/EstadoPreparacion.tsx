@@ -48,7 +48,7 @@ export function PasosRecepcion({ progreso, className }: { progreso: ProgresoRece
             )}
           >
             {hecho ? <Check className="h-3 w-3" /> : <span className="h-1.5 w-1.5 rounded-full bg-amber-400" aria-hidden />}
-            {NOMBRE_PASO[paso]}
+            {paso === 'pago' && progreso.deTratamiento ? 'Tratamiento' : NOMBRE_PASO[paso]}
             <span className="sr-only">{hecho ? '(hecho)' : '(pendiente)'}</span>
           </li>
         )

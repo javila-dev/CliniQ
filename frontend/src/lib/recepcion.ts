@@ -30,6 +30,15 @@ export const NOMBRE_PASO: Record<PasoRecepcion, string> = {
   firma: 'Firma de asistencia',
 }
 
+/**
+ * La cita es una sesión de un tratamiento (viene de una cotización o tiene una
+ * sesión vinculada): la cobra la cartera del tratamiento, no recepción al
+ * iniciar la atención. El backend aplica la misma regla.
+ */
+export function esCitaDeTratamiento(cita: Pick<Cita, 'item_cotizacion_id' | 'sesion_ejecutada_id'>): boolean {
+  return cita.item_cotizacion_id != null || cita.sesion_ejecutada_id != null
+}
+
 /** El paso "Pago" está hecho cuando el cobro de la cita tiene pagos. Un cobro
  *  creado cuyo pago falló sigue pendiente (M6-13). */
 export function cobroConPagos(cita: Pick<Cita, 'cobro_estado'>): boolean {
@@ -66,6 +75,8 @@ export interface ProgresoRecepcion {
   listo: boolean
   /** El procedimiento pide consentimiento (si no, ese paso se omite solo). */
   consentimientoAplica: boolean
+  /** Sesión de un tratamiento: el paso de pago no cobra, se muestra como "Tratamiento". */
+  deTratamiento: boolean
 }
 
 /**
@@ -79,18 +90,19 @@ export function progresoRecepcion(
 ): ProgresoRecepcion {
   const activos = pasosActivos(config)
   const consentimientoAplica = (cita.consentimiento_info?.consentimientos?.length ?? 0) > 0
+  const deTratamiento = esCitaDeTratamiento(cita)
   const hechos: Record<PasoRecepcion, boolean> = {
     llegada: !['pendiente', 'confirmada'].includes(cita.estado),
     // Basta un intento registrado, coincida o no; "Continuar sin verificar" deja uno.
     verificacion: Boolean(opciones.verificacionCompletada || cita.verificacion_identidad_registrada),
     consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-    // Una cita de cotización la cobra la cotización (cartera/cuotas), no recepción.
-    pago: cita.item_cotizacion_id != null || Boolean(opciones.pagoRegistrado) || cobroConPagos(cita)
+    // Una sesión de tratamiento la cobra la cartera del tratamiento, no recepción.
+    pago: deTratamiento || Boolean(opciones.pagoRegistrado) || cobroConPagos(cita)
       || cita.estado === 'en_curso' || cita.estado === 'completada',
     firma: cita.firma_asistencia_estado === 'firmada',
   }
   const faltan = activos.filter((paso) => !hechos[paso])
-  return { activos, hechos, faltan, listo: activos.length > 0 && faltan.length === 0, consentimientoAplica }
+  return { activos, hechos, faltan, listo: activos.length > 0 && faltan.length === 0, consentimientoAplica, deTratamiento }
 }
 
 export type EstadoOperativo =
@@ -122,7 +134,7 @@ export function estadoOperativo(cita: Cita, progreso: ProgresoRecepcion): Estado
       const sinLlegada = !progreso.activos.includes('llegada')
       const algoHecho = progreso.activos.some((paso) =>
         paso !== 'llegada' && progreso.hechos[paso] && !(paso === 'consentimiento' && !progreso.consentimientoAplica)
-        && !(paso === 'pago' && cita.item_cotizacion_id != null),
+        && !(paso === 'pago' && progreso.deTratamiento),
       )
       return cita.estado === 'confirmada' && sinLlegada && algoHecho ? 'en_preparacion' : 'sin_llegar'
     }
