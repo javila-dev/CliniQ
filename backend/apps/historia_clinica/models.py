@@ -307,7 +307,6 @@ class ResultadoExamen(BaseModel):
     )
     titulo = models.CharField(max_length=200)
     descripcion = models.TextField(blank=True, default="")
-    archivo = models.FileField(upload_to=resultado_examen_upload_path, null=True, blank=True)
     fecha = models.DateField()
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -322,6 +321,36 @@ class ResultadoExamen(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.historia.numero} - {self.titulo}"
+
+
+class ArchivoResultadoExamen(BaseModel):
+    """Un archivo (PDF o imagen) de un resultado de examen.
+
+    Un resultado puede traer varios: el paciente manda cada página por separado
+    o completa el envío días después. Eliminar solo lo desactiva (`activo`): el
+    archivo y quién lo subió quedan en la historia.
+    """
+
+    resultado = models.ForeignKey(
+        ResultadoExamen,
+        on_delete=models.CASCADE,
+        related_name="archivos",
+    )
+    archivo = models.FileField(upload_to=resultado_examen_upload_path)
+    nombre = models.CharField(max_length=255, blank=True, default="")
+    subido_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name="archivos_examenes_subidos",
+    )
+
+    class Meta:
+        db_table = "resultados_examenes_archivos"
+        ordering = ["created_at"]
+
+    def __str__(self) -> str:
+        return self.nombre or self.archivo.name
 
 
 class PlantillaOrden(BaseModel):

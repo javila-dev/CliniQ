@@ -251,6 +251,17 @@ export const historiaClinicaApi = {
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/historia-clinica/resultados-examenes/${id}/`)
     },
+    agregarArchivos: async (id: string, archivos: File[]): Promise<ResultadoExamen> => {
+      const fd = new FormData()
+      archivos.forEach((a) => fd.append('adjuntos', a))
+      const res = await apiClient.post<ResultadoExamen>(`/historia-clinica/resultados-examenes/${id}/archivos/`, fd, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return res.data
+    },
+    quitarArchivo: async (id: string, archivoId: string): Promise<void> => {
+      await apiClient.delete(`/historia-clinica/resultados-examenes/${id}/archivos/${archivoId}/`)
+    },
   },
 
   plantillasOrdenes: {

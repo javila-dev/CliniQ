@@ -301,11 +301,26 @@ que la clínica solicita:
 
 - **Título** del examen.
 - **Descripción** o interpretación breve.
-- **Archivo adjunto**, que puede ser un PDF o una imagen.
+- **Archivos adjuntos**: uno o varios PDF o imágenes, de hasta 15 MB cada uno.
 - **Fecha** del examen.
 
-Quedan ligados a la atención en que se cargaron y visibles en la historia del
-paciente.
+Los que se cargan durante la atención quedan ligados a ella.
+
+### Resultados que llegan después
+
+Si el paciente envía los resultados días después, se cargan desde la pestaña
+**Exámenes** de su historia clínica, sin abrir una atención. Quedan marcados como
+«Cargado desde la historia». Si llega otra página, **Agregar archivo** la suma al
+mismo resultado.
+
+Los cargan quienes atienden pacientes. Otros roles, como recepción, solo pueden
+si el administrador les da el permiso **Cargar resultados de exámenes** en
+**Roles**.
+
+Siempre queda registrado quién cargó cada resultado y cada archivo. Un resultado
+solo lo puede eliminar quien lo cargó, o el administrador. Lo eliminado deja de
+verse, pero el registro se conserva. Los resultados cargados fuera de una
+atención también salen en el PDF de la historia.
 
 ## Buenas prácticas
 

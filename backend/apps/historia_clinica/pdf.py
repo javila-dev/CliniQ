@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import io
+import os
 import logging
 from datetime import date
 
@@ -280,12 +281,37 @@ def _build_evolucion_seguimiento(paciente_id) -> list[dict]:
     return rows
 
 
+def _examen_payload(ex: ResultadoExamen) -> dict:
+    """Registro del examen: el PDF no incrusta los archivos, solo los nombra."""
+    return {
+        "titulo": ex.titulo,
+        "descripcion": ex.descripcion or "",
+        "fecha": _fmt_date(ex.fecha),
+        "cargado_por": ex.created_by.nombre_completo if ex.created_by_id else None,
+        "cargado_el": _fmt_datetime(ex.created_at),
+        "archivos": [a.nombre or os.path.basename(a.archivo.name) for a in ex.archivos.all() if a.activo],
+    }
+
+
+def _build_examenes_sin_atencion(historia: HistoriaClinica) -> list[dict]:
+    """Resultados cargados desde la historia, fuera de una atención (p. ej. los
+    que el paciente envía días después). Antes no salían en el PDF."""
+    qs = (
+        ResultadoExamen.objects
+        .filter(historia=historia, nota__isnull=True, activo=True)
+        .select_related("created_by")
+        .prefetch_related("archivos")
+        .order_by("-fecha", "-created_at")
+    )
+    return [_examen_payload(ex) for ex in qs]
+
+
 def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
     notas_qs = (
         NotaClinica.objects
         .filter(historia=historia, estado=NotaClinica.EstadoNota.COMPLETADA)
         .select_related("cita", "cita__profesional", "cita__servicio", "firmada_por")
-        .prefetch_related("fotos", "examenes", "ordenes", "ordenes__plantilla_origen", "anotaciones_zona", "anotaciones_zona__diagrama")
+        .prefetch_related("fotos", "examenes", "examenes__archivos", "examenes__created_by", "ordenes", "ordenes__plantilla_origen", "anotaciones_zona", "anotaciones_zona__diagrama")
         .order_by("-created_at")
     )
 
@@ -336,13 +362,7 @@ def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
             })
 
         # Exámenes
-        examenes = []
-        for ex in nota.examenes.all():
-            examenes.append({
-                "titulo": ex.titulo,
-                "descripcion": ex.descripcion or "",
-                "fecha": _fmt_date(ex.fecha),
-            })
+        examenes = [_examen_payload(ex) for ex in nota.examenes.all() if ex.activo]
 
         # Zonas anotadas (diagramas corporales)
         zonas_por_diagrama: dict[str, dict] = {}
@@ -475,6 +495,7 @@ def build_historia_pdf_context(historia: HistoriaClinica, *, include_fotos: bool
         "antecedentes": _build_antecedentes(paciente),
         "evolucion_seguimiento": _build_evolucion_seguimiento(paciente.id),
         "notas": _build_notas(historia, include_fotos=include_fotos),
+        "examenes_sin_atencion": _build_examenes_sin_atencion(historia),
         "consentimientos": _build_consentimientos(historia),
     }
 
