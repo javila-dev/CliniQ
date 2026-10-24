@@ -71,16 +71,36 @@ export interface HistoriaClinica {
   updated_at: string
 }
 
+export interface ArchivoResultadoExamen {
+  id: string
+  nombre: string
+  url: string | null
+  subido_por: string | null
+  subido_por_nombre: string | null
+  puede_quitar: boolean
+  created_at: string
+}
+
 export interface ResultadoExamen {
   id: string
   historia: string
-  nota?: string | null        // H26: FK a NotaClinica
+  /** Atención en la que se cargó; null = cargado desde la historia, después. */
+  nota: string | null
+  nota_fecha: string | null
   titulo: string
   descripcion: string
-  archivo_url: string | null
+  archivos: ArchivoResultadoExamen[]
   fecha: string
-  created_by_nombre: string
+  created_by: string | null
+  created_by_nombre: string | null
+  /** Quien lo cargó (o el admin) mientras su atención, si tiene, siga abierta. */
+  puede_modificar: boolean
   created_at: string
+}
+
+/** Versión resumida que viene dentro de una nota. */
+export type ResultadoExamenEmbed = Pick<ResultadoExamen, 'id' | 'titulo' | 'fecha' | 'descripcion'> & {
+  archivos: Omit<ArchivoResultadoExamen, 'puede_quitar'>[]
 }
 
 export interface PlantillaOrden {
@@ -132,7 +152,7 @@ export interface NotaClinica {
   estado: 'borrador' | 'completada'
   motivo_consulta: string | null   // TabMotivoConsulta
   plan_manejo: string | null       // TabPlanManejo
-  examenes: ResultadoExamen[]      // TabExamenes  (via FK nota)
+  examenes: ResultadoExamenEmbed[] // TabExamenes  (via FK nota)
   ordenes: OrdenMedica[]           // TabOrdenesMedicas (via FK nota)
   fotos: FotoClinica[]             // TabFotos
   // Campos legacy (pre-H26) — presentes en notas antiguas, no se crean nuevos

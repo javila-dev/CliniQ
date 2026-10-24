@@ -33,6 +33,8 @@ export const PERM = {
   HISTORIA_VER:              'historia.ver',
   // Lo da el check "atiende pacientes" (User.es_profesional), no el rol.
   HISTORIA_NOTAS_CREAR:      'historia.notas.crear',
+  // El check "atiende pacientes" lo da; a otros roles (recepción) se lo asigna el admin.
+  HISTORIA_EXAMENES_CARGAR:  'historia.examenes.cargar',
 
   // Antecedentes del paciente (claves reales del catálogo backend)
   PACIENTES_ANTECEDENTES_VER:    'pacientes.antecedentes.ver',
