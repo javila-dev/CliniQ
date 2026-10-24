@@ -35,8 +35,6 @@ export interface Clinica {
   registro_publico_token?: string | null
   tab_personal_requerido?: boolean
   tab_salud_requerido?: boolean
-  trial_expires_at: string | null
-  trial_days_remaining: number | null
   onboarding_completado: boolean
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean

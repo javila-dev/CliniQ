@@ -25,6 +25,7 @@ import { cn } from '@/lib/utils'
 import { Paginacion } from '@/components/shared/TablaDatos'
 import type { AdminTenant } from '@/types/admin'
 import { serverErrorMessage } from './_shared'
+import { ESTADO_SUSCRIPCION_BADGE, resumenSuscripcion } from './_suscripcion'
 
 // ─── Schema ───────────────────────────────────────────────────
 
@@ -35,6 +36,9 @@ const nuevaClinicaSchema = z.object({
   telefono:    z.string().optional(),
   plan:        z.string().optional(),
   admin_email: z.string().min(1, 'El email del admin es obligatorio').email('Email inválido'),
+  inicio:       z.enum(['prueba', 'manual']),
+  dias_prueba:  z.string().optional(),
+  pagado_hasta: z.string().optional(),
 })
 type NuevaClinicaValues = z.infer<typeof nuevaClinicaSchema>
 
@@ -67,8 +71,10 @@ function NuevaClinicaSheet({
 
   const { register, handleSubmit, reset, setValue, watch, formState: { errors } } = useForm<NuevaClinicaValues>({
     resolver: zodResolver(nuevaClinicaSchema),
+    defaultValues: { inicio: 'prueba' },
   })
   const planValue = watch('plan')
+  const inicio = watch('inicio')
 
   const mutation = useMutation({
     mutationFn: (data: NuevaClinicaValues) => adminApi.tenants.create({
@@ -78,6 +84,9 @@ function NuevaClinicaSheet({
       telefono:    data.telefono || undefined,
       plan:        data.plan || undefined,
       admin_email: data.admin_email.trim(),
+      inicio:      data.inicio,
+      dias_prueba: data.inicio === 'prueba' && data.dias_prueba ? Number(data.dias_prueba) : undefined,
+      pagado_hasta: data.inicio === 'manual' ? data.pagado_hasta || null : undefined,
     }),
     onSuccess: (tenant) => {
       qc.invalidateQueries({ queryKey: ['admin-tenants'] })
@@ -132,6 +141,27 @@ function NuevaClinicaSheet({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Inicio de la cuenta</Label>
+            <Select value={inicio} onValueChange={v => setValue('inicio', v as 'prueba' | 'manual')}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="prueba">En prueba (vence)</SelectItem>
+                <SelectItem value="manual">Activa con cobro manual</SelectItem>
+              </SelectContent>
+            </Select>
+            {inicio === 'prueba' ? (
+              <Input type="number" min={1} max={90} placeholder="Días de prueba (por defecto, los de la plataforma)" {...register('dias_prueba')} />
+            ) : (
+              <>
+                <Input type="date" {...register('pagado_hasta')} />
+                <p className="text-xs text-muted-foreground">Pagado hasta (inclusive). Vacío = sin vencimiento.</p>
+              </>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -207,6 +237,11 @@ function TenantRow({ tenant }: { tenant: AdminTenant }) {
           </div>
         ) : (
           <span className="text-xs text-muted-foreground">Sin plan</span>
+        )}
+        {tenant.suscripcion && (
+          <Badge variant={ESTADO_SUSCRIPCION_BADGE[tenant.suscripcion.estado]} className="mt-1 whitespace-nowrap">
+            {resumenSuscripcion(tenant.suscripcion)}
+          </Badge>
         )}
       </TableCell>
 

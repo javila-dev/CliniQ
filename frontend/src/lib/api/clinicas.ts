@@ -5,11 +5,14 @@ const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000/api/v
 
 export interface RegistroClinicaRequest {
   nombre_clinica: string
-  nit: string
   nombre_admin: string
   apellido_admin: string
   email: string
   telefono?: string
+  /** Autoriza que CliniQ le escriba por WhatsApp sobre su cuenta. */
+  acepta_whatsapp?: boolean
+  /** Rol de quien se registra: duenio, director_medico, administrador, profesional, recepcion u otro. */
+  cargo: string
 }
 
 export interface PlanPublico {
@@ -26,6 +29,7 @@ export interface PlanPublico {
   modulo_obesidad_habilitado: boolean
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
+  descuento_anual_pct: number        // 0 = sin pago anual con descuento
 }
 
 /** Pestañas visibles de la clínica: historia del paciente y pantalla del profesional. */

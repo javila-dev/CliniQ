@@ -176,8 +176,8 @@ export default function ConsoleLoginPage() {
         </form>
 
         <p className="mt-5 text-center text-xs text-slate-600">
-          ¿Sos parte del equipo de una clínica?{' '}
-          <a href="/login" className="text-slate-400 underline hover:text-slate-200">Ingresá por acá</a>
+          ¿Eres parte del equipo de una clínica?{' '}
+          <a href="/login" className="text-slate-400 underline hover:text-slate-200">Ingresa aquí</a>
         </p>
       </div>
     </div>

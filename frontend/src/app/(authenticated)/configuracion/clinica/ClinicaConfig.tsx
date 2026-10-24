@@ -103,7 +103,8 @@ const INTERVALO_RECORDATORIO_OPTIONS = [
 
 const schema = z.object({
   nombre: z.string().min(1, 'El nombre es obligatorio'),
-  nit: z.string().trim().min(1, 'El NIT es obligatorio'),
+  // Opcional: la clínica que se registró sola puede no tenerlo; se pide al pagar.
+  nit: z.string().trim(),
   telefono: z.string().optional(),
 })
 type FormData = z.infer<typeof schema>

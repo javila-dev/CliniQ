@@ -39,6 +39,15 @@ apiClient.interceptors.response.use(
   async (error: AxiosError) => {
     const original = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
 
+    // Cuenta en solo lectura o suspendida: lo atiende un aviso global
+    // (AvisoSuscripcion en AppShell), además del error de cada pantalla.
+    if (error.response?.status === 403 && typeof window !== 'undefined') {
+      const datos = error.response.data as { code?: string; error?: string } | undefined
+      if (datos?.code === 'SUSCRIPCION_SOLO_LECTURA' || datos?.code === 'SUSCRIPCION_SUSPENDIDA') {
+        window.dispatchEvent(new CustomEvent('cliniq:suscripcion-bloqueada', { detail: datos }))
+      }
+    }
+
     if (error.response?.status !== 401 || original._retry) {
       return Promise.reject(error)
     }
