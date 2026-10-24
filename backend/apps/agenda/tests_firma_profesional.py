@@ -78,6 +78,13 @@ class FirmaProfesionalAlIniciarAtencionTests(TestCase):
             documenso_recipient_paciente_id="11", documenso_recipient_profesional_id="12",
         )
         self.url = f"/api/v1/agenda/citas/{self.cita.id}/firma_profesional/"
+        # Estas pruebas son de la firma del profesional: los pasos de recepción
+        # (pago y firma de asistencia) se apagan para que no frenen antes.
+        from apps.configuracion.models import ConfiguracionWizard
+
+        ConfiguracionWizard.objects.update_or_create(
+            clinica=self.clinica, defaults={"paso_pago": False, "paso_firma_asistencia": False},
+        )
 
     def _iniciar_atencion(self):
         return self.client.post(

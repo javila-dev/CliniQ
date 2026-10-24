@@ -93,6 +93,8 @@ export interface Cita {
   cobro_estado?: 'pendiente' | 'pagado_parcial' | 'pagado' | 'anulado' | null
   /** Presente solo si la clínica bloquea por deuda y el paciente tiene cuotas vencidas. */
   deuda_info?: DeudaInfo | null
+  /** Hay un intento de verificación facial (o un salto registrado) para esta cita. */
+  verificacion_identidad_registrada?: boolean
   created_at: string
 }
 

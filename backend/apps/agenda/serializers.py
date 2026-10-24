@@ -218,6 +218,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     cobro_id = serializers.SerializerMethodField()
     cobro_estado = serializers.SerializerMethodField()
     deuda_info = serializers.SerializerMethodField()
+    verificacion_identidad_registrada = serializers.SerializerMethodField()
 
     class Meta:
         model = Cita
@@ -266,6 +267,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "cobro_id",
             "cobro_estado",
             "deuda_info",
+            "verificacion_identidad_registrada",
             "created_by",
             "created_at",
             "updated_at",
@@ -299,6 +301,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "cobro_id",
             "cobro_estado",
             "deuda_info",
+            "verificacion_identidad_registrada",
             "created_by",
             "created_at",
             "updated_at",
@@ -329,6 +332,14 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     def get_firma_asistencia_archivo_url(self, obj):
         path = obj.firma_asistencia_archivo.name if obj.firma_asistencia_archivo else ""
         return get_signed_url(path, expires_in=3600) if path else None
+
+    def get_verificacion_identidad_registrada(self, obj):
+        # Paso "Verificación de identidad" de Preparar paciente: hay un intento
+        # (o un salto registrado) para esta cita. El listado lo trae anotado.
+        anotado = getattr(obj, "_verificacion_registrada", None)
+        if anotado is not None:
+            return anotado
+        return obj.checkins.exists()
 
     def get_cobro_id(self, obj):
         try:

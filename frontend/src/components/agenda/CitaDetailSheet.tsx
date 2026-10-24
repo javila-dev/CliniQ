@@ -7,11 +7,14 @@ import { useAuthStore } from '@/store/authStore'
 import {
   Stethoscope, Clock, MessageSquare,
   FileText, AlertCircle, Pencil, ChevronDown, ChevronUp, UserCheck, FileSignature,
-  ReceiptText, Bell, ShieldCheck, ShieldX, ExternalLink,
+  ReceiptText, Bell, ShieldCheck, ShieldX, ExternalLink, Play,
 } from 'lucide-react'
 import Link from 'next/link'
 import { agendaApi } from '@/lib/api/agenda'
-import { hasPermission, PERM, puedeAbrirCotizacion } from '@/lib/permissions'
+import { canIniciarAtencion, hasPermission, PERM, puedeAbrirCotizacion } from '@/lib/permissions'
+import { clinicasApi } from '@/lib/api/clinicas'
+import { estadoOperativo, progresoRecepcion } from '@/lib/recepcion'
+import { EtiquetaEstadoOperativo, PasosRecepcion, QueFalta } from '@/components/atenciones/EstadoPreparacion'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -99,6 +102,12 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
   const { data: cita, isLoading } = useQuery({
     queryKey: ['citas', citaId],
     queryFn: () => agendaApi.citas.get(citaId!),
+    enabled: Boolean(citaId),
+  })
+
+  const { data: wizardConfig } = useQuery({
+    queryKey: ['wizard-config'],
+    queryFn: () => clinicasApi.wizardConfig.get(),
     enabled: Boolean(citaId),
   })
 
@@ -226,6 +235,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     || (Boolean(user?.es_profesional) && cita?.profesional === user?.id)
   const puedeTransicionar = (estado: EstadoCita) =>
     puedeCambiarEstado || (estado === 'confirmada' && puedeGestionarAgenda)
+
+  // Pasos de recepción ("Preparar paciente"): los mismos que exige el backend para iniciar.
+  const progreso = cita ? progresoRecepcion(cita, wizardConfig) : null
+  const estadoOp = cita && progreso ? estadoOperativo(cita, progreso) : null
+  // Solo interesa el día de la cita: antes, todos los pasos saldrían pendientes.
+  const muestraPreparacion = Boolean(cita && progreso)
+    && (cita!.estado === 'en_espera' || (cita!.estado === 'confirmada' && esHoy))
 
   const transiciones: EstadoCita[] = (() => {
     if (!cita) return []
@@ -429,6 +445,21 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 </div>
               )}
 
+              {/* Preparación — pasos de recepción con su nombre y cuántos faltan */}
+              {muestraPreparacion && progreso && estadoOp && (
+                <div className="rounded-lg border px-4 py-3 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+                      <UserCheck className="h-3.5 w-3.5" />
+                      Preparación
+                    </p>
+                    <EtiquetaEstadoOperativo estado={estadoOp} />
+                  </div>
+                  <PasosRecepcion progreso={progreso} />
+                  <QueFalta progreso={progreso} puedeCambiarPasos={hasPermission(user, PERM.CLINICAS_EDITAR)} />
+                </div>
+              )}
+
               {/* Consentimientos — chips compactos */}
               {(cita.consentimiento_info?.consentimientos?.length ?? 0) > 0 && (
                 <div className="rounded-lg border px-4 py-3 space-y-2">
@@ -496,10 +527,10 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 // El recordatorio solo sirve antes de que el paciente llegue.
                 const tieneRecordatorio = ['pendiente', 'confirmada'].includes(cita.estado) && !isPasada && puedeEditar
                 if (!necesitaAccion && !puedeLlegarSinConfirmar && accionesModal.length === 0 && !tieneRecordatorio) return null
-                // Desde 'confirmada' el asistente solo checkea la llegada (→ en_espera): el
-                // wizard no arranca la atención clínica. Etiquetamos el botón según eso para
-                // no dar a entender que recepción "inicia la atención".
-                const soloCheckin = tieneEnEspera && !tieneEnCurso
+                // Recepción prepara al paciente; la atención la inicia el profesional.
+                // Con todo listo, quien también atiende puede ir a la atención (allí se inicia).
+                const preparado = cita.estado === 'en_espera' && Boolean(progreso?.listo)
+                const iniciaDirecto = preparado && canIniciarAtencion(user) && tieneEnCurso
                 const puedeCambiarProf =
                   (cita.estado === 'confirmada' || cita.estado === 'en_espera') && puedeEditar
                 // Confirmar (cita pendiente o asistencia de una confirmada) abre el
@@ -531,10 +562,20 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                           {registrandoLlegada ? 'Registrando…' : 'Llegó'}
                         </Button>
                       )}
+                      {necesitaAccion && iniciaDirecto && (
+                        <Button size="sm" onClick={() => router.push(`/atenciones/${cita.id}`)}>
+                          <Play className="h-3.5 w-3.5 mr-1.5" />
+                          Ir a la atención
+                        </Button>
+                      )}
                       {necesitaAccion && (
-                        <Button size="sm" onClick={() => setWizardCitaId(cita.id)}>
+                        <Button
+                          size="sm"
+                          variant={preparado ? 'outline' : 'default'}
+                          onClick={() => setWizardCitaId(cita.id)}
+                        >
                           <UserCheck className="h-3.5 w-3.5 mr-1.5" />
-                          {soloCheckin ? 'Registrar llegada' : 'Iniciar atención'}
+                          {preparado ? 'Revisar preparación' : 'Preparar paciente'}
                         </Button>
                       )}
                       {confirmacionEsPrimaria && (

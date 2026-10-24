@@ -6,7 +6,7 @@ import logging
 
 from django.conf import settings
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import Exists, OuterRef, Q, Sum
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.decorators import action
@@ -243,6 +243,12 @@ class CitaViewSet(ModelViewSet):
         if firma_asistencia_estado:
             queryset = queryset.filter(firma_asistencia_estado=firma_asistencia_estado)
 
+        # Paso de verificación de identidad, sin una consulta por fila en la agenda.
+        from apps.pacientes.models import CheckIn
+
+        queryset = queryset.annotate(
+            _verificacion_registrada=Exists(CheckIn.objects.filter(cita=OuterRef("pk")))
+        )
         return queryset.order_by("fecha_inicio")
 
     def _confirmo_cruce_paciente(self):
@@ -454,6 +460,18 @@ class CitaViewSet(ModelViewSet):
                         "error": "El paciente tiene consentimientos pendientes de firma.",
                         "code": "CONSENTIMIENTO_REQUERIDO",
                         "pendientes": pendientes,
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+            pasos_pendientes = services.pasos_recepcion_pendientes(cita)
+            if pasos_pendientes:
+                return Response(
+                    {
+                        "error": "Recepción aún no termina de preparar al paciente. Falta: "
+                        + ", ".join(pasos_pendientes) + ".",
+                        "code": "PASOS_RECEPCION_PENDIENTES",
+                        "pendientes": pasos_pendientes,
                     },
                     status=status.HTTP_400_BAD_REQUEST,
                 )

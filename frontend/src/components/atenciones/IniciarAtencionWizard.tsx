@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
-import { AlertTriangle, Check, CheckCircle2, Maximize2, Minimize2, X, Loader2 } from 'lucide-react'
+import Link from 'next/link'
+import { AlertTriangle, Check, CheckCircle2, Maximize2, Minimize2, Play, Settings2, X, Loader2 } from 'lucide-react'
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden'
 import { agendaApi } from '@/lib/api/agenda'
 import { clinicasApi } from '@/lib/api/clinicas'
@@ -13,40 +14,48 @@ import { cn } from '@/lib/utils'
 import { textoDeudaBloqueante } from '@/lib/deuda'
 import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
+import { useAuthStore } from '@/store/authStore'
+import { canIniciarAtencion, hasPermission, PERM } from '@/lib/permissions'
+import {
+  NOMBRE_CORTO_PASO, PASOS_RECEPCION, pasosActivos, progresoRecepcion, textoFaltan,
+  type PasoRecepcion,
+} from '@/lib/recepcion'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
 import { ConsentimientoFirmaContent } from './ConsentimientoFirmaContent'
-import { PagoContent, cobroConPagos } from './PagoContent'
+import { PagoContent } from './PagoContent'
 import { FirmaAsistenciaContent } from './FirmaAsistenciaContent'
 import { VerificacionFacialContent } from './VerificacionFacialContent'
 
-type WizardStep = 'llegada' | 'verificacion' | 'consentimiento' | 'pago' | 'firma'
+type WizardStep = PasoRecepcion
 type StepStatus = 'done' | 'skipped' | 'current' | 'pending'
-
-// Orden canónico completo — se filtra en runtime según WizardConfig
-const ALL_STEPS: WizardStep[] = ['llegada', 'verificacion', 'consentimiento', 'pago', 'firma']
-const STEP_LABELS: Record<WizardStep, string> = {
-  llegada: 'Llegada',
-  verificacion: 'Identidad',
-  consentimiento: 'Consentimiento',
-  pago: 'Pago',
-  firma: 'Firma',
-}
 
 interface Props {
   citaId: string | null
   onClose: () => void
+  /**
+   * Iniciar la atención al terminar, si quien prepara también atiende. Sin
+   * esto, el botón solo abre la pantalla de la atención, que pide iniciarla.
+   */
+  onIniciarAtencion?: () => void
 }
 
-export function IniciarAtencionWizard({ citaId, onClose }: Props) {
+/**
+ * "Preparar paciente": lo que hace recepción antes de atender (llegada,
+ * identidad, consentimiento, pago y firma, según la configuración). Termina en
+ * "Listo para atender": la cita pasa a en_curso solo cuando el profesional
+ * inicia la atención.
+ */
+export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Props) {
   const queryClient = useQueryClient()
   const router = useRouter()
+  const { user } = useAuthStore()
+  const puedeCambiarPasos = hasPermission(user, PERM.CLINICAS_EDITAR)
   const [maximized, setMaximized] = useState(false)
   const [firmandoConsentimiento, setFirmandoConsentimiento] = useState(false)
   const [pagoRegistrado, setPagoRegistrado] = useState(false)
   const [verificacionCompletada, setVerificacionCompletada] = useState(false)
   // null = seguir el paso activo automáticamente; un valor = usuario navegó a ese paso
   const [viewingStep, setViewingStep] = useState<WizardStep | null>(null)
-  const [showSteps, setShowSteps] = useState(false)
   // Tras firmar, el frontend llama directamente a confirmar_firma_asistencia (eager).
   // El polling es el fallback: si esa llamada falla, esperamos a que llegue el webhook.
   // esperaLenta se activa a los 15s para mostrar un botón de verificación manual.
@@ -59,16 +68,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
   })
 
   // Pasos activos según configuración de la clínica. Consentimiento siempre obligatorio.
-  const activeSteps = useMemo((): WizardStep[] => {
-    if (!wizardConfig) return ALL_STEPS.filter((s) => s !== 'verificacion')
-    return ALL_STEPS.filter((step) => {
-      if (step === 'llegada')       return wizardConfig.paso_checkin
-      if (step === 'verificacion')  return wizardConfig.paso_verificacion_facial
-      if (step === 'pago')          return wizardConfig.paso_pago
-      if (step === 'firma')         return wizardConfig.paso_firma_asistencia
-      return true
-    })
-  }, [wizardConfig])
+  const activeSteps = useMemo(() => pasosActivos(wizardConfig), [wizardConfig])
 
   const { data: cita, refetch: refetchCita } = useQuery({
     queryKey: ['citas', citaId],
@@ -85,7 +85,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
   // (cartera/cuotas): el paso "Pago" no aplica, se muestra como "Tratamiento".
   const esCitaDeCotizacion = cita?.item_cotizacion_id != null
   const stepLabel = (step: WizardStep) =>
-    esCitaDeCotizacion && step === 'pago' ? 'Tratamiento' : STEP_LABELS[step]
+    esCitaDeCotizacion && step === 'pago' ? 'Tratamiento' : NOMBRE_CORTO_PASO[step]
 
   useEffect(() => {
     if (!esperandoConfirmacionFirma) {
@@ -111,19 +111,14 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
     const firstActive = activeSteps[0] ?? 'llegada'
     const fallback = {
       currentStep: firstActive as WizardStep,
-      statusByStep: ALL_STEPS.reduce((acc, s) => ({ ...acc, [s]: 'pending' as StepStatus }), {} as Record<WizardStep, StepStatus>),
+      statusByStep: PASOS_RECEPCION.reduce((acc, s) => ({ ...acc, [s]: 'pending' as StepStatus }), {} as Record<WizardStep, StepStatus>),
       allDone: false,
     }
     if (!cita) return fallback
 
-    const consentimientoAplica = (cita.consentimiento_info?.consentimientos?.length ?? 0) > 0
-    const doneMap: Record<WizardStep, boolean> = {
-      llegada:        cita.estado !== 'confirmada',
-      verificacion:   verificacionCompletada,
-      consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-      pago:           cita.item_cotizacion_id != null || pagoRegistrado || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada',
-      firma:          cita.firma_asistencia_estado === 'firmada',
-    }
+    const { hechos: doneMap, consentimientoAplica } = progresoRecepcion(cita, wizardConfig, {
+      pagoRegistrado, verificacionCompletada,
+    })
 
     const current = activeSteps.find((s) => !doneMap[s]) ?? activeSteps[activeSteps.length - 1] ?? 'firma'
     const allDone = activeSteps.length > 0 && activeSteps.every((s) => doneMap[s])
@@ -137,7 +132,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
     }, {} as Record<WizardStep, StepStatus>)
 
     return { currentStep: current, statusByStep, allDone }
-  }, [cita, activeSteps, pagoRegistrado, verificacionCompletada])
+  }, [cita, activeSteps, wizardConfig, pagoRegistrado, verificacionCompletada])
 
   // Cuando avanza el paso activo automáticamente, volver al modo automático
   useEffect(() => {
@@ -169,6 +164,12 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
     if (cita?.firma_asistencia_estado === 'rechazada') setEsperandoConfirmacionFirma(false)
   }, [cita?.firma_asistencia_estado])
 
+  // Si quien prepara también atiende, sigue directo a la atención. La cita
+  // tiene que haber llegado a "en espera" (sin el paso de llegada, eso pasa al
+  // completar los demás pasos).
+  const puedeIniciar = canIniciarAtencion(user) && cita?.estado === 'en_espera'
+  const pasosPendientes = activeSteps.filter((s) => statusByStep[s] !== 'done' && statusByStep[s] !== 'skipped').length
+
   const displayStep = viewingStep ?? currentStep
   const isViewingCompletedStep = viewingStep !== null && statusByStep[viewingStep] === 'done'
 
@@ -197,7 +198,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
         )}
       >
         <VisuallyHidden.Root>
-          <DialogTitle>Iniciar atención — {cita?.paciente_nombre ?? ''}</DialogTitle>
+          <DialogTitle>Preparar paciente — {cita?.paciente_nombre ?? ''}</DialogTitle>
         </VisuallyHidden.Root>
 
         {/* Header */}
@@ -207,7 +208,7 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
         )}>
           {!firmandoConsentimiento && (
             <div className="min-w-0">
-              <p className="text-sm font-semibold leading-tight">Iniciar atención</p>
+              <p className="text-sm font-semibold leading-tight">Preparar paciente</p>
               {cita && <p className="text-xs text-muted-foreground truncate mt-0.5">{cita.paciente_nombre}</p>}
             </div>
           )}
@@ -217,33 +218,6 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
             </p>
           )}
           <div className="flex items-center gap-2 shrink-0 ml-3">
-            {/* Indicador de pasos — hover revela el stepper sobre el body */}
-            {!firmandoConsentimiento && (
-              <div
-                className="relative"
-                onMouseEnter={() => setShowSteps(true)}
-                onMouseLeave={() => setShowSteps(false)}
-              >
-                <button
-                  type="button"
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground px-2 py-1 rounded-md hover:bg-muted/60 transition-colors"
-                >
-                  {activeSteps.map((step, i) => (
-                    <div
-                      key={step}
-                      className={cn(
-                        'h-1.5 w-4 rounded-full transition-colors',
-                        statusByStep[step] === 'done' || statusByStep[step] === 'skipped'
-                          ? 'bg-green-500'
-                          : step === displayStep
-                          ? 'bg-primary'
-                          : 'bg-muted-foreground/30'
-                      )}
-                    />
-                  ))}
-                </button>
-              </div>
-            )}
             <Button
               variant="ghost"
               size="icon"
@@ -265,62 +239,68 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
           </div>
         </div>
 
-        {/* Body — posición relativa para que el overlay de pasos se superponga */}
-        <div
-          className="flex-1 overflow-y-auto px-5 py-4 min-h-0 relative"
-          onMouseEnter={() => setShowSteps(false)}
-        >
-          {/* Overlay de pasos — aparece con blur al hover del indicador */}
-          {showSteps && !firmandoConsentimiento && (
-            <div
-              className="absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-sm bg-background/60"
-              onMouseEnter={() => setShowSteps(true)}
-              onMouseLeave={() => setShowSteps(false)}
-            >
-              <div className="flex items-center gap-3 text-sm">
-                {activeSteps.map((step, i) => {
-                  const status = statusByStep[step]
-                  const isViewing = step === displayStep
-                  const isClickable = status === 'done' || status === 'skipped'
-                  return (
-                    <div key={step} className="flex items-center gap-3">
-                      <button
-                        type="button"
-                        disabled={!isClickable}
-                        onClick={() => {
-                          if (isClickable) setViewingStep(step === viewingStep ? null : step)
-                          setShowSteps(false)
-                        }}
-                        className={cn(
-                          'flex items-center gap-2 rounded-lg px-3 py-2 transition-colors',
-                          isClickable ? 'cursor-pointer hover:bg-muted/80' : 'cursor-default',
-                          isViewing ? 'bg-muted/60 ring-1 ring-border' : ''
-                        )}
-                      >
-                        <div className={cn(
-                          'flex items-center justify-center h-6 w-6 rounded-full text-[10px] font-bold shrink-0',
-                          status === 'done' || status === 'skipped' ? 'bg-green-100 text-green-700'
-                            : status === 'current' ? 'bg-primary text-primary-foreground'
-                            : 'bg-muted text-muted-foreground'
-                        )}>
-                          {status === 'done' || status === 'skipped' ? <Check className="h-3.5 w-3.5" /> : i + 1}
-                        </div>
-                        <span className={cn(
-                          'font-medium',
-                          status === 'current' || isViewing ? 'text-foreground' : 'text-muted-foreground',
-                          status === 'skipped' && 'line-through opacity-60'
-                        )}>
-                          {stepLabel(step)}
-                        </span>
-                      </button>
-                      {i < activeSteps.length - 1 && <div className="w-6 h-px bg-border" />}
-                    </div>
-                  )
-                })}
-              </div>
+        {/* Pasos — siempre a la vista, con su nombre: nada depende del hover. */}
+        {!firmandoConsentimiento && cita && !cita.deuda_info && (
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b bg-muted/20 px-5 py-2.5 shrink-0">
+            <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Pasos de recepción">
+              {activeSteps.map((step, i) => {
+                const status = statusByStep[step]
+                const isViewing = step === displayStep && !allDone
+                const hecho = status === 'done' || status === 'skipped'
+                return (
+                  <li key={step} className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      disabled={!hecho}
+                      aria-current={status === 'current' ? 'step' : undefined}
+                      onClick={() => setViewingStep(step === viewingStep ? null : step)}
+                      className={cn(
+                        'flex items-center gap-1.5 rounded-full py-1 pl-1 pr-2.5 transition-colors',
+                        hecho ? 'cursor-pointer hover:bg-muted' : 'cursor-default',
+                        isViewing && 'bg-white ring-1 ring-border',
+                      )}
+                    >
+                      <span className={cn(
+                        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold',
+                        hecho ? 'bg-green-100 text-green-700'
+                          : status === 'current' ? 'bg-primary text-primary-foreground'
+                          : 'bg-muted text-muted-foreground',
+                      )}>
+                        {hecho ? <Check className="h-3 w-3" /> : i + 1}
+                      </span>
+                      <span className={cn(
+                        'font-medium',
+                        status === 'current' || isViewing ? 'text-foreground' : 'text-muted-foreground',
+                        status === 'skipped' && 'line-through opacity-60',
+                      )}>
+                        {stepLabel(step)}
+                      </span>
+                    </button>
+                    {i < activeSteps.length - 1 && <span className="h-px w-3 bg-border" aria-hidden />}
+                  </li>
+                )
+              })}
+            </ol>
+            <div className="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+              <span className={cn('font-medium', allDone ? 'text-green-700' : 'text-muted-foreground')}>
+                {allDone ? 'Listo para atender' : textoFaltan(pasosPendientes)}
+              </span>
+              {puedeCambiarPasos && (
+                <Link
+                  href="/configuracion/recepcion"
+                  onClick={() => handleOpenChange(false)}
+                  className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground hover:underline"
+                >
+                  <Settings2 className="h-3 w-3" />
+                  Cambiar los pasos de recepción
+                </Link>
+              )}
             </div>
-          )}
+          </div>
+        )}
 
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 relative">
           {cita?.deuda_info ? (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
               <div className="h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">
@@ -352,12 +332,27 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
                 <CheckCircle2 className="h-8 w-8 text-green-600" />
               </div>
               <div className="max-w-sm">
-                <p className="text-lg font-semibold">Paciente listo</p>
+                <p className="text-lg font-semibold">Listo para atender</p>
                 <p className="text-sm text-muted-foreground mt-1.5">
-                  Todos los pasos fueron completados. El profesional puede iniciar la atención desde <span className="font-medium text-foreground">Mis atenciones</span>.
+                  Recepción terminó de preparar al paciente. La atención la inicia el profesional desde{' '}
+                  <span className="font-medium text-foreground">Mis atenciones</span>.
                 </p>
               </div>
-              <Button onClick={() => handleOpenChange(false)}>Cerrar</Button>
+              <div className="flex flex-wrap justify-center gap-2">
+                {puedeIniciar && (
+                  <Button
+                    onClick={() => {
+                      handleOpenChange(false)
+                      if (onIniciarAtencion) onIniciarAtencion()
+                      else router.push(`/atenciones/${citaId}`)
+                    }}
+                  >
+                    <Play className="h-3.5 w-3.5 mr-1.5" />
+                    {onIniciarAtencion ? 'Iniciar atención' : 'Ir a la atención'}
+                  </Button>
+                )}
+                <Button variant={puedeIniciar ? 'outline' : 'default'} onClick={() => handleOpenChange(false)}>Cerrar</Button>
+              </div>
             </div>
           ) : !cita ? (
             <div className="flex items-center justify-center h-full">
@@ -394,7 +389,11 @@ export function IniciarAtencionWizard({ citaId, onClose }: Props) {
                 <VerificacionFacialContent
                   pacienteId={cita.paciente}
                   citaId={citaId}
-                  onCompletado={() => setVerificacionCompletada(true)}
+                  onCompletado={() => {
+                    setVerificacionCompletada(true)
+                    // La cola y el detalle leen el paso desde la cita.
+                    queryClient.invalidateQueries({ queryKey: ['citas'] })
+                  }}
                 />
               </div>
             </div>

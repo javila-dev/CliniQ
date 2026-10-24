@@ -409,6 +409,34 @@ def _validar_deuda_paciente(paciente, clinica, *, accion="iniciar la atención")
     })
 
 
+def pasos_recepcion_pendientes(cita) -> list[str]:
+    """Pasos encendidos de Preparar paciente que la cita aún no cumple.
+
+    Sin ellos no se inicia la atención (decisión del 21/10/2026): si se pudiera
+    iniciar sin completarlos, recepción se los saltaría siempre. La llegada ya
+    la exige el flujo (de "confirmada" no se pasa a "en curso") y el
+    consentimiento se valida aparte. Los add-ons apagados no cuentan.
+    """
+    from apps.cobros.models import Cobro
+    from apps.configuracion.models import ConfiguracionWizard
+
+    clinica = cita.sede.clinica
+    config, _ = ConfiguracionWizard.objects.get_or_create(clinica=clinica)
+    pendientes = []
+    # Un intento de verificación basta, coincida o no; "Continuar sin verificar"
+    # deja un registro omitido.
+    if config.paso_verificacion_facial and clinica.facial_verificacion_habilitada and not cita.checkins.exists():
+        pendientes.append("Verificación de identidad")
+    # Una cita de una cotización la cobra la cartera, no recepción.
+    if config.paso_pago and cita.item_cotizacion_id is None and not Cobro.objects.filter(
+        cita=cita, estado__in=[Cobro.Estado.PAGADO, Cobro.Estado.PAGADO_PARCIAL],
+    ).exists():
+        pendientes.append("Pago")
+    if config.paso_firma_asistencia and cita.firma_asistencia_estado != Cita.FirmaAsistenciaEstado.FIRMADA:
+        pendientes.append("Firma de asistencia")
+    return pendientes
+
+
 def _bloquear_agenda_del_profesional(profesional_id):
     """Serializa las reservas del mismo profesional: dos recepcionistas (o un
     doble clic) ya no pueden tomar el mismo horario a la vez. Se usa dentro de

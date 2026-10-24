@@ -181,8 +181,19 @@ class EstadoDeLaPreparacionTests(PreparacionBase):
         self.assertFalse(paso["requerido"])
         self.assertIn("Pago", paso["resumen"])
         self.assertIn("Firma de asistencia", paso["resumen"])
+        self.assertIn("2 pasos antes de atender", paso["resumen"])
         # La verificación de llegada depende del add-on de WhatsApp.
         self.assertNotIn("Verificación de llegada", paso["resumen"])
+
+    def test_recepcion_sin_pasos_explica_que_pasa_directo(self):
+        from apps.configuracion.models import ConfiguracionWizard
+
+        self._whatsapp(False)
+        ConfiguracionWizard.objects.update_or_create(
+            clinica=self.clinica, defaults={"paso_pago": False, "paso_firma_asistencia": False},
+        )
+
+        self.assertIn("0 pasos", self._pasos()["recepcion"]["resumen"])
 
     def test_recepcion_incluye_la_verificacion_de_llegada_con_el_addon(self):
         self._whatsapp(True)

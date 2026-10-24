@@ -16,11 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useFormasPago } from '@/hooks/useFormasPago'
 import type { Cita } from '@/types/agenda'
 
-/** El paso "Pago" está hecho cuando el cobro de la cita tiene pagos. Un cobro
- *  creado cuyo pago falló sigue pendiente (M6-13). */
-export function cobroConPagos(cita: Pick<Cita, 'cobro_estado'>): boolean {
-  return cita.cobro_estado === 'pagado' || cita.cobro_estado === 'pagado_parcial'
-}
+export { cobroConPagos } from '@/lib/recepcion'
 
 interface Props {
   cita: Cita
@@ -179,27 +175,6 @@ export function PagoContent({ cita, soloRegistrar = false, onInicioExitoso, onRe
           </p>
         </div>
         <Button variant="outline" onClick={() => onRegistradoSinAvance?.()}>Cerrar</Button>
-      </div>
-    )
-  }
-
-  // Quien atiende y recibe a su paciente puede no cobrar: el pago queda pendiente
-  // y recepción lo registra después desde la cita (el asistente se reabre).
-  if (!hasPermission(user, PERM.COBROS_CREAR)) {
-    return (
-      <div className="flex flex-col items-center gap-3 py-6 text-center">
-        <Lock className="h-8 w-8 text-muted-foreground" />
-        <div>
-          <p className="font-semibold">El cobro lo registra recepción</p>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Tu rol no registra pagos. El cobro de {cita.paciente_nombre} queda pendiente y se puede registrar
-            después desde la cita.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {onCancel && <Button variant="outline" onClick={onCancel}>Cerrar</Button>}
-          {onPagoRegistrado && <Button onClick={onPagoRegistrado}>Continuar sin cobrar</Button>}
-        </div>
       </div>
     )
   }

@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Check, Loader2, RotateCcw } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Loader2, RotateCcw } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
 import { clinicasApi } from '@/lib/api/clinicas'
 import type { GuardarPreparacionRequest, NivelPreparacion, SetupChecklist, SetupChecklistItem } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { FlujoRecepcionEditor } from '@/components/configuracion/FlujoRecepcionEditor'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
@@ -172,6 +173,7 @@ export default function PrepararClinicaPage() {
                 ocupado={guardar.isPending || yoAtiendo.isPending}
                 onOmitir={() => guardar.mutate({ omitir: paso.key })}
                 onYoAtiendo={() => yoAtiendo.mutate()}
+                onActualizar={() => qc.invalidateQueries({ queryKey: QUERY_KEY })}
               />
             ))}
           </div>
@@ -209,7 +211,7 @@ export default function PrepararClinicaPage() {
 }
 
 function FilaDePaso({
-  paso, numero, esSiguiente, ocupado, onOmitir, onYoAtiendo,
+  paso, numero, esSiguiente, ocupado, onOmitir, onYoAtiendo, onActualizar,
 }: {
   paso: SetupChecklistItem
   numero: number
@@ -217,8 +219,12 @@ function FilaDePaso({
   ocupado: boolean
   onOmitir: () => void
   onYoAtiendo: () => void
+  onActualizar: () => void
 }) {
   const puedeOmitir = !paso.requerido && !paso.completado
+  // Los pasos de recepción se cambian aquí mismo, viendo el recorrido completo.
+  const enLinea = paso.key === 'recepcion'
+  const [abierto, setAbierto] = useState(false)
 
   // Un círculo por estado: hecho, siguiente paso o pendiente.
   const circulo = paso.completado
@@ -252,12 +258,19 @@ function FilaDePaso({
         <p className={cn('text-sm leading-snug', paso.completado ? 'text-gray-600' : 'text-gray-800')}>{paso.resumen}</p>
 
         <div className="flex flex-wrap items-center gap-2 pt-0.5">
-          <Button asChild size="sm" variant={paso.completado || !esSiguiente ? 'outline' : 'default'}>
-            <Link href={paso.href}>
-              {paso.completado ? 'Revisar' : paso.accion}
-              {!paso.completado && <ArrowRight className="ml-1.5 h-3.5 w-3.5" />}
-            </Link>
-          </Button>
+          {enLinea ? (
+            <Button size="sm" variant="outline" aria-expanded={abierto} onClick={() => setAbierto((v) => !v)}>
+              {abierto ? 'Ocultar los pasos' : 'Ver y cambiar los pasos'}
+              <ChevronDown className={cn('ml-1.5 h-3.5 w-3.5 transition-transform', abierto && 'rotate-180')} />
+            </Button>
+          ) : (
+            <Button asChild size="sm" variant={paso.completado || !esSiguiente ? 'outline' : 'default'}>
+              <Link href={paso.href}>
+                {paso.completado ? 'Revisar' : paso.accion}
+                {!paso.completado && <ArrowRight className="ml-1.5 h-3.5 w-3.5" />}
+              </Link>
+            </Button>
+          )}
 
           {paso.puede_marcarse_profesional && !paso.completado && (
             <Button size="sm" variant="outline" disabled={ocupado} onClick={onYoAtiendo}>
@@ -272,6 +285,12 @@ function FilaDePaso({
             </Button>
           )}
         </div>
+
+        {enLinea && abierto && (
+          <div className="overflow-hidden rounded-xl border">
+            <FlujoRecepcionEditor onGuardado={onActualizar} />
+          </div>
+        )}
       </div>
     </div>
   )

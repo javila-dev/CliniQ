@@ -81,12 +81,14 @@ tratamiento, esa sesión queda marcada como realizada.
         "keywords": "wizard, asistente, llegada, check-in, otp, consentimiento, pago, firma, pasos, recepción",
         "destacado": False,
         "contenido": """
-Antes de que el paciente pase al consultorio, CliniQ abre un asistente con los
-pasos que tu clínica haya decidido exigir. Cada paso se marca en verde cuando se
-cumple, y el asistente avanza solo hasta el siguiente pendiente.
+Antes de que el paciente pase al consultorio, recepción abre **Preparar
+paciente**, un asistente con los pasos que tu clínica haya decidido exigir. Cada
+paso se marca en verde cuando se cumple, y el asistente avanza solo hasta el
+siguiente pendiente.
 
-Los puntos de colores del encabezado son el recorrido completo. Al pasar el
-cursor por encima se despliegan con su nombre y su estado.
+Debajo del encabezado está el recorrido completo, con el nombre de cada paso y
+cuántos faltan. Al terminar, el asistente muestra **Listo para atender**: la
+atención la inicia el profesional.
 
 ![Recorrido del asistente: Llegada, Consentimiento, Pago y Firma](/img/ayuda/asistente-de-inicio-de-atencion/02-pasos-del-asistente.png)
 
@@ -115,7 +117,9 @@ Con la llegada registrada, la cita pasa a **en espera**.
 ### 2. Identidad
 
 Verificación facial del paciente contra su foto de control. Es otro addon de
-pago: el paso solo aparece si tu clínica lo tiene habilitado.
+pago: el paso solo aparece si tu clínica lo tiene habilitado. Si el servicio de
+reconocimiento falla, **Continuar sin verificar** deja registrado quién saltó
+la verificación.
 
 ### 3. Consentimiento
 
@@ -125,9 +129,9 @@ procedimiento exige consentimiento, hay que resolverlo antes de atender.
 
 ### 4. Pago
 
-Registra el cobro de la sesión: medio de pago y valor recibido. Puedes dejar el
-valor en cero si el pago queda pendiente; el cobro igual queda creado y visible
-en cartera.
+Registra el cobro de la sesión: medio de pago y valor recibido. Lo puede
+registrar quien prepara al paciente, aunque su rol no cobre en otras pantallas.
+Si tu clínica no cobra al momento de la cita, apaga este paso.
 
 Cuando la cita corresponde a un **tratamiento ya vendido**, este paso no pide
 dinero, porque el cobro va por la cartera de la cotización. En ese caso el paso
@@ -142,7 +146,9 @@ actualiza sola en cuanto llega la firma.
 
 ## Qué se puede activar y desactivar
 
-En **Configuración** cada clínica decide qué pasos exigir:
+En **Configuración** cada clínica decide qué pasos exigir. Los pasos encendidos
+son obligatorios: mientras falte alguno, el profesional no puede iniciar la
+atención y ve qué falta.
 
 | Paso | ¿Se puede desactivar? |
 |---|---|

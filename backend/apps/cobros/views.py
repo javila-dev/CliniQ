@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal
 
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
@@ -24,12 +25,62 @@ from apps.cobros.services import agregar_item_cobro, registrar_pago, reversar_pa
 from apps.core.logging import registrar_accion
 from apps.inventario.models import Insumo
 from apps.users.authorization import user_sede_ids_acotadas
-from apps.users.permissions import RequirePermission, get_clinica_activa
+from apps.users.permissions import PuedeGestionarLlegada, RequirePermission, get_clinica_activa
+from rest_framework.permissions import BasePermission
 from django.utils import timezone
 import logging
 import uuid
 
 logger = logging.getLogger(__name__)
+
+
+class PuedeCrearCobro(BasePermission):
+    """Crear un cobro: con "cobros.crear", o el cobro de una cita que se está
+    preparando, por quien maneja Preparar paciente para esa cita.
+
+    El pago es un paso de la preparación sin el que no se inicia la atención:
+    quien puede preparar al paciente tiene que poder cobrar (decisión del
+    21/10/2026). El precio sigue validado contra la lista de precios."""
+
+    message = "No tienes permiso para registrar cobros."
+
+    def has_permission(self, request, view):
+        if RequirePermission("cobros.crear")().has_permission(request, view):
+            return True
+        from apps.agenda.models import Cita
+
+        cita_id = request.data.get("cita") if hasattr(request, "data") else None
+        if not cita_id or not getattr(request.user, "is_authenticated", False):
+            return False
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return False
+        try:
+            cita = Cita.objects.filter(
+                id=cita_id,
+                sede__clinica=clinica,
+                estado__in=[Cita.Estado.CONFIRMADA, Cita.Estado.EN_ESPERA],
+            ).first()
+        except (ValueError, DjangoValidationError):
+            return False
+        if cita is None:
+            return False
+        # Solo el cobro de esa cita: mismo paciente y sede, sin otro origen.
+        if str(request.data.get("paciente", cita.paciente_id)) != str(cita.paciente_id):
+            return False
+        if str(request.data.get("sede", cita.sede_id)) != str(cita.sede_id):
+            return False
+        if request.data.get("origen", Cobro.Origen.CITA) != Cobro.Origen.CITA:
+            return False
+        # Solo el procedimiento de la cita (sin insumos ni otros servicios).
+        items = request.data.get("items") or []
+        if not isinstance(items, list) or any(
+            not isinstance(item, dict) or item.get("tipo") != "servicio"
+            or str(item.get("servicio")) != str(cita.servicio_id)
+            for item in items
+        ):
+            return False
+        return PuedeGestionarLlegada().has_object_permission(request, view, cita)
 
 
 class CobroViewSet(ModelViewSet):
@@ -53,7 +104,7 @@ class CobroViewSet(ModelViewSet):
         if self.action == "destroy":
             return [RequirePermission("cobros.anular")()]
         if self.action == "create":
-            return [RequirePermission("cobros.crear")()]
+            return [PuedeCrearCobro()]
         if self.action in {"agregar_item", "eliminar_item"}:
             return [RequirePermission("cobros.editar_items")()]
         if self.action == "registrar_pago_action":

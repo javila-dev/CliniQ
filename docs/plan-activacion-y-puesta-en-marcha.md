@@ -420,9 +420,31 @@ Los estados mostrados (Sin llegar, En preparación, Listo para atender, En atenc
 
 Hoy `IniciarAtencionWizard` cubre las dos cosas: desde `confirmada` registra la llegada (→ `en_espera`) y desde `en_espera` completa pago y firma y mueve la cita a `en_curso`. Antes de renombrarlo a **Preparar paciente** hay que decidir dónde termina la preparación y quién mueve la cita a `en_curso`. La propuesta es que el asistente de recepción termine en "Listo para atender" (estado derivado) y que solo el profesional inicie la atención.
 
-### Por decidir
+**Decidido (21/10/2026):** el asistente se llama **Preparar paciente** y termina en **Listo para atender**; solo el profesional mueve la cita a `en_curso`. Si quien prepara también atiende (`canIniciarAtencion`), al final ve **Ir a la atención**, que abre la pantalla de la atención; allí se inicia con el botón de siempre, que conserva sus validaciones (firma del profesional, consentimientos).
 
-Qué ocurre con la cita cuando se apaga un paso de **pago** o **firma**: hoy ninguno de los dos deja un registro alternativo si están apagados (nadie cobra ni firma nada por otro lado). Falta decidir si eso es intencional o si hace falta un aviso o un registro manual, y mostrar la consecuencia junto a cada interruptor.
+### Decidido: pago o firma apagados
+
+Apagar el **pago** o la **firma de asistencia** es intencional y no deja registro alternativo. Junto al interruptor apagado se muestra la consecuencia: sin pago, "recepción no cobra al llegar; si cobras, regístralo en Cobros"; sin firma, "no queda constancia firmada de que el paciente asistió".
+
+### Decidido: control estricto para iniciar la atención (21/10/2026)
+
+Sin los pasos encendidos no se inicia la atención; si se pudiera, recepción se saltaría el asistente siempre. Lo valida el **backend** al pasar a `en_curso` (`pasos_recepcion_pendientes`, código `PASOS_RECEPCION_PENDIENTES`), así que no hay atajo por ninguna pantalla:
+
+- **Llegada:** ya la exigía el flujo (de `confirmada` no se pasa a `en_curso`).
+- **Verificación facial:** basta un intento registrado para la cita, coincida o no. "Continuar sin verificar" (cuando el servicio falla) crea un registro `CheckIn` con `omitido=True` y quién lo hizo (`POST /pacientes/<id>/omitir_verificacion/`, migración `pacientes 0011`).
+- **Consentimiento:** sin cambios, ya se validaba.
+- **Pago:** un cobro con pagos (pagado o parcial), o una cita de cotización. Se eliminó "Continuar sin cobrar": **quien puede manejar Preparar paciente de una cita puede cobrarla** aunque su rol no tenga `cobros.crear` (solo esa cita, su procedimiento y al precio de lista).
+- **Firma de asistencia:** firmada.
+
+### Estado de implementación
+
+En la rama local `feature/recepcion-pasos`, sin commit.
+
+- ✅ **Lógica compartida** en `frontend/src/lib/recepcion.ts`: pasos activos, qué falta, estado operativo derivado de `EstadoCita` (Sin llegar, En preparación, Listo para atender, En atención, Finalizada) y nombres de los pasos. La usan el asistente, la cola, el detalle de la cita y la pantalla de la atención; antes cada una tenía su propia copia.
+- ✅ **Configuración con nodos:** `FlujoRecepcionEditor` (Configuración > Recepción y en línea en Preparar mi clínica) muestra el consentimiento como paso fijo ("Si aplica"), la vista previa "Recepción verá: N pasos antes de atender", la consecuencia de apagar pago o firma, y los add-ons fuera del plan con un botón "No incluido" que explica cómo activarlos. Si la verificación facial está activa, enlaza a los ajustes avanzados de Biometría. El resumen del paso en Preparar mi clínica dice lo mismo ("Recepción verá N pasos antes de atender: …").
+- ✅ **Operación diaria:** el asistente muestra siempre los pasos con su nombre (ya no depende del hover) y "Faltan N pasos". La cola del profesional explica en la fila por qué no se puede iniciar (antes era un tooltip). El detalle de la cita tiene un bloque "Preparación" con el estado y los pasos, y el botón pasa a "Preparar paciente" (o "Ir a la atención" + "Revisar preparación" cuando está listo). La pantalla de la atención sin iniciar ya no deja iniciar mientras falte un paso (antes bastaba "en espera"); muestra qué falta y quién lo resuelve. Los administradores ven "Cambiar los pasos de recepción" en el asistente y en cada mensaje de bloqueo.
+- ✅ **Ayuda:** el artículo "El asistente de inicio de atención" ya no habla del hover; el script `e2e/capturas/ayuda.spec.ts` usa "Preparar paciente". **Al desplegar hay que correr `python manage.py cargar_ayuda`** y recapturar las dos imágenes del artículo.
+- ✅ **La verificación facial cuenta en todas las pantallas:** la cita expone `verificacion_identidad_registrada`.
 
 - ✅ **Verificado que el asistente ya respeta la configuración de la clínica, incluso con todo apagado.** Se dudó de que "todos los pasos apagados" dejara el asistente trabado (`activeSteps` vacío). Revisado a fondo: `'consentimiento'` siempre queda en la lista de pasos activos (no depende de ningún interruptor), así que nunca queda vacía; si el procedimiento no exige consentimiento, se completa sola y el asistente pasa igual a "Paciente listo". No hizo falta ningún cambio de código.
 
