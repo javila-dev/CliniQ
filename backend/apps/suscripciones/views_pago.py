@@ -211,6 +211,19 @@ class CambiarTarjetaView(_PagoBase):
         return Response(SuscripcionSerializer(s).data)
 
 
+class ReintentarPagoView(_PagoBase):
+    """Cobra ya, con la tarjeta guardada, el periodo que quedó sin pagar."""
+
+    def post(self, request):
+        s = self.suscripcion(request)
+        try:
+            cobro = cobros.reintentar_ahora(s, usuario=request.user)
+        except (cobros.CobroNoPermitido, wompi.WompiError) as exc:
+            return _error(str(exc))
+        s.refresh_from_db()
+        return Response({**CobroSerializer(cobro).data, "suscripcion": SuscripcionSerializer(s).data})
+
+
 class CambiarPlanView(_PagoBase):
     def post(self, request):
         s = self.suscripcion(request)

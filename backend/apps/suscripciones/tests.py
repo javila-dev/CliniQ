@@ -1,3 +1,4 @@
+from io import StringIO
 from datetime import timedelta
 
 from django.test import TestCase
@@ -432,3 +433,15 @@ class BienvenidaYPreparacionTests(ClinicaFixtureMixin, TestCase):
         respuesta = self.client.patch("/api/v1/core/configuracion-global/", {"correos_ciclo_vida_habilitados": True}, format="json")
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         self.assertTrue(ConfiguracionGlobal.get_solo().correos_ciclo_vida_habilitados)
+
+
+class TareaProgramadaTests(TestCase):
+    def test_la_tarea_guarda_cuando_corrio_y_la_simulacion_no(self):
+        from django.core.management import call_command
+
+        from apps.core.models import ConfiguracionGlobal
+
+        call_command("procesar_suscripciones", "--simular", stdout=StringIO())
+        self.assertIsNone(ConfiguracionGlobal.get_solo().suscripciones_procesadas_el)
+        call_command("procesar_suscripciones", stdout=StringIO())
+        self.assertIsNotNone(ConfiguracionGlobal.get_solo().suscripciones_procesadas_el)

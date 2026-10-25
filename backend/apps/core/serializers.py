@@ -8,9 +8,10 @@ class ConfiguracionGlobalSerializer(serializers.ModelSerializer):
         model = ConfiguracionGlobal
         fields = [
             "centro_ayuda_habilitado", "correos_ciclo_vida_habilitados",
-            "dias_prueba", "plan_prueba", "whatsapp_envios_prueba", "updated_at",
+            "dias_prueba", "plan_prueba", "whatsapp_envios_prueba",
+            "suscripciones_procesadas_el", "updated_at",
         ]
-        read_only_fields = ["updated_at"]
+        read_only_fields = ["suscripciones_procesadas_el", "updated_at"]
 
 
 class LogAccionSerializer(serializers.ModelSerializer):

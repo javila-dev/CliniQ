@@ -8,6 +8,8 @@ export interface ConfiguracionGlobal {
   plan_prueba: string | null
   /** Envíos de WhatsApp por el número de CliniQ durante toda la prueba (0 = sin límite). */
   whatsapp_envios_prueba: number
+  /** Última vez que terminó la tarea programada `procesar_suscripciones` (null = nunca). */
+  suscripciones_procesadas_el: string | null
   updated_at: string
 }
 

@@ -7,7 +7,7 @@
 
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { CalendarPlus, Receipt } from 'lucide-react'
+import { CalendarPlus, CreditCard, Receipt } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -15,6 +15,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
+import { RUTA_PAGAR, inicioConTarjeta, invitarATarjeta } from '@/components/shared/SuscripcionAviso'
+import { useToast } from '@/hooks/use-toast'
 import { suscripcionesApi } from '@/lib/api/suscripciones'
 import type { AdminTenant } from '@/types/admin'
 import type { EstadoSuscripcion, SuscripcionAdmin } from '@/types/suscripciones'
@@ -226,6 +228,35 @@ function CobrosClinica({ clinicaId }: { clinicaId: string }) {
   )
 }
 
+/** Clínica con cobro manual: invitarla a registrar tarjeta con el enlace a la pantalla de pago. */
+function InvitarTarjeta({ s }: { s: SuscripcionAdmin }) {
+  const { toast } = useToast()
+  const inicio = inicioConTarjeta(s)
+  const copiar = async () => {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}${RUTA_PAGAR}`)
+      toast({ title: 'Enlace copiado', description: 'Solo funciona para quien administra la clínica, con su sesión iniciada.' })
+    } catch {
+      toast({ title: 'No se pudo copiar el enlace', variant: 'destructive' })
+    }
+  }
+  return (
+    <div className="mt-5 flex flex-col gap-3 rounded-lg border border-sky-200 bg-sky-50 px-3.5 py-3 text-sm sm:flex-row sm:items-center">
+      <CreditCard className="hidden h-4 w-4 shrink-0 text-sky-700 sm:block" />
+      <div className="min-w-0 flex-1 text-sky-900">
+        <p className="font-medium">Cobro manual, sin tarjeta: invítala a registrarla.</p>
+        <p className="mt-0.5 text-xs text-sky-800">
+          {inicio
+            ? `Si la registra hoy, se le cobra y el periodo con tarjeta empieza el ${inicio}, al terminar lo pagado.`
+            : 'Sin fecha de "pagado hasta": si registra la tarjeta se le cobra ese día y el periodo empieza ahí. Si ya pagó este periodo, registra antes el pago manual con su fecha.'}
+          {' '}Su administrador también ve el aviso en la app.
+        </p>
+      </div>
+      <Button size="sm" variant="outline" className="shrink-0 bg-white" onClick={copiar}>Copiar enlace</Button>
+    </div>
+  )
+}
+
 export function SuscripcionConsola({ tenant }: { tenant: AdminTenant }) {
   const [extenderOpen, setExtenderOpen] = useState(false)
   const [pagoOpen, setPagoOpen] = useState(false)
@@ -285,6 +316,8 @@ export function SuscripcionConsola({ tenant }: { tenant: AdminTenant }) {
           {s.intentos_fallidos > 0 && <Dato etiqueta="Cobros fallidos seguidos" valor={s.intentos_fallidos} />}
           {s.suspension_el && <Dato etiqueta="Se suspende" valor={fecha(s.suspension_el)} />}
         </div>
+
+        {invitarATarjeta(s) && <InvitarTarjeta s={s} />}
 
         {s.nota_interna && (
           <p className="mt-5 whitespace-pre-line rounded-lg bg-muted/60 px-3 py-2.5 text-sm text-muted-foreground">{s.nota_interna}</p>

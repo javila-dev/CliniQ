@@ -15,7 +15,7 @@ import { ArrowLeft, CheckCircle2, CreditCard, Loader2, Lock, XCircle } from 'luc
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { MI_SUSCRIPCION_KEY } from '@/components/shared/SuscripcionAviso'
+import { inicioConTarjeta, invitarATarjeta, MI_SUSCRIPCION_KEY } from '@/components/shared/SuscripcionAviso'
 import { erroresFacturacion, FormFacturacion, type ErroresFacturacion } from './FormFacturacion'
 import { suscripcionesApi, tokenizarTarjeta, type DatosTarjeta } from '@/lib/api/suscripciones'
 import { cn } from '@/lib/utils'
@@ -403,6 +403,11 @@ export function PagoSuscripcion({ modo }: { modo: ModoPago }) {
               <p className="mt-1 text-2xl font-semibold tabular-nums">{COP.format(total)}</p>
               {config.suscripcion?.estado === 'prueba' && (
                 <p className="mt-1 text-muted-foreground">Se cobra hoy y el periodo empieza cuando termine tu prueba: no pierdes los días que te quedan.</p>
+              )}
+              {invitarATarjeta(config.suscripcion) && inicioConTarjeta(config.suscripcion!) && (
+                <p className="mt-1 text-muted-foreground">
+                  Se cobra hoy y el periodo empieza el {inicioConTarjeta(config.suscripcion!)}, cuando termina lo que ya pagaste.
+                </p>
               )}
             </div>
           )}

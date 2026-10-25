@@ -189,6 +189,9 @@ class CobroSuscripcion(BaseModel):
         PRIMER_PAGO = "primer_pago", "Primer pago"
         RENOVACION = "renovacion", "Renovación"
         CAMBIO_PLAN = "cambio_plan", "Cambio de plan"
+        # La clínica reintenta en mora o en solo lectura con su tarjeta guardada.
+        # Si se rechaza no suma intentos ni cambia la cuenta (eso es solo de la renovación).
+        REINTENTO = "reintento", "Reintento de pago"
 
     class Estado(models.TextChoices):
         PENDIENTE = "pendiente", "Pendiente"
