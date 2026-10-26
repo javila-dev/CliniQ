@@ -41,13 +41,13 @@ export function ProductTheater() {
     <div
       className="lv3-rise lv3-rise-3 relative mx-auto w-full max-w-[560px] lg:mx-0 lg:ml-auto lg:w-[560px]"
       role="img"
-      aria-label="Ejemplo de un día en CliniQ: un recordatorio por WhatsApp, la cita que pasa a confirmada, un consentimiento firmado y una cuota pagada."
+      aria-label="Un día en CliniQ: un recordatorio por WhatsApp, la cita que pasa a confirmada, un consentimiento firmado y una cuota pagada."
     >
       <div aria-hidden className="pointer-events-none absolute -inset-14 -z-10 bg-[radial-gradient(50%_50%_at_60%_50%,rgba(217,34,111,0.3),transparent_72%)]" />
 
       <div className="grid gap-3 sm:grid-cols-2">
         <Panel className="sm:col-span-2">
-          <PanelHead title="Agenda · Sede Norte" meta="Ejemplo · Mié 24" />
+          <PanelHead title="Agenda · Sede Norte" meta="Mié 24" />
           <ul>
             <Fila hora="09:00" servicio="Limpieza facial" paciente="M. Rojas">
               <span className={PILL_OK}>Completada</span>
@@ -134,10 +134,6 @@ export function ProductTheater() {
           </div>
         </Panel>
       </div>
-
-      <p className="mt-4 text-center text-xs text-[var(--lv3-faint)] lg:text-right">
-        Ejemplo ilustrativo · datos ficticios
-      </p>
     </div>
   )
 }

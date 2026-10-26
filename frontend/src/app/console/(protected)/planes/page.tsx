@@ -78,7 +78,6 @@ function PlanDialog({
 
   const [facialHabilitado, setFacialHabilitado] = useState(plan?.facial_verificacion_habilitada ?? false)
   const [moduloEstetico, setModuloEstetico]     = useState(plan?.modulo_estetico_habilitado ?? true)
-  const [moduloObesidad, setModuloObesidad]     = useState(plan?.modulo_obesidad_habilitado ?? false)
   const [whatsappHabilitado, setWhatsappHabilitado] = useState(plan?.whatsapp_habilitado ?? true)
   const [numeroPropio, setNumeroPropio] = useState(plan?.whatsapp_numero_propio_habilitado ?? false)
   const [mostrarPublico, setMostrarPublico]     = useState(plan?.mostrar_publico ?? false)
@@ -87,7 +86,6 @@ function PlanDialog({
   useEffect(() => {
     setFacialHabilitado(plan?.facial_verificacion_habilitada ?? false)
     setModuloEstetico(plan?.modulo_estetico_habilitado ?? true)
-    setModuloObesidad(plan?.modulo_obesidad_habilitado ?? false)
     setWhatsappHabilitado(plan?.whatsapp_habilitado ?? true)
     setNumeroPropio(plan?.whatsapp_numero_propio_habilitado ?? false)
     setMostrarPublico(plan?.mostrar_publico ?? false)
@@ -107,7 +105,6 @@ function PlanDialog({
         descuento_anual_pct:      data.descuento_anual_pct ? Math.min(90, Math.max(0, parseInt(data.descuento_anual_pct, 10))) : 0,
         facial_verificacion_habilitada: facialHabilitado,
         modulo_estetico_habilitado: moduloEstetico,
-        modulo_obesidad_habilitado: moduloObesidad,
         whatsapp_habilitado: whatsappHabilitado,
         whatsapp_envios_incluidos: data.whatsapp_envios_incluidos ? parseInt(data.whatsapp_envios_incluidos, 10) : 0,
         // El número propio exige el addon base de WhatsApp (el backend también lo valida).
@@ -231,10 +228,6 @@ function PlanDialog({
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-gray-700">Módulo estético</p>
               <Switch checked={moduloEstetico} onCheckedChange={setModuloEstetico} />
-            </div>
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-gray-700">Módulo obesidad</p>
-              <Switch checked={moduloObesidad} onCheckedChange={setModuloObesidad} />
             </div>
             <div className="flex items-center justify-between gap-3">
               <p className="text-sm text-gray-700">WhatsApp (documentos, firma, check-in OTP, recordatorios)</p>

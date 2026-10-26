@@ -1416,19 +1416,19 @@ function DashboardContent() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              <div className={cn('grid px-5 py-2 bg-gray-50/60', canVerFinanzas ? 'grid-cols-4' : 'grid-cols-3')}>
-                {['Profesional', 'Citas', 'Compl.', ...(canVerFinanzas ? ['Tasa'] : [])].map(h => (
-                  <span key={h} className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">{h}</span>
+              <div className={cn('grid gap-x-3 px-5 py-2 bg-gray-50/60', canVerFinanzas ? 'grid-cols-[minmax(0,1fr)_3rem_3.5rem_3rem]' : 'grid-cols-[minmax(0,1fr)_3rem_3.5rem]')}>
+                {['Profesional', 'Citas', 'Compl.', ...(canVerFinanzas ? ['Tasa'] : [])].map((h, i) => (
+                  <span key={h} className={cn('text-[10px] font-semibold text-muted-foreground uppercase tracking-wide', i > 0 && 'text-right')}>{h}</span>
                 ))}
               </div>
               {ocupacionActiva.slice(0, 6).map(o => (
-                <div key={o.profesional_id} className={cn('grid px-5 py-2.5 items-center hover:bg-gray-50/50', canVerFinanzas ? 'grid-cols-4' : 'grid-cols-3')}>
-                  <span className="text-sm truncate pr-2">{o.profesional_nombre}</span>
-                  <span className="text-sm text-muted-foreground">{o.total_citas}</span>
-                  <span className="text-sm text-muted-foreground">{o.completadas}</span>
+                <div key={o.profesional_id} className={cn('grid gap-x-3 px-5 py-2.5 items-center hover:bg-gray-50/50', canVerFinanzas ? 'grid-cols-[minmax(0,1fr)_3rem_3.5rem_3rem]' : 'grid-cols-[minmax(0,1fr)_3rem_3.5rem]')}>
+                  <span className="text-sm truncate" title={toTitleCase(o.profesional_nombre)}>{toTitleCase(o.profesional_nombre)}</span>
+                  <span className="text-sm text-muted-foreground text-right tabular-nums">{o.total_citas}</span>
+                  <span className="text-sm text-muted-foreground text-right tabular-nums">{o.completadas}</span>
                   {canVerFinanzas && (
                     <span className={cn(
-                      'text-sm font-semibold',
+                      'text-sm font-semibold text-right tabular-nums',
                       Number(o.tasa_completadas_pct) >= 80 ? 'text-emerald-600' : Number(o.tasa_completadas_pct) >= 50 ? 'text-amber-600' : 'text-red-500'
                     )}>
                       {Number(o.tasa_completadas_pct).toFixed(0)}%

@@ -20,10 +20,8 @@ def marcar_clinica_como_recomendado(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-    # Va después de 0051. La rama feature/quitar-obesidad también parte de 0051
-    # (0052_quitar_modulo_obesidad): al unir las dos hace falta un merge de migraciones.
     dependencies = [
-        ("clinicas", "0051_nit_opcional"),
+        ("clinicas", "0052_quitar_modulo_obesidad"),
     ]
 
     operations = [

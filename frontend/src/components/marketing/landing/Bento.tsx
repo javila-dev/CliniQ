@@ -85,7 +85,6 @@ export function Bento() {
                 ))}
               </ul>
             </div>
-            <p className="mt-3 text-xs text-[var(--lv3-faint)]">Ejemplo ilustrativo · datos ficticios</p>
           </Tile>
 
           <Tile>
@@ -169,7 +168,6 @@ export function Bento() {
                 </li>
               ))}
             </ul>
-            <p className="mt-3 text-xs text-[var(--lv3-faint)]">Ejemplo ilustrativo · datos ficticios</p>
           </Tile>
         </div>
       </div>

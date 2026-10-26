@@ -40,7 +40,6 @@ const ETIQUETAS_CONTENIDO: Record<keyof TrasladoPrevisualizacion['contenido'], [
   zonas: ['marca de zonas', 'marcas de zonas'],
   insumos: ['insumo', 'insumos'],
   mediciones: ['medición', 'mediciones'],
-  tratamientos_farmacologicos: ['tratamiento farmacológico', 'tratamientos farmacológicos'],
 }
 
 export function describirContenido(contenido: TrasladoPrevisualizacion['contenido']): string {

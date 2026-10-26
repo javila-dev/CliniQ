@@ -72,10 +72,10 @@ def _copia(cita, notas) -> dict:
     from django.forms.models import model_to_dict
 
     from apps.historia_clinica.models import ConsumoInsumo, FotoClinica, OrdenMedica, ResultadoExamen
-    from apps.obesidad.models import MedicionAntropometrica, TratamientoFarmacologico
+    from apps.obesidad.models import MedicionAntropometrica
 
     nota_ids = [n.id for n in notas]
-    # Campos sueltos de una medición o un tratamiento: fechas y decimales como texto.
+    # Campos sueltos de una medición: fechas y decimales como texto.
     plano = lambda obj: {k: (str(v) if v is not None else None) for k, v in model_to_dict(obj).items()}
     return {
         "notas": [
@@ -126,7 +126,6 @@ def _copia(cita, notas) -> dict:
             for c in ConsumoInsumo.objects.filter(nota_id__in=nota_ids).select_related("insumo")
         ],
         "mediciones": [plano(m) for m in MedicionAntropometrica.objects.filter(Q(nota_id__in=nota_ids) | Q(cita=cita))],
-        "tratamientos_farmacologicos": [plano(t) for t in TratamientoFarmacologico.objects.filter(nota_id__in=nota_ids)],
     }
 
 
@@ -136,7 +135,7 @@ def eliminar(
     from apps.agenda.confirmacion import crear_registro_confirmacion
     from apps.historia_clinica.models import ConsumoInsumo, FotoClinica, NotaClinica, OrdenMedica, ResultadoExamen
     from apps.historia_clinica.services import eliminar_consumo_insumo
-    from apps.obesidad.models import MedicionAntropometrica, TratamientoFarmacologico
+    from apps.obesidad.models import MedicionAntropometrica
 
     motivo = (motivo or "").strip()
     if not motivo:
@@ -166,7 +165,6 @@ def eliminar(
         ResultadoExamen.objects.filter(nota_id__in=nota_ids).delete()
         OrdenMedica.objects.filter(Q(nota_id__in=nota_ids) | Q(cita=cita)).delete()
         MedicionAntropometrica.objects.filter(Q(nota_id__in=nota_ids) | Q(cita=cita)).delete()
-        TratamientoFarmacologico.objects.filter(nota_id__in=nota_ids).delete()
         ConsumoInsumo.objects.filter(nota_id__in=nota_ids).delete()
         NotaClinica.objects.filter(id__in=nota_ids).delete()
 

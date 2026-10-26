@@ -140,7 +140,6 @@ export function Precios({ planesIniciales }: { planesIniciales?: PlanPublico[] }
                     <Punto>{plan.max_sedes > 0 ? `Hasta ${plan.max_sedes} ${plan.max_sedes === 1 ? 'sede' : 'sedes'}` : 'Sedes ilimitadas'}</Punto>
                     {plan.facial_verificacion_habilitada && <Punto>Verificación facial</Punto>}
                     {plan.whatsapp_habilitado && <Punto>WhatsApp integrado</Punto>}
-                    {plan.modulo_obesidad_habilitado && <Punto>Módulo de obesidad</Punto>}
                   </ul>
                   <Link
                     href="/registro-clinica"

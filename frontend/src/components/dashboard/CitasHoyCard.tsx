@@ -28,6 +28,17 @@ const ETIQUETA: Partial<Record<EstadoCita, { texto: string; clase: string }>> = 
 // Filas de la lista: lo que está pasando más lo próximo, nunca la agenda entera.
 const MAX_FILAS = 5
 
+// "08:00 a. m." en una sola línea: el "a. m." chico para que no parta la fila en dos.
+function HoraCorta({ iso }: { iso: string }) {
+  const [hora, ...resto] = formatTime(iso).split(/\s+/)
+  return (
+    <>
+      {hora}
+      {resto.length > 0 && <span className="ml-0.5 text-[10px] font-medium opacity-70">{resto.join(' ')}</span>}
+    </>
+  )
+}
+
 interface Props {
   citas: Cita[] | undefined
   loading: boolean
@@ -139,12 +150,12 @@ export function CitasHoyCard({ citas, loading, titulo, mostrarProfesional, accio
                     key={cita.id}
                     href={`/agenda?cita=${cita.id}`}
                     className={cn(
-                      'flex items-center gap-3 px-5 py-2.5 transition-colors',
+                      'flex items-center gap-3 px-5 py-2 transition-colors',
                       actual ? 'bg-primary/[0.06] hover:bg-primary/10' : 'hover:bg-gray-50',
                     )}
                   >
-                    <span className={cn('w-12 shrink-0 text-sm font-semibold tabular-nums', actual ? 'text-primary' : 'text-foreground')}>
-                      {actual && cita.estado === 'en_curso' ? 'Ahora' : formatTime(cita.fecha_inicio)}
+                    <span className={cn('w-[4.5rem] shrink-0 whitespace-nowrap text-sm font-semibold tabular-nums', actual ? 'text-primary' : 'text-foreground')}>
+                      {actual && cita.estado === 'en_curso' ? 'Ahora' : <HoraCorta iso={cita.fecha_inicio} />}
                     </span>
                     <span className="min-w-0 flex-1 truncate text-sm">
                       <span className="font-medium">{cita.paciente_nombre}</span>

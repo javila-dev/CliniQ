@@ -483,7 +483,6 @@ function AddonsTab({ tenant }: { tenant: AdminTenant }) {
 
   const [facialOverride, setFacialOverride]         = useState<boolean | null>(tenant.facial_verificacion_override)
   const [esteticoOverride, setEsteticoOverride]     = useState<boolean | null>(tenant.modulo_estetico_override)
-  const [obesidadOverride, setObesidadOverride]     = useState<boolean | null>(tenant.modulo_obesidad_override)
   const [whatsappOverride, setWhatsappOverride]     = useState<boolean | null>(tenant.whatsapp_override)
   const [whatsappCupoOverride, setWhatsappCupoOverride] = useState<number | null>(tenant.whatsapp_envios_incluidos_override)
   const [numeroPropioOverride, setNumeroPropioOverride] = useState<boolean | null>(tenant.whatsapp_numero_propio_override)
@@ -493,18 +492,16 @@ function AddonsTab({ tenant }: { tenant: AdminTenant }) {
   useEffect(() => {
     setFacialOverride(tenant.facial_verificacion_override)
     setEsteticoOverride(tenant.modulo_estetico_override)
-    setObesidadOverride(tenant.modulo_obesidad_override)
     setWhatsappOverride(tenant.whatsapp_override)
     setWhatsappCupoOverride(tenant.whatsapp_envios_incluidos_override)
     setNumeroPropioOverride(tenant.whatsapp_numero_propio_override)
     setNumerosOverride(tenant.whatsapp_numeros_incluidos_override)
     setPuestaEnMarcha(tenant.modo_puesta_en_marcha)
-  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.modulo_obesidad_override, tenant.whatsapp_override, tenant.whatsapp_envios_incluidos_override, tenant.whatsapp_numero_propio_override, tenant.whatsapp_numeros_incluidos_override, tenant.modo_puesta_en_marcha])
+  }, [tenant.id, tenant.facial_verificacion_override, tenant.modulo_estetico_override, tenant.whatsapp_override, tenant.whatsapp_envios_incluidos_override, tenant.whatsapp_numero_propio_override, tenant.whatsapp_numeros_incluidos_override, tenant.modo_puesta_en_marcha])
 
   const addonsDirty =
     facialOverride   !== tenant.facial_verificacion_override ||
     esteticoOverride !== tenant.modulo_estetico_override ||
-    obesidadOverride !== tenant.modulo_obesidad_override ||
     whatsappOverride !== tenant.whatsapp_override ||
     whatsappCupoOverride !== tenant.whatsapp_envios_incluidos_override ||
     numeroPropioOverride !== tenant.whatsapp_numero_propio_override ||
@@ -515,7 +512,6 @@ function AddonsTab({ tenant }: { tenant: AdminTenant }) {
     mutationFn: () => adminApi.tenants.update(tenant.id, {
       facial_verificacion_override: facialOverride,
       modulo_estetico_override: esteticoOverride,
-      modulo_obesidad_override: obesidadOverride,
       whatsapp_override: whatsappOverride,
       whatsapp_envios_incluidos_override: whatsappCupoOverride,
       whatsapp_numero_propio_override: numeroPropioOverride,
@@ -563,15 +559,6 @@ function AddonsTab({ tenant }: { tenant: AdminTenant }) {
 
           <div className="border-t border-violet-100" />
 
-          <AddonOverrideRow
-            label="Módulo obesidad"
-            descripcion="Tratamientos, sesiones de seguimiento y control de peso."
-            defaultDelPlan={planSeleccionado?.modulo_obesidad_habilitado ?? false}
-            value={obesidadOverride}
-            onChange={setObesidadOverride}
-          />
-
-          <div className="border-t border-violet-100" />
 
           <AddonOverrideRow
             label="WhatsApp (documentos, firma, check-in OTP, recordatorios)"

@@ -24,7 +24,7 @@ export function Ficha() {
     <EnVista
       className="relative overflow-hidden rounded-[1.75rem] border border-[var(--lv3-line)] bg-[var(--lv3-surface)] p-5 sm:p-8"
       role="img"
-      aria-label="Ejemplo: el cuaderno de citas, el Excel de pagos, las fotos del celular y los chats quedan reunidos en la ficha de una paciente con su historia, próxima cita, tratamiento, consentimiento y saldo."
+      aria-label="El cuaderno de citas, el Excel de pagos, las fotos del celular y los chats quedan reunidos en la ficha de una paciente con su historia, próxima cita, tratamiento, consentimiento y saldo."
     >
       <div
         aria-hidden
@@ -76,7 +76,6 @@ export function Ficha() {
           </dl>
         </div>
 
-        <p className="mt-4 text-center text-xs text-[var(--lv3-faint)]">Ejemplo ilustrativo · datos ficticios</p>
       </div>
     </EnVista>
   )

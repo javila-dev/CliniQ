@@ -1,4 +1,5 @@
 from django.core.management.base import BaseCommand
+from django.utils import timezone
 
 from apps.core.models import ConfiguracionGlobal
 from apps.suscripciones.activacion import actualizar_hitos
@@ -20,6 +21,13 @@ class Command(BaseCommand):
         parser.add_argument("--simular", action="store_true", help="Muestra qué correos saldrían, sin enviarlos.")
 
     def handle(self, *args, simular=False, **options):
+        self._procesar(simular)
+        if not simular:
+            # Con update() para no tocar updated_at: lo que la consola muestra como último cambio de ajustes.
+            ConfiguracionGlobal.get_solo()
+            ConfiguracionGlobal.objects.filter(pk=1).update(suscripciones_procesadas_el=timezone.now())
+
+    def _procesar(self, simular):
         cambios = 0
         for suscripcion in Suscripcion.objects.select_related("clinica"):
             anterior = suscripcion.estado

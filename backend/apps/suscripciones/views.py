@@ -61,6 +61,15 @@ class MiSuscripcionView(APIView):
 
             facturacion = DatosFacturacion.objects.filter(clinica=clinica).first()
             datos["facturacion_incompleta"] = facturacion is None or bool(problemas_de(facturacion))
+        # Mora o solo lectura por renovaciones rechazadas: puede cobrar ya con su tarjeta guardada.
+        from .cobros import puede_reintentar
+        from .models import CobroSuscripcion
+
+        datos["puede_reintentar_pago"] = puede_reintentar(suscripcion)
+        datos["ultimo_rechazo"] = ""
+        if datos["puede_reintentar_pago"]:
+            ultimo = suscripcion.cobros.exclude(estado=CobroSuscripcion.Estado.APROBADO).order_by("-created_at").first()
+            datos["ultimo_rechazo"] = (ultimo.mensaje if ultimo and ultimo.estado != CobroSuscripcion.Estado.PENDIENTE else "") or ""
         datos["preparacion"] = None
         if en_prueba:
             from apps.clinicas.preparacion import construir_preparacion

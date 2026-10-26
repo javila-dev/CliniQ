@@ -92,15 +92,12 @@ def _items_compatibles(cita, destino) -> list[dict]:
 
 
 def _avisos(cita) -> list[dict]:
-    from apps.obesidad.models import ResultadoLaboratorio
     from apps.pacientes.models import AntecedentePaciente
 
     avisos = soporte.avisos_comunes(cita)
     origen = cita.paciente
     dia = (cita.fecha_inicio_real or cita.fecha_inicio).date()
     sin_vinculo = []
-    if ResultadoLaboratorio.objects.filter(paciente=origen, created_at__date=dia).exists():
-        sin_vinculo.append("laboratorios")
     if AntecedentePaciente.objects.filter(paciente=origen, updated_at__date=dia).exists():
         sin_vinculo.append("antecedentes")
     if sin_vinculo:
@@ -145,7 +142,7 @@ def trasladar(
     from apps.historia_clinica.models import (
         ConsentimientoInformado, HistoriaClinica, OrdenMedica, OrdenMedicaAuditoria, ResultadoExamen,
     )
-    from apps.obesidad.models import MedicionAntropometrica, TratamientoFarmacologico
+    from apps.obesidad.models import MedicionAntropometrica
     from apps.pacientes.models import CheckIn
     from apps.protocolos.models import ConsentimientoPaciente, SesionProcedimiento
     from apps.protocolos.services import marcar_sesion_completada, procedimientos_requeridos_sesion
@@ -202,7 +199,6 @@ def trasladar(
             for o in ordenes
         ])
         MedicionAntropometrica.objects.filter(Q(nota_id__in=nota_ids) | Q(cita=cita)).update(paciente=destino)
-        TratamientoFarmacologico.objects.filter(nota_id__in=nota_ids).update(paciente=destino)
 
         # Lo que A firmó o verificó con su identidad se queda en A, sin la cita.
         ConsentimientoInformado.objects.filter(cita=cita).update(cita=None)

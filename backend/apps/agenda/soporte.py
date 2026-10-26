@@ -81,7 +81,7 @@ def contenido(cita) -> dict:
     from apps.historia_clinica.models import (
         AnotacionZona, ConsumoInsumo, FotoClinica, OrdenMedica, ResultadoExamen,
     )
-    from apps.obesidad.models import MedicionAntropometrica, TratamientoFarmacologico
+    from apps.obesidad.models import MedicionAntropometrica
 
     nota_ids = list(cita.notas_clinicas.values_list("id", flat=True))
     return {
@@ -92,7 +92,6 @@ def contenido(cita) -> dict:
         "zonas": AnotacionZona.objects.filter(nota_id__in=nota_ids, activo=True).count(),
         "insumos": ConsumoInsumo.objects.filter(nota_id__in=nota_ids, activo=True).count(),
         "mediciones": MedicionAntropometrica.objects.filter(Q(nota_id__in=nota_ids) | Q(cita=cita)).count(),
-        "tratamientos_farmacologicos": TratamientoFarmacologico.objects.filter(nota_id__in=nota_ids).count(),
     }
 
 

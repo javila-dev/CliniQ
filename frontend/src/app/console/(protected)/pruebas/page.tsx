@@ -172,6 +172,49 @@ function NotasDialog({ fila, onClose }: { fila: FilaSeguimiento | null; onClose:
   )
 }
 
+const COMANDO_TAREA = 'python manage.py procesar_suscripciones'
+
+/** "hace 12 min", "hace 3 h", "hace 2 días". */
+function haceRato(iso: string): string {
+  const min = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000))
+  if (min < 60) return `hace ${min} min`
+  if (min < 48 * 60) return `hace ${Math.round(min / 60)} h`
+  return `hace ${Math.round(min / 1440)} días`
+}
+// La tarea corre cada hora: más de 2 h sin correr es que se cayó o no existe.
+const TAREA_ATRASADA_MS = 2 * 60 * 60 * 1000
+
+/** Si la tarea programada de Dokploy está corriendo y, si no, cómo crearla. */
+function EstadoTarea({ ultima, correos }: { ultima: string | null; correos: boolean }) {
+  const atrasada = !ultima || Date.now() - new Date(ultima).getTime() > TAREA_ATRASADA_MS
+  if (!atrasada) {
+    return (
+      <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+        Tarea programada al día: corrió {haceRato(ultima!)}.
+      </p>
+    )
+  }
+  return (
+    <div className={cn('rounded-lg border px-3 py-2.5 text-xs', correos ? 'border-amber-200 bg-amber-50 text-amber-900' : 'bg-muted/40 text-muted-foreground')}>
+      <p className="font-medium">
+        {ultima ? `La tarea programada no corre desde ${haceRato(ultima)}.` : 'La tarea programada no ha corrido nunca.'}
+        {correos ? ' Los correos no van a salir hasta que corra.' : ''}
+      </p>
+      <p className="mt-1">
+        Sin ella tampoco se cobran las renovaciones con tarjeta, no se emiten las facturas pendientes ni cambian los estados por fecha.
+        Créala en Dokploy → backend → Schedules, cada hora (<code className="font-mono">0 * * * *</code>), con el comando:
+      </p>
+      <div className="mt-1.5 flex items-center gap-2">
+        <code className="min-w-0 flex-1 truncate rounded border bg-white px-2 py-1 font-mono text-foreground">{COMANDO_TAREA}</code>
+        <Button size="sm" variant="outline" className="h-7" onClick={() => navigator.clipboard?.writeText(COMANDO_TAREA)}>
+          Copiar
+        </Button>
+      </div>
+    </div>
+  )
+}
+
 /** Enciende o apaga los correos automáticos de la prueba para todas las clínicas. */
 function CorreosToggle() {
   const qc = useQueryClient()
@@ -191,22 +234,29 @@ function CorreosToggle() {
   })
 
   return (
-    <div className="flex items-center gap-3 rounded-xl border bg-card px-4 py-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-500">
-        <MailCheck className="h-4 w-4" />
+    <div className="space-y-3 rounded-xl border bg-card px-4 py-3">
+      <div className="flex items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-rose-50 text-rose-500">
+          <MailCheck className="h-4 w-4" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">Correos automáticos de la prueba</p>
+          <p className="text-xs text-muted-foreground">
+            Bienvenida, recordatorios de configuración y avisos de vencimiento a los administradores de cada clínica.
+            Salen cada hora con la tarea programada, como mucho uno al día por clínica.
+          </p>
+        </div>
+        <Switch
+          checked={data?.correos_ciclo_vida_habilitados ?? false}
+          onCheckedChange={(v) => mutation.mutate(v)}
+          disabled={isLoading || mutation.isPending}
+        />
       </div>
-      <div className="min-w-0 flex-1">
-        <p className="text-sm font-semibold text-foreground">Correos automáticos de la prueba</p>
-        <p className="text-xs text-muted-foreground">
-          Bienvenida, recordatorios de configuración y avisos de vencimiento a los administradores de cada clínica.
-          Salen cada hora, como mucho uno al día por clínica.
-        </p>
-      </div>
-      <Switch
-        checked={data?.correos_ciclo_vida_habilitados ?? false}
-        onCheckedChange={(v) => mutation.mutate(v)}
-        disabled={isLoading || mutation.isPending}
-      />
+      {data && (
+        <div className="sm:ml-12">
+          <EstadoTarea ultima={data.suscripciones_procesadas_el} correos={data.correos_ciclo_vida_habilitados} />
+        </div>
+      )}
     </div>
   )
 }

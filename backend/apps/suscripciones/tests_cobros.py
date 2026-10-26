@@ -76,6 +76,24 @@ class CobroTests(ClinicaFixtureMixin, TestCase):
             }, format="json")
         return respuesta, anular
 
+    def test_de_cobro_manual_a_tarjeta_respeta_lo_ya_pagado(self):
+        hasta = timezone.localdate() + timedelta(days=10)
+        services.registrar_pago_manual(self.s, pagado_hasta=hasta, ciclo="mensual")
+        respuesta, _ = self._contratar()
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        s = Suscripcion.objects.get(pk=self.s.pk)
+        self.assertEqual(s.modo_cobro, Suscripcion.ModoCobro.AUTOMATICO)
+        self.assertEqual(s.periodo_inicio, hasta + timedelta(days=1))
+        self.assertEqual(s.proximo_cobro_el, s.periodo_fin)
+
+    def test_de_cobro_manual_sin_fecha_a_tarjeta_empieza_hoy(self):
+        services.registrar_pago_manual(self.s, pagado_hasta=None, ciclo="mensual")
+        respuesta, _ = self._contratar()
+        self.assertEqual(respuesta.status_code, 201, respuesta.data)
+        s = Suscripcion.objects.get(pk=self.s.pk)
+        self.assertEqual(s.modo_cobro, Suscripcion.ModoCobro.AUTOMATICO)
+        self.assertEqual(s.periodo_inicio, timezone.localdate())
+
     def test_pagar_en_la_prueba_activa_y_el_periodo_empieza_al_terminarla(self):
         respuesta, _ = self._contratar()
         self.assertEqual(respuesta.status_code, 201, respuesta.content)
@@ -171,6 +189,53 @@ class CobroTests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(respuesta.status_code, 200, respuesta.content)
         self.s.refresh_from_db()
         self.assertEqual((self.s.estado, self.s.fuente_pago.ultimos4), (E.ACTIVA, "5555"))
+
+    def _en_mora(self, rechazos=1):
+        self._vencer_periodo()
+        with patch("apps.suscripciones.wompi.cobrar", return_value=_transaccion("DECLINED")):
+            for _ in range(rechazos):
+                Suscripcion.objects.filter(pk=self.s.pk).update(proximo_cobro_el=timezone.localdate())
+                self.s.refresh_from_db()
+                cobros.renovar(self.s)
+        self.s.refresh_from_db()
+
+    def _reintentar(self, estado="APPROVED"):
+        with patch("apps.suscripciones.wompi.cobrar", return_value=_transaccion(estado)):
+            return self.client.post("/api/v1/suscripcion/pago/reintentar/", format="json")
+
+    def test_reintentar_en_mora_con_la_tarjeta_guardada_reactiva_el_periodo_siguiente(self):
+        self._en_mora()
+        fin = self.s.periodo_fin
+        self.assertTrue(self.client.get("/api/v1/suscripcion/").json()["puede_reintentar_pago"])
+        respuesta = self._reintentar()
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.s.refresh_from_db()
+        self.assertEqual((self.s.estado, self.s.intentos_fallidos), (E.ACTIVA, 0))
+        self.assertEqual(self.s.periodo_inicio, fin + timedelta(days=1))
+        self.assertFalse(self.client.get("/api/v1/suscripcion/").json()["puede_reintentar_pago"])
+
+    def test_reintento_rechazado_no_suma_intentos_y_no_se_puede_repetir_enseguida(self):
+        self._en_mora()
+        respuesta = self._reintentar("DECLINED")
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.s.refresh_from_db()
+        self.assertEqual((self.s.estado, self.s.intentos_fallidos), (E.EN_GRACIA, 1))
+        self.assertEqual(self.s.fuente_pago.estado, "disponible")  # la tarjeta guardada sigue
+        self.assertEqual(self._reintentar().status_code, 400)
+
+    def test_reintentar_desde_solo_lectura_empieza_el_periodo_hoy(self):
+        self._en_mora(rechazos=3)
+        self.assertEqual(self.s.estado, E.SOLO_LECTURA)
+        respuesta = self._reintentar()
+        self.assertEqual(respuesta.status_code, 200, respuesta.content)
+        self.s.refresh_from_db()
+        hoy = timezone.localdate()
+        self.assertEqual((self.s.estado, self.s.periodo_inicio, self.s.dia_ancla), (E.ACTIVA, hoy, hoy.day))
+
+    def test_no_se_reintenta_en_una_prueba_vencida_sin_tarjeta(self):
+        Suscripcion.objects.filter(pk=self.s.pk).update(prueba_termina_el=timezone.now() - timedelta(hours=1))
+        self.assertFalse(self.client.get("/api/v1/suscripcion/").json()["puede_reintentar_pago"])
+        self.assertEqual(self._reintentar().status_code, 400)
 
     def test_subir_de_plan_cobra_la_diferencia_prorrateada(self):
         self._contratar()

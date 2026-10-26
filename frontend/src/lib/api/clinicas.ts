@@ -26,7 +26,6 @@ export interface PlanPublico {
   precio_sede_adicional: string | null
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
-  modulo_obesidad_habilitado: boolean
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
   descuento_anual_pct: number        // 0 = sin pago anual con descuento

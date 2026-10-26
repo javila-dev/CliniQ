@@ -57,7 +57,6 @@ class _PagoBase(APIView):
 # Funciones que dependen del plan, en el orden en que se muestran.
 FUNCIONES_PLAN = (
     ("modulo_estetico_habilitado", "Módulo estético"),
-    ("modulo_obesidad_habilitado", "Módulo de obesidad"),
     ("facial_verificacion_habilitada", "Verificación facial"),
     ("whatsapp_habilitado", "WhatsApp"),
     ("whatsapp_numero_propio_habilitado", "WhatsApp con número propio"),
@@ -209,6 +208,19 @@ class CambiarTarjetaView(_PagoBase):
             return _error(str(exc))
         s.refresh_from_db()
         return Response(SuscripcionSerializer(s).data)
+
+
+class ReintentarPagoView(_PagoBase):
+    """Cobra ya, con la tarjeta guardada, el periodo que quedó sin pagar."""
+
+    def post(self, request):
+        s = self.suscripcion(request)
+        try:
+            cobro = cobros.reintentar_ahora(s, usuario=request.user)
+        except (cobros.CobroNoPermitido, wompi.WompiError) as exc:
+            return _error(str(exc))
+        s.refresh_from_db()
+        return Response({**CobroSerializer(cobro).data, "suscripcion": SuscripcionSerializer(s).data})
 
 
 class CambiarPlanView(_PagoBase):

@@ -2,14 +2,14 @@
 
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { BadgeCheck, Building2, CalendarClock, CreditCard, MessageCircle, Receipt, RefreshCw, ScanFace, Smartphone, Sparkles, Users } from 'lucide-react'
+import { AlertTriangle, BadgeCheck, Building2, CalendarClock, CreditCard, MessageCircle, Receipt, RefreshCw, ScanFace, Smartphone, Sparkles, Users } from 'lucide-react'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { useAuthStore } from '@/store/authStore'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { cn } from '@/lib/utils'
 import { EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes } from '@/components/configuracion/ajustes'
 import { Button } from '@/components/ui/button'
-import { conEstado, ElegirPlanLink, MI_SUSCRIPCION_KEY, RUTA_PAGAR, useMiSuscripcion } from '@/components/shared/SuscripcionAviso'
+import { BotonReintentar, conEstado, ElegirPlanLink, inicioConTarjeta, invitarATarjeta, MI_SUSCRIPCION_KEY, RUTA_PAGAR, useMiSuscripcion } from '@/components/shared/SuscripcionAviso'
 import { suscripcionesApi } from '@/lib/api/suscripciones'
 import { isAdminOrSuperAdmin } from '@/lib/permissions'
 import type { CobroSuscripcion, Suscripcion } from '@/types/suscripciones'
@@ -151,7 +151,7 @@ export default function PlanConfigPage() {
           <SeccionAjustes
             titulo="Tu cuenta"
             descripcion="Estado de la suscripción de tu clínica a CliniQ."
-            accion={esAdmin && !conTarjeta && suscripcion.estado !== 'activa' && (suscripcion.pago_en_linea || suscripcion.contacto_ventas_url) && (
+            accion={esAdmin && !conTarjeta && !suscripcion.puede_reintentar_pago && suscripcion.estado !== 'activa' && (suscripcion.pago_en_linea || suscripcion.contacto_ventas_url) && (
               <Button asChild size="sm">
                 <ElegirPlanLink s={suscripcion}>Elegir plan</ElegirPlanLink>
               </Button>
@@ -173,6 +173,15 @@ export default function PlanConfigPage() {
                 </EtiquetaAjuste>
               )}
             </FilaAjuste>
+            {suscripcion.puede_reintentar_pago && esAdmin && (
+              <FilaAjuste
+                icono={AlertTriangle}
+                titulo="Pago pendiente"
+                descripcion={`No se pudo cobrar la renovación${suscripcion.ultimo_rechazo ? ` (${suscripcion.ultimo_rechazo})` : ''}. Si ya resolviste con tu banco, cóbrala ahora con tu tarjeta; si no, cámbiala abajo.`}
+              >
+                <BotonReintentar size="sm" />
+              </FilaAjuste>
+            )}
             {conTarjeta && (
               <>
                 <FilaAjuste
@@ -204,6 +213,19 @@ export default function PlanConfigPage() {
                   {esAdmin && <Button asChild size="sm" variant="outline"><Link href={`${RUTA_PAGAR}?modo=tarjeta`}>Cambiar tarjeta</Link></Button>}
                 </FilaAjuste>
               </>
+            )}
+            {invitarATarjeta(suscripcion) && suscripcion.pago_en_linea && esAdmin && (
+              <FilaAjuste
+                icono={CreditCard}
+                titulo="Paga con tarjeta"
+                descripcion={`Hoy pagas a mano. Con tarjeta tu plan se renueva solo cada ${suscripcion.ciclo === 'anual' ? 'año' : 'mes'} y recibes la factura electrónica de cada pago. ${
+                  inicioConTarjeta(suscripcion)
+                    ? `Lo que ya pagaste se respeta: el primer periodo con tarjeta empieza el ${inicioConTarjeta(suscripcion)}.`
+                    : 'El primer cobro se hace al registrarla.'
+                }`}
+              >
+                <Button asChild size="sm"><Link href={RUTA_PAGAR}>Registrar tarjeta</Link></Button>
+              </FilaAjuste>
             )}
             {suscripcion.pago_en_linea && esAdmin && (
               <FilaAjuste

@@ -38,7 +38,6 @@ export interface Clinica {
   onboarding_completado: boolean
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
-  modulo_obesidad_habilitado?: boolean
   whatsapp_habilitado?: boolean
   whatsapp_uso?: WhatsAppUso
   whatsapp_numero_propio_habilitado?: boolean

@@ -14,7 +14,6 @@ export interface Plan {
   descuento_anual_pct: number
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
-  modulo_obesidad_habilitado: boolean
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
   whatsapp_numero_propio_habilitado: boolean
@@ -37,7 +36,6 @@ export interface AdminTenant {
   // Valores efectivos (override si existe, si no el default del plan)
   facial_verificacion_habilitada: boolean
   modulo_estetico_habilitado: boolean
-  modulo_obesidad_habilitado: boolean
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
   whatsapp_uso: WhatsAppUso
@@ -46,7 +44,6 @@ export interface AdminTenant {
   // Anulación explícita por clínica. null = sigue al plan.
   facial_verificacion_override: boolean | null
   modulo_estetico_override: boolean | null
-  modulo_obesidad_override: boolean | null
   whatsapp_override: boolean | null
   whatsapp_envios_incluidos_override: number | null
   whatsapp_numero_propio_override: boolean | null
@@ -121,7 +118,6 @@ export type UpdateTenantRequest = Partial<Omit<CreateTenantRequest, 'admin_email
   plan?: string | null
   facial_verificacion_override?: boolean | null
   modulo_estetico_override?: boolean | null
-  modulo_obesidad_override?: boolean | null
   whatsapp_override?: boolean | null
   whatsapp_envios_incluidos_override?: number | null
   whatsapp_numero_propio_override?: boolean | null
@@ -140,7 +136,6 @@ export interface CreatePlanRequest {
   descuento_anual_pct?: number
   facial_verificacion_habilitada?: boolean
   modulo_estetico_habilitado?: boolean
-  modulo_obesidad_habilitado?: boolean
   whatsapp_habilitado?: boolean
   whatsapp_envios_incluidos?: number
   whatsapp_numero_propio_habilitado?: boolean
@@ -255,7 +250,7 @@ export interface TrasladoPrevisualizacion {
   }
   origen: { id: string; nombre: string }
   destino: { id: string; nombre: string }
-  contenido: Record<'notas' | 'fotos' | 'examenes' | 'ordenes' | 'zonas' | 'insumos' | 'mediciones' | 'tratamientos_farmacologicos', number>
+  contenido: Record<'notas' | 'fotos' | 'examenes' | 'ordenes' | 'zonas' | 'insumos' | 'mediciones', number>
   paquete_origen: string | null
   sesiones_origen: SoporteSesion[]
   paquetes_destino: SoportePaqueteDestino[]

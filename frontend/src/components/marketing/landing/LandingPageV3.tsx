@@ -161,7 +161,7 @@ export function LandingPageV3({ planes }: { planes?: PlanPublico[] | null }) {
                   <span className="h-2.5 w-2.5 rounded-full bg-[#1b1020]/15" />
                   <span className="h-2.5 w-2.5 rounded-full bg-[#1b1020]/15" />
                 </span>
-                <figcaption className="truncate text-xs text-[#1b1020]/55">Dashboard · datos de ejemplo</figcaption>
+                <figcaption className="truncate text-xs text-[#1b1020]/55">Dashboard de CliniQ</figcaption>
               </div>
               <Image
                 src={CAPTURAS.dashboard.src}

@@ -67,6 +67,9 @@ class ConfiguracionGlobal(models.Model):
     # Envíos por el número compartido de CliniQ durante toda la prueba (0 = sin límite):
     # sin tope, una prueba que abuse baja la calidad del número de todas las clínicas.
     whatsapp_envios_prueba = models.PositiveIntegerField(default=100)
+    # Última vez que terminó `procesar_suscripciones` (tarea programada en Dokploy):
+    # la consola avisa si no corre, porque sin ella no salen correos ni cobros.
+    suscripciones_procesadas_el = models.DateTimeField(null=True, blank=True)
     actualizado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True, blank=True,
