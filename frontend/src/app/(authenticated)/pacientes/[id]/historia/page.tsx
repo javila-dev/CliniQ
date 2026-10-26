@@ -7,7 +7,6 @@ import { ArrowLeft, FileText, User, Download, Loader2, Image, ImageOff } from 'l
 import Link from 'next/link'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { pacientesApi } from '@/lib/api/pacientes'
-import { clinicasApi } from '@/lib/api/clinicas'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { Button } from '@/components/ui/button'
@@ -23,12 +22,9 @@ import { TabOrdenesMedicas } from '@/components/historia/TabOrdenesMedicas'
 import { TabFotos } from '@/components/historia/TabFotos'
 import { TabZonasHistorial } from '@/components/historia/TabZonasHistorial'
 import { TabMediciones } from '@/components/obesidad/TabMediciones'
-import { TabAntecedentesObesidad } from '@/components/obesidad/TabAntecedentesObesidad'
-import { TabProgresoObesidad } from '@/components/obesidad/TabProgresoObesidad'
 import { RoleGuard } from '@/components/shared/RoleGuard'
 import { canAccess } from '@/lib/permissions'
 import { useHistoriaConfig } from '@/hooks/usePestanasClinica'
-import { useAuthStore } from '@/store/authStore'
 import { cn, edadPaciente } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
 import { toast } from '@/hooks/use-toast'
@@ -61,7 +57,6 @@ function HistoriaContent({ params }: Props) {
   const [isPending, startTransition] = useTransition()
   const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [pdfDialogOpen, setPdfDialogOpen] = useState(false)
-  const { user } = useAuthStore()
 
   async function descargarPdf(includeFotos: boolean) {
     if (!historia) return
@@ -84,21 +79,7 @@ function HistoriaContent({ params }: Props) {
   const tabActivo = searchParams.get('tab') ?? 'datos-generales'
   const { tabsActivos } = useHistoriaConfig()
 
-  const { data: miClinica } = useQuery({
-    queryKey: ['mi-clinica', user?.clinica_id],
-    queryFn: () => clinicasApi.miClinica(user?.clinica_id),
-    enabled: Boolean(user?.clinica_id),
-    staleTime: 5 * 60_000,
-  })
-  const moduloObesidad = miClinica?.modulo_obesidad_habilitado ?? false
-
-  const TABS = [
-    ...ALL_TABS.filter((t) => (tabsActivos as Record<string, boolean>)[t.value] ?? true),
-    ...(moduloObesidad ? [
-      { value: 'antecedentes-obesidad', label: 'Antec. Obesidad' },
-      { value: 'progreso-obesidad',     label: 'Progreso'        },
-    ] : []),
-  ]
+  const TABS = ALL_TABS.filter((t) => (tabsActivos as Record<string, boolean>)[t.value] ?? true)
 
   const { data: paciente, isLoading: loadingPaciente, error: errorPaciente, refetch: refetchPaciente } = useQuery({
     queryKey: ['pacientes', pacienteId],
@@ -355,18 +336,6 @@ function HistoriaContent({ params }: Props) {
           <TabsContent value="zonas" className="mt-0">
             <TabZonasHistorial historiaId={historia.id} />
           </TabsContent>
-
-          {moduloObesidad && (
-            <TabsContent value="antecedentes-obesidad" className="mt-0">
-              <TabAntecedentesObesidad historiaId={historia.id} />
-            </TabsContent>
-          )}
-
-          {moduloObesidad && (
-            <TabsContent value="progreso-obesidad" className="mt-0">
-              <TabProgresoObesidad pacienteId={pacienteId} />
-            </TabsContent>
-          )}
         </div>
       </Tabs>
     </div>

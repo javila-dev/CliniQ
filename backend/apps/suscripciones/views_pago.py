@@ -57,7 +57,6 @@ class _PagoBase(APIView):
 # Funciones que dependen del plan, en el orden en que se muestran.
 FUNCIONES_PLAN = (
     ("modulo_estetico_habilitado", "Módulo estético"),
-    ("modulo_obesidad_habilitado", "Módulo de obesidad"),
     ("facial_verificacion_habilitada", "Verificación facial"),
     ("whatsapp_habilitado", "WhatsApp"),
     ("whatsapp_numero_propio_habilitado", "WhatsApp con número propio"),

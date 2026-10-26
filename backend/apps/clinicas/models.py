@@ -78,10 +78,6 @@ class Plan(BaseModel):
         default=True,
         help_text="Addon: módulo estético (procedimientos, zonas corporales) incluido en este plan.",
     )
-    modulo_obesidad_habilitado = models.BooleanField(
-        default=False,
-        help_text="Addon: módulo de obesidad (tratamientos, sesiones, control de peso) incluido en este plan.",
-    )
     whatsapp_habilitado = models.BooleanField(
         default=True,
         help_text=(
@@ -226,12 +222,6 @@ class Clinica(BaseModel):
         default=None,
         help_text="Anula el addon de módulo estético del plan para esta clínica. Null = hereda del plan.",
     )
-    modulo_obesidad_override = models.BooleanField(
-        null=True,
-        blank=True,
-        default=None,
-        help_text="Anula el addon de módulo obesidad del plan para esta clínica. Null = hereda del plan.",
-    )
     whatsapp_override = models.BooleanField(
         null=True,
         blank=True,
@@ -316,10 +306,6 @@ class Clinica(BaseModel):
     @property
     def modulo_estetico_habilitado(self):
         return self._addon_efectivo(self.modulo_estetico_override, "modulo_estetico_habilitado")
-
-    @property
-    def modulo_obesidad_habilitado(self):
-        return self._addon_efectivo(self.modulo_obesidad_override, "modulo_obesidad_habilitado")
 
     @property
     def whatsapp_habilitado(self):

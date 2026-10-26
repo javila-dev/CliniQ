@@ -270,12 +270,6 @@ export function LandingPage() {
                           : ' (envíos ilimitados)'}
                       </li>
                     )}
-                    {plan.modulo_obesidad_habilitado && (
-                      <li className="flex items-center gap-2">
-                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
-                        Módulo de obesidad
-                      </li>
-                    )}
                   </ul>
                   {(plan.precio_usuario_adicional || plan.precio_sede_adicional) && (
                     <div className="mt-4 pt-4 border-t space-y-1 text-[11px] text-muted-foreground">
