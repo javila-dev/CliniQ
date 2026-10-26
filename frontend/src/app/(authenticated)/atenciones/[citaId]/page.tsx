@@ -5,14 +5,13 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, CheckCircle, Clock, ChevronLeft, ChevronRight, XCircle, Loader2, AlertTriangle, Stethoscope,
   MessageSquare, ClipboardList, Activity, FlaskConical, ListChecks, FileText, Camera, Package,
-  PersonStanding, Microscope, Pill, CheckCircle2,
+  PersonStanding, CheckCircle2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { agendaApi } from '@/lib/api/agenda'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
-import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -26,8 +25,6 @@ import { TabPlanManejo } from '@/components/historia/TabPlanManejo'
 import { TabOrdenesMedicas } from '@/components/historia/TabOrdenesMedicas'
 import { TabFotos } from '@/components/historia/TabFotos'
 import { TabMediciones } from '@/components/obesidad/TabMediciones'
-import { TabLaboratorios } from '@/components/obesidad/TabLaboratorios'
-import { TabFarmacologico } from '@/components/obesidad/TabFarmacologico'
 import { TabZonas } from '@/components/historia/TabZonas'
 import { TabInsumos } from '@/components/historia/TabInsumos'
 import { guardarBorradoresDeNota } from '@/components/historia/useBorradorNota'
@@ -74,15 +71,6 @@ export default function AtencionCitaPage({ params }: Props) {
   const { user } = useAuthStore()
 
   // ── Queries ────────────────────────────────────────────────────────────────
-
-  const { data: miClinica } = useQuery({
-    queryKey: ['mi-clinica', user?.clinica_id],
-    queryFn: () => clinicasApi.miClinica(user?.clinica_id),
-    enabled: Boolean(user?.clinica_id),
-    staleTime: 5 * 60_000,
-  })
-
-  const moduloObesidad = miClinica?.modulo_obesidad_habilitado ?? false
 
   const { data: cita, isLoading: loadingCita } = useQuery({
     queryKey: ['citas', citaId],
@@ -483,8 +471,6 @@ export default function AtencionCitaPage({ params }: Props) {
     { value: 'fotos',            label: 'Fotos',              icon: Camera,         show: tabsActivos.fotos ?? true },
     { value: 'insumos',          label: 'Insumos',            icon: Package,        show: tabsActivos.insumos ?? true },
     { value: 'zonas',            label: 'Zonas',              icon: PersonStanding, show: tieneZonas },
-    { value: 'laboratorios',     label: 'Laboratorios',       icon: Microscope,     show: moduloObesidad },
-    { value: 'farmacologico',    label: 'Farmacológico',      icon: Pill,           show: moduloObesidad },
   ].filter((t) => t.show)
 
   return (
@@ -626,7 +612,7 @@ export default function AtencionCitaPage({ params }: Props) {
               </TabsContent>
             )}
 
-            {/* Seguimiento — signos vitales + medidas corporales (obesidad como extra opcional) */}
+            {/* Seguimiento — signos vitales + medidas corporales */}
             {(tabsActivos.mediciones ?? true) && pacienteId && (
               <TabsContent value="mediciones" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
                 <TabMediciones pacienteId={pacienteId} notaId={notaId ?? undefined} citaId={citaId} />
@@ -672,20 +658,6 @@ export default function AtencionCitaPage({ params }: Props) {
             {tieneZonas && notaId && (
               <TabsContent value="zonas" className="flex-1 overflow-y-auto mt-0">
                 <TabZonas notaId={notaId} />
-              </TabsContent>
-            )}
-
-            {/* Obesidad — Laboratorios */}
-            {moduloObesidad && pacienteId && (
-              <TabsContent value="laboratorios" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
-                <TabLaboratorios pacienteId={pacienteId} />
-              </TabsContent>
-            )}
-
-            {/* Obesidad — Farmacológico */}
-            {moduloObesidad && pacienteId && (
-              <TabsContent value="farmacologico" className="flex-1 overflow-y-auto px-6 py-5 mt-0">
-                <TabFarmacologico pacienteId={pacienteId} notaId={notaId ?? undefined} />
               </TabsContent>
             )}
 
