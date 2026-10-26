@@ -81,7 +81,6 @@ export function Multisede() {
             </div>
             <div className="flex flex-col gap-1 border-t border-white/[0.08] px-5 py-4 text-xs text-[var(--lv3-faint)] sm:flex-row sm:items-center sm:justify-between">
               <span>Cada sede: Agenda · Stock · Compras · Caja</span>
-              <span className="lv3-mono text-[10px] uppercase tracking-[0.14em]">Ejemplo ilustrativo · datos ficticios</span>
             </div>
           </div>
           <p className="mt-5 flex items-center gap-3 text-xs font-medium text-[#ff6aa9]/90">

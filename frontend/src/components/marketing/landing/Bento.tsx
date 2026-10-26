@@ -64,7 +64,6 @@ export function Bento() {
                 className="object-cover object-left-top"
               />
             </div>
-            <p className="lv3-mono mt-3 text-[10px] uppercase tracking-[0.14em] text-[var(--lv3-faint)]">Ejemplo ilustrativo · datos ficticios</p>
           </Tile>
 
           <Tile>
@@ -127,7 +126,6 @@ export function Bento() {
                 </li>
               ))}
             </ul>
-            <p className="lv3-mono mt-3 text-[10px] uppercase tracking-[0.14em] text-[var(--lv3-faint)]">Ejemplo ilustrativo · datos ficticios</p>
           </Tile>
         </div>
       </div>
