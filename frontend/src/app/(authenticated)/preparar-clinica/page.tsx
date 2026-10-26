@@ -3,13 +3,14 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Check, Loader2 } from 'lucide-react'
+import { ArrowRight, Check, ChevronDown, Loader2 } from 'lucide-react'
 import { authApi } from '@/lib/api/auth'
 import { clinicasApi } from '@/lib/api/clinicas'
 import type { GuardarPreparacionRequest, NivelPreparacion, SetupChecklist, SetupChecklistItem } from '@/lib/api/clinicas'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
+import { FlujoRecepcionEditor } from '@/components/configuracion/FlujoRecepcionEditor'
 import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
@@ -170,6 +171,7 @@ export default function PrepararClinicaPage() {
                 onAlternar={() => setAbierto(paso.key === abiertoActual ? '' : paso.key)}
                 onOmitir={() => guardar.mutate({ omitir: paso.key })}
                 onYoAtiendo={() => yoAtiendo.mutate()}
+                onActualizar={() => qc.invalidateQueries({ queryKey: QUERY_KEY })}
               />
             ))}
           </ol>
@@ -206,7 +208,7 @@ export default function PrepararClinicaPage() {
 }
 
 function FilaDePaso({
-  paso, numero, esSiguiente, abierto, ocupado, onAlternar, onOmitir, onYoAtiendo,
+  paso, numero, esSiguiente, abierto, ocupado, onAlternar, onOmitir, onYoAtiendo, onActualizar,
 }: {
   paso: SetupChecklistItem
   numero: number
@@ -216,8 +218,12 @@ function FilaDePaso({
   onAlternar: () => void
   onOmitir: () => void
   onYoAtiendo: () => void
+  onActualizar: () => void
 }) {
   const puedeOmitir = !paso.requerido && !paso.completado
+  // Los pasos de recepción se cambian aquí mismo, viendo el recorrido completo:
+  // la fila se despliega con el editor aunque el paso ya esté completo.
+  const enLinea = paso.key === 'recepcion'
 
   return (
     <li className={cn(abierto && !paso.completado && 'bg-primary/[0.03]')}>
@@ -247,7 +253,17 @@ function FilaDePaso({
           )}
         </button>
 
-        {paso.completado ? (
+        {enLinea ? (
+          <button
+            type="button"
+            onClick={onAlternar}
+            aria-expanded={abierto}
+            className="inline-flex shrink-0 items-center gap-1 text-sm font-medium text-gray-500 hover:text-gray-900"
+          >
+            {abierto ? 'Ocultar los pasos' : 'Ver y cambiar los pasos'}
+            <ChevronDown className={cn('h-3.5 w-3.5 transition-transform', abierto && 'rotate-180')} />
+          </button>
+        ) : paso.completado ? (
           <Link href={paso.href} className="shrink-0 text-sm font-medium text-gray-500 hover:text-gray-900">Revisar</Link>
         ) : !abierto && (
           // En celular no cabe junto al texto: se toca la fila y el paso abierto trae su botón.
@@ -257,8 +273,17 @@ function FilaDePaso({
         )}
       </div>
 
+      {enLinea && abierto && (
+        <div className="space-y-2 pb-4 pl-[3.25rem] pr-4">
+          <p className="text-xs leading-relaxed text-gray-500">{paso.por_que}</p>
+          <div className="overflow-hidden rounded-xl border">
+            <FlujoRecepcionEditor onGuardado={onActualizar} />
+          </div>
+        </div>
+      )}
+
       {/* Detalle del paso abierto: para qué sirve, qué falta exactamente y qué hacer. */}
-      {abierto && !paso.completado && (
+      {abierto && !paso.completado && !enLinea && (
         <div className="space-y-3 pb-4 pl-[3.25rem] pr-4">
           <p className="text-xs leading-relaxed text-gray-500">{paso.por_que}</p>
           <p className="border-l-2 border-primary/40 pl-3 text-sm text-gray-800">{paso.resumen}</p>

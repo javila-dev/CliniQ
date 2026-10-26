@@ -82,6 +82,14 @@ def _flujo_de_recepcion(clinica) -> list:
     return [etiqueta for clave, etiqueta in etiquetas if wizard.get(clave)]
 
 
+def _resumen_recepcion(flujo: list) -> str:
+    """Lo mismo que muestra la vista previa del flujo: cuántos pasos verá recepción."""
+    if not flujo:
+        return "Recepción verá 0 pasos: el paciente pasa directo a la cola del profesional."
+    cuantos = "1 paso" if len(flujo) == 1 else f"{len(flujo)} pasos"
+    return f"Recepción verá {cuantos} antes de atender: " + " → ".join(flujo) + "."
+
+
 def _paso(clave, titulo, por_que, resumen, completado, href, accion, *, requerido=True, omitido=False, extra=None):
     paso = {
         "key": clave,
@@ -197,7 +205,7 @@ def construir_preparacion(clinica, user=None) -> dict:
         _paso(
             "recepcion", "Cómo recibes al paciente",
             "Define qué hace recepción antes de que el profesional inicie la atención.",
-            " → ".join(flujo) + "." if flujo else "Sin pasos: recepción no completa nada antes de atender.",
+            _resumen_recepcion(flujo),
             True, "/configuracion/recepcion", "Revisar pasos", requerido=False,
         ),
         _paso(

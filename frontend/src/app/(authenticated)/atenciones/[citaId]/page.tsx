@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation'
 import { agendaApi } from '@/lib/api/agenda'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
+import { clinicasApi } from '@/lib/api/clinicas'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
@@ -37,7 +38,9 @@ import {
 import { useAtencionConfig } from '@/hooks/usePestanasClinica'
 import { useNotaEnProgreso } from '@/store/notaEnProgresoStore'
 import { useAuthStore } from '@/store/authStore'
-import { canIniciarAtencion } from '@/lib/permissions'
+import { canIniciarAtencion, hasPermission, PERM } from '@/lib/permissions'
+import { estadoOperativo, progresoRecepcion } from '@/lib/recepcion'
+import { EnlaceCambiarPasos, EtiquetaEstadoOperativo, PasosRecepcion, QueFalta } from '@/components/atenciones/EstadoPreparacion'
 import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
 import { cn, formatTime, formatDuracion } from '@/lib/utils'
@@ -75,6 +78,11 @@ export default function AtencionCitaPage({ params }: Props) {
   const { data: cita, isLoading: loadingCita } = useQuery({
     queryKey: ['citas', citaId],
     queryFn: () => agendaApi.citas.get(citaId),
+  })
+
+  const { data: wizardConfig } = useQuery({
+    queryKey: ['wizard-config'],
+    queryFn: () => clinicasApi.wizardConfig.get(),
   })
 
   const pacienteId = getPacienteId(cita)
@@ -271,6 +279,8 @@ export default function AtencionCitaPage({ params }: Props) {
         setFirmaProfesionalAbierta(true)
       } else if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
         toast.error('Consentimientos pendientes', `Falta firmar: ${(data.pendientes ?? []).join(', ')}`)
+      } else if (data.code === 'PASOS_RECEPCION_PENDIENTES') {
+        toast.error('Falta preparar al paciente', `Falta: ${(data.pendientes ?? []).join(', ')}. Lo completa recepción.`)
       } else {
         toast.error('No se pudo iniciar la atención', data.error ?? 'Revisa el estado de la cita.')
       }
@@ -344,31 +354,29 @@ export default function AtencionCitaPage({ params }: Props) {
   // (p.ej. el link "Ver" de la tabla de admin sobre una cita en espera) cae
   // aquí en vez de saltarse el wizard.
   if (cita.estado !== 'en_curso') {
-    const ESTADO_LABEL: Record<string, string> = {
-      pendiente: 'Pendiente', confirmada: 'Confirmada', en_espera: 'En espera',
-      completada: 'Completada', cancelada: 'Cancelada', no_asistio: 'No asistió',
-    }
     const cerrada = ['completada', 'cancelada', 'no_asistio'].includes(cita.estado)
-    const puedeIniciar =
-      // Desde "Confirmada" el backend exige pasar antes por "En espera" (preparación).
-      canIniciarAtencion(user) && cita.estado === 'en_espera'
-    // En espera = la recepción ya completó la preparación; solo falta iniciar.
-    const lista = cita.estado === 'en_espera'
+    // Sin los pasos de recepción no se inicia (el backend también lo exige).
+    const progreso = progresoRecepcion(cita, wizardConfig)
+    const estado = estadoOperativo(cita, progreso)
+    const enEspera = cita.estado === 'en_espera'
+    const lista = enEspera && progreso.listo
+    const puedeIniciar = canIniciarAtencion(user) && lista
+    const puedeCambiarPasos = hasPermission(user, PERM.CLINICAS_EDITAR)
     const onIniciar = () => {
-      if (lista && citaRequiereFirmaProfesional(cita)) setFirmaProfesionalAbierta(true)
+      if (citaRequiereFirmaProfesional(cita)) setFirmaProfesionalAbierta(true)
       else iniciarAtencion()
     }
 
     const titulo = cerrada
       ? 'Esta atención ya está cerrada'
-      : lista ? 'El paciente está listo' : 'Falta preparar al paciente'
+      : lista ? 'Listo para atender' : enEspera ? 'Faltan pasos de recepción' : 'Falta preparar al paciente'
     const detalle = cerrada
       ? 'No se puede documentar una atención en este estado.'
       : lista
         ? puedeIniciar
-          ? 'La preparación está completa. Inicia la atención para empezar a documentar.'
-          : 'La preparación está completa. El profesional puede iniciar la atención.'
-        : 'Antes de iniciar, completa la preparación: llegada, consentimientos, pago y firma de asistencia.'
+          ? 'Recepción terminó. Inicia la atención para empezar a documentar.'
+          : 'Recepción terminó. El profesional puede iniciar la atención.'
+        : null
 
     return (
       <div className="flex flex-1 items-center justify-center p-6">
@@ -384,11 +392,20 @@ export default function AtencionCitaPage({ params }: Props) {
           <div className="space-y-1">
             <p className="text-base font-semibold">{titulo}</p>
             <p className="text-sm text-muted-foreground">
-              {cita.paciente_nombre} · <span className="uppercase">{cita.servicio_nombre}</span> — estado:{' '}
-              <span className="font-medium">{ESTADO_LABEL[cita.estado] ?? cita.estado}</span>
+              {cita.paciente_nombre} · <span className="uppercase">{cita.servicio_nombre}</span>
             </p>
-            <p className="text-sm text-muted-foreground">{detalle}</p>
+            <div className="flex justify-center pt-1">
+              <EtiquetaEstadoOperativo estado={estado} />
+            </div>
+            {detalle && <p className="text-sm text-muted-foreground">{detalle}</p>}
           </div>
+
+          {!cerrada && (
+            <div className="space-y-2 rounded-lg bg-muted/40 px-3 py-3 text-left">
+              <PasosRecepcion progreso={progreso} />
+              <QueFalta progreso={progreso} />
+            </div>
+          )}
 
           {!cerrada && (
             <div className="flex flex-col gap-2">
@@ -405,16 +422,9 @@ export default function AtencionCitaPage({ params }: Props) {
                   </Button>
                 </>
               ) : (
-                <>
-                  <Button onClick={() => setWizardAbierto(true)}>Preparar al paciente</Button>
-                  {puedeIniciar && (
-                    <Button variant="outline" onClick={onIniciar} disabled={iniciando}>
-                      {iniciando && <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />}
-                      Iniciar atención
-                    </Button>
-                  )}
-                </>
+                <Button onClick={() => setWizardAbierto(true)}>Preparar paciente</Button>
               )}
+              {puedeCambiarPasos && <EnlaceCambiarPasos className="justify-center pt-1" />}
             </div>
           )}
 
@@ -425,6 +435,7 @@ export default function AtencionCitaPage({ params }: Props) {
 
         <IniciarAtencionWizard
           citaId={wizardAbierto ? citaId : null}
+          onIniciarAtencion={onIniciar}
           onClose={() => {
             setWizardAbierto(false)
             queryClient.invalidateQueries({ queryKey: ['citas', citaId] })

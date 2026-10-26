@@ -7,9 +7,8 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import {
   Clock, Check, Save, ImageIcon, Upload, Trash2, Loader2,
-  ShieldCheck, CreditCard, PenLine, ScanFace, Workflow,
   Lock, Bell, Info, Link2, Copy, QrCode, Printer, ClipboardList,
-  MapPin, HeartPulse, Sparkles, Timer,
+  MapPin, HeartPulse, Timer,
   ChevronDown, ChevronUp, Camera,
 } from 'lucide-react'
 import Image from 'next/image'
@@ -21,9 +20,9 @@ import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
 import type { ConfiguracionFacial } from '@/types/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FiltroProfesionalesPorProcedimiento } from '@/components/configuracion/FiltroProfesionalesPorProcedimiento'
-import { FlujoRecepcion } from '@/components/configuracion/FlujoRecepcion'
+import { FlujoRecepcionEditor } from '@/components/configuracion/FlujoRecepcionEditor'
 import {
-  avisarGuardado, BarraGuardado, EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes,
+  avisarGuardado, BarraGuardado, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes,
 } from '@/components/configuracion/ajustes'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -38,47 +37,6 @@ import type { WizardConfig } from '@/types/clinicas'
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
-
-const WIZARD_STEPS: {
-  key: keyof WizardConfig
-  label: string
-  description: string
-  icon: React.ElementType
-  toggleBloqueado?: boolean
-  esAddon?: boolean
-  addonKey?: 'facial_verificacion_habilitada' | 'whatsapp_habilitado'
-  addonLockedCopy?: string
-}[] = [
-  {
-    key: 'paso_checkin',
-    label: 'Verificación de llegada',
-    description: 'Confirma que el paciente llegó, con un código que recibe por WhatsApp o con una foto.',
-    icon: ScanFace,
-    esAddon: true,
-    addonKey: 'whatsapp_habilitado',
-    addonLockedCopy: 'Envía cotizaciones, firmas y recordatorios por WhatsApp, y verifica la llegada del paciente por código. Contáctanos para activarlo.',
-  },
-  {
-    key: 'paso_verificacion_facial',
-    label: 'Verificación de identidad facial',
-    description: 'Compara la foto en vivo del paciente con su foto de control registrada.',
-    icon: ShieldCheck,
-    esAddon: true,
-    addonKey: 'facial_verificacion_habilitada',
-  },
-  {
-    key: 'paso_pago',
-    label: 'Registro de pago',
-    description: 'Registra el cobro de la sesión antes de iniciar la atención.',
-    icon: CreditCard,
-  },
-  {
-    key: 'paso_firma_asistencia',
-    label: 'Firma de asistencia',
-    description: 'Firma digital del registro de presencia al finalizar el ingreso.',
-    icon: PenLine,
-  },
-]
 
 const DEFAULT_WIZARD_CONFIG: WizardConfig = {
   paso_checkin: true,
@@ -295,20 +253,8 @@ export function ClinicaConfig({
     queryFn: () => clinicasApi.wizardConfig.get(),
   })
 
-  const wizardMutation = useMutation({
-    mutationFn: (data: Partial<WizardConfig>) => clinicasApi.wizardConfig.update(data),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['wizard-config'] }),
-    onError: () => toast.error('No se pudo guardar', 'Intenta de nuevo.'),
-  })
-
   const effectiveWizard: WizardConfig = wizardConfig ?? DEFAULT_WIZARD_CONFIG
 
-  /** Prende o apaga un paso de recepción; el aviso permite volver atrás. */
-  function cambiarPaso(clave: keyof WizardConfig, valor: boolean, conDeshacer = true) {
-    wizardMutation.mutate({ [clave]: valor }, {
-      onSuccess: () => avisarGuardado(conDeshacer ? () => cambiarPaso(clave, !valor, false) : undefined),
-    })
-  }
   const pasoFacialActivo = wizardConfig?.paso_verificacion_facial ?? false
 
   // ── Configuración facial ─────────────────────────────────────────────────
@@ -555,33 +501,7 @@ export function ClinicaConfig({
                 titulo="Pasos al llegar el paciente"
                 descripcion="El recorrido del paciente desde que llega. Apaga un paso y el recorrido lo salta."
               >
-                {loadingWizard ? <FilasCargando filas={4} /> : (
-                  <FlujoRecepcion
-                    deshabilitado={!isAdmin || wizardMutation.isPending}
-                    onCambiar={(clave, valor) => cambiarPaso(clave as keyof WizardConfig, valor)}
-                    pasos={WIZARD_STEPS.map((step) => {
-                      const addonNoHabilitado = step.esAddon && !(step.addonKey && miClinica?.[step.addonKey])
-                      return {
-                        clave: step.key,
-                        titulo: step.label,
-                        icono: step.icon,
-                        activo: effectiveWizard[step.key],
-                        bloqueado: addonNoHabilitado ? 'plan' as const : step.toggleBloqueado ? 'fijo' as const : undefined,
-                        extra: step.esAddon
-                          ? <EtiquetaAjuste tono={addonNoHabilitado ? 'neutro' : 'addon'} icono={Sparkles}>Add-on</EtiquetaAjuste>
-                          : undefined,
-                        descripcion: addonNoHabilitado ? (
-                          step.addonLockedCopy ?? 'Contáctanos para habilitar este módulo en tu plan.'
-                        ) : step.key === 'paso_checkin' ? (
-                          <>
-                            {step.description} El código sale del número de CliniQ, aunque tengas{' '}
-                            <Link href="/configuracion/whatsapp" className="font-medium text-primary hover:underline">número propio</Link>.
-                          </>
-                        ) : step.description,
-                      }
-                    })}
-                  />
-                )}
+                <FlujoRecepcionEditor />
               </SeccionAjustes>
 
             </>

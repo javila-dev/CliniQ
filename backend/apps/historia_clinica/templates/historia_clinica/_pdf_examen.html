@@ -1,0 +1,6 @@
+<div class="ant-block">
+  <div class="ant-label">{{ ex.titulo }} · {{ ex.fecha }}</div>
+  {% if ex.descripcion %}<div class="ant-value">{{ ex.descripcion }}</div>{% endif %}
+  {% if ex.archivos %}<div class="muted small">Archivos: {{ ex.archivos|join:", " }}</div>{% endif %}
+  <div class="muted small">Cargado por {{ ex.cargado_por|default:"usuario eliminado" }} el {{ ex.cargado_el }}</div>
+</div>

@@ -192,3 +192,129 @@ export interface CreateConsoleUsuarioRequest {
   last_name?: string
   es_superadmin: boolean
 }
+
+// ─── Soporte: trasladar una atención a otro paciente ──────────
+
+export interface SoportePaciente {
+  id: string
+  nombre: string
+  tipo_documento: string
+  numero_documento: string
+  telefono: string
+}
+
+export interface SoporteAtencion {
+  id: string
+  fecha_inicio: string
+  estado: 'completada' | 'en_curso'
+  servicio_nombre: string
+  profesional_nombre: string | null
+  sede_nombre: string
+  paquete: string | null
+  /** Esta atención llegó a este paciente por un traslado anterior. */
+  recibida_por_traslado: boolean
+}
+
+export interface SoporteSesion {
+  id: string
+  nombre: string
+  numero: number
+  estado: string
+  /** Mismo tipo de sesión que se le descontó a A: la opción sugerida. */
+  misma_sesion?: boolean
+  consentimientos_faltantes?: string[]
+}
+
+export interface SoportePaqueteDestino {
+  id: string
+  descripcion: string
+  cotizacion_id: string
+  aceptada_en: string | null
+  sesiones_restantes: number
+  /** Vacío en un paquete de procedimiento: no hay sesión de protocolo que elegir. */
+  sesiones: SoporteSesion[]
+}
+
+export type AccionCobroTraslado = 'mover' | 'desligar' | 'anular'
+
+export interface TrasladoPrevisualizacion {
+  cita: {
+    id: string
+    fecha_inicio: string
+    estado: string
+    servicio_nombre: string
+    profesional_nombre: string | null
+    sede_nombre: string
+  }
+  origen: { id: string; nombre: string }
+  destino: { id: string; nombre: string }
+  contenido: Record<'notas' | 'fotos' | 'examenes' | 'ordenes' | 'zonas' | 'insumos' | 'mediciones', number>
+  paquete_origen: string | null
+  sesiones_origen: SoporteSesion[]
+  paquetes_destino: SoportePaqueteDestino[]
+  cobro: {
+    id: string
+    estado: string
+    total: string
+    pagado: string
+    /** Abono al plan del paquete: moverlo o anularlo cambia lo pagado del plan. */
+    cuenta_para_el_plan: boolean
+  } | null
+  avisos: { code: string; texto: string }[]
+}
+
+export interface TrasladarAtencionRequest {
+  clinica: string
+  cita: string
+  paciente_destino: string
+  item_destino?: string | null
+  sesion_destino?: string | null
+  accion_cobro?: AccionCobroTraslado | null
+  motivo: string
+}
+
+export type AccionCobroEliminacion = 'mantener' | 'desligar' | 'anular'
+export type EstadoCitaEliminacion = 'cancelada' | 'no_asistio' | 'pendiente'
+
+export interface CupoPaquete {
+  descripcion: string
+  restantes_antes: number
+  restantes_despues: number
+}
+
+export interface EliminacionPrevisualizacion {
+  cita: TrasladoPrevisualizacion['cita']
+  paciente: { id: string; nombre: string }
+  contenido: TrasladoPrevisualizacion['contenido']
+  sesiones: SoporteSesion[]
+  /** Cupo del paquete según cómo quede la cita (cancelada o no asistió liberan; pendiente no). */
+  paquete: { cancelada: CupoPaquete; pendiente: CupoPaquete } | null
+  cobro: TrasladoPrevisualizacion['cobro']
+  avisos: { code: string; texto: string }[]
+}
+
+export interface EliminarAtencionRequest {
+  clinica: string
+  cita: string
+  estado_cita: EstadoCitaEliminacion
+  accion_cobro?: AccionCobroEliminacion | null
+  motivo: string
+}
+
+export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion'
+
+export interface CorreccionSoporte {
+  id: string
+  tipo: TipoCorreccionSoporte
+  cita_id: string
+  fecha_atencion: string
+  paciente: string
+  /** Solo en un traslado. */
+  paciente_destino: string | null
+  accion_cobro: 'sin_cobro' | 'mover' | 'mantener' | 'desligar' | 'anular'
+  /** Solo al eliminar: cómo quedó la cita. */
+  estado_cita: EstadoCitaEliminacion | null
+  motivo: string
+  realizado_por: string | null
+  created_at: string
+}

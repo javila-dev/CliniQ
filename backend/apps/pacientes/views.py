@@ -101,7 +101,7 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             permission_classes = (RequirePermission("pacientes.foto_control.cambiar"),)
         elif self.action == "eliminar_foto_control":
             permission_classes = (RequirePermission("pacientes.foto_control.eliminar"),)
-        elif self.action == "checkin":
+        elif self.action in {"checkin", "omitir_verificacion"}:
             permission_classes = (RequirePermission("pacientes.ver"),)
         else:
             permission_classes = (RequirePermission("pacientes.ver"),)
@@ -523,3 +523,27 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         qs = paciente.checkins.select_related("cita", "realizado_por").order_by("-created_at")
         from apps.pacientes.serializers import CheckInSerializer
         return Response(CheckInSerializer(qs, many=True, context={"request": request}).data)
+
+    @action(detail=True, methods=["post"], url_path="omitir_verificacion")
+    def omitir_verificacion(self, request, pk=None):
+        """"Continuar sin verificar" en Preparar paciente, cuando el servicio facial
+        no responde. La verificación es un paso obligatorio para iniciar la
+        atención: el salto queda registrado con quién lo hizo."""
+        from apps.core.logging import registrar_accion
+
+        paciente = self.get_object()
+        cita = Cita.objects.filter(id=request.data.get("cita_id"), paciente=paciente).first()
+        if cita is None:
+            raise ValidationError({"cita_id": "Cita no encontrada para este paciente."})
+        checkin = CheckIn.objects.create(
+            paciente=paciente,
+            cita=cita,
+            score=0,
+            confidence=CheckIn.Confidence.BAJA,
+            match=False,
+            det_score_live=0,
+            omitido=True,
+            realizado_por=request.user,
+        )
+        registrar_accion(request, "checkin.omitido", cita, {"checkin_id": str(checkin.id)})
+        return Response({"omitido": True}, status=status.HTTP_201_CREATED)

@@ -11,7 +11,6 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { CitaStatusBadge } from '@/components/shared/StatusBadge'
 import { agendaApi } from '@/lib/api/agenda'
 import { useAuthStore } from '@/store/authStore'
 import { canIniciarAtencion, hasPermission, PERM } from '@/lib/permissions'
@@ -20,7 +19,8 @@ import { mensajeErrorDeuda } from '@/lib/deuda'
 import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
 import type { Cita } from '@/types/agenda'
-import { cobroConPagos } from './PagoContent'
+import { estadoOperativo, listaDePasos, progresoRecepcion } from '@/lib/recepcion'
+import { EnlaceCambiarPasos, EtiquetaEstadoOperativo } from './EstadoPreparacion'
 import {
   FirmaProfesionalModal,
   citaRequiereFirmaProfesional,
@@ -55,25 +55,11 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
   const [bloqueoPorActiva, setBloqueoPorActiva] = useState<Cita | null>(null)
   const [iniciandoCitaId, setIniciandoCitaId] = useState<string | null>(null)
 
-  function isWizardDone(cita: Cita): boolean {
-    const consentimientoAplica = (cita.consentimiento_info?.consentimientos?.length ?? 0) > 0
-    const doneMap = {
-      llegada:        cita.estado !== 'confirmada',
-      consentimiento: !consentimientoAplica || Boolean(cita.consentimiento_info?.todos_firmados),
-      // Quien no registra cobros ("Continuar sin cobrar" en el asistente) no queda
-      // bloqueado por el pago: recepción lo registra después (AG-05).
-      pago:           cita.item_cotizacion_id != null || cobroConPagos(cita) || cita.estado === 'en_curso' || cita.estado === 'completada'
-                      || !hasPermission(user, PERM.COBROS_CREAR),
-      firma:          cita.firma_asistencia_estado === 'firmada',
-    }
-    const activeSteps = (['llegada', 'consentimiento', 'pago', 'firma'] as const).filter((step) => {
-      if (!wizardConfig) return true
-      if (step === 'llegada') return wizardConfig.paso_checkin
-      if (step === 'pago')    return wizardConfig.paso_pago
-      if (step === 'firma')   return wizardConfig.paso_firma_asistencia
-      return true
-    })
-    return activeSteps.length > 0 && activeSteps.every((s) => doneMap[s])
+  const puedeCambiarPasos = hasPermission(user, PERM.CLINICAS_EDITAR)
+
+  // Pasos de recepción de cada cita: los mismos que exige el backend para iniciar.
+  function progresoDe(cita: Cita) {
+    return progresoRecepcion(cita, wizardConfig)
   }
 
   const [firmaProfesionalCita, setFirmaProfesionalCita] = useState<Cita | null>(null)
@@ -105,6 +91,8 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
       const data = (err as any)?.response?.data ?? {}
       if (data.code === 'CONSENTIMIENTO_REQUERIDO') {
         toast.error('Consentimientos pendientes', `Falta firmar: ${(data.pendientes ?? []).join(', ')}`)
+      } else if (data.code === 'PASOS_RECEPCION_PENDIENTES') {
+        toast.error('Falta preparar al paciente', `Falta: ${(data.pendientes ?? []).join(', ')}. Lo completa recepción.`)
       } else {
         // Antes los demás errores no mostraban nada y el botón solo se apagaba (AG-08).
         toast.error('No se pudo iniciar la atención', mensajeDeError(err, 'Revisa el estado de la cita.'))
@@ -170,58 +158,69 @@ export function ColaEspera({ citas, citaActiva }: ColaEsperaProps) {
             const usaSesionConsent = Boolean(cita.sesion_ejecutada_id && cita.id === siguienteCitaEnEspera?.id && sesionConsentData)
             const todosFirmadosOverride = usaSesionConsent ? sesionConsentData!.puede_ejecutar : undefined
             const puedeContinuar = enEspera && esElSiguiente
-            const listaPara = puedeIniciarAtencion && isWizardDone(cita)
+            const progreso = progresoDe(cita)
+            const listaPara = puedeIniciarAtencion && progreso.listo
+            // El bloqueo se explica en la fila, no en un tooltip.
+            const bloqueada = puedeContinuar && puedeIniciarAtencion && !progreso.listo
             const iniciando = iniciandoCitaId === cita.id
 
             return (
               <div
                 key={cita.id}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors ${
+                className={`rounded-lg px-3 py-2.5 transition-colors ${
                   esElSiguiente
                     ? 'bg-rose-50 border border-rose-200/70'
                     : 'bg-muted/30 border border-transparent'
                 }`}
               >
-                <div className={`flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold shrink-0 ${
-                  esElSiguiente ? 'bg-rose-100 text-rose-600' : 'bg-muted text-muted-foreground'
-                }`}>
-                  {idx + 1}
-                </div>
-
-                <div className="flex items-center gap-1 text-muted-foreground shrink-0 w-12">
-                  <Clock className="h-3.5 w-3.5" />
-                  <span className="text-xs font-medium">{formatTime(cita.fecha_inicio)}</span>
-                </div>
-
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className={`text-sm font-medium truncate ${esElSiguiente ? 'text-foreground' : 'text-muted-foreground'}`}>
-                      {cita.paciente_nombre}
-                    </p>
-                    <ConsentimientoBadge cita={cita} todosFirmadosOverride={todosFirmadosOverride} />
+                <div className="flex items-center gap-3">
+                  <div className={`flex items-center justify-center h-6 w-6 rounded-full text-xs font-bold shrink-0 ${
+                    esElSiguiente ? 'bg-rose-100 text-rose-600' : 'bg-muted text-muted-foreground'
+                  }`}>
+                    {idx + 1}
                   </div>
-                  <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
+
+                  <div className="flex items-center gap-1 text-muted-foreground shrink-0 w-12">
+                    <Clock className="h-3.5 w-3.5" />
+                    <span className="text-xs font-medium">{formatTime(cita.fecha_inicio)}</span>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <p className={`text-sm font-medium truncate ${esElSiguiente ? 'text-foreground' : 'text-muted-foreground'}`}>
+                        {cita.paciente_nombre}
+                      </p>
+                      <ConsentimientoBadge cita={cita} todosFirmadosOverride={todosFirmadosOverride} />
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate uppercase">{cita.servicio_nombre}</p>
+                  </div>
+
+                  {puedeContinuar && puedeIniciarAtencion ? (
+                    <Button
+                      size="sm"
+                      className="shrink-0 h-7 text-xs"
+                      disabled={iniciando || !listaPara}
+                      onClick={() => handleIniciar(cita)}
+                    >
+                      {iniciando
+                        ? <Loader2 className="h-3 w-3 animate-spin" />
+                        : <><Play className="h-3 w-3 mr-1" />Iniciar</>
+                      }
+                    </Button>
+                  ) : (
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <EtiquetaEstadoOperativo estado={estadoOperativo(cita, progreso)} />
+                    </div>
+                  )}
                 </div>
 
-                {puedeContinuar && puedeIniciarAtencion ? (
-                  <Button
-                    size="sm"
-                    className="shrink-0 h-7 text-xs"
-                    disabled={iniciando || !listaPara}
-                    title={!listaPara ? 'Recepción debe completar los pasos previos' : undefined}
-                    onClick={() => handleIniciar(cita)}
-                  >
-                    {iniciando
-                      ? <Loader2 className="h-3 w-3 animate-spin" />
-                      : <><Play className="h-3 w-3 mr-1" />Iniciar</>
-                    }
-                  </Button>
-                ) : (
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <CitaStatusBadge estado={cita.estado} />
-                    {esElSiguiente && cita.estado === 'confirmada' && (
-                      <Badge variant="outline" className="text-[10px] border-amber-200 text-amber-600">Sin llegar</Badge>
-                    )}
+                {/* Por qué no se puede iniciar, en la fila y no en un tooltip. */}
+                {bloqueada && (
+                  <div className="mt-2 border-t border-rose-200/70 pt-2 text-xs leading-snug">
+                    <p className="text-amber-700">
+                      Falta {listaDePasos(progreso.faltan)}. Lo completa recepción con Preparar paciente.
+                    </p>
+                    {puedeCambiarPasos && <EnlaceCambiarPasos className="mt-1" />}
                   </div>
                 )}
               </div>

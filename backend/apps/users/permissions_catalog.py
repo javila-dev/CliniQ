@@ -48,6 +48,7 @@ PERMISSION_CATALOG = [
     ("consentimientos.revocar", "consentimientos", "revocar", "Revocar consentimientos", False),
     ("consentimientos.ver", "consentimientos", "ver", "Ver consentimientos", True),
     ("historia.consentimientos.gestionar", "historia", "consentimientos.gestionar", "Gestionar consentimientos informados", True),
+    ("historia.examenes.cargar", "historia", "examenes.cargar", "Cargar resultados de examenes", True),
     ("historia.fotos.eliminar", "historia", "fotos.eliminar", "Eliminar fotos clinicas", False),
     ("historia.fotos.subir", "historia", "fotos.subir", "Subir fotos clinicas", False),
     ("historia.notas.crear", "historia", "notas.crear", "Crear notas clinicas", False),
@@ -225,6 +226,14 @@ CAPABILITY_CATALOG = [
                 "permisos": ["historia.consentimientos.gestionar"],
                 # Tambien lo usa recepcion (firma en la cotizacion): no vuelve
                 # profesional al rol. Quien atiende lo recibe por el check.
+            },
+            {
+                "clave": "clinica.cargar_examenes",
+                "titulo": "Cargar resultados de examenes",
+                "descripcion": "Subir a la historia clinica los resultados que el paciente envia, tambien despues de la atencion.",
+                "permisos": ["historia.examenes.cargar"],
+                # Quien atiende lo recibe por el check; recepcion solo si se lo
+                # dan en el rol (no vuelve profesional al rol).
             },
             {
                 "clave": "clinica.eliminar_consumo_insumos",
@@ -665,6 +674,7 @@ PERMISOS_SIN_PANTALLA = frozenset({
 # (rol personalizado o recepción con el check "atiende pacientes").
 PERMISOS_ATIENDE_PACIENTES = PERMISOS_SOLO_CHECK_ATIENDE | {
     "historia.consentimientos.gestionar",
+    "historia.examenes.cargar",
     "historia.ver",
     "pacientes.antecedentes.ver",
 }
@@ -726,6 +736,7 @@ ROLE_PERMISSION_DEFAULTS = {
         "consentimientos.plantillas.ver",
         "consentimientos.ver",
         "historia.consentimientos.gestionar",
+        "historia.examenes.cargar",
         "historia.ver",
         "inventario.kardex.ver",
         "inventario.ver",

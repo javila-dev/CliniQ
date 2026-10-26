@@ -7,6 +7,7 @@ import Link from 'next/link'
 import { CheckCircle2, XCircle, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { registroPublicoApi } from '@/lib/api/clinicas'
+import { urlSitio } from '@/lib/dominios'
 
 type State = 'loading' | 'success' | 'error'
 
@@ -81,7 +82,7 @@ export default function VerificarClinicaPage() {
               <h1 className="text-2xl font-bold text-white">Enlace inválido</h1>
               <p className="text-white/50 text-sm leading-relaxed">{errorMsg}</p>
             </div>
-            <Link href="/registro-clinica">
+            <Link href={urlSitio('/registro-clinica')}>
               <Button variant="outline" className="w-full">
                 Volver al registro
               </Button>

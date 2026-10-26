@@ -235,6 +235,10 @@ class CheckIn(BaseModel):
     match = models.BooleanField()
     requiere_confirmacion = models.BooleanField(default=False)
     det_score_live = models.FloatField()
+    # "Continuar sin verificar" cuando el servicio facial falla: queda registrado
+    # quién saltó la verificación (sin foto ni puntaje). db_default para que el
+    # código que aún no conoce el campo pueda seguir insertando.
+    omitido = models.BooleanField(default=False, db_default=False)
     realizado_por = models.ForeignKey(
         "users.User",
         on_delete=models.SET_NULL,

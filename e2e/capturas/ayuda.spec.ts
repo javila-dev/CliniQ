@@ -120,15 +120,15 @@ test('asistente de inicio de atención', async ({ page, request }) => {
   expect(citas.length, 'la clínica demo no tiene citas confirmadas hoy').toBeGreaterThan(0)
 
   await page.goto(`/agenda?cita=${citas[0].id}`)
-  await page.getByRole('button', { name: 'Registrar llegada' }).click()
+  await page.getByRole('button', { name: 'Preparar paciente' }).click()
 
   const modal = dialogo(page)
-  await expect(modal.getByRole('heading', { name: /Iniciar atención/ })).toBeVisible()
+  await expect(modal.getByRole('heading', { name: /Preparar paciente/ })).toBeVisible()
   await expect(modal.getByRole('button', { name: /Enviar código/ })).toBeVisible()
   await capturar(page, slug, '01-paso-llegada', { target: modal, alto: 360 })
 
-  // El recorrido de pasos se revela al pasar el cursor sobre el indicador de puntos.
-  await modal.locator('button:has(> div.rounded-full)').first().hover()
+  // El recorrido de pasos está siempre a la vista, con el nombre de cada paso.
+  await expect(modal.getByRole('list', { name: 'Pasos de recepción' })).toBeVisible()
   await expect(modal.getByText('Consentimiento')).toBeVisible()
   await capturar(page, slug, '02-pasos-del-asistente', { target: modal, alto: 470 })
 })
