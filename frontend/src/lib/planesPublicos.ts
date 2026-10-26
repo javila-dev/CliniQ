@@ -1,4 +1,22 @@
+import { unstable_cache } from 'next/cache'
 import type { PlanPublico } from '@/lib/api/clinicas'
+
+// La imagen se compila sin backend a la vista: si el landing se prerenderiza en
+// `next build` queda congelado sin planes. Por eso la página se arma en cada
+// request y lo que se cachea es la respuesta de la API, y solo si fue exitosa
+// (unstable_cache no guarda una función que lanzó error).
+const leerPlanes = unstable_cache(
+  async (): Promise<PlanPublico[]> => {
+    const res = await fetch(`${process.env.BACKEND_URL}/api/v1/registro-clinica/planes/`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(3000),
+    })
+    if (!res.ok) throw new Error(`planes públicos: HTTP ${res.status}`)
+    return (await res.json()) as PlanPublico[]
+  },
+  ['planes-publicos'],
+  { revalidate: 600 },
+)
 
 /**
  * Planes públicos leídos desde el servidor (sin JS en el navegador), para que
@@ -6,15 +24,9 @@ import type { PlanPublico } from '@/lib/api/clinicas'
  * Si el backend no responde devuelve null y el landing los pide desde el navegador.
  */
 export async function obtenerPlanesPublicos(): Promise<PlanPublico[] | null> {
-  const base = process.env.BACKEND_URL
-  if (!base) return null
+  if (!process.env.BACKEND_URL) return null
   try {
-    const res = await fetch(`${base}/api/v1/registro-clinica/planes/`, {
-      next: { revalidate: 3600 },
-      signal: AbortSignal.timeout(5000),
-    })
-    if (!res.ok) return null
-    return (await res.json()) as PlanPublico[]
+    return await leerPlanes()
   } catch {
     return null
   }

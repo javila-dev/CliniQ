@@ -21,15 +21,6 @@ import { Multisede } from './Multisede'
 import { Precios } from './Precios'
 import './landing.css'
 
-const CONTRATO = `
-THESIS: la landing es un día de clínica en vivo (recordatorio, cita, firma, cuota, sede), no una lista de funciones. Rechaza el hero con captura estática y la grilla de tarjetas con iconos.
-OWN-WORLD: negro-ciruela #07040a alternado con blanco (paneles oscuros redondeados sobre fondo blanco), fotografía real de clínica junto a las capturas, líneas de 1px, magenta #d9226f como única luz, Geist en negrita para títulos (la voz de la app) y Geist Mono solo para datos; ilustraciones de línea animadas en SVG, sin fotos de stock.
-STORY: el dueño entiende que todo su día pasa en un solo flujo y empieza la prueba de 14 días.
-FIRST VIEWPORT: titular serif a la izquierda; a la derecha el teatro de producto animado (WhatsApp, agenda, firma, cuota); CTA magenta bajo el titular.
-FORM: dirección fijada por la petición (referencias Resend y ManyChat), sin sorteo; build code-first.
-FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
-`
-
 const DOLORES = [
   ['Información dispersa', 'La historia está en papel, las fotos en un celular y los pagos en otra hoja.'],
   ['Equipo descoordinado', 'Recepción, profesionales y administración trabajan con versiones distintas del día.'],
@@ -68,8 +59,6 @@ export function LandingPageV3({ planes }: { planes?: PlanPublico[] | null }) {
 
   return (
     <div className={`${sans.variable} ${mono.variable} lv3 min-h-screen`}>
-      <div hidden dangerouslySetInnerHTML={{ __html: `<!--${CONTRATO}-->` }} />
-
       <a
         href="#contenido"
         className="fixed left-4 top-3 z-50 -translate-y-20 rounded-full bg-white px-4 py-2 text-sm font-semibold text-[#07040a] focus:translate-y-0"

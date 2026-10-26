@@ -4,9 +4,9 @@ import { SITIO_URL } from '@/lib/dominios'
 import { obtenerPlanesPublicos, resumenPlan } from '@/lib/planesPublicos'
 
 // /llms.txt (https://llmstxt.org): resumen del producto para agentes de IA
-// como ChatGPT, Claude o Perplexity. Los precios salen de la API y se
-// regeneran cada hora.
-export const revalidate = 3600
+// como ChatGPT, Claude o Perplexity. Los precios salen de la API (cacheados
+// 10 min en obtenerPlanesPublicos); dinámica para no generarla en el build.
+export const dynamic = 'force-dynamic'
 
 const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 

@@ -28,9 +28,10 @@ export const metadata: Metadata = {
   }),
 }
 
-// Los planes se leen en el servidor cada hora: los precios quedan en el HTML
-// para buscadores y agentes de IA, que no ejecutan JavaScript.
-export const revalidate = 3600
+// Los planes se leen en el servidor (cacheados 10 min en obtenerPlanesPublicos):
+// los precios quedan en el HTML para buscadores y agentes de IA, que no ejecutan
+// JavaScript. Dinámica para no prerenderizarla en el build, donde no hay backend.
+export const dynamic = 'force-dynamic'
 
 export default async function Page() {
   const planes = await obtenerPlanesPublicos()
