@@ -330,8 +330,8 @@ Varias cosas están apagadas hasta que alguien las enciende:
 - El documento de **aceptación y compromiso de pago** al aceptar una cotización es opcional.
 - Las pestañas de la **historia clínica** y de la **pantalla de atención** se
   eligen una por una.
-- Los **módulos adicionales**, como el de obesidad o la verificación facial, se
-  habilitan por clínica.
+- Los **módulos adicionales**, como la verificación facial, se habilitan por
+  clínica.
 
 **Qué hacer**: revisa la sección correspondiente de Configuración, o pregúntale
 a quien administra la clínica.

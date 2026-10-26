@@ -401,14 +401,13 @@ class AdminTenantViewSet(ModelViewSet):
     _TENANT_TRACKED_FIELDS = (
         "nombre", "nit", "email", "telefono", "activo", "plan_id",
         "facial_verificacion_override", "modulo_estetico_override",
-        "modulo_obesidad_override", "whatsapp_override", "whatsapp_envios_incluidos_override",
+        "whatsapp_override", "whatsapp_envios_incluidos_override",
         "whatsapp_numero_propio_override", "whatsapp_numeros_incluidos_override",
         "modo_puesta_en_marcha",
     )
     _MODULO_LABELS = {
         "facial_verificacion_override": "Verificación facial",
         "modulo_estetico_override": "Módulo estético",
-        "modulo_obesidad_override": "Módulo obesidad",
         "whatsapp_override": "WhatsApp",
         "whatsapp_envios_incluidos_override": "Cupo de envíos de WhatsApp",
         "whatsapp_numero_propio_override": "WhatsApp con número propio",
