@@ -5,7 +5,7 @@ import { APP_URL, DOMINIOS_SEPARADOS, HOST_SITIO, HOSTS_ALIAS_SITIO, SITIO_URL }
 // Sin los dos dominios configurados no hace nada.
 
 // Páginas del sitio público. Lo demás se manda a la app con la misma ruta.
-const PAGINAS_SITIO = ['/registro-clinica']
+const PAGINAS_SITIO = ['/registro-clinica', '/terminos', '/privacidad']
 
 // Lo único de la API que usa el sitio: el alta de la clínica (con sus planes),
 // los reportes de CSP y la versión del build (DetectorNuevaVersion).

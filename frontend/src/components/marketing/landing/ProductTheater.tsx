@@ -17,7 +17,7 @@ function PanelHead({ title, meta }: { title: string; meta: string }) {
   )
 }
 
-const PILL = 'inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium'
+const PILL = 'inline-flex h-6 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[11px] font-medium'
 const PILL_OK = `${PILL} bg-emerald-400/[0.13] text-emerald-300`
 const PILL_WARN = `${PILL} bg-amber-300/[0.13] text-amber-200`
 
@@ -135,7 +135,7 @@ export function ProductTheater() {
         </Panel>
       </div>
 
-      <p className="lv3-mono mt-4 text-center text-[10px] uppercase tracking-[0.14em] text-[var(--lv3-faint)] lg:text-right">
+      <p className="mt-4 text-center text-xs text-[var(--lv3-faint)] lg:text-right">
         Ejemplo ilustrativo · datos ficticios
       </p>
     </div>

@@ -26,8 +26,8 @@ export function Ventana({
   return (
     <div className={`overflow-hidden rounded-2xl border border-white/10 bg-[#0d0811] shadow-[0_40px_100px_-40px_rgba(0,0,0,0.9)] ${className}`}>
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 border-b border-white/[0.06] px-4 py-3">
-        <span className="lv3-mono text-[10px] uppercase tracking-[0.14em] text-white/60">{caption}</span>
-        <span className="lv3-mono text-[10px] uppercase tracking-[0.14em] text-white/60">Datos de ejemplo</span>
+        <span className="text-xs text-white/60">{caption}</span>
+        <span className="text-xs text-white/60">Datos de ejemplo</span>
       </div>
       <Image
         src={img.src}

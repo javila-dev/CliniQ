@@ -82,6 +82,7 @@ function PlanDialog({
   const [whatsappHabilitado, setWhatsappHabilitado] = useState(plan?.whatsapp_habilitado ?? true)
   const [numeroPropio, setNumeroPropio] = useState(plan?.whatsapp_numero_propio_habilitado ?? false)
   const [mostrarPublico, setMostrarPublico]     = useState(plan?.mostrar_publico ?? false)
+  const [recomendado, setRecomendado]           = useState(plan?.recomendado ?? false)
 
   useEffect(() => {
     setFacialHabilitado(plan?.facial_verificacion_habilitada ?? false)
@@ -90,6 +91,7 @@ function PlanDialog({
     setWhatsappHabilitado(plan?.whatsapp_habilitado ?? true)
     setNumeroPropio(plan?.whatsapp_numero_propio_habilitado ?? false)
     setMostrarPublico(plan?.mostrar_publico ?? false)
+    setRecomendado(plan?.recomendado ?? false)
   }, [plan?.id])
 
   const mutation = useMutation({
@@ -113,6 +115,7 @@ function PlanDialog({
         precio_por_numero_whatsapp: data.precio_por_numero_whatsapp ? parseFloat(data.precio_por_numero_whatsapp) : null,
         whatsapp_numeros_incluidos: data.whatsapp_numeros_incluidos ? Math.max(1, parseInt(data.whatsapp_numeros_incluidos, 10)) : 1,
         mostrar_publico: mostrarPublico,
+        recomendado: mostrarPublico && recomendado,
       }
       return isEdit ? adminApi.planes.update(plan!.id, payload) : adminApi.planes.create(payload)
     },
@@ -288,7 +291,17 @@ function PlanDialog({
                 Aparece en la tabla de precios de la página pública para prospectos que aún no tienen cuenta.
               </p>
             </div>
-            <Switch checked={mostrarPublico} onCheckedChange={setMostrarPublico} />
+            <Switch checked={mostrarPublico} onCheckedChange={(v) => { setMostrarPublico(v); if (!v) setRecomendado(false) }} />
+          </div>
+
+          <div className={cn('flex items-center justify-between gap-3 rounded-lg border p-4', !mostrarPublico && 'opacity-60')}>
+            <div>
+              <p className="text-sm font-medium text-gray-900">Plan recomendado</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Se destaca como «Más elegido» en la landing. Solo puede haber uno: al marcar este se desmarca el anterior.
+              </p>
+            </div>
+            <Switch checked={mostrarPublico && recomendado} disabled={!mostrarPublico} onCheckedChange={setRecomendado} />
           </div>
 
           {mutation.isError && (
@@ -441,6 +454,7 @@ export default function PlanesPage() {
                     <div className="flex items-center gap-2">
                       <Crown className="h-3.5 w-3.5 text-amber-500 shrink-0" />
                       <span className="font-medium text-sm">{p.nombre}</span>
+                      {p.recomendado && <Badge variant="default" className="whitespace-nowrap">Recomendado</Badge>}
                     </div>
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground max-w-xs">

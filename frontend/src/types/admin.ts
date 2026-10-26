@@ -21,6 +21,7 @@ export interface Plan {
   whatsapp_numeros_incluidos: number
   precio_por_numero_whatsapp: string | null
   mostrar_publico: boolean
+  recomendado: boolean  // «Más elegido» en la landing; solo un plan a la vez
   created_at: string
   updated_at: string
 }
@@ -146,6 +147,7 @@ export interface CreatePlanRequest {
   whatsapp_numeros_incluidos?: number
   precio_por_numero_whatsapp?: number | null
   mostrar_publico?: boolean
+  recomendado?: boolean
 }
 
 export type UpdatePlanRequest = Partial<CreatePlanRequest> & { activo?: boolean }

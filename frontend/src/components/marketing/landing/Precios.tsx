@@ -3,8 +3,8 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, RefreshCw } from 'lucide-react'
-import { registroPublicoApi } from '@/lib/api/clinicas'
+import { ArrowRight, Building2, Check, Network, RefreshCw, Store, UserRound, type LucideIcon } from 'lucide-react'
+import { registroPublicoApi, type PlanPublico } from '@/lib/api/clinicas'
 import { CtaPrimary } from './shared'
 
 const COP_FMT = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
@@ -22,43 +22,49 @@ function precioMes(precio: string, ciclo: Ciclo, descuento: number) {
   return ciclo === 'anual' && descuento > 0 ? Math.round(mensual * (1 - descuento / 100)) : mensual
 }
 
+// Ícono por posición del plan (de menor a mayor tamaño).
+const ICONOS: LucideIcon[] = [UserRound, Store, Building2, Network]
+
 function Punto({ children }: { children: React.ReactNode }) {
   return (
-    <li className="flex items-start gap-3 text-sm text-[var(--lv3-muted)]">
-      <span aria-hidden className="mt-2 h-1 w-1 shrink-0 rounded-full bg-emerald-400" />
+    <li className="flex items-start gap-2.5 text-sm text-[var(--lv3-muted)]">
+      <span aria-hidden className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[#d9226f]/[0.14] text-[var(--lv3-lit)]">
+        <Check className="h-2.5 w-2.5" strokeWidth={3} />
+      </span>
       {children}
     </li>
   )
 }
 
-export function Precios() {
+export function Precios({ planesIniciales }: { planesIniciales?: PlanPublico[] }) {
   const { data: planes, isLoading, isError, isFetching, refetch } = useQuery({
     queryKey: ['planes-publicos'],
     queryFn: registroPublicoApi.planesPublicos,
     staleTime: 5 * 60 * 1000,
     retry: 1,
+    initialData: planesIniciales,
   })
   const [ciclo, setCiclo] = useState<Ciclo>('mensual')
   const hayAnual = !!planes?.some((p) => p.precio !== null && p.descuento_anual_pct > 0)
   const maxDescuento = Math.max(0, ...(planes ?? []).map((p) => p.descuento_anual_pct))
 
   return (
-    <section id="precios" className="scroll-mt-20 border-t border-white/[0.07] py-16 sm:py-32">
+    <section id="precios" className="scroll-mt-20 py-14 sm:py-24">
       <div className="mx-auto max-w-7xl px-5 sm:px-6">
         <div className="mx-auto max-w-2xl text-center">
-          <h2 className="lv3-display text-[clamp(1.9rem,3.1vw,2.85rem)] leading-[1.06] tracking-[-0.02em] [text-wrap:balance]">
+          <h2 className="lv3-display text-[clamp(1.9rem,3.1vw,2.85rem)] leading-[1.06] tracking-[-0.025em] [text-wrap:balance]">
             Empieza con <span className="text-[var(--lv3-lit)]">el tamaño que tienes hoy</span>.
           </h2>
           <p className="mt-5 text-base leading-7 text-[var(--lv3-muted)]">Todos los planes incluyen 14 días de prueba sin tarjeta de crédito.</p>
           {hayAnual && (
-            <div role="group" aria-label="Ciclo de pago" className="mt-8 inline-flex rounded-full border border-white/10 bg-white/[0.03] p-1 text-sm">
+            <div role="group" aria-label="Ciclo de pago" className="mt-8 inline-flex rounded-full border border-[var(--lv3-line)] bg-[var(--lv3-surface)] p-1 text-sm">
               {(['mensual', 'anual'] as const).map((c) => (
                 <button
                   key={c}
                   type="button"
                   aria-pressed={ciclo === c}
                   onClick={() => setCiclo(c)}
-                  className={`rounded-full px-4 py-1.5 font-medium transition-colors ${ciclo === c ? 'bg-white text-[var(--lv3-bg)]' : 'text-[var(--lv3-muted)] hover:text-[var(--lv3-text)]'}`}
+                  className={`whitespace-nowrap rounded-full px-4 py-1.5 font-medium transition-colors ${ciclo === c ? 'bg-[var(--lv3-text)] text-[var(--lv3-bg)]' : 'text-[var(--lv3-muted)] hover:text-[var(--lv3-text)]'}`}
                 >
                   {c === 'mensual' ? 'Mensual' : `Anual · ahorra hasta ${maxDescuento} %`}
                 </button>
@@ -68,13 +74,13 @@ export function Precios() {
         </div>
 
         {isLoading ? (
-          <div className="mx-auto mt-14 grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Cargando planes">
+          <div className="mx-auto mt-10 grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Cargando planes">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="h-80 animate-pulse rounded-2xl motion-reduce:animate-none border border-white/[0.06] bg-white/[0.03]" />
+              <div key={i} className="h-80 animate-pulse rounded-2xl motion-reduce:animate-none border border-[var(--lv3-line)] bg-[var(--lv3-surface)]" />
             ))}
           </div>
         ) : isError ? (
-          <div className="mx-auto mt-14 max-w-xl rounded-2xl border border-white/10 bg-[var(--lv3-surface)] p-8 text-center">
+          <div className="mx-auto mt-10 max-w-xl rounded-2xl border border-[var(--lv3-line)] bg-[var(--lv3-surface)] p-8 text-center">
             <p className="lv3-display text-xl">No pudimos cargar los planes en este momento.</p>
             <p className="mt-2 text-sm leading-6 text-[var(--lv3-muted)]">Puedes iniciar tu prueba de todas formas o volver a intentarlo.</p>
             <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
@@ -82,7 +88,7 @@ export function Precios() {
                 type="button"
                 onClick={() => refetch()}
                 disabled={isFetching}
-                className="inline-flex h-11 items-center gap-2 rounded-full border border-white/15 px-5 text-sm font-medium text-[var(--lv3-text)] transition-colors hover:bg-white/[0.06] disabled:pointer-events-none disabled:opacity-60"
+                className="inline-flex h-11 items-center gap-2 rounded-full border border-[var(--lv3-line)] px-5 text-sm font-medium text-[var(--lv3-text)] transition-colors hover:bg-[var(--lv3-surface-2)] disabled:pointer-events-none disabled:opacity-60"
               >
                 <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden />
                 {isFetching ? 'Reintentando' : 'Reintentar'}
@@ -91,14 +97,30 @@ export function Precios() {
             </div>
           </div>
         ) : planes && planes.length > 0 ? (
-          <div className="mx-auto mt-14 grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {planes.map((plan) => {
+          <div className="mx-auto mt-10 grid max-w-7xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            {planes.map((plan, i) => {
+              const destacado = plan.recomendado
+              const Icono = ICONOS[Math.min(i, ICONOS.length - 1)]
               return (
                 <article
                   key={plan.id}
-                  className="relative flex flex-col rounded-2xl border border-white/10 bg-[var(--lv3-surface)] p-7"
+                  className={`relative flex flex-col rounded-2xl p-7 transition-[transform,box-shadow] duration-300 hover:-translate-y-1 motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${
+                    destacado
+                      ? 'border border-[#d9226f]/40 bg-white bg-[radial-gradient(120%_70%_at_100%_0%,rgba(217,34,111,0.16),transparent_62%)] shadow-[0_30px_60px_-38px_rgba(192,29,99,0.55)]'
+                      : 'border border-[var(--lv3-line)] bg-white hover:shadow-[0_30px_60px_-35px_rgba(192,29,99,0.45)]'
+                  }`}
                 >
-                  <h3 className="lv3-display text-2xl">{plan.nombre}</h3>
+                  {destacado && (
+                    <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full border border-[#d9226f]/30 bg-[#fdf0f5] px-3 py-1 text-xs font-semibold text-[#c01d63]">
+                      Más elegido
+                    </span>
+                  )}
+                  <div className="flex items-center gap-3">
+                    <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${destacado ? 'bg-[#d9226f]/[0.16] text-[#c01d63]' : 'bg-[#d9226f]/10 text-[#c01d63]'}`}>
+                      <Icono className="h-[18px] w-[18px]" aria-hidden />
+                    </span>
+                    <h3 className="lv3-display text-2xl">{plan.nombre}</h3>
+                  </div>
                   {plan.descripcion && <p className="mt-2 min-h-[6.5rem] text-[13px] leading-5 text-[var(--lv3-faint)]">{plan.descripcion}</p>}
                   <p className="mt-6 flex items-baseline gap-1">
                     <span className="lv3-display text-4xl tracking-tight">
@@ -122,7 +144,11 @@ export function Precios() {
                   </ul>
                   <Link
                     href="/registro-clinica"
-                    className="group mt-8 inline-flex h-11 w-full items-center justify-between border-t border-white/10 pt-4 text-sm font-semibold text-[var(--lv3-text)]"
+                    className={`group mt-8 inline-flex h-11 w-full items-center justify-between rounded-xl px-4 text-sm font-semibold transition-colors ${
+                      destacado
+                        ? 'bg-[#d9226f] text-white hover:bg-[#c01d63]'
+                        : 'border border-[#d9226f]/30 text-[#c01d63] hover:bg-[#d9226f]/[0.06]'
+                    }`}
                   >
                     Probar gratis
                     <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" aria-hidden />
@@ -132,7 +158,7 @@ export function Precios() {
             })}
           </div>
         ) : (
-          <div className="mx-auto mt-14 max-w-xl rounded-2xl border border-white/10 bg-[var(--lv3-surface)] p-8 text-center">
+          <div className="mx-auto mt-10 max-w-xl rounded-2xl border border-[var(--lv3-line)] bg-[var(--lv3-surface)] p-8 text-center">
             <p className="lv3-display text-xl">Cada clínica tiene una operación distinta.</p>
             <p className="mt-2 text-sm text-[var(--lv3-muted)]">Inicia la prueba y configura CliniQ según tu equipo y tus sedes.</p>
             <div className="mt-6 flex justify-center">

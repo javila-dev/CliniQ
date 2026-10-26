@@ -281,7 +281,10 @@ export default function RegistroClinicaPage() {
                 </Button>
 
                 <p className="text-center text-xs leading-relaxed text-muted-foreground">
-                  Al registrarte aceptas los <span className="text-rose-500">términos de servicio</span> de CliniQ.
+                  Al registrarte aceptas los{' '}
+                  <Link href="/terminos" target="_blank" className="font-medium text-foreground underline underline-offset-2">términos y condiciones</Link>
+                  {' '}y la{' '}
+                  <Link href="/privacidad" target="_blank" className="font-medium text-foreground underline underline-offset-2">política de tratamiento de datos</Link>.
                   <br />
                   ¿Ya tienes cuenta?{' '}
                   <Link href={urlApp('/login')} className="font-medium text-foreground underline-offset-2 hover:underline">Inicia sesión</Link>

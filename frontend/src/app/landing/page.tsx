@@ -1,5 +1,7 @@
 import type { Metadata } from 'next'
 import { LandingPageV3 } from '@/components/marketing/landing/LandingPageV3'
+import { DatosEstructurados } from '@/components/marketing/landing/DatosEstructurados'
+import { obtenerPlanesPublicos } from '@/lib/planesPublicos'
 import { DOMINIOS_SEPARADOS, SITIO_URL } from '@/lib/dominios'
 
 const TITULO = 'CliniQ — Gestión para clínicas estéticas'
@@ -26,6 +28,16 @@ export const metadata: Metadata = {
   }),
 }
 
-export default function Page() {
-  return <LandingPageV3 />
+// Los planes se leen en el servidor cada hora: los precios quedan en el HTML
+// para buscadores y agentes de IA, que no ejecutan JavaScript.
+export const revalidate = 3600
+
+export default async function Page() {
+  const planes = await obtenerPlanesPublicos()
+  return (
+    <>
+      <DatosEstructurados planes={planes} />
+      <LandingPageV3 planes={planes} />
+    </>
+  )
 }

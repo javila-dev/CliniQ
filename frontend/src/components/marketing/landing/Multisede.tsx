@@ -1,4 +1,5 @@
 import { Dash } from './shared'
+import { RedSedes } from './Ilustraciones'
 
 const SEDES = ['Sede principal', 'Sede norte', 'Sede sur']
 
@@ -21,10 +22,10 @@ const BAJO = 4
 
 export function Multisede() {
   return (
-    <section id="multisede" className="scroll-mt-20 border-t border-white/[0.07] py-16 sm:py-32">
+    <section id="multisede" className="scroll-mt-20 py-14 sm:py-24">
       <div className="mx-auto grid max-w-7xl gap-14 px-5 sm:px-6 lg:grid-cols-[0.8fr_1.2fr] lg:items-center lg:gap-20">
         <div>
-          <h2 className="lv3-display text-[clamp(1.9rem,3.1vw,2.85rem)] leading-[1.06] tracking-[-0.02em] [text-wrap:balance]">
+          <h2 className="lv3-display text-[clamp(1.9rem,3.1vw,2.85rem)] leading-[1.06] tracking-[-0.025em] [text-wrap:balance]">
             Cada sede conserva su operación. <span className="text-[var(--lv3-lit)]">Tú conservas la visión completa.</span>
           </h2>
           <p className="mt-6 max-w-md text-base leading-7 text-[var(--lv3-muted)]">
@@ -41,6 +42,7 @@ export function Multisede() {
         </div>
 
         <div className="min-w-0">
+          <RedSedes className="mx-auto mb-5 hidden h-auto w-full max-w-[34rem] sm:block" />
           <div className="overflow-hidden rounded-2xl border border-white/10 bg-[var(--lv3-surface)] shadow-[0_40px_100px_-50px_rgba(0,0,0,0.9)]">
             <div className="overflow-x-auto">
               <table className="w-full border-collapse text-left text-xs sm:text-sm">
@@ -51,7 +53,7 @@ export function Multisede() {
                     {SEDES.map((s) => (
                       <th key={s} scope="col" className="px-2 py-4 font-medium text-[var(--lv3-text)] sm:px-4">
                         <span className="block">{s}</span>
-                        <span className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-normal text-emerald-300">
+                        <span className="mt-1 inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-normal text-emerald-300">
                           <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-400" /> <span className="hidden sm:inline">Operación activa</span>
                         </span>
                       </th>
@@ -81,7 +83,7 @@ export function Multisede() {
             </div>
             <div className="flex flex-col gap-1 border-t border-white/[0.08] px-5 py-4 text-xs text-[var(--lv3-faint)] sm:flex-row sm:items-center sm:justify-between">
               <span>Cada sede: Agenda · Stock · Compras · Caja</span>
-              <span className="lv3-mono text-[10px] uppercase tracking-[0.14em]">Ejemplo ilustrativo · datos ficticios</span>
+              <span className="text-xs">Ejemplo ilustrativo · datos ficticios</span>
             </div>
           </div>
           <p className="mt-5 flex items-center gap-3 text-xs font-medium text-[#ff6aa9]/90">

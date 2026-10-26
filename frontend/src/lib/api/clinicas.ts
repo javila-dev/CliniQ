@@ -30,6 +30,7 @@ export interface PlanPublico {
   whatsapp_habilitado: boolean
   whatsapp_envios_incluidos: number  // 0 = sin límite
   descuento_anual_pct: number        // 0 = sin pago anual con descuento
+  recomendado: boolean               // «Más elegido»: lo marca la consola, uno solo
 }
 
 /** Pestañas visibles de la clínica: historia del paciente y pantalla del profesional. */

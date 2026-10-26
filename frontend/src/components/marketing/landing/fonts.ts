@@ -1,12 +1,5 @@
 import localFont from 'next/font/local'
 
-export const display = localFont({
-  src: './fonts/HedvigLettersSerif.woff2',
-  weight: '400',
-  variable: '--font-lv3-display',
-  display: 'swap',
-})
-
 export const sans = localFont({
   src: './fonts/Geist.woff2',
   weight: '300 700',

@@ -1,6 +1,7 @@
-/* CliniQ landing v3 — negro-ciruela, magenta como única luz. */
+/* CliniQ landing v3 — negro-ciruela y blanco alternados, magenta como única luz. */
 
-.lv3 {
+.lv3,
+.lv3-dark {
   --lv3-bg: #07040a;
   --lv3-sheet: #0b0710;
   --lv3-surface: #120b18;
@@ -13,7 +14,16 @@
   --lv3-lit: #ff6aa9;
   --lv3-ok: #34d399;
   --lv3-warn: #fbbf24;
+}
 
+/* Panel oscuro dentro de una zona blanca. */
+.lv3-dark {
+  color: var(--lv3-text);
+  background: var(--lv3-bg);
+  color-scheme: dark;
+}
+
+.lv3 {
   font-family: var(--font-lv3-sans), ui-sans-serif, system-ui, sans-serif;
   color: var(--lv3-text);
   background: var(--lv3-bg);
@@ -22,14 +32,63 @@
   scrollbar-color: #2b1a35 transparent;
 }
 
+/* Secciones en blanco: mismas variables, invertidas. El magenta se oscurece
+   un punto para que el texto pequeño conserve contraste sobre blanco. */
+.lv3-light {
+  --lv3-bg: #ffffff;
+  --lv3-sheet: #ffffff;
+  --lv3-surface: #fbf7f9;
+  --lv3-surface-2: #f5eef2;
+  --lv3-line: rgb(27 16 32 / 0.1);
+  --lv3-text: #1b1020;
+  --lv3-muted: rgb(27 16 32 / 0.7);
+  --lv3-faint: rgb(27 16 32 / 0.56);
+  --lv3-lit: #c01d63;
+  --lv3-ok: #059669;
+
+  color: var(--lv3-text);
+  background: var(--lv3-bg);
+  color-scheme: light;
+}
+
+.lv3-light ::selection {
+  background: rgb(217 34 111 / 0.2);
+  color: #1b1020;
+}
+
 body:has(.lv3) {
   background: #07040a;
 }
 
+body:has(.lv3.lv3-light) {
+  background: #ffffff;
+}
+
+/* Texto corrido de las páginas legales. */
+.legal-texto ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.legal-texto li + li {
+  margin-top: 0.4rem;
+}
+
+.legal-texto strong {
+  font-weight: 600;
+  color: var(--lv3-text);
+}
+
+.legal-texto a {
+  color: var(--lv3-lit);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Títulos con la voz de la app: Geist en negrita y espaciado apretado. */
 .lv3-display {
-  font-family: var(--font-lv3-display), Georgia, serif;
-  font-weight: 400;
-  word-spacing: 0.03em;
+  font-family: var(--font-lv3-sans), ui-sans-serif, system-ui, sans-serif;
+  font-weight: 650;
 }
 
 .lv3-mono {
@@ -174,3 +233,104 @@ body:has(.lv3) {
 @keyframes lv3-d3 { 0%, 28% { opacity: 0; } 32%, 92% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes lv3-d4 { 0%, 40% { opacity: 0; } 44%, 92% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes lv3-otp-ok { 0%, 56% { opacity: 0; } 62%, 92% { opacity: 1; } 100% { opacity: 0; } }
+
+/* ── Ilustraciones animadas ─────────────────────────────────────────────
+   Estado por defecto = estado final (sin JS o con movimiento reducido).
+   Las animaciones solo se activan con prefers-reduced-motion: no-preference. */
+
+.lv3-dibujo path,
+.lv3-dibujo rect,
+.lv3-dibujo circle,
+.lv3-dibujo line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+
+@media (prefers-reduced-motion: no-preference) {
+  /* Fondo del hero: tres manchas que se mueven lento. */
+  .lv3-aurora { animation: lv3-aurora 22s ease-in-out infinite alternate; will-change: transform; }
+  .lv3-aurora-b { animation-duration: 28s; animation-delay: -6s; }
+  .lv3-aurora-c { animation-duration: 34s; animation-delay: -14s; }
+
+  /* Entrada al hacer scroll (EnVista). */
+  .lv3-entra {
+    transition: opacity 700ms cubic-bezier(0.22, 1, 0.36, 1), transform 700ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--retraso, 0ms);
+  }
+  [data-en-vista='false'] .lv3-entra { opacity: 0; transform: translateY(18px) scale(0.97); }
+
+  /* Flotación suave de las notificaciones. */
+  .lv3-flota { animation: lv3-flota 6s ease-in-out infinite; animation-delay: var(--fase, 0s); }
+
+  /* Ficha: las fuentes sueltas llegan desde afuera y se ordenan. */
+  .lv3-junta {
+    transition: opacity 600ms ease-out, transform 900ms cubic-bezier(0.22, 1, 0.36, 1);
+    transition-delay: var(--retraso, 0ms);
+  }
+  [data-en-vista='false'] .lv3-junta {
+    opacity: 0;
+    transform: translate(var(--dx, 0), var(--dy, 0)) rotate(var(--giro, 0deg));
+  }
+  .lv3-baja { transition: transform 500ms ease-out 650ms; transform-origin: top; }
+  [data-en-vista='false'] .lv3-baja { transform: scaleY(0); }
+
+  /* Dibujos de línea por rol: se trazan cuando el paso está activo. */
+  .lv3-dibujo path,
+  .lv3-dibujo rect,
+  .lv3-dibujo circle,
+  .lv3-dibujo line { transition: stroke-dashoffset 1200ms cubic-bezier(0.45, 0, 0.2, 1); }
+  [data-activo='false'] .lv3-dibujo path,
+  [data-activo='false'] .lv3-dibujo rect,
+  [data-activo='false'] .lv3-dibujo circle,
+  [data-activo='false'] .lv3-dibujo line { stroke-dashoffset: 1; }
+
+  /* Marcas del diagrama de zonas: pulso suave, como un área señalada. */
+  .lv3-marca { animation: lv3-marca 2.8s ease-in-out infinite; animation-delay: var(--fase, 0s); }
+
+  /* Celular: la firma se dibuja y aparece el sello. */
+  .lv3-firma-trazo { animation: lv3-firma 7s cubic-bezier(0.45, 0, 0.2, 1) infinite both; }
+  .lv3-sello { animation: lv3-sello 7s cubic-bezier(0.22, 1, 0.36, 1) infinite both; transform-box: fill-box; transform-origin: center; }
+
+  /* Sedes: el catálogo fluye hacia cada una. */
+  .lv3-flujo { animation: lv3-flujo 1.4s linear infinite; }
+
+  /* CTA final: un tramo de luz recorre la Q. */
+  .lv3-recorre { animation: lv3-recorre 9s linear infinite; }
+}
+
+@keyframes lv3-aurora {
+  0% { transform: translate3d(0, 0, 0) scale(1); }
+  50% { transform: translate3d(-6%, 4%, 0) scale(1.08); }
+  100% { transform: translate3d(5%, -3%, 0) scale(0.96); }
+}
+
+@keyframes lv3-flota {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes lv3-marca {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@keyframes lv3-firma {
+  0%, 8% { stroke-dashoffset: 1; }
+  40%, 92% { stroke-dashoffset: 0; }
+  100% { stroke-dashoffset: 1; }
+}
+
+@keyframes lv3-sello {
+  0%, 42% { opacity: 0; transform: scale(0.6); }
+  48%, 92% { opacity: 1; transform: scale(1); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+@keyframes lv3-flujo {
+  to { stroke-dashoffset: -16; }
+}
+
+@keyframes lv3-recorre {
+  to { stroke-dashoffset: -1; }
+}

@@ -7,5 +7,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return [
     { url: `${SITIO_URL}/`, changeFrequency: 'weekly', priority: 1 },
     { url: `${SITIO_URL}/registro-clinica`, changeFrequency: 'monthly', priority: 0.8 },
+    { url: `${SITIO_URL}/terminos`, changeFrequency: 'yearly', priority: 0.3 },
+    { url: `${SITIO_URL}/privacidad`, changeFrequency: 'yearly', priority: 0.3 },
   ]
 }
