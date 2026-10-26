@@ -2,7 +2,7 @@ import os
 import secrets
 
 from django.core.validators import MaxValueValidator, MinValueValidator
-from django.db import models
+from django.db import models, transaction
 from django.db.models import F
 from django.db.models.functions import Lower, Trim
 from django.utils import timezone
@@ -132,10 +132,36 @@ class Plan(BaseModel):
     )
     # Pago anual: precio mensual x 12 menos este porcentaje (0 = sin pago anual con descuento).
     descuento_anual_pct = models.PositiveSmallIntegerField(default=0)
+    recomendado = models.BooleanField(
+        default=False,
+        db_default=False,
+        help_text=(
+            "Plan destacado como «Más elegido» en la landing. Solo uno puede estarlo "
+            "y tiene que ser activo y público."
+        ),
+    )
 
     class Meta:
         db_table = "planes"
         ordering = ["max_usuarios", "nombre"]
+        constraints = [
+            # Nunca dos planes recomendados a la vez, aunque se escriba por fuera de save().
+            models.UniqueConstraint(
+                fields=["recomendado"],
+                condition=models.Q(recomendado=True),
+                name="planes_un_solo_recomendado",
+            ),
+        ]
+
+    def save(self, *args, **kwargs):
+        # Un plan oculto o inactivo no puede quedar como recomendado; y al marcar
+        # uno se desmarca el anterior, para que el cambio desde la consola sea directo.
+        if self.recomendado and not (self.activo and self.mostrar_publico):
+            self.recomendado = False
+        with transaction.atomic():
+            if self.recomendado:
+                Plan.objects.filter(recomendado=True).exclude(pk=self.pk).update(recomendado=False)
+            super().save(*args, **kwargs)
 
     def __str__(self) -> str:
         limite = f"{self.max_usuarios} usuarios" if self.max_usuarios > 0 else "sin limite"

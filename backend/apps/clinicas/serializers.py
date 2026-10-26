@@ -41,10 +41,14 @@ class PlanSerializer(serializers.ModelSerializer):
             "modulo_obesidad_habilitado",
             "whatsapp_habilitado", "whatsapp_envios_incluidos",
             "whatsapp_numero_propio_habilitado", "whatsapp_numeros_incluidos", "precio_por_numero_whatsapp",
-            "mostrar_publico", "descuento_anual_pct",
+            "mostrar_publico", "descuento_anual_pct", "recomendado",
             "created_at", "updated_at",
         )
         read_only_fields = ("id", "created_at", "updated_at")
+        # DRF convierte la restricción "un solo recomendado" en un validador de
+        # unicidad que rechazaría el cambio; Plan.save() desmarca el anterior y la
+        # restricción de la base sigue como garantía.
+        extra_kwargs = {"recomendado": {"validators": []}}
 
     def validate(self, attrs):
         def valor(campo):
@@ -59,6 +63,10 @@ class PlanSerializer(serializers.ModelSerializer):
                 "whatsapp_numero_propio_habilitado": (
                     "El número propio de WhatsApp requiere el addon de WhatsApp."
                 ),
+            })
+        if valor("recomendado") and not (valor("mostrar_publico") and valor("activo")):
+            raise serializers.ValidationError({
+                "recomendado": "Solo un plan activo y visible en la landing puede ser el recomendado.",
             })
         return attrs
 
@@ -84,7 +92,7 @@ class PlanPublicoSerializer(serializers.ModelSerializer):
             "facial_verificacion_habilitada", "modulo_estetico_habilitado",
             "modulo_obesidad_habilitado",
             "whatsapp_habilitado", "whatsapp_envios_incluidos",
-            "descuento_anual_pct",
+            "descuento_anual_pct", "recomendado",
         )
 
 
