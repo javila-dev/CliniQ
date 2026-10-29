@@ -28,7 +28,6 @@ from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.serializers import ConsentimientoInformadoSerializer
 from apps.protocolos.models import ConsentimientoPaciente
 from apps.protocolos.serializers import ConsentimientoPacienteSerializer
-from apps.users.authorization import atiende_solo_lo_propio
 from apps.users.permissions import HasClinicamente, RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
@@ -152,18 +151,6 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
 
         return Response(resultado, status=status.HTTP_200_OK)
 
-    def _can_manage_antecedentes(self, paciente):
-        # El permiso (ver/editar antecedentes) ya lo exige get_permissions. Quien
-        # atiende pacientes, además, solo edita los de pacientes que ha atendido. Antes
-        # se miraba el rol fijo y un rol personalizado con el permiso quedaba fuera.
-        user = self.request.user
-        if not atiende_solo_lo_propio(user):
-            return True
-        return Cita.objects.filter(
-            paciente=paciente,
-            profesional=user,
-        ).exclude(estado=Cita.Estado.CANCELADA).exists()
-
     @action(detail=False, methods=["get"], url_path="buscar", pagination_class=None)
     def buscar(self, request, *args, **kwargs):
         query = request.query_params.get("q", "").strip()
@@ -245,10 +232,9 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
     @action(detail=True, methods=["get", "put", "patch"], url_path="antecedentes")
     def antecedentes(self, request, pk=None):
         paciente = self.get_object()
-        # Leer sigue la misma regla que la historia (quien la ve, ve sus notas de
-        # cualquier paciente); escribir, solo en pacientes que ha atendido.
-        if request.method != "GET" and not self._can_manage_antecedentes(paciente):
-            return Response({"error": "No autorizado.", "code": "FORBIDDEN"}, status=status.HTTP_403_FORBIDDEN)
+        # Leer y escribir: el permiso basta, para cualquier paciente de la clínica
+        # (como las evoluciones). Los antecedentes son del paciente, no de una
+        # atención: antes solo los editaba quien ya tenía una cita con él (29/10/2026).
 
         if request.method == "GET":
             try:

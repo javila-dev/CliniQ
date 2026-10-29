@@ -64,11 +64,19 @@ class QAPerfilesTests(ClinicaFixtureMixin, TestCase):
         cerrar = self.client.post(f"/api/v1/caja/sesiones/{sesion.id}/cerrar/", {"efectivo_contado": 0}, format="json")
         self.assertEqual(cerrar.status_code, 403)
 
-    # ── QA-09: antecedentes, leer como la historia; editar solo lo propio ──
-    def test_qa09_quien_atiende_lee_antecedentes_de_paciente_ajeno_pero_no_los_edita(self):
+    # ── QA-09: antecedentes, como las evoluciones: quien atiende los lee y los
+    # edita en cualquier paciente de la clínica, sin cita con él (29/10/2026) ──
+    def test_qa09_quien_atiende_lee_y_edita_antecedentes_de_paciente_sin_cita(self):
         self._con_rol(["pacientes.ver"], es_profesional=True)
         leer = self.client.get(f"/api/v1/pacientes/{self.paciente.id}/antecedentes/")
         self.assertIn(leer.status_code, {200, 404}, leer.content)
+        editar = self.client.patch(
+            f"/api/v1/pacientes/{self.paciente.id}/antecedentes/", {"alergias": "Latex"}, format="json",
+        )
+        self.assertEqual(editar.status_code, 200, editar.content)
+
+    def test_qa09_sin_el_check_ni_el_permiso_no_edita_antecedentes(self):
+        self._con_rol(["pacientes.ver", "pacientes.antecedentes.ver"])
         editar = self.client.patch(f"/api/v1/pacientes/{self.paciente.id}/antecedentes/", {}, format="json")
         self.assertEqual(editar.status_code, 403)
 

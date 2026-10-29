@@ -3,7 +3,7 @@
 import { use, useTransition, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { ArrowLeft, FileText, User, Download, Loader2, Image, ImageOff } from 'lucide-react'
+import { ArrowLeft, FileText, User, Download, Loader2, Image, ImageOff, Info } from 'lucide-react'
 import Link from 'next/link'
 import { historiaClinicaApi } from '@/lib/api/historiaClinica'
 import { pacientesApi } from '@/lib/api/pacientes'
@@ -80,6 +80,8 @@ function HistoriaContent({ params }: Props) {
   const tabActivo = searchParams.get('tab') ?? 'datos-generales'
   const { tabsActivos } = useHistoriaConfig()
   const { user } = useAuthStore()
+  // El check "atiende pacientes" (o ser admin): evoluciones, antecedentes y exámenes.
+  const atiende = hasPermission(user, PERM.HISTORIA_NOTAS_CREAR)
 
   const TABS = ALL_TABS.filter((t) => (tabsActivos as Record<string, boolean>)[t.value] ?? true)
 
@@ -257,6 +259,16 @@ function HistoriaContent({ params }: Props) {
         </div>
       </div>
 
+      {/* La historia no es una atención: se usaba para documentar como si lo fuera. */}
+      <div className="flex items-center gap-2 border-b bg-muted/40 px-6 py-2 text-xs text-muted-foreground">
+        <Info className="h-3.5 w-3.5 shrink-0" />
+        <p>
+          <span className="font-medium text-foreground">Esto no es una atención.</span>{' '}
+          Aquí ves lo registrado en las atenciones
+          {atiende ? ' y puedes agregar evoluciones, llenar antecedentes y cargar exámenes.' : '.'}
+        </p>
+      </div>
+
       {/* Tabs */}
       <Tabs value={tabActivo} onValueChange={handleTabChange}>
         {/* Tab bar */}
@@ -311,7 +323,7 @@ function HistoriaContent({ params }: Props) {
             <TabMotivoConsulta
               historia={historia}
               notas={notas ?? []}
-              puedeAgregarEvolucion={hasPermission(user, PERM.HISTORIA_NOTAS_CREAR)}
+              puedeAgregarEvolucion={atiende}
             />
           </TabsContent>
 
