@@ -149,6 +149,8 @@ export interface NotaClinica {
   historia: string
   cita: string | null
   cotizacion: string | null
+  /** Evolución escrita en la historia, fuera de una atención (sin cita ni cotización). */
+  es_evolucion?: boolean
   estado: 'borrador' | 'completada'
   motivo_consulta: string | null   // TabMotivoConsulta
   plan_manejo: string | null       // TabPlanManejo

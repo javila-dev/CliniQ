@@ -634,7 +634,7 @@
       <table style="width:100%; border-collapse:collapse;">
         <tr>
           <td style="vertical-align:top;">
-            <div class="atencion-num">Atención</div>
+            <div class="atencion-num">{% if nota.es_evolucion %}Evolución{% else %}Atención{% endif %}</div>
             <div class="atencion-fecha">{{ nota.fecha }}</div>
             <div class="atencion-meta">
               {% if nota.profesional %}Prof.: {{ nota.profesional }}{% endif %}

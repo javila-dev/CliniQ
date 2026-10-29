@@ -328,6 +328,9 @@ def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
                 servicio = cita.servicio.nombre
             if hasattr(cita, "sede") and cita.sede_id:
                 sede = cita.sede.nombre
+        elif nota.firmada_por_id:
+            # Evolución escrita fuera de una atención: la firma quien la escribió.
+            profesional = nota.firmada_por.nombre_completo
 
         # Signos vitales de esa cita
         signos = _build_signos(historia.paciente_id, nota.cita_id)
@@ -409,6 +412,7 @@ def _build_notas(historia: HistoriaClinica, include_fotos: bool) -> list[dict]:
 
         result.append({
             "numero": len(notas_qs) - i,
+            "es_evolucion": not nota.cita_id and not nota.cotizacion_id,
             "fecha": _fmt_datetime(nota.created_at),
             "profesional": profesional,
             "servicio": servicio,

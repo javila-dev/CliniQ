@@ -176,6 +176,8 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
     # completar la atención (AT-15). Solo en el detalle, para no sumar consultas
     # por nota en los listados.
     otros_registros = serializers.SerializerMethodField()
+    # Evolución escrita en la historia, fuera de una atención: sin cita ni cotización.
+    es_evolucion = serializers.SerializerMethodField()
 
     class Meta:
         model = NotaClinica
@@ -184,6 +186,7 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             "historia",
             "cita",
             "cotizacion",
+            "es_evolucion",
             "estado",
             "motivo_consulta",
             "plan_manejo",
@@ -222,6 +225,9 @@ class NotaClinicaSerializer(serializers.ModelSerializer):
             + obj.consumos_insumo.filter(activo=True).count()
             + obj.mediciones_antropometricas.count()
         )
+
+    def get_es_evolucion(self, obj):
+        return not obj.cita_id and not obj.cotizacion_id
 
     def get_profesional_nombre(self, obj):
         if obj.cita_id and obj.cita.profesional_id:

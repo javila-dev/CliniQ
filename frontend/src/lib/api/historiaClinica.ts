@@ -38,6 +38,11 @@ export const historiaClinicaApi = {
       const res = await apiClient.get<NotaClinica[]>(`/historia-clinica/historias/${id}/notas/`)
       return res.data
     },
+    /** Evolución fuera de una atención: queda firmada y cerrada al guardarla. */
+    agregarEvolucion: async (id: string, texto: string): Promise<NotaClinica> => {
+      const res = await apiClient.post<NotaClinica>(`/historia-clinica/historias/${id}/evoluciones/`, { texto })
+      return res.data
+    },
     galeria: async (id: string, params?: { zona?: string; tipo?: string; cita?: string }): Promise<GaleriaResponse> => {
       const res = await apiClient.get<GaleriaResponse>(`/historia-clinica/historias/${id}/galeria/`, { params })
       return res.data

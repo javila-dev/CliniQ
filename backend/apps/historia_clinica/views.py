@@ -203,11 +203,15 @@ def normalize_error_response(detail):
     return detail
 
 
+LARGO_MAXIMO_EVOLUCION = 5000
+
+
 class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, mixins.UpdateModelMixin, GenericViewSet):
     serializer_class = HistoriaClinicaResumenSerializer
     # Solo PATCH: un PUT reemplazaba la historia entera con el serializer de
-    # resumen y respondía 500 (AT-21).
-    http_method_names = ["get", "patch", "head", "options"]
+    # resumen y respondía 500 (AT-21). POST solo lo usa la acción de evoluciones
+    # (el viewset no crea historias).
+    http_method_names = ["get", "post", "patch", "head", "options"]
     queryset = HistoriaClinica.objects.select_related("paciente", "clinica").prefetch_related("notas").all()
 
     def get_queryset(self):
@@ -239,6 +243,8 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
             HistoriaClinica.del_paciente(paciente)
 
     def get_permissions(self):
+        if self.action == "evolucion":
+            return [RequirePermission("historia.notas.crear")()]
         return [RequirePermission("historia.ver")()]
 
     def get_serializer_class(self):
@@ -277,6 +283,30 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
         )
         serializer = NotaClinicaSerializer(notas, many=True, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="evoluciones")
+    def evolucion(self, request, pk=None):
+        """Evolución del paciente fuera de una atención (p. ej. un seguimiento por
+        teléfono): una nota sin cita ni cotización, firmada por quien la escribe y
+        cerrada desde que se guarda. No se edita: un error se corrige con otra
+        evolución. La escribe cualquiera con permiso de crear notas, de cualquier
+        paciente de su clínica (decisión del 28/10/2026)."""
+        historia = self.get_object()
+        texto = str(request.data.get("texto") or "").strip()
+        if not texto:
+            raise serializers.ValidationError({"texto": "Escribe la evolución."})
+        if len(texto) > LARGO_MAXIMO_EVOLUCION:
+            raise serializers.ValidationError({"texto": f"La evolución no puede pasar de {LARGO_MAXIMO_EVOLUCION} caracteres."})
+        nota = NotaClinica.objects.create(
+            historia=historia,
+            estado=NotaClinica.EstadoNota.COMPLETADA,
+            motivo_consulta=texto,
+            firmada_por=request.user,
+            firmada_en=timezone.now(),
+            zonas_inicializadas=True,
+        )
+        registrar_accion(request, "nota.evolucion", nota, {"historia_id": str(historia.id)})
+        return Response(NotaClinicaSerializer(nota, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"], url_path="galeria")
     def galeria(self, request, pk=None):

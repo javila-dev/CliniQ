@@ -23,7 +23,8 @@ import { TabFotos } from '@/components/historia/TabFotos'
 import { TabZonasHistorial } from '@/components/historia/TabZonasHistorial'
 import { TabMediciones } from '@/components/obesidad/TabMediciones'
 import { RoleGuard } from '@/components/shared/RoleGuard'
-import { canAccess } from '@/lib/permissions'
+import { canAccess, hasPermission, PERM } from '@/lib/permissions'
+import { useAuthStore } from '@/store/authStore'
 import { useHistoriaConfig } from '@/hooks/usePestanasClinica'
 import { cn, edadPaciente } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
@@ -78,6 +79,7 @@ function HistoriaContent({ params }: Props) {
   }
   const tabActivo = searchParams.get('tab') ?? 'datos-generales'
   const { tabsActivos } = useHistoriaConfig()
+  const { user } = useAuthStore()
 
   const TABS = ALL_TABS.filter((t) => (tabsActivos as Record<string, boolean>)[t.value] ?? true)
 
@@ -306,7 +308,11 @@ function HistoriaContent({ params }: Props) {
           </TabsContent>
 
           <TabsContent value="motivo-consulta" className="mt-0">
-            <TabMotivoConsulta historia={historia} notas={notas ?? []} />
+            <TabMotivoConsulta
+              historia={historia}
+              notas={notas ?? []}
+              puedeAgregarEvolucion={hasPermission(user, PERM.HISTORIA_NOTAS_CREAR)}
+            />
           </TabsContent>
 
           <TabsContent value="antecedentes" className="mt-0">
