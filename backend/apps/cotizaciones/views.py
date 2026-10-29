@@ -135,6 +135,11 @@ class CotizacionViewSet(ModelViewSet):
             return [RequirePermission("inventario.consumo.registrar")()]
         if self.action == "revertir_entrega_obsequio":
             return [RequirePermission("inventario.consumo.eliminar")()]
+        # Datos clínicos de la venta: quien cotiza o quien atiende (el check
+        # "atiende pacientes" da historia.notas.crear). Las notas y fotos de la
+        # cotización ya aceptan a los dos; sin esto el botón abría un 403.
+        if self.action == "nota_clinica":
+            return [RequireAnyPermission("cotizaciones.gestionar", "historia.notas.crear")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
     def get_queryset(self):
@@ -676,10 +681,10 @@ class CotizacionViewSet(ModelViewSet):
     def nota_clinica(self, request, pk=None):
         """
         Mini-atención (motivo de consulta, seguimiento y fotos) generada desde
-        la cotización, sin depender de una cita agendada. Vive bajo
-        `cotizaciones.gestionar` (no `historia.notas.crear`) a propósito: quien
-        puede cotizar debe poder dejar estos datos aunque su rol no tenga
-        permisos clínicos generales — devuelve la nota existente si ya se creó.
+        la cotización, sin depender de una cita agendada. Acepta
+        `cotizaciones.gestionar` o `historia.notas.crear`: quien puede cotizar
+        deja estos datos aunque su rol no tenga permisos clínicos, y quien
+        atiende pacientes aunque no cotice — devuelve la nota existente si ya se creó.
         """
         from apps.historia_clinica.models import HistoriaClinica, NotaClinica
         from apps.historia_clinica.serializers import NotaClinicaSerializer
