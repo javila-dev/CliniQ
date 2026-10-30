@@ -8,6 +8,7 @@ import type {
   ConsoleUsuario, CreateConsoleUsuarioRequest,
   SoporteAtencion, SoportePaciente, TrasladoPrevisualizacion, TrasladarAtencionRequest,
   EliminacionPrevisualizacion, EliminarAtencionRequest, CorreccionSoporte, TipoCorreccionSoporte,
+  SoporteCargaMigrada,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
@@ -39,6 +40,16 @@ export const adminApi = {
     },
     eliminar: async (data: EliminarAtencionRequest): Promise<{ id: string; cita: string }> => {
       const res = await apiClient.post<{ id: string; cita: string }>('/admin/soporte/eliminar-atencion/', data)
+      return res.data
+    },
+    cargasMigradas: async (clinica: string, paciente: string): Promise<SoporteCargaMigrada[]> => {
+      const res = await apiClient.get<SoporteCargaMigrada[]>('/admin/soporte/sesiones-previas/', { params: { clinica, paciente } })
+      return res.data
+    },
+    corregirSesionesPrevias: async (
+      data: { clinica: string; item: string; sesiones: number; motivo: string },
+    ): Promise<{ id: string }> => {
+      const res = await apiClient.post<{ id: string }>('/admin/soporte/sesiones-previas/corregir/', data)
       return res.data
     },
     correcciones: async (clinica: string, tipo?: TipoCorreccionSoporte): Promise<CorreccionSoporte[]> => {

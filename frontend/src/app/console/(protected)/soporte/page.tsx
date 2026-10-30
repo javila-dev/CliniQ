@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeftRight, ChevronRight, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, ChevronRight, ListChecks, Trash2, type LucideIcon } from 'lucide-react'
 
 // Cada error común de los usuarios que soporte corrige tiene su herramienta:
 // una tarjeta aquí y su página en /console/soporte/<herramienta>.
@@ -17,6 +17,12 @@ const HERRAMIENTAS: { href: string; titulo: string; descripcion: string; icon: L
     titulo: 'Eliminar atención',
     descripcion: 'Una atención que no debió existir. Devuelve insumos y la sesión del paquete, y resuelve la cita y el cobro.',
     icon: Trash2,
+  },
+  {
+    href: '/console/soporte/sesiones-previas',
+    titulo: 'Corregir sesiones previas',
+    descripcion: 'Al migrar un paciente se marcaron mal las sesiones que ya había hecho. Se corrige mientras no haya hecho ninguna en la app.',
+    icon: ListChecks,
   },
 ]
 

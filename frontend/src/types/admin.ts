@@ -303,19 +303,50 @@ export interface EliminarAtencionRequest {
   motivo: string
 }
 
-export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion'
+// ─── Soporte: corregir las sesiones previas de un paciente migrado ──
+
+export interface SoporteCargaMigrada {
+  item_id: string
+  lote_id: string
+  descripcion: string
+  cargado_en: string
+  cargado_por: string | null
+  nota: string
+  total: number
+  /** Sesiones hechas antes de CliniQ (las cargadas con cita incluidas). */
+  previas: number
+  /** Previas que se cargaron con cita y profesional: no se tocan. */
+  con_cita: number
+  /** Citas del paquete agendadas en la app que siguen ocupando su sesión. */
+  agendadas_en_app: number
+  minimo: number
+  maximo: number
+  /** Sesiones libres para agendar. */
+  restantes: number
+  /** Por qué no se puede corregir (ya hizo sesiones en la app). */
+  bloqueo: string | null
+  /** Sesiones del protocolo sin cita, en el orden en que se marcan como previas. */
+  sesiones: (SoporteSesion & { previa: boolean })[]
+}
+
+export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas'
 
 export interface CorreccionSoporte {
   id: string
   tipo: TipoCorreccionSoporte
-  cita_id: string
-  fecha_atencion: string
+  /** Sin cita al corregir sesiones previas: la corrección es del paquete. */
+  cita_id: string | null
+  fecha_atencion: string | null
+  paquete: string | null
   paciente: string
   /** Solo en un traslado. */
   paciente_destino: string | null
   accion_cobro: 'sin_cobro' | 'mover' | 'mantener' | 'desligar' | 'anular'
   /** Solo al eliminar: cómo quedó la cita. */
   estado_cita: EstadoCitaEliminacion | null
+  /** Solo al corregir sesiones previas. */
+  sesiones_antes: number | null
+  sesiones_despues: number | null
   motivo: string
   realizado_por: string | null
   created_at: string

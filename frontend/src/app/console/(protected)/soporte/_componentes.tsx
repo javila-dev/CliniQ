@@ -21,7 +21,7 @@ import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
 import type {
-  AdminTenant, SoporteAtencion, SoportePaciente, TipoCorreccionSoporte, TrasladoPrevisualizacion,
+  AdminTenant, CorreccionSoporte, SoporteAtencion, SoportePaciente, TipoCorreccionSoporte, TrasladoPrevisualizacion,
 } from '@/types/admin'
 
 // Piezas comunes de las herramientas de soporte: cada una sigue el mismo patrón
@@ -264,6 +264,13 @@ const ESTADO_CITA_TEXTO: Record<string, string> = {
   pendiente: 'Cita agendada de nuevo',
 }
 
+function resultado(c: CorreccionSoporte): string {
+  if (c.sesiones_antes != null && c.sesiones_despues != null) {
+    return `Sesiones previas: ${c.sesiones_antes} → ${c.sesiones_despues}`
+  }
+  return [c.estado_cita && ESTADO_CITA_TEXTO[c.estado_cita], ACCION_COBRO_TEXTO[c.accion_cobro]].filter(Boolean).join(' · ')
+}
+
 export function CorreccionesRecientes({ clinicaId, tipo }: { clinicaId: string; tipo: TipoCorreccionSoporte }) {
   const { data } = useQuery({
     queryKey: ['soporte-correcciones', clinicaId, tipo],
@@ -277,7 +284,7 @@ export function CorreccionesRecientes({ clinicaId, tipo }: { clinicaId: string; 
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Atención</TableHead>
+              <TableHead>{tipo === 'corregir_sesiones_previas' ? 'Paquete' : 'Atención'}</TableHead>
               <TableHead>Paciente</TableHead>
               <TableHead>Resultado</TableHead>
               <TableHead>Motivo</TableHead>
@@ -287,13 +294,11 @@ export function CorreccionesRecientes({ clinicaId, tipo }: { clinicaId: string; 
           <TableBody>
             {data.map((c) => (
               <TableRow key={c.id}>
-                <TableCell className="text-xs">{formatDateTime(c.fecha_atencion)}</TableCell>
+                <TableCell className="text-xs">{c.fecha_atencion ? formatDateTime(c.fecha_atencion) : c.paquete ?? '—'}</TableCell>
                 <TableCell className="text-xs">
                   {c.paciente}{c.paciente_destino && ` → ${c.paciente_destino}`}
                 </TableCell>
-                <TableCell className="text-xs">
-                  {[c.estado_cita && ESTADO_CITA_TEXTO[c.estado_cita], ACCION_COBRO_TEXTO[c.accion_cobro]].filter(Boolean).join(' · ')}
-                </TableCell>
+                <TableCell className="text-xs">{resultado(c)}</TableCell>
                 <TableCell className="max-w-xs truncate text-xs" title={c.motivo}>{c.motivo}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">
                   {c.realizado_por ?? '—'} · {formatDateTime(c.created_at)}
