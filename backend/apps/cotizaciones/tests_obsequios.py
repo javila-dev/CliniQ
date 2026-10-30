@@ -172,10 +172,63 @@ class ObsequiosCotizacionTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertIn("agendable", str(response.json()))
 
-    def test_un_tratamiento_completo_no_puede_ser_obsequio(self):
-        response = self._crear([self._item_pagado(), {**self._item_tratamiento(), "es_obsequio": True}])
+    # ── tratamiento completo ───────────────────────────────────────────────
+
+    def _obsequio_tratamiento(self, **extra):
+        return {"tipo": "tratamiento", "tratamiento": str(self.tratamiento.id), "es_obsequio": True, "agendable": True, **extra}
+
+    def test_tratamiento_completo_obsequiado_trae_sus_sesiones_sin_cobrarse(self):
+        response = self._crear([self._item_pagado(), self._obsequio_tratamiento(num_citas=5, valor_unitario="700000")])
+
+        self.assertEqual(response.status_code, 201, response.content)
+        data = response.json()
+        self.assertEqual(Decimal(data["total"]), Decimal("350000.00"))
+        regalo = next(i for i in data["items"] if i["es_obsequio"])
+        self.assertEqual(regalo["descripcion"], "Plan Toxina")
+        self.assertEqual(regalo["num_citas"], 1)
+        self.assertEqual(regalo["valor_unitario"], "0.00")
+        self.assertEqual(regalo["valor_referencia"], "700000.00")
+        # Solo las sesiones de compromiso del catálogo, como el tratamiento cobrado.
+        self.assertEqual(regalo["citas_restantes"], 2)
+        self.assertEqual(ItemCotizacion.objects.get(id=regalo["id"]).etiqueta_obsequio(), "Tratamiento")
+
+        sesiones = self.client.get(f"/api/v1/cotizaciones/{data['id']}/sesiones/").json()
+        en_agenda = next(i for i in sesiones["items"] if i["es_obsequio"])
+        self.assertEqual(en_agenda["num_citas"], 2)
+
+    def test_aceptar_crea_el_seguimiento_del_tratamiento_obsequiado(self):
+        cotizacion = self._crear_y_aceptar([self._item_pagado(), self._obsequio_tratamiento()], total="350000.00")
+
+        self.assertEqual(cotizacion.cartera.total, Decimal("350000.00"))
+        regalo = cotizacion.items.get(es_obsequio=True)
+        seguimiento = TratamientoPaciente.objects.get(cotizacion_item=regalo)
+        self.assertEqual(seguimiento.sesiones.count(), 2)
+
+    def test_tratamiento_obsequiado_siempre_es_agendable_y_pide_sus_consentimientos(self):
+        plantilla = DocumensoConsentimientoTemplate.objects.create(
+            clinica=self.clinica, nombre="Consentimiento limpieza", template_token="consentimiento-limpieza",
+        )
+        ServicioConsentimiento.objects.create(servicio=self.limpieza, template=plantilla, orden=1)
+        self.tipo_compromiso.procedimientos.create(procedimiento=self.limpieza)
+
+        cotizacion = self._crear_y_aceptar(
+            [self._item_pagado(), self._obsequio_tratamiento(agendable=False)], total="350000.00",
+        )
+
+        regalo = cotizacion.items.get(es_obsequio=True)
+        self.assertTrue(regalo.agendable)
+        self.assertEqual(regalo.citas_restantes(), 2)
+        self.assertTrue(TratamientoPaciente.objects.filter(cotizacion_item=regalo).exists())
+        self.assertEqual(
+            [c["template_token"] for c in consentimientos_requeridos_cotizacion(cotizacion)],
+            ["consentimiento-limpieza"],
+        )
+
+    def test_no_se_clona_una_sesion_de_un_tratamiento_obsequiado(self):
+        response = self._crear([self._item_pagado(), self._obsequio_tratamiento(), self._obsequio_clon(origen_indice=1)])
 
         self.assertEqual(response.status_code, 400)
+        self.assertIn("debe clonar una sesión", str(response.json()))
 
     # ── procedimiento del catálogo ─────────────────────────────────────────
 

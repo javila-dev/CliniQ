@@ -82,7 +82,7 @@ const itemSchema = z.object({
   _clave: z.string().optional(),
   // Forma elegida en la fila de obsequio; sin ella, "sesión clonada sin elegir" y
   // "solo informativo" serían indistinguibles (ambas son libre sin origen).
-  _modo: z.enum(['procedimiento', 'clon', 'informativo', 'producto']).optional(),
+  _modo: z.enum(['procedimiento', 'tratamiento', 'clon', 'informativo', 'producto']).optional(),
   origen_clave: z.string().nullable().optional(),
   insumo_nombre: z.string().nullable().optional(),
   insumo_unidad: z.string().nullable().optional(),
@@ -121,6 +121,8 @@ const schema = z.object({
       }
     } else if (it.tipo === 'procedimiento') {
       if (!it.procedimiento) ctx.addIssue({ code: 'custom', message: 'Selecciona el procedimiento', path: ['items', idx, 'procedimiento'] })
+    } else if (it.tipo === 'tratamiento') {
+      if (!it.tratamiento) ctx.addIssue({ code: 'custom', message: 'Selecciona el tratamiento', path: ['items', idx, 'tratamiento'] })
     } else if (it.tipo_sesion_origen) {
       const origen = data.items.find((x) => !x.es_obsequio && x.tipo === 'tratamiento' && x.tratamiento && x._clave && x._clave === it.origen_clave)
       if (!origen) {
@@ -2058,6 +2060,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             errors={errors}
             soloLectura={soloLectura}
             procedimientos={procedimientos ?? []}
+            tratamientos={tratamientos ?? []}
             sedeId={sedeSeleccionada ?? null}
             onAdd={(item) => addItem(item)}
             onRemove={(idx) => removeItem(idx)}

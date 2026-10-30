@@ -211,10 +211,6 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
         if tipo == ItemCotizacion.Tipo.INSUMO and not es_obsequio:
             raise serializers.ValidationError({"tipo": "Un producto solo puede agregarse como obsequio."})
-        if es_obsequio and tipo == ItemCotizacion.Tipo.TRATAMIENTO:
-            raise serializers.ValidationError(
-                {"tipo": "Un tratamiento completo no puede ser un obsequio: obsequia una de sus sesiones."}
-            )
 
         if servicio and not procedimiento:
             attrs["procedimiento"] = servicio
@@ -262,7 +258,9 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         if es_obsequio:
             # Un obsequio no pasa por las reglas de precio (bloqueo, tope de
             # descuento, campaña): su valor cobrado es siempre 0.
-            return self._validar_obsequio(attrs, tipo=tipo, procedimiento=procedimiento, request=request)
+            return self._validar_obsequio(
+                attrs, tipo=tipo, procedimiento=procedimiento, tratamiento=tratamiento, request=request,
+            )
         self._limpiar_campos_obsequio(attrs)
 
         if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
@@ -417,7 +415,7 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
         attrs["cantidad_insumo"] = None
         attrs["origen_indice"] = None
 
-    def _validar_obsequio(self, attrs, *, tipo, procedimiento, request):
+    def _validar_obsequio(self, attrs, *, tipo, procedimiento, tratamiento, request):
         """Reglas de un ítem obsequio (valor cobrado 0, valor de referencia aparte).
 
         El cruce con los demás ítems (que el origen sea un tratamiento de la misma
@@ -434,8 +432,10 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
 
         referencia = attrs.get("valor_referencia") or Decimal("0")
         if not referencia:
-            if procedimiento is not None:
-                referencia = precio_lista_en_sede(procedimiento, self._resolve_clinica_sede()[1]) or Decimal("0")
+            if procedimiento is not None or tratamiento is not None:
+                referencia = (
+                    precio_lista_en_sede(procedimiento or tratamiento, self._resolve_clinica_sede()[1]) or Decimal("0")
+                )
             elif tipo == Tipo.INSUMO and insumo is not None:
                 referencia = insumo.precio_venta or Decimal("0")
         attrs["valor_referencia"] = Decimal(referencia)
@@ -466,6 +466,15 @@ class ItemCotizacionSerializer(serializers.ModelSerializer):
             if tipo == Tipo.PROCEDIMIENTO:
                 attrs["tipo_sesion_origen"] = None
                 attrs["origen_indice"] = None
+            elif tipo == Tipo.TRATAMIENTO:
+                # El paquete completo: una línea, como el tratamiento cobrado, y
+                # siempre agendable: trae sus propias sesiones (las del catálogo).
+                attrs["agendable"] = True
+                attrs["num_citas"] = 1
+                attrs["tipo_sesion_origen"] = None
+                attrs["origen_indice"] = None
+                if not attrs.get("descripcion", getattr(self.instance, "descripcion", "")):
+                    attrs["descripcion"] = tratamiento.nombre
             elif tipo_sesion is not None:
                 if indice is None:
                     raise serializers.ValidationError(

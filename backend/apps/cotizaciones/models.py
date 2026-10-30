@@ -255,6 +255,8 @@ class ItemCotizacion(BaseModel):
     #   * sesión agendable: procedimiento del catálogo (cupo propio) o clon de
     #     una sesión del tratamiento cotizado (``item_origen``: suma al cupo del
     #     ítem tratamiento y no tiene cupo propio);
+    #   * tratamiento completo del catálogo (``tipo = tratamiento``): siempre
+    #     agendable, trae todas sus sesiones como el tratamiento cobrado;
     #   * producto (``tipo = insumo``): descuenta inventario al entregarse.
     es_obsequio = models.BooleanField(default=False)
     agendable = models.BooleanField(
@@ -341,9 +343,11 @@ class ItemCotizacion(BaseModel):
         return str(self.num_citas)
 
     def etiqueta_obsequio(self) -> str:
-        """Clase de obsequio para documentos: producto, sesión adicional o cortesía."""
+        """Clase de obsequio para documentos: producto, tratamiento, sesión adicional o cortesía."""
         if self.tipo == self.Tipo.INSUMO:
             return "Producto"
+        if self.tipo == self.Tipo.TRATAMIENTO:
+            return "Tratamiento"
         return "Sesión adicional" if self.agendable else "Cortesía"
 
     def sesiones_obsequio_extra(self) -> int:

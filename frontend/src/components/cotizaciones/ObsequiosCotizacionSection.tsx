@@ -28,10 +28,11 @@ import type { FormValues } from './CotizacionForm'
 
 type ItemForm = FormValues['items'][number]
 
-export type ModoObsequio = 'procedimiento' | 'clon' | 'informativo' | 'producto'
+export type ModoObsequio = 'procedimiento' | 'tratamiento' | 'clon' | 'informativo' | 'producto'
 
 const MODO_LABEL: Record<Exclude<ModoObsequio, 'producto'>, string> = {
   procedimiento: 'Procedimiento del catálogo',
+  tratamiento: 'Tratamiento completo del catálogo',
   clon: 'Sesión adicional de un tratamiento cotizado',
   informativo: 'Solo informativo',
 }
@@ -48,7 +49,21 @@ function cantidadTextoApi(item: ItemCotizacionApi): string {
     const unidad = item.insumo_unidad === 'unidad' ? 'und.' : item.insumo_unidad ?? ''
     return `${cantidad} ${unidad}`.trim()
   }
+  if (item.tipo === 'tratamiento') {
+    // num_citas es 1 (el paquete): las sesiones son las del catálogo.
+    const sesiones = (item.citas_agendadas ?? 0) + (item.citas_restantes ?? 0)
+    return sesiones > 0
+      ? `Tratamiento completo · ${sesiones} ${sesiones === 1 ? 'sesión' : 'sesiones'}`
+      : 'Tratamiento completo'
+  }
   return `${item.num_citas} ${item.num_citas === 1 ? 'sesión' : 'sesiones'}`
+}
+
+/** Etiqueta del obsequio, la misma que sale en los documentos (`etiqueta_obsequio`). */
+function etiquetaObsequio(tipo: string | undefined, agendable: boolean | undefined): string {
+  if (tipo === 'insumo') return 'Producto'
+  if (tipo === 'tratamiento') return 'Tratamiento'
+  return agendable ? 'Sesión adicional' : 'Cortesía'
 }
 
 /** Mensaje del backend (`error`) o uno genérico si la respuesta no lo trae. */
@@ -71,6 +86,7 @@ export function modoDe(item: ItemForm | undefined): ModoObsequio {
   if (item?._modo) return item._modo
   if (item?.tipo === 'insumo') return 'producto'
   if (item?.tipo === 'procedimiento') return 'procedimiento'
+  if (item?.tipo === 'tratamiento') return 'tratamiento'
   return item?.tipo_sesion_origen || item?.agendable ? 'clon' : 'informativo'
 }
 
@@ -156,6 +172,7 @@ interface Props {
   errors: FieldErrors<FormValues>
   soloLectura: boolean
   procedimientos: Procedimiento[]
+  tratamientos: TratamientoCatalogo[]
   sedeId: string | null
   onAdd: (item: ItemForm) => void
   onRemove: (idx: number) => void
@@ -166,7 +183,7 @@ interface Props {
 
 export function ObsequiosCotizacionSection({
   control, register, setValue, itemFields, items, errors, soloLectura,
-  procedimientos, sedeId, onAdd, onRemove, cotizacion,
+  procedimientos, tratamientos, sedeId, onAdd, onRemove, cotizacion,
 }: Props) {
   // ── Entrega de obsequios de producto (solo aplica en modo lectura, con la
   // cotización ya guardada) ───────────────────────────────────────────────
@@ -216,7 +233,8 @@ export function ObsequiosCotizacionSection({
   // tratamiento cotizado (detalle) para ofrecer las sesiones que se pueden clonar.
   const idsTratamientos = [...new Set(
     items
-      .filter((it) => !it.es_obsequio && it.tipo === 'tratamiento' && it.tratamiento)
+      // También los obsequiados: de su detalle sale cuántas sesiones se agendan.
+      .filter((it) => it.tipo === 'tratamiento' && it.tratamiento)
       .map((it) => it.tratamiento as string),
   )]
   const detalles = useQueries({
@@ -259,8 +277,10 @@ export function ObsequiosCotizacionSection({
 
   function cambiarModo(idx: number, modo: Exclude<ModoObsequio, 'producto'>) {
     setValue(`items.${idx}._modo`, modo, { shouldDirty: true })
-    setValue(`items.${idx}.tipo`, modo === 'procedimiento' ? 'procedimiento' : 'libre', { shouldDirty: true })
+    setValue(`items.${idx}.tipo`, modo === 'clon' || modo === 'informativo' ? 'libre' : modo, { shouldDirty: true })
     setValue(`items.${idx}.procedimiento`, null, { shouldDirty: true })
+    setValue(`items.${idx}.tratamiento`, null, { shouldDirty: true })
+    setValue(`items.${idx}.num_citas`, 1, { shouldDirty: true })
     setValue(`items.${idx}.tipo_sesion_origen`, null, { shouldDirty: true })
     setValue(`items.${idx}.origen_clave`, null, { shouldDirty: true })
     setValue(`items.${idx}.descripcion`, '', { shouldDirty: true })
@@ -273,6 +293,12 @@ export function ObsequiosCotizacionSection({
     setValue(`items.${idx}.descripcion`, p.nombre, { shouldDirty: true })
     const precio = precioEnSede(p, precioGeneralProcedimiento(p), sedeId)
     setValue(`items.${idx}.valor_referencia`, precio ?? 0, { shouldDirty: true })
+  }
+
+  function elegirTratamiento(idx: number, t: TratamientoCatalogo) {
+    setValue(`items.${idx}.tratamiento`, t.id, { shouldDirty: true })
+    setValue(`items.${idx}.descripcion`, t.nombre, { shouldDirty: true })
+    setValue(`items.${idx}.valor_referencia`, precioEnSede(t, t.precio_estimado, sedeId) ?? 0, { shouldDirty: true })
   }
 
   function elegirClon(idx: number, valor: string) {
@@ -364,7 +390,7 @@ export function ObsequiosCotizacionSection({
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <p className="font-medium truncate">{item.descripcion}</p>
                   <span className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-amber-100 text-amber-800">
-                    {esProducto ? 'Producto' : item.agendable ? 'Sesión adicional' : 'Cortesía'}
+                    {etiquetaObsequio(item.tipo, item.agendable)}
                   </span>
                 </div>
                 <p className="text-xs text-muted-foreground">
@@ -375,7 +401,9 @@ export function ObsequiosCotizacionSection({
                   <p className="text-xs text-muted-foreground">
                     {item.item_origen
                       ? 'Suma a las sesiones del tratamiento: se agenda desde el seguimiento de sesiones.'
-                      : 'Se agenda desde el seguimiento de sesiones.'}
+                      : item.tipo === 'tratamiento'
+                        ? 'Sus sesiones se agendan desde el seguimiento de sesiones, como las de un tratamiento pagado.'
+                        : 'Se agenda desde el seguimiento de sesiones.'}
                   </p>
                 )}
                 {!esProducto && !item.agendable && (
@@ -436,7 +464,9 @@ export function ObsequiosCotizacionSection({
                 <p className="text-xs text-muted-foreground">
                   {item?.tipo === 'insumo'
                     ? `${item?.cantidad_insumo ?? ''} ${item?.insumo_unidad ?? ''}`.trim()
-                    : `${item?.num_citas ?? 1} ${item?.agendable ? 'sesión(es) agendable(s)' : '· incluido'}`}
+                    : item?.tipo === 'tratamiento'
+                      ? 'Tratamiento completo'
+                      : `${item?.num_citas ?? 1} ${item?.agendable ? 'sesión(es) agendable(s)' : '· incluido'}`}
                 </p>
               </div>
               <div className="text-right shrink-0">
@@ -513,6 +543,20 @@ export function ObsequiosCotizacionSection({
                     onSelect={(id) => { const p = procedimientos.find((x) => x.id === id); if (p) elegirProcedimiento(idx, p) }}
                   />
                 )}
+                {modo === 'tratamiento' && (
+                  <BuscadorPopover
+                    etiqueta={item?.tratamiento ? item.descripcion : null}
+                    placeholder="Seleccionar tratamiento…"
+                    icono={Package2}
+                    invalido={!!err?.tratamiento}
+                    opciones={tratamientos.map((t) => ({
+                      id: t.id,
+                      label: t.nombre,
+                      hint: (() => { const precio = precioEnSede(t, t.precio_estimado, sedeId); return precio !== null ? cop(precio) : undefined })(),
+                    }))}
+                    onSelect={(id) => { const t = tratamientos.find((x) => x.id === id); if (t) elegirTratamiento(idx, t) }}
+                  />
+                )}
                 {modo === 'clon' && (
                   <BuscadorPopover
                     etiqueta={item?.tipo_sesion_origen ? item.descripcion : null}
@@ -530,9 +574,9 @@ export function ObsequiosCotizacionSection({
                     {...register(`items.${idx}.descripcion`)}
                   />
                 )}
-                {(err?.insumo?.message || err?.procedimiento?.message || err?.origen_clave?.message || err?.descripcion) && (
+                {(err?.insumo?.message || err?.procedimiento?.message || err?.tratamiento?.message || err?.origen_clave?.message || err?.descripcion) && (
                   <p className="text-[10px] text-destructive mt-0.5">
-                    {err?.insumo?.message ?? err?.procedimiento?.message ?? err?.origen_clave?.message ?? 'Requerido'}
+                    {err?.insumo?.message ?? err?.procedimiento?.message ?? err?.tratamiento?.message ?? err?.origen_clave?.message ?? 'Requerido'}
                   </p>
                 )}
                 {origenFaltante && (
@@ -553,7 +597,8 @@ export function ObsequiosCotizacionSection({
               {/* Agendable: inline junto al selector de obsequio, no debajo */}
               <div>
                 <p className="text-xs text-muted-foreground md:hidden mb-1">Agendable</p>
-                {modo !== 'producto' && modo !== 'informativo' ? (
+                {/* Un tratamiento obsequiado siempre se agenda: no lleva interruptor. */}
+                {modo === 'procedimiento' || modo === 'clon' ? (
                   <TooltipProvider delayDuration={300}>
                     <Tooltip>
                       <TooltipTrigger asChild>
@@ -599,6 +644,16 @@ export function ObsequiosCotizacionSection({
                       </div>
                     )}
                   />
+                ) : modo === 'tratamiento' ? (
+                  // Como el tratamiento cobrado: una línea por el paquete; las sesiones salen del catálogo.
+                  <span className="flex h-8 items-center justify-center text-xs text-muted-foreground">
+                    {(() => {
+                      // Solo las que se agendan (los controles informativos no cuentan), como la agenda.
+                      const tipos = item?.tratamiento ? catalogoPorId.get(item.tratamiento)?.tipos_sesion : undefined
+                      const n = tipos?.filter((ts) => ts.es_compromiso).reduce((a, ts) => a + ts.cantidad, 0)
+                      return n ? `${n} ${n === 1 ? 'sesión' : 'sesiones'}` : '1 paquete'
+                    })()}
+                  </span>
                 ) : (
                   <Input type="number" min={1} className="h-8 text-sm text-center"
                     {...register(`items.${idx}.num_citas`, { valueAsNumber: true })} />
