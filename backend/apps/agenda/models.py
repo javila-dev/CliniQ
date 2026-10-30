@@ -297,14 +297,16 @@ class RegistroConfirmacion(BaseModel):
 
 
 class CorreccionSoporte(BaseModel):
-    """Una corrección que soporte hizo desde el console sobre una atención:
-    trasladarla al paciente correcto o eliminarla. Guarda qué se movió, qué se
-    revirtió y, al eliminar, una copia de lo borrado, para poder explicarlo
-    después; el detalle queda además en LogAccion."""
+    """Una corrección que soporte hizo desde el console: trasladar una atención
+    al paciente correcto, eliminarla o corregir las sesiones previas de un
+    paquete migrado. Guarda qué se movió, qué se revirtió y, al eliminar, una
+    copia de lo borrado, para poder explicarlo después; el detalle queda además
+    en LogAccion."""
 
     class Tipo(models.TextChoices):
         TRASLADAR_ATENCION = "trasladar_atencion", "Trasladar atención"
         ELIMINAR_ATENCION = "eliminar_atencion", "Eliminar atención"
+        CORREGIR_SESIONES_PREVIAS = "corregir_sesiones_previas", "Corregir sesiones previas"
 
     class AccionCobro(models.TextChoices):
         SIN_COBRO = "sin_cobro", "La cita no tenía cobro"
@@ -315,7 +317,10 @@ class CorreccionSoporte(BaseModel):
 
     clinica = models.ForeignKey("clinicas.Clinica", on_delete=models.CASCADE, related_name="correcciones_soporte")
     tipo = models.CharField(max_length=30, choices=Tipo.choices)
-    cita = models.ForeignKey(Cita, on_delete=models.PROTECT, related_name="correcciones_soporte")
+    # Sin cita al corregir las sesiones previas: la corrección es del paquete (item_origen).
+    cita = models.ForeignKey(
+        Cita, on_delete=models.PROTECT, null=True, blank=True, related_name="correcciones_soporte",
+    )
     paciente = models.ForeignKey(
         "pacientes.Paciente", on_delete=models.PROTECT, related_name="correcciones_soporte",
     )

@@ -3,7 +3,9 @@ from rest_framework.routers import DefaultRouter
 
 from apps.agenda.soporte_views import (
     SoporteAtencionesView,
+    SoporteCargasMigradasView,
     SoporteCorreccionesView,
+    SoporteCorregirSesionesPreviasView,
     SoporteEliminarAtencionView,
     SoportePacientesView,
     SoportePrevisualizarEliminacionView,
@@ -39,6 +41,12 @@ urlpatterns = [
         name="admin-soporte-eliminar-previsualizar",
     ),
     path("soporte/eliminar-atencion/", SoporteEliminarAtencionView.as_view(), name="admin-soporte-eliminar"),
+    path("soporte/sesiones-previas/", SoporteCargasMigradasView.as_view(), name="admin-soporte-sesiones-previas"),
+    path(
+        "soporte/sesiones-previas/corregir/",
+        SoporteCorregirSesionesPreviasView.as_view(),
+        name="admin-soporte-sesiones-previas-corregir",
+    ),
     path("soporte/correcciones/", SoporteCorreccionesView.as_view(), name="admin-soporte-correcciones"),
     path("tenants/<uuid:clinica_id>/whatsapp-propio/", AdminWhatsappPropioView.as_view(), name="admin-whatsapp-propio"),
     path(

@@ -59,7 +59,8 @@ Al cambiar una app, correr sus pruebas y las de las apps que la importan
 | `obesidad` | agenda, historia_clinica, migracion |
 | `caja` | reportes |
 | `proveedores` | inventario |
-| `migracion`, `reportes`, `ayuda`, `comisiones` | solo las suyas |
+| `migracion` | agenda |
+| `reportes`, `ayuda`, `comisiones` | solo las suyas |
 
 Si se agregan imports nuevos entre apps, actualizar esta tabla.
 

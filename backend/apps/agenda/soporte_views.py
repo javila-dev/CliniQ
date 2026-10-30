@@ -5,7 +5,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.agenda import eliminacion, soporte, traslado
+from apps.agenda import eliminacion, sesiones_previas, soporte, traslado
 from apps.agenda.models import CorreccionSoporte
 from apps.users.permissions import IsSuperAdmin
 
@@ -62,6 +62,19 @@ class SoporteAtencionesView(_SoporteView):
         return Response(soporte.atenciones_del_paciente(paciente))
 
 
+class SoporteCargasMigradasView(_SoporteView):
+    """Paquetes de un paciente que llegaron por la puesta en marcha, con sus sesiones previas."""
+
+    def get(self, request):
+        from apps.pacientes.models import Paciente
+
+        clinica = _clinica(request.query_params.get("clinica"))
+        paciente = Paciente.objects.filter(pk=request.query_params.get("paciente"), clinica=clinica).first()
+        if paciente is None:
+            return Response({"error": "El paciente no existe en esta clínica."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(sesiones_previas.cargas_del_paciente(clinica, paciente))
+
+
 class SoporteCorreccionesView(_SoporteView):
     """Correcciones ya hechas en una clínica (opcionalmente de un tipo)."""
 
@@ -92,6 +105,13 @@ class TrasladarAtencionSerializer(PrevisualizarTrasladoSerializer):
 class EliminarAtencionSerializer(_AtencionSerializer):
     estado_cita = serializers.ChoiceField(choices=eliminacion.ESTADOS_RESULTANTES)
     accion_cobro = serializers.ChoiceField(choices=sorted(eliminacion.ACCIONES_COBRO), required=False, allow_null=True)
+    motivo = serializers.CharField(max_length=1000)
+
+
+class CorregirSesionesPreviasSerializer(serializers.Serializer):
+    clinica = serializers.UUIDField()
+    item = serializers.UUIDField()
+    sesiones = serializers.IntegerField(min_value=0)
     motivo = serializers.CharField(max_length=1000)
 
 
@@ -134,3 +154,15 @@ class SoporteEliminarAtencionView(_SoporteView):
             accion_cobro=v.get("accion_cobro"), motivo=v["motivo"], usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id), "cita": str(correccion.cita_id)}, status=status.HTTP_201_CREATED)
+
+
+class SoporteCorregirSesionesPreviasView(_SoporteView):
+    def post(self, request):
+        datos = CorregirSesionesPreviasSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        correccion = sesiones_previas.corregir(
+            _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], motivo=v["motivo"],
+            usuario=request.user, request=request,
+        )
+        return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

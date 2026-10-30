@@ -250,9 +250,10 @@ def registrar(
     accion = {
         CorreccionSoporte.Tipo.TRASLADAR_ATENCION: "cita.trasladar",
         CorreccionSoporte.Tipo.ELIMINAR_ATENCION: "cita.eliminar_atencion",
+        CorreccionSoporte.Tipo.CORREGIR_SESIONES_PREVIAS: "cotizacion.corregir_sesiones_previas",
     }[tipo]
     registrar_accion(
-        request, accion, cita,
+        request, accion, cita or item_origen,
         {
             "paciente_nombre": paciente.nombre_completo,
             "paciente_id": str(paciente.id),
@@ -268,7 +269,7 @@ def registrar(
 
 def correcciones_de_la_clinica(clinica, tipo=None, limite=20) -> list[dict]:
     qs = CorreccionSoporte.objects.filter(clinica=clinica).select_related(
-        "cita", "paciente", "paciente_destino", "realizado_por",
+        "cita", "paciente", "paciente_destino", "realizado_por", "item_origen",
     )
     if tipo:
         qs = qs.filter(tipo=tipo)
@@ -276,12 +277,15 @@ def correcciones_de_la_clinica(clinica, tipo=None, limite=20) -> list[dict]:
         {
             "id": str(c.id),
             "tipo": c.tipo,
-            "cita_id": str(c.cita_id),
-            "fecha_atencion": c.cita.fecha_inicio,
+            "cita_id": str(c.cita_id) if c.cita_id else None,
+            "fecha_atencion": c.cita.fecha_inicio if c.cita_id else None,
+            "paquete": c.item_origen.descripcion if c.item_origen_id else c.resumen.get("paquete"),
             "paciente": c.paciente.nombre_completo,
             "paciente_destino": c.paciente_destino.nombre_completo if c.paciente_destino_id else None,
             "accion_cobro": c.accion_cobro,
             "estado_cita": c.resumen.get("estado_cita"),
+            "sesiones_antes": c.resumen.get("sesiones_antes"),
+            "sesiones_despues": c.resumen.get("sesiones_despues"),
             "motivo": c.motivo,
             "realizado_por": nombre(c.realizado_por),
             "created_at": c.created_at,
