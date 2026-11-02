@@ -5,7 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, CheckCircle, Clock, ChevronLeft, ChevronRight, XCircle, Loader2, AlertTriangle, Stethoscope,
   MessageSquare, ClipboardList, Activity, FlaskConical, ListChecks, FileText, Camera, Package,
-  PersonStanding, CheckCircle2,
+  PersonStanding, CheckCircle2, LayoutList,
 } from 'lucide-react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -30,6 +30,8 @@ import { TabZonas } from '@/components/historia/TabZonas'
 import { TabInsumos } from '@/components/historia/TabInsumos'
 import { guardarBorradoresDeNota } from '@/components/historia/useBorradorNota'
 import { IniciarAtencionWizard } from '@/components/atenciones/IniciarAtencionWizard'
+import { AtencionSencilla } from '@/components/atenciones/sencilla/AtencionSencilla'
+import { authApi } from '@/lib/api/auth'
 import {
   FirmaProfesionalModal,
   citaRequiereFirmaProfesional,
@@ -79,6 +81,17 @@ export default function AtencionCitaPage({ params }: Props) {
     queryKey: ['citas', citaId],
     queryFn: () => agendaApi.citas.get(citaId),
   })
+
+  // Vista con la que atiende quien abre la cita: la de su usuario, su rol o la
+  // clínica. Se consulta al entrar porque el perfil en memoria puede ser de
+  // antes de que la cambiaran; los enlaces de la pantalla permiten pasar a la otra.
+  const { data: perfil, isLoading: cargandoVista } = useQuery({
+    queryKey: ['auth', 'me', 'vista-atencion'],
+    queryFn: authApi.me,
+    staleTime: 0,
+  })
+  const [vistaElegida, setVistaElegida] = useState<'completa' | 'sencilla' | null>(null)
+  const vista = vistaElegida ?? perfil?.vista_atencion_efectiva?.vista ?? user?.vista_atencion_efectiva?.vista ?? 'completa'
 
   const { data: wizardConfig } = useQuery({
     queryKey: ['wizard-config'],
@@ -341,7 +354,7 @@ export default function AtencionCitaPage({ params }: Props) {
     ? Math.floor((Date.now() - new Date(cita.fecha_inicio_real).getTime()) / 60000)
     : null
 
-  if (loadingCita || (pacienteId && loadingPaciente)) return <LoadingState rows={6} />
+  if (loadingCita || (pacienteId && loadingPaciente) || cargandoVista) return <LoadingState rows={6} />
   if (!cita) {
     return (
       <div className="p-6">
@@ -467,6 +480,69 @@ export default function AtencionCitaPage({ params }: Props) {
     )
   }
 
+  const dialogoDescartar = (
+    <Dialog open={showDescartar} onOpenChange={setShowDescartar}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Descartar atención</DialogTitle>
+          <DialogDescription>
+            ¿Qué deseas hacer con esta atención?
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <button
+            className="w-full text-left rounded-lg border p-3 hover:bg-muted/50 transition-colors space-y-0.5 disabled:opacity-50"
+            disabled={descartando || isNavigating}
+            onClick={() => descartar('desiniciar')}
+          >
+            <p className="text-sm font-medium">Desiniciar atención</p>
+            <p className="text-xs text-muted-foreground">
+              La cita vuelve a "En espera" para iniciarla después. Lo que ya registraste (nota, fotos, insumos) se conserva.
+            </p>
+          </button>
+          <button
+            className="w-full text-left rounded-lg border border-destructive/30 p-3 hover:bg-destructive/5 transition-colors space-y-0.5 disabled:opacity-50"
+            disabled={descartando || isNavigating}
+            onClick={() => descartar('cancelar')}
+          >
+            <p className="text-sm font-medium text-destructive">Cancelar cita</p>
+            <p className="text-xs text-muted-foreground">
+              La cita queda cancelada y no se podrá recuperar. Los insumos registrados vuelven al inventario.
+            </p>
+          </button>
+        </div>
+        <DialogFooter>
+          <Button variant="ghost" size="sm" onClick={() => setShowDescartar(false)} disabled={descartando}>
+            Volver
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+
+  if (vista === 'sencilla') {
+    if (!historia) return <LoadingState rows={6} />
+    return (
+      <>
+        <AtencionSencilla
+          cita={cita}
+          historia={historia}
+          notas={notas ?? []}
+          notaId={notaId}
+          onAbrirCompleta={() => setVistaElegida('completa')}
+          onDescartar={() => setShowDescartar(true)}
+          onTerminada={() => {
+            queryClient.invalidateQueries({ queryKey: ['citas'] })
+            clearNota()
+            startTransition(() => router.push('/atenciones'))
+          }}
+          navegando={isNavigating}
+        />
+        {dialogoDescartar}
+      </>
+    )
+  }
+
   const totalNotas = notas?.length ?? 0
   const totalFotos = notas?.reduce((acc, n) => acc + (n.fotos?.length ?? 0), 0) ?? 0
 
@@ -487,18 +563,19 @@ export default function AtencionCitaPage({ params }: Props) {
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-3 border-b bg-background sticky top-0 z-10 min-w-0">
+      <div className="flex items-center justify-between gap-3 px-6 py-3 border-b bg-background sticky top-0 z-10 min-w-0">
         <div className="flex items-center gap-3 min-w-0">
           <Button variant="ghost" size="sm" asChild className="shrink-0">
-            <Link href="/atenciones">
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Atenciones
+            <Link href="/atenciones" aria-label="Volver a atenciones">
+              <ArrowLeft className="h-4 w-4 xl:mr-1" />
+              <span className="hidden xl:inline">Atenciones</span>
             </Link>
           </Button>
           <div className="h-4 w-px bg-border shrink-0" />
-          <div className="min-w-0">
-            <span className="font-semibold text-sm">{cita.paciente_nombre}</span>
-            <span className="text-muted-foreground text-sm ml-2 truncate uppercase">· {cita.servicio_nombre}</span>
+          {/* Una sola línea: con poco ancho se recorta en vez de partirse y montarse sobre lo demás. */}
+          <div className="min-w-0 truncate text-sm">
+            <span className="font-semibold">{cita.paciente_nombre}</span>
+            <span className="text-muted-foreground ml-2 uppercase">· {cita.servicio_nombre}</span>
           </div>
           <Badge variant="secondary" className="text-xs bg-rose-50 text-rose-700 border-rose-200 shrink-0">
             En atención
@@ -512,9 +589,27 @@ export default function AtencionCitaPage({ params }: Props) {
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)}</span>
-          <Button size="sm" variant="ghost" className="text-muted-foreground hover:text-destructive" onClick={() => setShowDescartar(true)}>
-            <XCircle className="h-4 w-4 mr-1.5" />
-            Descartar
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground"
+            onClick={() => setVistaElegida('sencilla')}
+            aria-label="Vista sencilla"
+            title="Vista sencilla"
+          >
+            <LayoutList className="h-4 w-4 xl:mr-1.5" />
+            <span className="hidden xl:inline">Vista sencilla</span>
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => setShowDescartar(true)}
+            aria-label="Descartar"
+            title="Descartar"
+          >
+            <XCircle className="h-4 w-4 xl:mr-1.5" />
+            <span className="hidden xl:inline">Descartar</span>
           </Button>
           <Button size="sm" onClick={handleCompletar} disabled={completando || verificando || isNavigating}>
             {(completando || verificando || isNavigating)
@@ -676,43 +771,7 @@ export default function AtencionCitaPage({ params }: Props) {
         </div>
       </div>
 
-      <Dialog open={showDescartar} onOpenChange={setShowDescartar}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Descartar atención</DialogTitle>
-            <DialogDescription>
-              ¿Qué deseas hacer con esta atención?
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2 py-2">
-            <button
-              className="w-full text-left rounded-lg border p-3 hover:bg-muted/50 transition-colors space-y-0.5 disabled:opacity-50"
-              disabled={descartando || isNavigating}
-              onClick={() => descartar('desiniciar')}
-            >
-              <p className="text-sm font-medium">Desiniciar atención</p>
-              <p className="text-xs text-muted-foreground">
-                La cita vuelve a "En espera" para iniciarla después. Lo que ya registraste (nota, fotos, insumos) se conserva.
-              </p>
-            </button>
-            <button
-              className="w-full text-left rounded-lg border border-destructive/30 p-3 hover:bg-destructive/5 transition-colors space-y-0.5 disabled:opacity-50"
-              disabled={descartando || isNavigating}
-              onClick={() => descartar('cancelar')}
-            >
-              <p className="text-sm font-medium text-destructive">Cancelar cita</p>
-              <p className="text-xs text-muted-foreground">
-                La cita queda cancelada y no se podrá recuperar. Los insumos registrados vuelven al inventario.
-              </p>
-            </button>
-          </div>
-          <DialogFooter>
-            <Button variant="ghost" size="sm" onClick={() => setShowDescartar(false)} disabled={descartando}>
-              Volver
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {dialogoDescartar}
 
       {/* Dialog: procedimientos ejecutados en la sesión */}
       <Dialog open={showSesionProcs} onOpenChange={setShowSesionProcs}>

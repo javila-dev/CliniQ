@@ -163,7 +163,8 @@ def _normalizar_tabs(value, disponibles):
 
 class ConfiguracionHistoriaSerializer(serializers.ModelSerializer):
     """Pestanas visibles de la clinica: historia del paciente (`tabs_activos`)
-    y pantalla del profesional en una atencion (`atencion_tabs_activos`)."""
+    y pantalla del profesional en una atencion (`atencion_tabs_activos`), y la
+    vista de la atencion para toda la clinica (`vista_atencion`)."""
 
     tabs_disponibles = serializers.SerializerMethodField()
     atencion_tabs_disponibles = serializers.SerializerMethodField()
@@ -171,7 +172,8 @@ class ConfiguracionHistoriaSerializer(serializers.ModelSerializer):
     class Meta:
         model = ConfiguracionHistoria
         fields = (
-            "tabs_activos", "tabs_disponibles", "atencion_tabs_activos", "atencion_tabs_disponibles", "updated_at",
+            "tabs_activos", "tabs_disponibles", "atencion_tabs_activos", "atencion_tabs_disponibles",
+            "vista_atencion", "updated_at",
         )
         read_only_fields = ("tabs_disponibles", "atencion_tabs_disponibles", "updated_at")
 

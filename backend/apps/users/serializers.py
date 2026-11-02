@@ -130,6 +130,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     tiene_colaborador = serializers.SerializerMethodField()
     sede_principal_nombre = serializers.SerializerMethodField()
+    vista_atencion_efectiva = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -150,8 +151,19 @@ class UserAdminSerializer(serializers.ModelSerializer):
             "created_at",
             "tiene_colaborador",
             "sede_principal_nombre",
+            "vista_atencion",
+            "vista_atencion_efectiva",
         )
         read_only_fields = fields
+
+    def get_vista_atencion_efectiva(self, obj):
+        from apps.users.vista_atencion import vista_atencion_de, vista_de_clinica
+
+        # Una sola lectura de la configuración por clínica en todo el listado.
+        cache = self.context.setdefault("_vista_por_clinica", {})
+        if obj.clinica_id not in cache:
+            cache[obj.clinica_id] = vista_de_clinica(obj.clinica_id)
+        return vista_atencion_de(obj, vista_clinica=cache[obj.clinica_id])
 
     def get_tiene_colaborador(self, obj):
         return hasattr(obj, "colaborador")
@@ -185,7 +197,10 @@ class UserCreateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("email", "first_name", "last_name", "password", "rol", "role_id", "es_profesional", "telefono")
+        fields = (
+            "email", "first_name", "last_name", "password", "rol", "role_id", "es_profesional", "telefono",
+            "vista_atencion",
+        )
 
     def validate_email(self, value):
         request = self.context["request"]
@@ -228,7 +243,7 @@ class UserUpdateSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ("first_name", "last_name", "telefono", "rol", "role_id", "es_profesional", "activo")
+        fields = ("first_name", "last_name", "telefono", "rol", "role_id", "es_profesional", "activo", "vista_atencion")
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
@@ -283,6 +298,7 @@ class UserSerializer(serializers.ModelSerializer):
     centro_ayuda_habilitado = serializers.SerializerMethodField()
     modo_puesta_en_marcha = serializers.SerializerMethodField()
     filtrar_profesionales_por_procedimiento = serializers.SerializerMethodField()
+    vista_atencion_efectiva = serializers.SerializerMethodField()
 
     class Meta:
         model = User
@@ -312,6 +328,7 @@ class UserSerializer(serializers.ModelSerializer):
             "foto_perfil",
             "registro_profesional",
             "firma_digital_url",
+            "vista_atencion_efectiva",
             "activo",
             "created_at",
             "updated_at",
@@ -377,6 +394,11 @@ class UserSerializer(serializers.ModelSerializer):
 
     def get_filtrar_profesionales_por_procedimiento(self, obj):
         return obj.clinica.filtrar_profesionales_por_procedimiento if obj.clinica_id else False
+
+    def get_vista_atencion_efectiva(self, obj):
+        from apps.users.vista_atencion import vista_atencion_de
+
+        return vista_atencion_de(obj)
 
 
 class MeUpdateSerializer(serializers.ModelSerializer):
@@ -543,6 +565,7 @@ class RolSerializer(serializers.ModelSerializer):
             "es_sistema",
             "editable",
             "es_profesional",
+            "vista_atencion",
             "activo",
             "permission_keys",
             "usuarios_count",

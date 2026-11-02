@@ -1,3 +1,5 @@
+import type { VistaAtencionEfectiva } from './usuarios'
+
 export type UserRole = 'superadmin' | 'admin' | 'profesional' | 'recepcion' | string
 
 export interface AuthUser {
@@ -29,6 +31,8 @@ export interface AuthUser {
   modo_puesta_en_marcha: boolean
   /** true cuando la clínica solo ofrece, al agendar, los profesionales asociados al procedimiento. */
   filtrar_profesionales_por_procedimiento?: boolean
+  /** Con qué pantalla atiende: la de su usuario, su rol o la clínica. */
+  vista_atencion_efectiva?: VistaAtencionEfectiva
   telefono: string | null
   foto_perfil: string | null
   firma_digital_url: string | null

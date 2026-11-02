@@ -1,7 +1,6 @@
 import base64
 from decimal import Decimal
 
-from django.db.models import Prefetch
 from django.template.loader import render_to_string
 from django.utils import timezone
 from weasyprint import HTML
@@ -135,59 +134,85 @@ def format_time(value) -> str:
     return timezone.localtime(value).strftime("%I:%M %p")
 
 
+def _hora_de_fila(hhmm: str | None) -> str:
+    if not hhmm:
+        return ""
+    h, m = (int(x) for x in hhmm.split(":"))
+    return f"{h % 12 or 12}:{m:02d} {'a. m.' if h < 12 else 'p. m.'}"
+
+
 def build_consolidado_asistencia_context(cotizacion: Cotizacion) -> dict:
     """
-    Arma el contexto del PDF consolidado del ciclo de tratamiento: una tabla
-    por item de la cotizacion con todas sus citas (sesion N/M, fecha, hora,
-    profesional) y la firma del paciente ya capturada por cita (recortada
-    del PDF de registro de asistencia firmado via Documenso). No dispara
-    ninguna firma nueva: solo reutiliza lo que ya quedo firmado.
+    Contexto del PDF consolidado: la hoja de cada ítem como la que la clínica lleva
+    en papel (docs/plan-atencion-sencilla.md). Una fila por sesión del paquete, hecha
+    o no, con procedimientos, fecha, hora, firma del profesional y firma del paciente.
+    Las firmas digitales que ya existen se muestran (la del paciente recortada del
+    registro de asistencia firmado en Documenso; la del profesional, la de su
+    perfil); donde no hay, queda el recuadro en blanco para firmar a mano. No
+    dispara ninguna firma nueva.
     """
     from apps.agenda.models import Cita
     from apps.agenda.pdf_coords import recortar_firma_paciente
-
-    items = list(
-        cotizacion.items.filter(activo=True).prefetch_related(
-            Prefetch(
-                "citas",
-                queryset=Cita.objects.exclude(estado=Cita.Estado.CANCELADA)
-                .select_related("profesional")
-                .order_by("fecha_inicio"),
-            )
-        )
-    )
+    from apps.agenda.tarjeta import filas_de_item
+    from django.contrib.auth import get_user_model
 
     secciones = []
-    for item in items:
-        citas = list(item.citas.all())
-        if not citas:
+    for item in cotizacion.items.filter(activo=True).order_by("created_at"):
+        filas_hoja = filas_de_item(item)
+        if not filas_hoja:
             continue
+
+        citas = Cita.objects.in_bulk([f["cita_id"] for f in filas_hoja if f["cita_id"]])
+        profesionales = get_user_model().objects.in_bulk(
+            [f["profesional"]["id"] for f in filas_hoja if f["profesional"]]
+        )
         filas = []
-        for idx, cita in enumerate(citas, start=1):
-            firma_img_b64 = None
-            if cita.firma_asistencia_estado == Cita.FirmaAsistenciaEstado.FIRMADA and cita.firma_asistencia_archivo:
+        for f in filas_hoja:
+            hecha = f["estado"] == "completado"
+            realizados = [p["nombre"] for p in f["procedimientos"] if p["realizado"]]
+            procedimiento = " + ".join(realizados if hecha and realizados else [p["nombre"] for p in f["procedimientos"]])
+
+            firma_paciente_b64 = None
+            cita = citas.get(f["cita_id"]) if f["cita_id"] else None
+            if cita and cita.firma_asistencia_estado == Cita.FirmaAsistenciaEstado.FIRMADA and cita.firma_asistencia_archivo:
                 try:
                     recorte = recortar_firma_paciente(cita.firma_asistencia_archivo.read())
                 except Exception:
                     recorte = None
                 if recorte:
-                    firma_img_b64 = base64.b64encode(recorte).decode("ascii")
+                    firma_paciente_b64 = base64.b64encode(recorte).decode("ascii")
+
+            firma_profesional_url = None
+            nombre_profesional = ""
+            if hecha and f["profesional"]:
+                nombre_profesional = f["profesional"]["nombre"]
+                profesional = profesionales.get(f["profesional"]["id"])
+                if profesional is not None and profesional.firma_digital:
+                    firma_profesional_url = get_public_url(profesional.firma_digital.name, internal=True)
+
+            fecha = ""
+            if hecha and f["fecha"]:
+                anio, mes, dia = f["fecha"].split("-")
+                fecha = f"{dia}/{mes}/{anio}"
             filas.append({
-                "numero": idx,
-                "procedimiento": cita.servicio_nombre or (cita.servicio.nombre if cita.servicio else item.descripcion),
-                "fecha": format_date(cita.fecha_inicio),
-                "hora": format_time(cita.fecha_inicio),
-                "profesional_nombre": cita.profesional.nombre_completo if cita.profesional else "-",
-                "estado_cita": cita.get_estado_display(),
-                "firma_estado": cita.firma_asistencia_estado,
-                "firma_estado_label": cita.get_firma_asistencia_estado_display(),
-                "firma_img_b64": firma_img_b64,
+                "numero": f["numero"],
+                "procedimiento": procedimiento,
+                "zonas": ", ".join(f["zonas"]),
+                "obsequio": f["obsequio"],
+                "no_asistio": f["estado"] == "inasistencia",
+                # Fecha y hora solo de lo ya hecho: en lo pendiente quedan los
+                # espacios para llenarlos a mano.
+                "fecha": fecha,
+                "hora": _hora_de_fila(f["hora"]) if hecha else "",
+                "profesional_nombre": nombre_profesional,
+                "firma_profesional_url": firma_profesional_url,
+                "firma_paciente_b64": firma_paciente_b64,
             })
         secciones.append({
             "descripcion": item.descripcion,
-            "num_citas": item.num_sesiones_efectivas(),
-            "citas_registradas": len(citas),
-            "citas_firmadas": sum(1 for f in filas if f["firma_img_b64"]),
+            "total": len(filas),
+            "hechas": sum(1 for f in filas_hoja if f["estado"] == "completado"),
+            "con_firma": sum(1 for f in filas if f["firma_paciente_b64"]),
             "filas": filas,
         })
 

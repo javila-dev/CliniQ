@@ -20,10 +20,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
-import { EtiquetaAjuste, FilaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
+import { EtiquetaAjuste, FilaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes } from '@/components/configuracion/ajustes'
+import { NOMBRE_VISTA, aValorLista, deValorLista, opcionesVista } from '@/components/configuracion/vistaAtencion'
+import { useVistaAtencionClinica } from '@/hooks/usePestanasClinica'
 import { cn } from '@/lib/utils'
 import { aplicarErroresDeCampo, mensajeDeError } from '@/lib/errores'
-import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse } from '@/types/usuarios'
+import type { Rol, PermisoGrupo, CapacidadArea, CapacidadesResponse, VistaAtencion } from '@/types/usuarios'
 
 // ── Schemas ────────────────────────────────────────────────────────────────────
 
@@ -284,15 +286,20 @@ function RolDialog({
 
   // Permisos seleccionados en este modal
   const [permKeys, setPermKeys] = useState<string[]>(rol?.permission_keys ?? [])
+  // Vista al atender del rol; null = la de la clínica.
+  const [vistaRol, setVistaRol] = useState<VistaAtencion | null>(rol?.vista_atencion ?? null)
+  const { vista: vistaClinica } = useVistaAtencionClinica()
 
   // Sincronizar al abrir con un rol diferente
   const [lastRolId, setLastRolId] = useState<string | null>(null)
   if (rol && rol.id !== lastRolId) {
     setPermKeys(rol.permission_keys)
+    setVistaRol(rol.vista_atencion ?? null)
     setLastRolId(rol.id)
   }
   if (!rol && lastRolId !== null) {
     setPermKeys([])
+    setVistaRol(null)
     setLastRolId(null)
   }
 
@@ -306,14 +313,14 @@ function RolDialog({
   const crearMutation = useMutation({
     // Rol y permisos en una sola llamada: si algo falla no queda un rol vacío.
     mutationFn: (data: z.infer<typeof rolSchema>) =>
-      rolesApi.create({ ...data, permission_keys: permKeys }),
+      rolesApi.create({ ...data, permission_keys: permKeys, vista_atencion: vistaRol }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); reset(); onClose() },
     onError: marcarErrorDeCampo,
   })
 
   const editarMutation = useMutation({
     mutationFn: async (data: z.infer<typeof rolSchema>) => {
-      await rolesApi.update(rol!.id, { nombre: data.nombre, descripcion: data.descripcion })
+      await rolesApi.update(rol!.id, { nombre: data.nombre, descripcion: data.descripcion, vista_atencion: vistaRol })
       await rolesApi.updatePermisos(rol!.id, permKeys)
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['roles'] }); onClose() },
@@ -368,6 +375,21 @@ function RolDialog({
                 disabled={readonly}
                 className="resize-none text-sm"
               />
+            </div>
+
+            <div className="space-y-1.5">
+              <Label>Vista al atender</Label>
+              <SelectAjuste
+                valor={aValorLista(vistaRol)}
+                opciones={opcionesVista(vistaClinica, 'de la clínica')}
+                onCambiar={(v) => setVistaRol(deValorLista(v))}
+                deshabilitado={readonly}
+                etiqueta="Vista al atender"
+                ancho="w-full"
+              />
+              <p className="text-xs text-muted-foreground">
+                Para quienes tengan este rol y atiendan pacientes. A una persona se le puede poner otra en su ficha.
+              </p>
             </div>
           </div>
 
@@ -476,6 +498,7 @@ function RolRow({
         <>
           {rol.es_sistema && <EtiquetaAjuste icono={Lock}>Sistema</EtiquetaAjuste>}
           {!rol.activo && <EtiquetaAjuste tono="aviso">Inactivo</EtiquetaAjuste>}
+          {rol.vista_atencion && <EtiquetaAjuste tono="marca">Vista {NOMBRE_VISTA[rol.vista_atencion].toLowerCase()}</EtiquetaAjuste>}
         </>
       }
     >

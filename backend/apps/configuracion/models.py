@@ -2,6 +2,7 @@ from django.db import models
 
 from apps.core.models import BaseModel
 from apps.historia_clinica.models import ConsentimientoInformado
+from apps.users.models import VistaAtencion
 
 
 # Pestanas que la clinica puede mostrar u ocultar: (slug, etiqueta, obligatoria).
@@ -161,6 +162,8 @@ class ConfiguracionHistoria(BaseModel):
     tabs_activos = models.JSONField(default=list, blank=True)
     # Pantalla del profesional durante una atencion. Lista vacia = todas.
     atencion_tabs_activos = models.JSONField(default=list, blank=True)
+    # Vista de la atención para toda la clínica; el rol y el usuario la pueden cambiar.
+    vista_atencion = models.CharField(max_length=10, choices=VistaAtencion.choices, default=VistaAtencion.COMPLETA)
 
     class Meta:
         db_table = "configuracion_historia"

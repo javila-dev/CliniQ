@@ -1,5 +1,14 @@
 // ── Rol dinámico ──────────────────────────────────────────────────────────────
 
+/** Pantalla con la que se atiende (docs/plan-atencion-sencilla.md). */
+export type VistaAtencion = 'completa' | 'sencilla'
+
+/** La vista que le toca a alguien y de qué nivel sale: su usuario, su rol o la clínica. */
+export interface VistaAtencionEfectiva {
+  vista: VistaAtencion
+  origen: 'usuario' | 'rol' | 'clinica'
+}
+
 export interface Rol {
   id: string
   slug: string
@@ -9,6 +18,8 @@ export interface Rol {
   editable: boolean
   activo: boolean
   es_profesional: boolean   // si true → el colaborador con este rol tiene perfil profesional (especialidades, horarios)
+  /** null = la de la clínica. */
+  vista_atencion: VistaAtencion | null
   permission_keys: string[]
   usuarios_count: number
   created_at: string
@@ -22,12 +33,14 @@ export interface CreateRolRequest {
   descripcion?: string
   /** Permisos del rol, guardados en la misma operación que el rol. */
   permission_keys?: string[]
+  vista_atencion?: VistaAtencion | null
 }
 
 export interface UpdateRolRequest {
   nombre?: string
   descripcion?: string
   activo?: boolean
+  vista_atencion?: VistaAtencion | null
 }
 
 // ── Permisos ──────────────────────────────────────────────────────────────────
@@ -83,6 +96,9 @@ export interface UsuarioAdmin {
   activo: boolean
   tiene_colaborador: boolean
   sede_principal_nombre: string | null
+  /** null = la de su rol (o la de la clínica). */
+  vista_atencion: VistaAtencion | null
+  vista_atencion_efectiva: VistaAtencionEfectiva
   created_at: string
 }
 
@@ -102,6 +118,7 @@ export interface UpdateUsuarioRequest {
   telefono?: string
   role_id?: string
   rol?: string
+  vista_atencion?: VistaAtencion | null
 }
 
 export interface PlanLimite {

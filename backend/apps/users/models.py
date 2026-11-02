@@ -8,6 +8,14 @@ from apps.core.models import BaseModel
 from apps.users.managers import CustomUserManager
 
 
+class VistaAtencion(models.TextChoices):
+    """Pantalla con la que se atiende: la historia con pestañas o la hoja del
+    paquete. Solo cambia la presentación; las dos guardan lo mismo."""
+
+    COMPLETA = "completa", "Completa"
+    SENCILLA = "sencilla", "Sencilla"
+
+
 class User(AbstractUser, BaseModel):
     username = None
 
@@ -38,6 +46,8 @@ class User(AbstractUser, BaseModel):
     foto_perfil = models.ImageField(upload_to="perfiles/", null=True, blank=True)
     registro_profesional = models.CharField(max_length=60, blank=True, default="")
     firma_digital = models.ImageField(upload_to="firmas_profesionales/", null=True, blank=True)
+    # Vacío = la de su rol, y si el rol tampoco la fija, la de la clínica.
+    vista_atencion = models.CharField(max_length=10, choices=VistaAtencion.choices, null=True, blank=True)
 
     # Sesion unica: identifica la sesion activa vigente. Un login nuevo la
     # rota y cierra cualquier otra sesion (ver apps.users.services.iniciar_sesion_unica).
@@ -94,6 +104,8 @@ class Rol(BaseModel):
     es_sistema = models.BooleanField(default=False)
     editable = models.BooleanField(default=True)
     es_profesional = models.BooleanField(default=False)
+    # Vacío = la de la clínica.
+    vista_atencion = models.CharField(max_length=10, choices=VistaAtencion.choices, null=True, blank=True)
     permisos = models.ManyToManyField(
         Permiso,
         through="users.RolPermiso",

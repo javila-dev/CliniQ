@@ -84,22 +84,33 @@
       }
       .sesiones-table tbody tr:nth-child(even) { background: #f9fafb; }
 
-      .col-num { width: 22px; color: #9ca3af; }
-      .col-firma { width: 110px; text-align: center; }
-      .firma-img { max-width: 100px; max-height: 32px; object-fit: contain; }
+      .col-num { width: 18px; color: #9ca3af; }
+      .col-fecha { width: 62px; }
+      .col-hora { width: 52px; }
+      .col-firma { width: 112px; text-align: center; }
+      .firma-img { max-width: 104px; max-height: 34px; object-fit: contain; }
+      .firma-nombre { font-size: 8.5px; color: #6b7280; }
 
-      .badge {
-        display: inline-block;
-        font-size: 9px;
-        font-weight: bold;
-        padding: 2px 6px;
-        border-radius: 4px;
+      /* Filas altas y recuadros en blanco: la hoja se imprime para llenarla a mano
+         donde no hay firma digital, como la que la clínica usa en papel. */
+      .sesiones-table tbody td { height: 38px; }
+      .sesiones-table tbody tr { page-break-inside: avoid; }
+      .recuadro {
+        height: 30px;
+        border-bottom: 1px solid #9ca3af;
+        margin: 0 4px;
       }
-      .badge-firmada  { background: #dcfce7; color: #15803d; }
-      .badge-enviada  { background: #fef9c3; color: #a16207; }
-      .badge-pendiente,
-      .badge-sin_firma { background: #f3f4f6; color: #6b7280; }
-      .badge-rechazada { background: #fee2e2; color: #b91c1c; }
+      .zonas { font-size: 9px; color: #6b7280; }
+      .etiqueta {
+        display: inline-block;
+        font-size: 8.5px;
+        font-weight: bold;
+        padding: 1px 5px;
+        border-radius: 4px;
+        background: #ede9fe;
+        color: #6d28d9;
+      }
+      .no-asistio { font-size: 9px; color: #b45309; }
 
       .evidencia-nota {
         font-size: 9px;
@@ -141,16 +152,16 @@
     <div class="section">
       <div class="section-title">
         {{ seccion.descripcion }}
-        <span class="section-meta">{{ seccion.citas_registradas }} de {{ seccion.num_citas }} sesiones registradas &middot; {{ seccion.citas_firmadas }} con firma</span>
+        <span class="section-meta">{{ seccion.hechas }} de {{ seccion.total }} sesiones hechas &middot; {{ seccion.con_firma }} con firma digital del paciente</span>
       </div>
       <table class="sesiones-table">
         <thead>
           <tr>
             <th class="col-num">#</th>
-            <th>Procedimiento</th>
-            <th>Fecha</th>
-            <th>Hora</th>
-            <th>Profesional</th>
+            <th>Procedimientos</th>
+            <th class="col-fecha">Fecha</th>
+            <th class="col-hora">Hora</th>
+            <th class="col-firma">Firma profesional</th>
             <th class="col-firma">Firma paciente</th>
           </tr>
         </thead>
@@ -158,15 +169,30 @@
           {% for fila in seccion.filas %}
           <tr>
             <td class="col-num">{{ fila.numero }}</td>
-            <td>{{ fila.procedimiento }}</td>
-            <td>{{ fila.fecha }}</td>
-            <td>{{ fila.hora }}</td>
-            <td>{{ fila.profesional_nombre }}</td>
+            <td>
+              {{ fila.procedimiento }}
+              {% if fila.obsequio %} <span class="etiqueta">Obsequio</span>{% endif %}
+              {% if fila.zonas %}<div class="zonas">{{ fila.zonas }}</div>{% endif %}
+              {% if fila.no_asistio %}<div class="no-asistio">No asistió</div>{% endif %}
+            </td>
+            <td class="col-fecha">{% if fila.fecha %}{{ fila.fecha }}{% else %}<div class="recuadro"></div>{% endif %}</td>
+            <td class="col-hora">{% if fila.hora %}{{ fila.hora }}{% else %}<div class="recuadro"></div>{% endif %}</td>
             <td class="col-firma">
-              {% if fila.firma_img_b64 %}
-                <img class="firma-img" src="data:image/png;base64,{{ fila.firma_img_b64 }}" alt="Firma paciente">
+              {% if fila.firma_profesional_url %}
+                <img class="firma-img" src="{{ fila.firma_profesional_url }}" alt="Firma profesional">
+                <div class="firma-nombre">{{ fila.profesional_nombre }}</div>
+              {% elif fila.profesional_nombre %}
+                <div class="recuadro"></div>
+                <div class="firma-nombre">{{ fila.profesional_nombre }}</div>
               {% else %}
-                <span class="badge badge-{{ fila.firma_estado }}">{{ fila.firma_estado_label }}</span>
+                <div class="recuadro"></div>
+              {% endif %}
+            </td>
+            <td class="col-firma">
+              {% if fila.firma_paciente_b64 %}
+                <img class="firma-img" src="data:image/png;base64,{{ fila.firma_paciente_b64 }}" alt="Firma paciente">
+              {% else %}
+                <div class="recuadro"></div>
               {% endif %}
             </td>
           </tr>
@@ -177,8 +203,8 @@
     {% endfor %}
 
     <p class="evidencia-nota">
-      La firma mostrada es la evidencia digital capturada al momento de cada cita (Documenso). La firma del
-      profesional corresponde al nombre de quien atendio la sesion; no incluye firma digital independiente.
+      Las firmas del paciente son la evidencia digital capturada en cada cita (Documenso). La firma del
+      profesional es la cargada en su perfil. Donde no hay firma digital queda el espacio para firmar a mano.
     </p>
 
     <div class="footer">

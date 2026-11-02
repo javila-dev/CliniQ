@@ -2,6 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { configuracionPestanasApi, type ConfiguracionPestanas } from '@/lib/api/clinicas'
+import type { VistaAtencion } from '@/types/usuarios'
 
 // Pestañas que la clínica muestra en la historia del paciente y en la pantalla
 // del profesional durante una atención. Se guardan en la clínica
@@ -65,6 +66,31 @@ function usePestanas<T extends string>(campo: Campo, todas: T[]) {
   }
 
   return { tabsActivos, setTabActivo, isLoading, guardando: mutation.isPending, error: mutation.error }
+}
+
+/** Vista de la atención de la clínica (el nivel base: el rol y el usuario la pueden cambiar). */
+export function useVistaAtencionClinica() {
+  const qc = useQueryClient()
+  const { data, isLoading } = useQuery({
+    queryKey: QUERY_KEY,
+    queryFn: configuracionPestanasApi.get,
+    staleTime: 5 * 60_000,
+  })
+  const mutation = useMutation({
+    mutationFn: (vista: VistaAtencion) => configuracionPestanasApi.update({ vista_atencion: vista }),
+    onSuccess: (respuesta) => {
+      qc.setQueryData(QUERY_KEY, respuesta)
+      // La vista efectiva de cada usuario y del listado sale de este valor.
+      qc.invalidateQueries({ queryKey: ['usuarios'] })
+    },
+  })
+  return {
+    vista: data?.vista_atencion ?? 'completa',
+    cargando: isLoading,
+    guardando: mutation.isPending,
+    error: mutation.error,
+    cambiar: (vista: VistaAtencion, alGuardar?: () => void) => mutation.mutate(vista, { onSuccess: () => alGuardar?.() }),
+  }
 }
 
 export const useHistoriaConfig = () => usePestanas<TabHistoria>('tabs_activos', HISTORIA_TABS)

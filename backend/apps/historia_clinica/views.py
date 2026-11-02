@@ -696,16 +696,22 @@ class FotoClinicaAccessPermission(BasePermission):
                     user_has_permission(user, "cotizaciones.gestionar", request=request)
             return user_has_permission(user, "historia.fotos.subir", request=request)
         # destroy: el objeto todavia no se conoce aca — se exige al menos uno de
-        # los dos permisos para poder llegar a `has_object_permission`.
+        # los permisos para poder llegar a `has_object_permission`.
         return user_has_permission(user, "historia.fotos.eliminar", request=request) or \
-            user_has_permission(user, "cotizaciones.gestionar", request=request)
+            user_has_permission(user, "cotizaciones.gestionar", request=request) or \
+            user_has_permission(user, "historia.fotos.subir", request=request)
 
     def has_object_permission(self, request, view, obj):
         if view.action == "destroy" and obj.nota.cotizacion_id:
             return user_has_permission(request.user, "historia.fotos.eliminar", request=request) or \
                 user_has_permission(request.user, "cotizaciones.gestionar", request=request)
-        return user_has_permission(request.user, "historia.fotos.eliminar", request=request) and \
-            puede_documentar(request.user, obj.nota)
+        # Solo se quitan fotos de la atención en curso, para corregir una foto
+        # equivocada antes de cerrarla; las de atenciones pasadas no se tocan, con
+        # ningún permiso. Basta con poder subir fotos (28/10/2026).
+        if obj.nota.estado != NotaClinica.EstadoNota.BORRADOR or not puede_documentar(request.user, obj.nota):
+            return False
+        return user_has_permission(request.user, "historia.fotos.subir", request=request) or \
+            user_has_permission(request.user, "historia.fotos.eliminar", request=request)
 
 
 class FotoClinicaViewSet(mixins.CreateModelMixin, mixins.DestroyModelMixin, GenericViewSet):

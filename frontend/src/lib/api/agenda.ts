@@ -2,6 +2,7 @@ import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
 import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
 import type { Paginated } from '@/types/common'
+import type { TarjetaCita } from '@/types/tarjeta'
 
 type SlotsBase = { profesional_id: string; sede_id: string; fecha: string; cita_id?: string }
 export type SlotsParams =
@@ -66,6 +67,11 @@ export const agendaApi = {
     },
     cambiarEstado: async (id: string, data: CambiarEstadoRequest): Promise<Cita> => {
       const res = await apiClient.post<Cita>(`/agenda/citas/${id}/cambiar_estado/`, data)
+      return res.data
+    },
+    /** La hoja del paquete de la cita, para la vista sencilla de la atención. */
+    tarjeta: async (id: string): Promise<TarjetaCita> => {
+      const res = await apiClient.get<TarjetaCita>(`/agenda/citas/${id}/tarjeta/`)
       return res.data
     },
     /** Cierra la atención en una sola transacción: sesión del tratamiento, nota y cita. */

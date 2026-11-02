@@ -21,10 +21,13 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Switch } from '@/components/ui/switch'
 import { cn, todayISO } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
+import { hasPermission, PERM } from '@/lib/permissions'
 import { GruposAtencionSelect, useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
 import { toast } from '@/hooks/use-toast'
 import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
-import type { Rol } from '@/types/usuarios'
+import type { Rol, VistaAtencion } from '@/types/usuarios'
+import { aValorLista, deValorLista, opcionesVista } from '@/components/configuracion/vistaAtencion'
+import { useVistaAtencionClinica } from '@/hooks/usePestanasClinica'
 import type { DiaSemana, HorarioSede } from '@/types/clinicas'
 
 // ─── Constantes ───────────────────────────────────────────────
@@ -505,6 +508,15 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   })
   const roles = rolesData.filter(r => r.activo && r.slug !== 'superadmin')
 
+  // Vista al atender propia de esta persona (null = la de su rol). Se guarda en
+  // el usuario, aparte del colaborador, al guardar el formulario: solo la ve
+  // quien puede editar usuarios (gestionar colaboradores no alcanza).
+  const puedeCambiarVista = hasPermission(useAuthStore((st) => st.user), PERM.USUARIOS_EDITAR)
+  const { vista: vistaClinica } = useVistaAtencionClinica()
+  const vistaGuardada = usuarioDetail?.vista_atencion ?? null
+  const [vistaUsuario, setVistaUsuario] = useState<VistaAtencion | null>(null)
+  useEffect(() => { setVistaUsuario(vistaGuardada) }, [usuarioDetail?.id, vistaGuardada])
+
   // Sedes
   const { data: sedesData } = useQuery({
     queryKey: ['sedes'],
@@ -608,13 +620,18 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   })
 
   const editMut = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: EditForm }) => {
+    mutationFn: async ({ id, data }: { id: string; data: EditForm }) => {
       console.log('PATCH colaborador payload:', JSON.stringify(data, null, 2))
-      return colaboradoresApi.update(id, data)
+      const res = await colaboradoresApi.update(id, data)
+      if (colaborador && puedeCambiarVista && vistaUsuario !== vistaGuardada) {
+        await usuariosApi.update(colaborador.user, { vista_atencion: vistaUsuario })
+      }
+      return res
     },
     onSuccess: (res) => {
       console.log('PATCH colaborador response:', JSON.stringify(res, null, 2))
       qc.invalidateQueries({ queryKey: ['colaboradores'] })
+      qc.invalidateQueries({ queryKey: ['usuario-detail-colab', colaborador?.user] })
       qc.invalidateQueries({ queryKey: ['colaborador-detail', colaborador?.id] })
       qc.invalidateQueries({ queryKey: ['mi-plan'] })
       onOpenChange(false)
@@ -958,6 +975,22 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                       </Seccion>
                       <Seccion titulo="Rol y acceso" descripcion="Qué puede ver y hacer en CliniQ, y si atiende pacientes.">
                         {b.acceso}
+                        {editForm.watch('es_profesional') && puedeCambiarVista && (
+                          <Campo
+                            label="Vista al atender"
+                            ayuda="Con qué pantalla registra sus atenciones. Las dos guardan lo mismo."
+                          >
+                            <Select value={aValorLista(vistaUsuario)} onValueChange={(v) => setVistaUsuario(deValorLista(v))}>
+                              <SelectTrigger aria-label="Vista al atender"><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {opcionesVista(
+                                  roles.find((r) => r.id === editForm.watch('role_id'))?.vista_atencion ?? vistaClinica,
+                                  'de su rol',
+                                ).map((o) => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </Campo>
+                        )}
                       </Seccion>
                       {editForm.watch('es_profesional') && (
                         <Seccion titulo="Qué atiende" descripcion="Los procedimientos que realiza: los de sus grupos de atención y, si hace falta, otros sueltos.">

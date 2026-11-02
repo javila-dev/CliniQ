@@ -175,7 +175,7 @@ class CitaViewSet(ModelViewSet):
         }:
             # Editar citas, o atender esa cita (el profesional recibe a su paciente).
             permission_classes = (PuedeGestionarLlegada,)
-        elif self.action in {"list", "retrieve"}:
+        elif self.action in {"list", "retrieve", "tarjeta"}:
             permission_classes = (PuedeVerCitas,)
         else:
             permission_classes = (RequirePermission("agenda.citas.ver"),)
@@ -601,6 +601,13 @@ class CitaViewSet(ModelViewSet):
         elif nuevo_estado == Cita.Estado.COMPLETADA:
             registrar_accion(request, "cita.completar", cita)
         return Response(CitaSerializer(cita).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="tarjeta")
+    def tarjeta(self, request, pk=None):
+        """La hoja del paquete de la cita para la vista sencilla de la atención."""
+        from apps.agenda.tarjeta import tarjeta_de_cita
+
+        return Response(tarjeta_de_cita(self.get_object()), status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="completar_atencion")
     def completar_atencion(self, request, pk=None):

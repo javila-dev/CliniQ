@@ -36,6 +36,8 @@ export interface PlanPublico {
 export interface ConfiguracionPestanas {
   tabs_activos: string[]
   atencion_tabs_activos: string[]
+  /** Vista de la atención para toda la clínica; el rol y el usuario la pueden cambiar. */
+  vista_atencion: VistaAtencion
   updated_at: string
 }
 
@@ -44,7 +46,7 @@ export const configuracionPestanasApi = {
     const res = await apiClient.get<ConfiguracionPestanas>('/configuracion/historia/')
     return res.data
   },
-  update: async (data: Partial<Pick<ConfiguracionPestanas, 'tabs_activos' | 'atencion_tabs_activos'>>): Promise<ConfiguracionPestanas> => {
+  update: async (data: Partial<Pick<ConfiguracionPestanas, 'tabs_activos' | 'atencion_tabs_activos' | 'vista_atencion'>>): Promise<ConfiguracionPestanas> => {
     const res = await apiClient.patch<ConfiguracionPestanas>('/configuracion/historia/', data)
     return res.data
   },
@@ -80,6 +82,7 @@ import type {
 } from '@/types/clinicas'
 import type { DiagramaCorporal, GrupoZonas } from '@/types/admin'
 import type { Paginated } from '@/types/common'
+import type { VistaAtencion } from '@/types/usuarios'
 
 /** Un paso de "Preparar mi clínica". El estado sale de los datos reales, no se guarda. */
 export interface SetupChecklistItem {

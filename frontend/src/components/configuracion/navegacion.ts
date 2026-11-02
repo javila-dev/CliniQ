@@ -152,9 +152,9 @@ export const CATEGORIAS: CategoriaConfig[] = [
     ajustes: [
       {
         href: '/configuracion/atencion',
-        label: 'Pestañas de la atención',
-        description: 'Qué pestañas ve el profesional al atender y cuáles se muestran en la historia del paciente.',
-        keywords: 'pestañas profesional atencion historia clinica nota consulta secciones modulos estetico',
+        label: 'Pantalla del profesional',
+        description: 'Vista sencilla o completa al atender, y qué pestañas se muestran al atender y en la historia del paciente.',
+        keywords: 'pestañas profesional atencion historia clinica nota consulta secciones modulos estetico vista sencilla completa tabla hoja paquete',
         perm: PERM.CLINICAS_EDITAR,
       },
       {
