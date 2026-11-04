@@ -517,6 +517,9 @@ class CotizacionViewSet(ModelViewSet):
         # compromiso de pago pendiente de firma — es histórico / firmado en papel.
         if getattr(cotizacion, "es_migracion", False):
             return None
+        # Solo obsequios (total 0): no hay nada que comprometerse a pagar.
+        if Decimal(cotizacion.total) <= 0:
+            return None
 
         config = ConfiguracionCartera.objects.filter(
             clinica_id=cotizacion.clinica_id,

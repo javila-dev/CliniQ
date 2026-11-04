@@ -18,7 +18,7 @@ from apps.clinicas.models import (
     TipoSesion,
     TratamientoCatalogo,
 )
-from apps.configuracion.models import DocumensoConsentimientoTemplate
+from apps.configuracion.models import ConfiguracionCartera, DocumensoConsentimientoTemplate
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
 from apps.inventario.models import Insumo, MovimientoInventario, StockInsumoSede
 from apps.inventario.serializers import MovimientoInventarioSerializer
@@ -152,14 +152,34 @@ class ObsequiosCotizacionTests(TestCase):
         sesiones = self.client.get(f"/api/v1/cotizaciones/{data['id']}/sesiones/").json()
         self.assertEqual([i["descripcion"] for i in sesiones["items"]], ["Toxina"])
 
-    def test_no_se_permite_cotizacion_solo_con_obsequios(self):
-        response = self._crear(
-            [{"tipo": "libre", "es_obsequio": True, "descripcion": "Regalo", "valor_referencia": "10000"}],
-            total="10000.00",
+    def test_cotizacion_solo_con_obsequios_se_acepta_sin_plan_de_pagos_ni_compromiso(self):
+        # Aunque la clínica exija el compromiso de pago: con total 0 no hay nada que firmar.
+        ConfiguracionCartera.objects.update_or_create(
+            clinica=self.clinica, defaults={"requiere_consentimiento_promocional": True},
+        )
+        payload = {
+            **self._payload([
+                {"tipo": "tratamiento", "tratamiento": str(self.tratamiento.id), "es_obsequio": True},
+                {"tipo": "libre", "es_obsequio": True, "descripcion": "Valoración", "valor_referencia": "50000"},
+            ]),
+            "formas_pago": [],
+        }
+        creada = self.client.post("/api/v1/cotizaciones/", payload, format="json")
+        self.assertEqual(creada.status_code, 201, creada.content)
+        self.assertEqual(Decimal(creada.json()["total"]), Decimal("0"))
+
+        response = self.client.post(
+            f"/api/v1/cotizaciones/{creada.json()['id']}/cambiar_estado/", {"estado": "aceptada"}, format="json",
         )
 
-        self.assertEqual(response.status_code, 400)
-        self.assertIn("obsequio", str(response.json()).lower())
+        self.assertEqual(response.status_code, 200, response.content)
+        cotizacion = Cotizacion.objects.get(id=creada.json()["id"])
+        self.assertEqual(cotizacion.estado, Cotizacion.Estado.ACEPTADA)
+        self.assertFalse(cotizacion.consentimientos.filter(plantilla__isnull=True).exists())
+        self.assertEqual(cotizacion.cartera.total, Decimal("0"))
+        self.assertFalse(cotizacion.cartera.cuotas.exists())
+        regalo = cotizacion.items.get(tipo="tratamiento")
+        self.assertEqual(TratamientoPaciente.objects.get(cotizacion_item=regalo).sesiones.count(), 2)
 
     def test_agendable_libre_sin_origen_se_rechaza(self):
         response = self._crear(

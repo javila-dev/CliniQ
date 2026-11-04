@@ -1015,13 +1015,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
         aplicar_fuera_de_regla(cotizacion, self._fuera_de_regla, request=self.context["request"], motivo=motivo)
 
     def _validate_obsequios(self, items):
-        """Reglas que cruzan ítems: al menos un ítem pagado y origen de las sesiones clonadas."""
+        """Reglas que cruzan ítems: el origen de las sesiones clonadas.
+
+        Una cotización puede ser solo de obsequios (total 0, sin plan de pagos).
+        """
         if not items:
             return
-        if all(item.get("es_obsequio") for item in items):
-            raise serializers.ValidationError(
-                {"items": "La cotización debe incluir al menos un ítem que no sea obsequio."}
-            )
         for posicion, item in enumerate(items):
             indice = item.get("origen_indice")
             if indice is None:
