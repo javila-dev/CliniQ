@@ -55,13 +55,50 @@ class FotoClinicaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
         # Antes se aceptaba cualquier archivo de cualquier tamaño.
         if archivo.size > MAX_FOTO_CLINICA:
             raise serializers.ValidationError("La foto no puede superar 15 MB.")
-        if (getattr(archivo, "content_type", "") or "").lower() not in TIPOS_FOTO_CLINICA:
+        if not tipo_permitido(archivo, TIPOS_FOTO_CLINICA):
             raise serializers.ValidationError("Solo se permiten fotos JPG, PNG, WebP o HEIC.")
         return archivo
 
 
 MAX_FOTO_CLINICA = 15 * 1024 * 1024
-TIPOS_FOTO_CLINICA = {"image/jpeg", "image/jpg", "image/png", "image/webp", "image/heic", "image/heif"}
+TIPOS_FOTO_CLINICA = {
+    "image/jpeg", "image/jpg", "image/pjpeg", "image/png", "image/webp",
+    "image/heic", "image/heif", "image/heic-sequence", "image/heif-sequence",
+}
+
+# Marcas ISO-BMFF ("ftyp") de las fotos HEIC/HEIF que sacan iPhone y Android.
+_MARCAS_HEIF = {b"heic", b"heix", b"heim", b"heis", b"hevc", b"hevx", b"hevm", b"hevs", b"mif1", b"msf1"}
+
+
+def _tipo_por_contenido(archivo):
+    """Tipo MIME según los primeros bytes del archivo, o None si no se reconoce."""
+    try:
+        pos = archivo.tell()
+        archivo.seek(0)
+        cabecera = archivo.read(16)
+        archivo.seek(pos)
+    except Exception:
+        return None
+    if cabecera.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg"
+    if cabecera.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png"
+    if cabecera[:4] == b"RIFF" and cabecera[8:12] == b"WEBP":
+        return "image/webp"
+    if cabecera[4:8] == b"ftyp" and cabecera[8:12] in _MARCAS_HEIF:
+        return "image/heic"
+    if cabecera.startswith(b"%PDF-"):
+        return "application/pdf"
+    return None
+
+
+def tipo_permitido(archivo, tipos):
+    # El navegador del celular a veces manda el tipo vacío, como
+    # application/octet-stream o con variantes (image/heic-sequence):
+    # si el tipo declarado no sirve, se mira el contenido real.
+    if (getattr(archivo, "content_type", "") or "").lower() in tipos:
+        return True
+    return _tipo_por_contenido(archivo) in tipos
 
 
 class NotaClinicaResumenSerializer(serializers.ModelSerializer):
@@ -105,7 +142,7 @@ def validar_archivo_examen(archivo):
     # Antes se aceptaba cualquier archivo de cualquier tamaño.
     if archivo.size > MAX_ARCHIVO_EXAMEN:
         raise serializers.ValidationError(f"{archivo.name}: no puede superar 15 MB.")
-    if (getattr(archivo, "content_type", "") or "").lower() not in TIPOS_ARCHIVO_EXAMEN:
+    if not tipo_permitido(archivo, TIPOS_ARCHIVO_EXAMEN):
         raise serializers.ValidationError(f"{archivo.name}: solo se permiten PDF o imágenes JPG, PNG, WebP o HEIC.")
     return archivo
 
