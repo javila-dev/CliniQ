@@ -326,10 +326,30 @@ export interface SoporteCargaMigrada {
   maximo: number
   /** Sesiones libres para agendar. */
   restantes: number
-  /** Por qué no se puede corregir (ya hizo sesiones en la app). */
+  /** Por qué no se pueden corregir las sesiones previas (ya hizo sesiones en la app). */
   bloqueo: string | null
+  /** Por qué no se puede cambiar el tratamiento (null: sí se puede). */
+  bloqueo_tratamiento: string | null
+  /** Citas del paquete hechas o agendadas en la app, con la sesión que ocupan hoy. */
+  atenciones: SoporteAtencionPaquete[]
   /** Sesiones del protocolo sin cita, en el orden en que se marcan como previas. */
   sesiones: (SoporteSesion & { previa: boolean })[]
+}
+
+export interface SoporteAtencionPaquete {
+  cita_id: string
+  fecha_inicio: string
+  estado: string
+  servicio_nombre: string
+  profesional_nombre: string | null
+  sesion: SoporteSesion | null
+}
+
+/** Una sesión del protocolo de un tratamiento del catálogo; `clave` = "<tipo de sesión>:<número>". */
+export interface SoporteRanura {
+  clave: string
+  nombre: string
+  numero: number
 }
 
 export interface SoporteTratamientoCatalogo {
@@ -337,6 +357,35 @@ export interface SoporteTratamientoCatalogo {
   nombre: string
   /** Sesiones de compromiso del protocolo (las agendables). */
   total_sesiones: number
+  sesiones: SoporteRanura[]
+}
+
+export interface AsignacionAtencion {
+  cita: string
+  sesion: string
+}
+
+export interface CorreccionMigradoRequest {
+  clinica: string
+  item: string
+  sesiones: number
+  tratamiento?: TratamientoMigradoRequest | null
+  asignaciones?: AsignacionAtencion[]
+}
+
+/** Cómo queda el paquete: la corrección hecha completa y descartada. */
+export interface CorreccionMigradoPrevisualizacion {
+  descripcion: string
+  total: number
+  previas: number
+  restantes: number
+  protocolo: (SoporteSesion & {
+    posicion: number
+    origen: 'previa' | 'atencion' | 'pendiente'
+    atencion: SoporteAtencionPaquete | null
+    consentimientos_faltantes?: string[]
+  })[]
+  atenciones_movidas: { cita: string; fecha: string; de: string | null; a: string }[]
 }
 
 /** El tratamiento nuevo de un paquete migrado: del catálogo o libre. */
