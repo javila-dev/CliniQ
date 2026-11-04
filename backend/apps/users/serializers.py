@@ -3,7 +3,7 @@ from rest_framework import serializers
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.core.models import ConfiguracionGlobal
-from apps.core.storage import delete_public_file, get_public_url, upload_public_file, read_public_file
+from apps.core.storage import get_public_url, upload_public_file, read_public_file
 from apps.users.authorization import get_user_permission_keys, user_is_tenant_admin, user_sede_ids_acotadas
 from apps.users.models import Permiso, Rol
 from apps.users.permissions_catalog import PERMISOS_SOLO_CHECK_ATIENDE
@@ -421,21 +421,23 @@ class MeUpdateSerializer(serializers.ModelSerializer):
         return attrs
 
     def _upload_image_field(self, instance, field_name, file_obj):
-        field = instance._meta.get_field(field_name)
+        from apps.users.captura_firma import borrar_imagen_anterior, ruta_unica_imagen
+
         previous_path = getattr(instance, field_name).name if getattr(instance, field_name) else ""
-        path = field.generate_filename(instance, file_obj.name)
+        path = ruta_unica_imagen(instance, field_name, file_obj.name)
         upload_public_file(file_obj.read(), path, file_obj.content_type or "application/octet-stream")
         setattr(instance, field_name, path)
         update_fields = [field_name, "updated_at"]
-        if previous_path and previous_path != path:
-            delete_public_file(previous_path)
+        if previous_path != path:
+            borrar_imagen_anterior(instance, field_name, previous_path)
         return update_fields
 
     def _quitar_image_field(self, instance, field_name):
+        from apps.users.captura_firma import borrar_imagen_anterior
+
         previous_path = getattr(instance, field_name).name if getattr(instance, field_name) else ""
         setattr(instance, field_name, None)
-        if previous_path:
-            delete_public_file(previous_path)
+        borrar_imagen_anterior(instance, field_name, previous_path)
         return [field_name, "updated_at"]
 
     def _pide_quitar(self, field_name) -> bool:

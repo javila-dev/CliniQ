@@ -4,6 +4,7 @@ La firma queda en ``User.firma_digital`` (bucket público, como la foto de perfi
 usa en órdenes médicas y en la firma diferida de consentimientos.
 """
 import io
+import os
 import secrets
 from datetime import timedelta
 
@@ -45,18 +46,41 @@ def validar_png_firma(datos: bytes) -> bytes:
     return datos
 
 
-def guardar_firma_digital(user, datos_png: bytes) -> None:
+def ruta_unica_imagen(user, field_name: str, nombre_original: str) -> str:
+    """Ruta propia del usuario y distinta en cada subida.
+
+    Con el nombre del archivo tal cual, la firma dibujada en el navegador (siempre
+    ``firma.png``) caía en la misma ruta para todos los profesionales: cada uno
+    sobrescribía la de los demás y la URL no cambiaba, así que el navegador seguía
+    mostrando la firma anterior en caché.
+    """
     from apps.users.models import User
 
-    field = User._meta.get_field("firma_digital")
+    extension = os.path.splitext(nombre_original or "")[1].lower() or ".png"
+    field = User._meta.get_field(field_name)
+    return field.generate_filename(user, f"{field_name}-{user.id}-{secrets.token_hex(4)}{extension}")
+
+
+def borrar_imagen_anterior(user, field_name: str, ruta: str) -> None:
+    """Borra el archivo anterior salvo que otro usuario apunte a la misma ruta."""
+    from apps.users.models import User
+
+    if not ruta:
+        return
+    if User.objects.filter(**{field_name: ruta}).exclude(pk=user.pk).exists():
+        return
+    delete_public_file(ruta)
+
+
+def guardar_firma_digital(user, datos_png: bytes) -> None:
     anterior = user.firma_digital.name if user.firma_digital else ""
     # Nombre nuevo en cada captura: la URL pública cambia y el navegador no muestra la anterior en caché.
-    path = field.generate_filename(user, f"firma-{user.id}-{secrets.token_hex(4)}.png")
+    path = ruta_unica_imagen(user, "firma_digital", "firma.png")
     upload_public_file(datos_png, path, "image/png")
     user.firma_digital = path
     user.save(update_fields=["firma_digital", "updated_at"])
-    if anterior and anterior != path:
-        delete_public_file(anterior)
+    if anterior != path:
+        borrar_imagen_anterior(user, "firma_digital", anterior)
 
 
 @transaction.atomic

@@ -162,3 +162,69 @@ class EliminarFirmaTests(TestCase):
         self.client.patch("/api/v1/auth/me/", {"telefono": "3000000000"}, format="json")
         self.user.refresh_from_db()
         self.assertEqual(self.user.firma_digital.name, self.path)
+
+
+@override_settings(MINIO_PUBLIC_BUCKET="", MEDIA_ROOT=tempfile.gettempdir())
+class CambiarFirmaDesdeElPerfilTests(TestCase):
+    """La firma dibujada en el navegador siempre llega como ``firma.png``."""
+
+    def setUp(self):
+        self.clinica = Clinica.objects.create(nombre="Clinica Cambiar", nit="900222444")
+        self.ana = User.objects.create_user(
+            email="ana-firma@example.com", password="x", rol=User.Role.PROFESIONAL,
+            clinica=self.clinica, es_profesional=True,
+        )
+        self.beto = User.objects.create_user(
+            email="beto-firma@example.com", password="x", rol=User.Role.PROFESIONAL,
+            clinica=self.clinica, es_profesional=True,
+        )
+        self.client = APIClient()
+
+    def _png(self, ancho: int) -> bytes:
+        from PIL import Image
+
+        buffer = io.BytesIO()
+        Image.new("RGBA", (ancho, 100)).save(buffer, format="PNG")
+        return buffer.getvalue()
+
+    def _subir_firma(self, user, contenido: bytes):
+        from django.core.files.uploadedfile import SimpleUploadedFile
+
+        self.client.force_authenticate(user)
+        archivo = SimpleUploadedFile("firma.png", contenido, content_type="image/png")
+        response = self.client.patch("/api/v1/auth/me/", {"firma_digital": archivo}, format="multipart")
+        self.assertEqual(response.status_code, 200, response.content)
+        user.refresh_from_db()
+        return response.json()["firma_digital_url"]
+
+    def test_cambiar_la_firma_cambia_la_url_y_borra_la_anterior(self):
+        from apps.core.storage import read_public_file
+
+        url_1 = self._subir_firma(self.ana, self._png(301))
+        ruta_1 = self.ana.firma_digital.name
+        url_2 = self._subir_firma(self.ana, self._png(302))
+
+        self.assertNotEqual(url_1, url_2)
+        self.assertEqual(read_public_file(self.ana.firma_digital.name), self._png(302))
+        self.assertIsNone(read_public_file(ruta_1))
+
+    def test_dos_profesionales_no_comparten_el_archivo(self):
+        from apps.core.storage import read_public_file
+
+        self._subir_firma(self.ana, self._png(303))
+        self._subir_firma(self.beto, self._png(304))
+
+        self.assertNotEqual(self.ana.firma_digital.name, self.beto.firma_digital.name)
+        self.assertEqual(read_public_file(self.ana.firma_digital.name), self._png(303))
+
+    def test_no_borra_un_archivo_que_otro_usuario_todavia_usa(self):
+        from apps.core.storage import read_public_file, upload_public_file
+
+        # Datos de antes de la corrección: varios profesionales en la misma ruta.
+        compartida = upload_public_file(b"compartida", "firmas_profesionales/firma.png")
+        User.objects.filter(pk__in=[self.ana.pk, self.beto.pk]).update(firma_digital=compartida)
+        self.ana.refresh_from_db()
+
+        self._subir_firma(self.ana, self._png(305))
+
+        self.assertEqual(read_public_file(compartida), b"compartida")
