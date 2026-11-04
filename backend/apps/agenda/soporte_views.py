@@ -7,6 +7,7 @@ from rest_framework.views import APIView
 
 from apps.agenda import eliminacion, sesiones_previas, soporte, traslado
 from apps.agenda.models import CorreccionSoporte
+from apps.migracion.serializers import TratamientoPrevioSerializer
 from apps.users.permissions import IsSuperAdmin
 
 
@@ -75,6 +76,13 @@ class SoporteCargasMigradasView(_SoporteView):
         return Response(sesiones_previas.cargas_del_paciente(clinica, paciente))
 
 
+class SoporteTratamientosMigracionView(_SoporteView):
+    """Tratamientos del catálogo de la clínica, para cambiar el de un paquete migrado."""
+
+    def get(self, request):
+        return Response(sesiones_previas.tratamientos_de_la_clinica(_clinica(request.query_params.get("clinica"))))
+
+
 class SoporteCorreccionesView(_SoporteView):
     """Correcciones ya hechas en una clínica (opcionalmente de un tipo)."""
 
@@ -108,10 +116,26 @@ class EliminarAtencionSerializer(_AtencionSerializer):
     motivo = serializers.CharField(max_length=1000)
 
 
+class TratamientoMigradoSerializer(TratamientoPrevioSerializer):
+    """El tratamiento nuevo de un paquete migrado: el precio y la fecha no cambian."""
+
+    precio_total_pactado = None
+    fecha_inicio = None
+    descripcion = serializers.CharField(max_length=300, required=False, allow_blank=True)
+    num_sesiones_total = serializers.IntegerField(min_value=1, required=False)
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs["tipo"] != "tratamiento" and (not attrs.get("descripcion", "").strip() or not attrs.get("num_sesiones_total")):
+            raise serializers.ValidationError({"descripcion": "Escribe la descripción y el número de sesiones."})
+        return attrs
+
+
 class CorregirSesionesPreviasSerializer(serializers.Serializer):
     clinica = serializers.UUIDField()
     item = serializers.UUIDField()
     sesiones = serializers.IntegerField(min_value=0)
+    tratamiento = TratamientoMigradoSerializer(required=False, allow_null=True)
     motivo = serializers.CharField(max_length=1000)
 
 
@@ -162,7 +186,8 @@ class SoporteCorregirSesionesPreviasView(_SoporteView):
         datos.is_valid(raise_exception=True)
         v = datos.validated_data
         correccion = sesiones_previas.corregir(
-            _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], motivo=v["motivo"],
+            _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
+            motivo=v["motivo"],
             usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

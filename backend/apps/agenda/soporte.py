@@ -286,6 +286,8 @@ def correcciones_de_la_clinica(clinica, tipo=None, limite=20) -> list[dict]:
             "estado_cita": c.resumen.get("estado_cita"),
             "sesiones_antes": c.resumen.get("sesiones_antes"),
             "sesiones_despues": c.resumen.get("sesiones_despues"),
+            "tratamiento_antes": c.resumen.get("tratamiento_antes"),
+            "tratamiento_despues": c.resumen.get("tratamiento_despues"),
             "motivo": c.motivo,
             "realizado_por": nombre(c.realizado_por),
             "created_at": c.created_at,

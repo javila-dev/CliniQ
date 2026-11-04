@@ -42,6 +42,64 @@ def _dt(fecha):
     return timezone.make_aware(datetime.combine(fecha, time(12, 0)))
 
 
+OBSERVACION_PREVIA = "Sesión previa a CliniQ (puesta en marcha)"
+
+
+def campos_item(trat: dict, clinica) -> dict:
+    """Lo que define el tratamiento de un ítem migrado: tipo, catálogo, descripción y sesiones."""
+    from apps.clinicas.models import Servicio, TratamientoCatalogo
+
+    tratamiento_obj = None
+    servicio_obj = None
+    if trat["tipo"] == "tratamiento":
+        tratamiento_obj = TratamientoCatalogo.objects.filter(id=trat["tratamiento"], clinica=clinica).first()
+        if tratamiento_obj is None:
+            raise ValidationError({"tratamiento": "Tratamiento no encontrado en esta clínica."})
+    elif trat["tipo"] == "procedimiento":
+        servicio_obj = Servicio.objects.filter(id=trat["servicio"], clinica=clinica).first()
+        if servicio_obj is None:
+            raise ValidationError({"servicio": "Procedimiento no encontrado en esta clínica."})
+    return {
+        "tipo": trat["tipo"],
+        "tratamiento": tratamiento_obj,
+        "servicio": servicio_obj,
+        "procedimiento": servicio_obj,
+        "descripcion": trat["descripcion"],
+        "num_citas": trat["num_sesiones_total"] if trat["tipo"] != "tratamiento" else 1,
+    }
+
+
+def crear_protocolo(item, sin_detalle: int, *, fecha=None) -> list[str]:
+    """Protocolo de seguimiento del ítem (TratamientoPaciente + sesiones) con las
+    primeras ``sin_detalle`` sesiones ya hechas.
+
+    El asistente NO pasa por aceptar_cotizacion, así que hay que crear el
+    protocolo a mano; si no, el panel "Seguimiento de sesiones" no muestra
+    los nombres reales ni el conteo."""
+    from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
+    from apps.protocolos.services import crear_tratamiento_desde_cotizacion
+
+    if item.tipo not in ("tratamiento", "procedimiento"):
+        return []
+    tp = crear_tratamiento_desde_cotizacion(item)
+    if tp is None:
+        return []
+    if sin_detalle > 0:
+        previas = list(
+            SesionProcedimiento.objects.filter(tratamiento=tp)
+            .order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at")[:sin_detalle]
+        )
+        for s in previas:
+            s.estado = SesionProcedimiento.Estado.COMPLETADO
+            s.fecha = fecha
+            s.observaciones = OBSERVACION_PREVIA
+            s.save(update_fields=["estado", "fecha", "observaciones", "updated_at"])
+        if len(previas) >= item.num_sesiones_efectivas():
+            tp.estado = TratamientoPaciente.Estado.COMPLETADO
+            tp.save(update_fields=["estado", "updated_at"])
+    return [str(tp.id)]
+
+
 @transaction.atomic
 def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> LoteMigracion:
     trat = data["tratamiento"]
@@ -74,63 +132,18 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         lote_migracion=lote.id,
     )
 
-    tratamiento_obj = None
-    servicio_obj = None
-    if trat["tipo"] == "tratamiento":
-        from apps.clinicas.models import TratamientoCatalogo
-        tratamiento_obj = TratamientoCatalogo.objects.filter(
-            id=trat["tratamiento"], clinica=clinica
-        ).first()
-        if tratamiento_obj is None:
-            raise ValidationError({"tratamiento": "Tratamiento no encontrado en esta clínica."})
-    elif trat["tipo"] == "procedimiento":
-        from apps.clinicas.models import Servicio
-        servicio_obj = Servicio.objects.filter(id=trat["servicio"], clinica=clinica).first()
-        if servicio_obj is None:
-            raise ValidationError({"servicio": "Procedimiento no encontrado en esta clínica."})
-
     # sesiones realizadas sin detalle (sin profesional) → solo cuentan
     sin_detalle = sum(1 for s in realizadas if not s.get("profesional"))
 
     item = ItemCotizacion.objects.create(
         cotizacion=cotizacion,
-        tipo=trat["tipo"],
-        tratamiento=tratamiento_obj,
-        servicio=servicio_obj if trat["tipo"] == "procedimiento" else None,
-        procedimiento=servicio_obj if trat["tipo"] == "procedimiento" else None,
-        descripcion=trat["descripcion"],
-        num_citas=trat["num_sesiones_total"] if trat["tipo"] != "tratamiento" else 1,
-        valor_unitario=total if trat["tipo"] != "tratamiento" else total,
+        valor_unitario=total,
         descuento_porcentaje=0,
         precio_bloqueado=False,
         sesiones_previas_consumidas=sin_detalle,
+        **campos_item(trat, clinica),
     )
-
-    # ── 1b. Protocolo de seguimiento (TratamientoPaciente + sesiones) ──────
-    # El asistente NO pasa por aceptar_cotizacion, así que hay que crear el
-    # protocolo a mano; si no, el panel "Seguimiento de sesiones" no muestra
-    # los nombres reales ni el conteo.
-    tratamientos_paciente_ids = []
-    if trat["tipo"] in ("tratamiento", "procedimiento"):
-        from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
-        from apps.protocolos.services import crear_tratamiento_desde_cotizacion
-
-        tp = crear_tratamiento_desde_cotizacion(item)
-        if tp is not None:
-            tratamientos_paciente_ids.append(str(tp.id))
-            if sin_detalle > 0:
-                previas = list(
-                    SesionProcedimiento.objects.filter(tratamiento=tp)
-                    .order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at")[:sin_detalle]
-                )
-                for s in previas:
-                    s.estado = SesionProcedimiento.Estado.COMPLETADO
-                    s.fecha = trat.get("fecha_inicio") or None
-                    s.observaciones = "Sesión previa a CliniQ (puesta en marcha)"
-                    s.save(update_fields=["estado", "fecha", "observaciones", "updated_at"])
-                if len(previas) >= item.num_sesiones_efectivas():
-                    tp.estado = TratamientoPaciente.Estado.COMPLETADO
-                    tp.save(update_fields=["estado", "updated_at"])
+    tratamientos_paciente_ids = crear_protocolo(item, sin_detalle, fecha=trat.get("fecha_inicio") or None)
 
     # ── 2. Cobro + pagos previos ────────────────────────────────────────────
     cobro = Cobro.objects.create(

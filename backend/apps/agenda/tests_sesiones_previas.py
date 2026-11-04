@@ -48,6 +48,11 @@ class SesionesPreviasTests(TestCase):
         trat = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="RF x6")
         tipo = trat.tipos_sesion.create(nombre="RF", cantidad=6, orden=1, es_compromiso=True)
         tipo.procedimientos.create(procedimiento=proc, orden=1)
+        # El que en realidad compró: 4 sesiones de compromiso y un control que no cuenta.
+        self.correcto = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="HIFU x4")
+        hifu = self.correcto.tipos_sesion.create(nombre="HIFU", cantidad=4, orden=1, es_compromiso=True)
+        hifu.procedimientos.create(procedimiento=proc, orden=1)
+        self.correcto.tipos_sesion.create(nombre="Control", cantidad=1, orden=2, es_compromiso=False)
 
         efectivo = str(FormaDePago.objects.get(clinica=self.clinica, tipo_base="efectivo").id)
         self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
@@ -223,3 +228,66 @@ class SesionesPreviasTests(TestCase):
     def test_solo_superadmin(self):
         self.client.force_authenticate(self.profesional)
         self.assertEqual(self._corregir(5).status_code, 403)
+
+    # ── Cambiar el tratamiento ──────────────────────────────────────────────
+
+    def test_lista_los_tratamientos_con_sus_sesiones(self):
+        r = self.client.get(f"{BASE}/sesiones-previas/tratamientos/", {"clinica": str(self.clinica.id)})
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual({t["nombre"]: t["total_sesiones"] for t in r.json()}, {"HIFU x4": 4, "RF x6": 6})
+
+    def test_cambia_a_otro_tratamiento_del_catalogo(self):
+        viejo = TratamientoPaciente.objects.get(cotizacion_item=self.item)
+        r = self._corregir(2, tratamiento={"tipo": "tratamiento", "tratamiento": str(self.correcto.id)})
+        self.assertEqual(r.status_code, 201, r.content)
+
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.tratamiento_id, self.item.descripcion), (self.correcto.id, "HIFU x4"))
+        self.assertEqual(self.item.num_sesiones_efectivas(), 4)
+        self.assertEqual(self.item.citas_restantes(), 2)
+        self.assertFalse(TratamientoPaciente.objects.filter(pk=viejo.pk).exists())
+        nuevo = TratamientoPaciente.objects.get(cotizacion_item=self.item)
+        self.assertEqual(nuevo.tratamiento_catalogo_id, self.correcto.id)
+        self.assertEqual(self._previas_en_protocolo(), 2)
+
+        self.lote.refresh_from_db()
+        self.assertEqual(self.lote.manifest["tratamientos_paciente"], [str(nuevo.id)])
+        self.assertEqual(self.lote.manifest["resumen"]["sesiones_total"], 4)
+        self.assertEqual(self.lote.manifest["resumen"]["sesiones_pendientes"], 2)
+        [hecha] = self.client.get(f"{BASE}/correcciones/", {"clinica": str(self.clinica.id)}).json()
+        self.assertEqual((hecha["tratamiento_antes"], hecha["tratamiento_despues"]), ("RF x6", "HIFU x4"))
+
+        # La carga se sigue pudiendo revertir completa, con el protocolo nuevo.
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+        r = self.client.post(f"/api/v1/migracion/lotes/{self.lote.id}/revertir/")
+        self.assertIn(r.status_code, (200, 204), r.content)
+        self.assertFalse(TratamientoPaciente.objects.filter(pk=nuevo.pk).exists())
+
+    def test_cambia_a_un_tratamiento_libre(self):
+        r = self._corregir(3, tratamiento={"tipo": "libre", "descripcion": "Láser 8 sesiones", "num_sesiones_total": 8})
+        self.assertEqual(r.status_code, 201, r.content)
+        self.item.refresh_from_db()
+        self.assertEqual((self.item.tipo, self.item.tratamiento_id, self.item.num_citas), ("libre", None, 8))
+        self.assertEqual(self.item.citas_restantes(), 5)
+        self.assertFalse(TratamientoPaciente.objects.filter(cotizacion_item=self.item).exists())
+
+    def test_libre_pide_descripcion_y_sesiones(self):
+        self.assertEqual(self._corregir(3, tratamiento={"tipo": "libre"}).status_code, 400)
+
+    def test_mas_sesiones_que_el_tratamiento_nuevo_no_cambia_nada(self):
+        r = self._corregir(5, tratamiento={"tipo": "tratamiento", "tratamiento": str(self.correcto.id)})
+        self.assertEqual(r.json()["code"], "SESIONES_SOBRE_MAXIMO")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.descripcion, "RF x6")
+        self.assertEqual(self._previas_en_protocolo(), 3)
+
+    def test_con_citas_agendadas_no_cambia_el_tratamiento(self):
+        self._cita_en_app(Cita.Estado.PENDIENTE)
+        r = self._corregir(2, tratamiento={"tipo": "tratamiento", "tratamiento": str(self.correcto.id)})
+        self.assertEqual(r.json()["code"], "CITAS_AGENDADAS")
+
+    def test_tratamiento_de_otra_clinica(self):
+        otra = Clinica.objects.create(nombre="Otra", nit="901000998")
+        ajeno = TratamientoCatalogo.objects.create(clinica=otra, nombre="Ajeno")
+        r = self._corregir(2, tratamiento={"tipo": "tratamiento", "tratamiento": str(ajeno.id)})
+        self.assertEqual(r.json()["code"], "TRATAMIENTO_NO_ENCONTRADO")

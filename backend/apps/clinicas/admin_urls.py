@@ -11,6 +11,7 @@ from apps.agenda.soporte_views import (
     SoportePrevisualizarEliminacionView,
     SoportePrevisualizarTrasladoView,
     SoporteTrasladoAtencionView,
+    SoporteTratamientosMigracionView,
 )
 from apps.clinicas.views import AdminTenantViewSet, PlanViewSet
 from apps.notificaciones.views import (
@@ -46,6 +47,11 @@ urlpatterns = [
         "soporte/sesiones-previas/corregir/",
         SoporteCorregirSesionesPreviasView.as_view(),
         name="admin-soporte-sesiones-previas-corregir",
+    ),
+    path(
+        "soporte/sesiones-previas/tratamientos/",
+        SoporteTratamientosMigracionView.as_view(),
+        name="admin-soporte-sesiones-previas-tratamientos",
     ),
     path("soporte/correcciones/", SoporteCorreccionesView.as_view(), name="admin-soporte-correcciones"),
     path("tenants/<uuid:clinica_id>/whatsapp-propio/", AdminWhatsappPropioView.as_view(), name="admin-whatsapp-propio"),
