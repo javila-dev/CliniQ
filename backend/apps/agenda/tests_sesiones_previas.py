@@ -235,6 +235,8 @@ class SesionesPreviasTests(TestCase):
         r = self.client.get(f"{BASE}/sesiones-previas/tratamientos/", {"clinica": str(self.clinica.id)})
         self.assertEqual(r.status_code, 200, r.content)
         self.assertEqual({t["nombre"]: t["total_sesiones"] for t in r.json()}, {"HIFU x4": 4, "RF x6": 6})
+        hifu = next(t for t in r.json() if t["nombre"] == "HIFU x4")
+        self.assertEqual([(x["nombre"], x["numero"]) for x in hifu["sesiones"]], [("HIFU", n) for n in range(1, 5)])
 
     def test_cambia_a_otro_tratamiento_del_catalogo(self):
         viejo = TratamientoPaciente.objects.get(cotizacion_item=self.item)
@@ -281,10 +283,118 @@ class SesionesPreviasTests(TestCase):
         self.assertEqual(self.item.descripcion, "RF x6")
         self.assertEqual(self._previas_en_protocolo(), 3)
 
-    def test_con_citas_agendadas_no_cambia_el_tratamiento(self):
-        self._cita_en_app(Cita.Estado.PENDIENTE)
-        r = self._corregir(2, tratamiento={"tipo": "tratamiento", "tratamiento": str(self.correcto.id)})
-        self.assertEqual(r.json()["code"], "CITAS_AGENDADAS")
+    # ── Cambiar el tratamiento con atenciones en la app ─────────────────────
+
+    def _ranura(self, numero):
+        tipo = self.correcto.tipos_sesion.get(nombre="HIFU")
+        return f"{tipo.id}:{numero}"
+
+    def _atencion_en_rf4(self, estado=Cita.Estado.COMPLETADA):
+        """Una atención en la app que ocupó la sesión RF #4 del paquete equivocado."""
+        cita = self._cita_en_app(estado)
+        sesion = SesionProcedimiento.objects.get(tratamiento__cotizacion_item=self.item, numero=4)
+        sesion.cita = cita
+        if estado == Cita.Estado.COMPLETADA:
+            sesion.estado = SesionProcedimiento.Estado.COMPLETADO
+            sesion.profesional = self.profesional
+        sesion.save()
+        return cita, sesion
+
+    def _a_hifu(self, sesiones, asignaciones=(), confirmar=True):
+        datos = {
+            "clinica": str(self.clinica.id), "item": str(self.item.id), "sesiones": sesiones,
+            "tratamiento": {"tipo": "tratamiento", "tratamiento": str(self.correcto.id)},
+            "asignaciones": [{"cita": str(c.id), "sesion": clave} for c, clave in asignaciones],
+        }
+        if not confirmar:
+            return self.client.post(f"{BASE}/sesiones-previas/previsualizar/", datos, format="json")
+        return self.client.post(f"{BASE}/sesiones-previas/corregir/", {**datos, "motivo": "Era HIFU, no RF"}, format="json")
+
+    def test_la_carga_con_atencion_permite_cambiar_el_tratamiento(self):
+        self._atencion_en_rf4()
+        [carga] = self._cargas()
+        self.assertIsNotNone(carga["bloqueo"])
+        self.assertIsNone(carga["bloqueo_tratamiento"])
+        [atencion] = carga["atenciones"]
+        self.assertEqual((atencion["sesion"]["nombre"], atencion["sesion"]["numero"]), ("RF", 4))
+
+    def test_la_atencion_pasa_a_la_sesion_elegida_y_conserva_lo_registrado(self):
+        cita, sesion = self._atencion_en_rf4()
+        r = self._a_hifu(2, [(cita, self._ranura(3))])
+        self.assertEqual(r.status_code, 201, r.content)
+
+        sesion.refresh_from_db()
+        nuevo = TratamientoPaciente.objects.get(cotizacion_item=self.item)
+        self.assertEqual(sesion.tratamiento_id, nuevo.id)
+        self.assertEqual((sesion.tipo_sesion.nombre, sesion.numero), ("HIFU", 3))
+        self.assertEqual((sesion.cita_id, sesion.estado, sesion.profesional_id),
+                         (cita.id, SesionProcedimiento.Estado.COMPLETADO, self.profesional.id))
+        protocolo = [
+            (s.numero, s.estado, s.cita_id is not None)
+            for s in nuevo.sesiones.order_by("numero")
+        ]
+        self.assertEqual(protocolo, [
+            (1, "completado", False), (2, "completado", False), (3, "completado", True), (4, "pendiente", False),
+        ])
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.citas_restantes(), 1)
+        correccion = CorreccionSoporte.objects.get()
+        [movida] = correccion.resumen["atenciones_movidas"]
+        self.assertEqual((movida["de"], movida["a"]), ("RF #4", "HIFU #3"))
+
+    def test_la_vista_previa_muestra_cada_sesion_y_no_cambia_nada(self):
+        cita, sesion = self._atencion_en_rf4()
+        r = self._a_hifu(2, [(cita, self._ranura(4))], confirmar=False)
+        self.assertEqual(r.status_code, 200, r.content)
+        filas = [(f["nombre"], f["numero"], f["origen"]) for f in r.json()["protocolo"]]
+        self.assertEqual(filas, [
+            ("HIFU", 1, "previa"), ("HIFU", 2, "previa"), ("HIFU", 3, "pendiente"), ("HIFU", 4, "atencion"),
+        ])
+        self.assertEqual(r.json()["protocolo"][3]["atencion"]["cita_id"], str(cita.id))
+
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.descripcion, "RF x6")
+        sesion.refresh_from_db()
+        self.assertEqual(sesion.tipo_sesion.nombre, "RF")
+        self.assertFalse(CorreccionSoporte.objects.exists())
+
+    def test_una_cita_agendada_tambien_se_asigna(self):
+        cita, sesion = self._atencion_en_rf4(Cita.Estado.PENDIENTE)
+        self.assertEqual(self._a_hifu(2).json()["code"], "ASIGNACIONES_INCOMPLETAS")
+        self.assertEqual(self._a_hifu(2, [(cita, self._ranura(3))]).status_code, 201)
+        sesion.refresh_from_db()
+        self.assertEqual((sesion.numero, sesion.estado, sesion.cita_id), (3, "pendiente", cita.id))
+
+    def test_una_atencion_sin_sesion_marca_la_elegida(self):
+        cita = self._cita_en_app(Cita.Estado.COMPLETADA)
+        self.assertEqual(self._a_hifu(1, [(cita, self._ranura(2))]).status_code, 201)
+        destino = SesionProcedimiento.objects.get(tratamiento__cotizacion_item=self.item, numero=2)
+        self.assertEqual((destino.cita_id, destino.estado, destino.profesional_id),
+                         (cita.id, SesionProcedimiento.Estado.COMPLETADO, self.profesional.id))
+
+    def test_dos_atenciones_no_van_a_la_misma_sesion(self):
+        cita, _ = self._atencion_en_rf4()
+        otra = self._cita_en_app(Cita.Estado.COMPLETADA)
+        r = self._a_hifu(1, [(cita, self._ranura(3)), (otra, self._ranura(3))])
+        self.assertEqual(r.json()["code"], "SESION_REPETIDA")
+
+    def test_la_sesion_elegida_debe_ser_del_tratamiento_nuevo(self):
+        cita, sesion = self._atencion_en_rf4()
+        r = self._a_hifu(2, [(cita, f"{sesion.tipo_sesion_id}:4")])
+        self.assertEqual(r.json()["code"], "SESION_NO_ENCONTRADA")
+
+    def test_previas_y_atenciones_no_pasan_del_total(self):
+        cita, _ = self._atencion_en_rf4()
+        r = self._a_hifu(4, [(cita, self._ranura(4))])
+        self.assertEqual(r.json()["code"], "SESIONES_SOBRE_MAXIMO")
+        self.item.refresh_from_db()
+        self.assertEqual(self.item.descripcion, "RF x6")
+
+    def test_con_atenciones_no_se_cambia_a_libre(self):
+        cita, _ = self._atencion_en_rf4()
+        r = self._corregir(1, tratamiento={"tipo": "libre", "descripcion": "Láser", "num_sesiones_total": 8},
+                           asignaciones=[{"cita": str(cita.id), "sesion": self._ranura(1)}])
+        self.assertEqual(r.json()["code"], "ATENCIONES_REQUIEREN_CATALOGO")
 
     def test_tratamiento_de_otra_clinica(self):
         otra = Clinica.objects.create(nombre="Otra", nit="901000998")

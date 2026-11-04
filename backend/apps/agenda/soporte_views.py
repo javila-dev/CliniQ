@@ -131,11 +131,22 @@ class TratamientoMigradoSerializer(TratamientoPrevioSerializer):
         return attrs
 
 
-class CorregirSesionesPreviasSerializer(serializers.Serializer):
+class AsignacionAtencionSerializer(serializers.Serializer):
+    """A qué sesión del tratamiento nuevo pasa una atención (`sesion`: "<tipo_sesion>:<número>")."""
+
+    cita = serializers.UUIDField()
+    sesion = serializers.RegexField(r"^[0-9a-f-]{36}:\d+$")
+
+
+class PrevisualizarCorreccionMigradoSerializer(serializers.Serializer):
     clinica = serializers.UUIDField()
     item = serializers.UUIDField()
     sesiones = serializers.IntegerField(min_value=0)
     tratamiento = TratamientoMigradoSerializer(required=False, allow_null=True)
+    asignaciones = AsignacionAtencionSerializer(many=True, required=False, default=list)
+
+
+class CorregirSesionesPreviasSerializer(PrevisualizarCorreccionMigradoSerializer):
     motivo = serializers.CharField(max_length=1000)
 
 
@@ -180,6 +191,19 @@ class SoporteEliminarAtencionView(_SoporteView):
         return Response({"id": str(correccion.id), "cita": str(correccion.cita_id)}, status=status.HTTP_201_CREATED)
 
 
+class SoportePrevisualizarCorreccionMigradoView(_SoporteView):
+    """Hace la corrección completa, devuelve el protocolo como queda y la descarta."""
+
+    def post(self, request):
+        datos = PrevisualizarCorreccionMigradoSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        return Response(sesiones_previas.corregir(
+            _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
+            asignaciones=v["asignaciones"], confirmar=False,
+        ))
+
+
 class SoporteCorregirSesionesPreviasView(_SoporteView):
     def post(self, request):
         datos = CorregirSesionesPreviasSerializer(data=request.data)
@@ -187,7 +211,7 @@ class SoporteCorregirSesionesPreviasView(_SoporteView):
         v = datos.validated_data
         correccion = sesiones_previas.corregir(
             _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
-            motivo=v["motivo"],
+            asignaciones=v["asignaciones"], motivo=v["motivo"],
             usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

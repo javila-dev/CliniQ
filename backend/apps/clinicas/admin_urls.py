@@ -8,6 +8,7 @@ from apps.agenda.soporte_views import (
     SoporteCorregirSesionesPreviasView,
     SoporteEliminarAtencionView,
     SoportePacientesView,
+    SoportePrevisualizarCorreccionMigradoView,
     SoportePrevisualizarEliminacionView,
     SoportePrevisualizarTrasladoView,
     SoporteTrasladoAtencionView,
@@ -43,6 +44,11 @@ urlpatterns = [
     ),
     path("soporte/eliminar-atencion/", SoporteEliminarAtencionView.as_view(), name="admin-soporte-eliminar"),
     path("soporte/sesiones-previas/", SoporteCargasMigradasView.as_view(), name="admin-soporte-sesiones-previas"),
+    path(
+        "soporte/sesiones-previas/previsualizar/",
+        SoportePrevisualizarCorreccionMigradoView.as_view(),
+        name="admin-soporte-sesiones-previas-previsualizar",
+    ),
     path(
         "soporte/sesiones-previas/corregir/",
         SoporteCorregirSesionesPreviasView.as_view(),

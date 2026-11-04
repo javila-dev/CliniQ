@@ -76,7 +76,6 @@ def crear_protocolo(item, sin_detalle: int, *, fecha=None) -> list[str]:
     El asistente NO pasa por aceptar_cotizacion, así que hay que crear el
     protocolo a mano; si no, el panel "Seguimiento de sesiones" no muestra
     los nombres reales ni el conteo."""
-    from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
     from apps.protocolos.services import crear_tratamiento_desde_cotizacion
 
     if item.tipo not in ("tratamiento", "procedimiento"):
@@ -84,20 +83,27 @@ def crear_protocolo(item, sin_detalle: int, *, fecha=None) -> list[str]:
     tp = crear_tratamiento_desde_cotizacion(item)
     if tp is None:
         return []
-    if sin_detalle > 0:
-        previas = list(
-            SesionProcedimiento.objects.filter(tratamiento=tp)
-            .order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at")[:sin_detalle]
-        )
-        for s in previas:
-            s.estado = SesionProcedimiento.Estado.COMPLETADO
-            s.fecha = fecha
-            s.observaciones = OBSERVACION_PREVIA
-            s.save(update_fields=["estado", "fecha", "observaciones", "updated_at"])
-        if len(previas) >= item.num_sesiones_efectivas():
-            tp.estado = TratamientoPaciente.Estado.COMPLETADO
-            tp.save(update_fields=["estado", "updated_at"])
+    marcar_previas(tp, item, sin_detalle, fecha=fecha)
     return [str(tp.id)]
+
+
+def marcar_previas(tp, item, n: int, *, fecha=None) -> None:
+    """Las primeras ``n`` sesiones libres del protocolo (pendientes y sin cita)
+    quedan hechas antes de CliniQ; el protocolo termina si ya no le falta nada."""
+    from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
+
+    libres = SesionProcedimiento.objects.filter(
+        tratamiento=tp, estado=SesionProcedimiento.Estado.PENDIENTE, cita__isnull=True,
+    ).order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at")
+    for s in list(libres[:n]) if n > 0 else []:
+        s.estado = SesionProcedimiento.Estado.COMPLETADO
+        s.fecha = fecha
+        s.observaciones = OBSERVACION_PREVIA
+        s.save(update_fields=["estado", "fecha", "observaciones", "updated_at"])
+    hechas = tp.sesiones.filter(estado=SesionProcedimiento.Estado.COMPLETADO).count()
+    if hechas and hechas >= item.num_sesiones_efectivas():
+        tp.estado = TratamientoPaciente.Estado.COMPLETADO
+        tp.save(update_fields=["estado", "updated_at"])
 
 
 @transaction.atomic
