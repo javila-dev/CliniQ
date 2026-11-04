@@ -266,7 +266,8 @@ const ESTADO_CITA_TEXTO: Record<string, string> = {
 
 function resultado(c: CorreccionSoporte): string {
   if (c.sesiones_antes != null && c.sesiones_despues != null) {
-    return `Sesiones previas: ${c.sesiones_antes} → ${c.sesiones_despues}`
+    const sesiones = `Sesiones previas: ${c.sesiones_antes} → ${c.sesiones_despues}`
+    return c.tratamiento_despues ? `${c.tratamiento_antes} → ${c.tratamiento_despues} · ${sesiones}` : sesiones
   }
   return [c.estado_cita && ESTADO_CITA_TEXTO[c.estado_cita], ACCION_COBRO_TEXTO[c.accion_cobro]].filter(Boolean).join(' · ')
 }

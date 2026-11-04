@@ -11,10 +11,11 @@ import { cn, formatDate } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ConfirmDialog } from '@/components/ui/confirm-dialog'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { ErrorState } from '@/components/shared/ErrorState'
-import type { AdminTenant, SoporteCargaMigrada, SoportePaciente } from '@/types/admin'
+import type { AdminTenant, SoporteCargaMigrada, SoportePaciente, TratamientoMigradoRequest } from '@/types/admin'
 
 import {
   BuscarClinica, BuscarPaciente, CampoMotivo, CorreccionesRecientes, EncabezadoHerramienta, MOTIVO_MINIMO, Opcion,
@@ -68,76 +69,191 @@ function ElegirCarga({
   )
 }
 
+/** El tratamiento nuevo mientras se edita: del catálogo o libre. */
+interface TratamientoNuevo {
+  tipo: 'tratamiento' | 'libre'
+  tratamiento: string
+  descripcion: string
+  numSesiones: string
+}
+
+function CambiarTratamiento({
+  clinicaId, valor, onChange,
+}: { clinicaId: string; valor: TratamientoNuevo; onChange: (v: TratamientoNuevo) => void }) {
+  const { data: tratamientos, isLoading } = useQuery({
+    queryKey: ['soporte-tratamientos-migracion', clinicaId],
+    queryFn: () => adminApi.soporte.tratamientosMigracion(clinicaId),
+  })
+  return (
+    <div className="space-y-2 rounded-md border p-3">
+      <div className="flex gap-2">
+        <Button size="sm" variant={valor.tipo === 'tratamiento' ? 'default' : 'outline'} onClick={() => onChange({ ...valor, tipo: 'tratamiento' })}>
+          Del catálogo
+        </Button>
+        <Button size="sm" variant={valor.tipo === 'libre' ? 'default' : 'outline'} onClick={() => onChange({ ...valor, tipo: 'libre' })}>
+          Libre
+        </Button>
+      </div>
+      {valor.tipo === 'tratamiento' ? (
+        isLoading ? <LoadingState /> : (
+          <Select value={valor.tratamiento} onValueChange={(v) => onChange({ ...valor, tratamiento: v })}>
+            <SelectTrigger><SelectValue placeholder="Elige el tratamiento" /></SelectTrigger>
+            <SelectContent>
+              {tratamientos?.map((t) => (
+                <SelectItem key={t.id} value={t.id}>{t.nombre} · {sesionesTexto(t.total_sesiones)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )
+      ) : (
+        <div className="flex gap-2">
+          <Input
+            placeholder="Descripción del tratamiento"
+            value={valor.descripcion}
+            onChange={(e) => onChange({ ...valor, descripcion: e.target.value })}
+          />
+          <Input
+            type="number"
+            min={1}
+            placeholder="Sesiones"
+            value={valor.numSesiones}
+            onChange={(e) => onChange({ ...valor, numSesiones: e.target.value })}
+            className="w-28"
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
 function CorregirSesiones({
   clinicaId, carga, onListo,
-}: { clinicaId: string; carga: SoporteCargaMigrada; onListo: (despues: number) => void }) {
+}: { clinicaId: string; carga: SoporteCargaMigrada; onListo: (texto: string) => void }) {
   const queryClient = useQueryClient()
   const [sesiones, setSesiones] = useState(carga.previas)
+  const [nuevo, setNuevo] = useState<TratamientoNuevo | null>(null)
   const [motivo, setMotivo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
 
+  const { data: tratamientos } = useQuery({
+    queryKey: ['soporte-tratamientos-migracion', clinicaId],
+    queryFn: () => adminApi.soporte.tratamientosMigracion(clinicaId),
+    enabled: !!nuevo,
+  })
+  const delCatalogo = nuevo?.tipo === 'tratamiento' ? tratamientos?.find((t) => t.id === nuevo.tratamiento) : undefined
+  const pedido: TratamientoMigradoRequest | null = !nuevo
+    ? null
+    : nuevo.tipo === 'tratamiento'
+      ? (delCatalogo ? { tipo: 'tratamiento', tratamiento: delCatalogo.id } : null)
+      : (nuevo.descripcion.trim() && Number(nuevo.numSesiones) >= 1
+        ? { tipo: 'libre', descripcion: nuevo.descripcion.trim(), num_sesiones_total: Number(nuevo.numSesiones) }
+        : null)
+  const nombreNuevo = pedido?.tipo === 'tratamiento' ? delCatalogo?.nombre : pedido?.descripcion
+
+  // Con otro tratamiento el paquete se rehace: el total es el del nuevo y no
+  // quedan citas de la app ocupando sesiones (deben estar canceladas).
+  const total = !nuevo ? carga.total : (pedido?.tipo === 'tratamiento' ? delCatalogo!.total_sesiones : pedido?.num_sesiones_total ?? 0)
+  const maximo = !nuevo ? carga.maximo : Math.max(carga.con_cita, total)
+  const restantesDespues = !nuevo ? carga.restantes - (sesiones - carga.previas) : total - sesiones
+  const fijar = (n: number) => setSesiones(Math.max(carga.minimo, Math.min(maximo, n)))
+  const fueraDeRango = sesiones > maximo
+  // Las del protocolo que quedan hechas: las previas sin cita, desde la primera.
+  const sinCita = sesiones - carga.con_cita
+  const cambia = !!pedido || sesiones !== carga.previas
+  const listo = cambia && (!nuevo || !!pedido) && !fueraDeRango && motivo.trim().length >= MOTIVO_MINIMO
+
   const corregir = useMutation({
     mutationFn: () => adminApi.soporte.corregirSesionesPrevias({
-      clinica: clinicaId, item: carga.item_id, sesiones, motivo: motivo.trim(),
+      clinica: clinicaId, item: carga.item_id, sesiones, tratamiento: pedido, motivo: motivo.trim(),
     }),
     onSuccess: () => {
-      toast.success('Sesiones corregidas', 'El paquete quedó con el número correcto y se registró la corrección.')
+      toast.success('Paquete corregido', 'Quedó con los datos correctos y se registró la corrección.')
       queryClient.invalidateQueries({ queryKey: ['soporte-cargas-migradas'] })
       queryClient.invalidateQueries({ queryKey: ['soporte-correcciones', clinicaId] })
-      onListo(sesiones)
+      onListo(`«${nombreNuevo ?? carga.descripcion}» quedó con ${sesionesTexto(sesiones)} previas.`)
     },
     onError: (err) => {
       setConfirmando(false)
-      toast.error('No se pudieron corregir las sesiones', mensajeDeError(err))
+      toast.error('No se pudo corregir el paquete', mensajeDeError(err))
     },
   })
-
-  const fijar = (n: number) => setSesiones(Math.max(carga.minimo, Math.min(carga.maximo, n)))
-  // Las del protocolo que quedan hechas: las previas sin cita, desde la primera.
-  const sinCita = sesiones - carga.con_cita
-  const restantesDespues = carga.restantes - (sesiones - carga.previas)
-  const cambia = sesiones !== carga.previas
-  const listo = cambia && motivo.trim().length >= MOTIVO_MINIMO
 
   return (
     <div className="space-y-5">
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-sm">
-          <Label>Sesiones hechas antes de CliniQ</Label>
-          <span className="text-muted-foreground">{sesiones} de {carga.total}</span>
+        <div className="flex items-center justify-between gap-3">
+          <Label>Tratamiento</Label>
+          {nuevo ? (
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setNuevo(null); setSesiones(carga.previas) }}>
+              Dejar el actual
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-xs"
+              disabled={carga.agendadas_en_app > 0}
+              onClick={() => setNuevo({ tipo: 'tratamiento', tratamiento: '', descripcion: '', numSesiones: '' })}
+            >
+              Cambiar tratamiento
+            </Button>
+          )}
         </div>
-        <div className="flex gap-0.5">
-          {Array.from({ length: carga.total }, (_, i) => (
-            <div key={i} className={cn('h-1.5 flex-1 rounded-full', i < sesiones ? 'bg-primary' : 'bg-muted')} />
-          ))}
-        </div>
-        <div className="flex items-center gap-2 text-sm">
-          <Input
-            type="number"
-            min={carga.minimo}
-            max={carga.maximo}
-            value={sesiones}
-            onChange={(e) => fijar(Number(e.target.value) || 0)}
-            className="h-8 w-20"
-          />
-          <span className="text-muted-foreground">
-            de {carga.total} (entre {carga.minimo} y {carga.maximo})
-          </span>
-        </div>
-        {carga.con_cita > 0 && (
+        <p className="text-sm">
+          <span className={cn(nuevo && 'text-muted-foreground line-through')}>{carga.descripcion}</span>
+          <span className="text-muted-foreground"> · {sesionesTexto(carga.total)}</span>
+        </p>
+        {!nuevo && carga.agendadas_en_app > 0 && (
           <p className="text-xs text-muted-foreground">
-            {sesionesTexto(carga.con_cita)} se cargaron con cita y profesional: cuentan siempre y no se cambian.
+            Para cambiar el tratamiento, primero cancela las citas agendadas en la app con este paquete.
           </p>
         )}
-        {carga.agendadas_en_app > 0 && (
-          <p className="text-xs text-muted-foreground">
-            {carga.agendadas_en_app === 1 ? 'Hay 1 cita agendada' : `Hay ${carga.agendadas_en_app} citas agendadas`} en
-            la app con este paquete: siguen igual y ocupan su sesión, por eso el máximo es {carga.maximo}.
-          </p>
-        )}
+        {nuevo && <CambiarTratamiento clinicaId={clinicaId} valor={nuevo} onChange={setNuevo} />}
       </div>
 
-      {carga.sesiones.length > 0 && (
+      {(!nuevo || pedido) && (
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <Label>Sesiones hechas antes de CliniQ</Label>
+            <span className="text-muted-foreground">{sesiones} de {total}</span>
+          </div>
+          <div className="flex gap-0.5">
+            {Array.from({ length: total }, (_, i) => (
+              <div key={i} className={cn('h-1.5 flex-1 rounded-full', i < sesiones ? 'bg-primary' : 'bg-muted')} />
+            ))}
+          </div>
+          <div className="flex items-center gap-2 text-sm">
+            <Input
+              type="number"
+              min={carga.minimo}
+              max={maximo}
+              value={sesiones}
+              onChange={(e) => fijar(Number(e.target.value) || 0)}
+              className="h-8 w-20"
+            />
+            <span className="text-muted-foreground">
+              de {total} (entre {carga.minimo} y {maximo})
+            </span>
+          </div>
+          {fueraDeRango && (
+            <p className="text-xs text-destructive">El tratamiento nuevo tiene {sesionesTexto(total)}: baja las previas.</p>
+          )}
+          {carga.con_cita > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {sesionesTexto(carga.con_cita)} se cargaron con cita y profesional: cuentan siempre y no se cambian.
+            </p>
+          )}
+          {!nuevo && carga.agendadas_en_app > 0 && (
+            <p className="text-xs text-muted-foreground">
+              {carga.agendadas_en_app === 1 ? 'Hay 1 cita agendada' : `Hay ${carga.agendadas_en_app} citas agendadas`} en
+              la app con este paquete: siguen igual y ocupan su sesión, por eso el máximo es {carga.maximo}.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Con el tratamiento actual se ve qué sesión del protocolo cambia; con otro, el protocolo se rehace. */}
+      {!nuevo && carga.sesiones.length > 0 && (
         <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">
           {carga.sesiones.map((s, i) => {
             const hecha = i < sinCita
@@ -166,12 +282,18 @@ function CorregirSesiones({
         </div>
       )}
 
-      {cambia && (
+      {cambia && !fueraDeRango && (!nuevo || pedido) && (
         <div className="rounded-md bg-muted/40 p-3 text-sm">
           <ul className="list-disc space-y-0.5 pl-5 text-muted-foreground">
+            {pedido && (
+              <li>
+                Tratamiento: {carga.descripcion} → {nombreNuevo} ({sesionesTexto(total)}). Se rehace su protocolo; el precio,
+                los pagos y la cartera no cambian.
+              </li>
+            )}
             <li>Sesiones hechas antes de CliniQ: {carga.previas} → {sesiones}.</li>
             <li>Libres para agendar: {carga.restantes} → {restantesDespues}.</li>
-            {sesiones >= carga.total && <li>El tratamiento queda completo.</li>}
+            {sesiones >= total && <li>El tratamiento queda completo.</li>}
           </ul>
         </div>
       )}
@@ -180,15 +302,19 @@ function CorregirSesiones({
 
       <div className="flex justify-end">
         <Button disabled={!listo || corregir.isPending} onClick={() => setConfirmando(true)}>
-          Corregir sesiones
+          Corregir paquete
         </Button>
       </div>
 
       <ConfirmDialog
         open={confirmando}
         onOpenChange={setConfirmando}
-        title="¿Corregir las sesiones previas?"
-        description={`«${carga.descripcion}» pasa de ${sesionesTexto(carga.previas)} hechas antes de CliniQ a ${sesionesTexto(sesiones)}. Queda registrado con tu usuario y el motivo.`}
+        title="¿Corregir el paquete migrado?"
+        description={
+          pedido
+            ? `«${carga.descripcion}» pasa a ser «${nombreNuevo}» con ${sesionesTexto(sesiones)} hechas antes de CliniQ. Queda registrado con tu usuario y el motivo.`
+            : `«${carga.descripcion}» pasa de ${sesionesTexto(carga.previas)} hechas antes de CliniQ a ${sesionesTexto(sesiones)}. Queda registrado con tu usuario y el motivo.`
+        }
         confirmLabel="Sí, corregir"
         loading={corregir.isPending}
         onConfirm={() => corregir.mutate()}
@@ -213,8 +339,8 @@ export default function SesionesPreviasPage() {
   return (
     <div className="max-w-3xl space-y-4">
       <EncabezadoHerramienta
-        titulo="Corregir sesiones previas"
-        descripcion="Para un paciente que llegó por la puesta en marcha con mal marcado el número de sesiones que ya había hecho. Se corrige solo mientras no haya hecho ninguna sesión de ese paquete en la app."
+        titulo="Corregir paquete migrado"
+        descripcion="Para un paciente que llegó por la puesta en marcha con otro tratamiento o con mal marcado el número de sesiones que ya había hecho. Se corrige solo mientras no haya hecho ninguna sesión de ese paquete en la app."
       />
 
       {hecho && (
@@ -241,11 +367,11 @@ export default function SesionesPreviasPage() {
           )}
 
           {carga && (
-            <Paso numero={4} titulo="Sesiones ya hechas y confirmación">
+            <Paso numero={4} titulo="Tratamiento, sesiones y confirmación">
               <CorregirSesiones
                 clinicaId={clinica.id}
                 carga={carga}
-                onListo={(n) => setHecho(`«${carga.descripcion}» de ${paciente?.nombre} quedó con ${sesionesTexto(n)} previas.`)}
+                onListo={(texto) => setHecho(`${texto} Paciente: ${paciente?.nombre}.`)}
               />
             </Paso>
           )}

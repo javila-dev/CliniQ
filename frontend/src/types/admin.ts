@@ -312,6 +312,9 @@ export interface SoporteCargaMigrada {
   cargado_en: string
   cargado_por: string | null
   nota: string
+  tipo: 'tratamiento' | 'procedimiento' | 'libre'
+  /** Tratamiento del catálogo del paquete; null en uno libre. */
+  tratamiento_id: string | null
   total: number
   /** Sesiones hechas antes de CliniQ (las cargadas con cita incluidas). */
   previas: number
@@ -328,6 +331,18 @@ export interface SoporteCargaMigrada {
   /** Sesiones del protocolo sin cita, en el orden en que se marcan como previas. */
   sesiones: (SoporteSesion & { previa: boolean })[]
 }
+
+export interface SoporteTratamientoCatalogo {
+  id: string
+  nombre: string
+  /** Sesiones de compromiso del protocolo (las agendables). */
+  total_sesiones: number
+}
+
+/** El tratamiento nuevo de un paquete migrado: del catálogo o libre. */
+export type TratamientoMigradoRequest =
+  | { tipo: 'tratamiento'; tratamiento: string }
+  | { tipo: 'libre'; descripcion: string; num_sesiones_total: number }
 
 export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas'
 
@@ -347,6 +362,9 @@ export interface CorreccionSoporte {
   /** Solo al corregir sesiones previas. */
   sesiones_antes: number | null
   sesiones_despues: number | null
+  /** Solo si al corregir el paquete migrado se cambió el tratamiento. */
+  tratamiento_antes: string | null
+  tratamiento_despues: string | null
   motivo: string
   realizado_por: string | null
   created_at: string

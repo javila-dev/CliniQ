@@ -20,8 +20,8 @@ const HERRAMIENTAS: { href: string; titulo: string; descripcion: string; icon: L
   },
   {
     href: '/console/soporte/sesiones-previas',
-    titulo: 'Corregir sesiones previas',
-    descripcion: 'Al migrar un paciente se marcaron mal las sesiones que ya había hecho. Se corrige mientras no haya hecho ninguna en la app.',
+    titulo: 'Corregir paquete migrado',
+    descripcion: 'Al migrar un paciente se cargó otro tratamiento o se marcaron mal las sesiones que ya había hecho. Se corrige mientras no haya hecho ninguna en la app.',
     icon: ListChecks,
   },
 ]

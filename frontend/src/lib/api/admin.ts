@@ -8,7 +8,7 @@ import type {
   ConsoleUsuario, CreateConsoleUsuarioRequest,
   SoporteAtencion, SoportePaciente, TrasladoPrevisualizacion, TrasladarAtencionRequest,
   EliminacionPrevisualizacion, EliminarAtencionRequest, CorreccionSoporte, TipoCorreccionSoporte,
-  SoporteCargaMigrada,
+  SoporteCargaMigrada, SoporteTratamientoCatalogo, TratamientoMigradoRequest,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
@@ -46,8 +46,12 @@ export const adminApi = {
       const res = await apiClient.get<SoporteCargaMigrada[]>('/admin/soporte/sesiones-previas/', { params: { clinica, paciente } })
       return res.data
     },
+    tratamientosMigracion: async (clinica: string): Promise<SoporteTratamientoCatalogo[]> => {
+      const res = await apiClient.get<SoporteTratamientoCatalogo[]>('/admin/soporte/sesiones-previas/tratamientos/', { params: { clinica } })
+      return res.data
+    },
     corregirSesionesPrevias: async (
-      data: { clinica: string; item: string; sesiones: number; motivo: string },
+      data: { clinica: string; item: string; sesiones: number; tratamiento?: TratamientoMigradoRequest | null; motivo: string },
     ): Promise<{ id: string }> => {
       const res = await apiClient.post<{ id: string }>('/admin/soporte/sesiones-previas/corregir/', data)
       return res.data
