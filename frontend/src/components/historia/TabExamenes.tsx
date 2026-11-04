@@ -24,7 +24,19 @@ interface TabExamenesProps {
 // Mismos límites que el backend (validar_archivo_examen).
 const MAX_BYTES = 15 * 1024 * 1024
 const MAX_POR_ENVIO = 10
-const TIPOS = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif']
+const TIPOS = [
+  'application/pdf', 'image/jpeg', 'image/jpg', 'image/pjpeg', 'image/png', 'image/webp',
+  'image/heic', 'image/heif', 'image/heic-sequence', 'image/heif-sequence',
+]
+const EXTENSIONES = ['PDF', 'JPG', 'JPEG', 'PNG', 'WEBP', 'HEIC', 'HEIF']
+
+// El celular a veces manda el tipo vacío o genérico; ahí decide la extensión
+// (el backend igual revisa el contenido real).
+function tipoPermitido(archivo: File): boolean {
+  if (TIPOS.includes(archivo.type)) return true
+  const ext = archivo.name.split('.').pop()?.toUpperCase() ?? ''
+  return (archivo.type === '' || archivo.type === 'application/octet-stream') && EXTENSIONES.includes(ext)
+}
 
 function getExtension(nombre: string): string {
   const ext = nombre.split('.').pop()?.toUpperCase() ?? ''
@@ -35,7 +47,7 @@ function getExtension(nombre: string): string {
 function filtrarArchivos(lista: FileList | null): File[] {
   const validos: File[] = []
   for (const archivo of Array.from(lista ?? [])) {
-    if (!TIPOS.includes(archivo.type)) {
+    if (!tipoPermitido(archivo)) {
       toast.error('Archivo no permitido', `${archivo.name}: solo PDF o imágenes JPG, PNG, WebP o HEIC.`)
     } else if (archivo.size > MAX_BYTES) {
       toast.error('Archivo muy pesado', `${archivo.name}: no puede superar 15 MB.`)
