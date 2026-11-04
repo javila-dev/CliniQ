@@ -109,9 +109,7 @@ const schema = z.object({
   formas_pago: z.array(pagoSchema),
 }).superRefine((data, ctx) => {
   // Reglas de obsequios (van antes del plan de pagos, que puede terminar la validación).
-  if (data.items.length > 0 && data.items.every((i) => i.es_obsequio)) {
-    ctx.addIssue({ code: 'custom', message: 'Agrega al menos un ítem que no sea obsequio.', path: ['items'] })
-  }
+  // Una cotización puede ser solo de obsequios: total 0 y sin plan de pagos.
   data.items.forEach((it, idx) => {
     if (!it.es_obsequio) return
     if (it.tipo === 'insumo') {
@@ -483,7 +481,9 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   // Requisitos visibles en la card de aceptación (el backend vuelve a validarlos).
   const formasPagoForm = useWatch({ control, name: 'formas_pago' })
   const sumaPagosForm = formasPagoForm.reduce((a, p) => a + (p.valor || 0), 0)
-  const pagosCuadran = formasPagoForm.length > 0 && Math.abs(sumaPagosForm - total) <= 1
+  // Solo obsequios (total 0): no hay nada que cobrar, así que no hace falta plan de pagos.
+  const sinCobro = total <= 0
+  const pagosCuadran = (formasPagoForm.length > 0 || sinCobro) && Math.abs(sumaPagosForm - total) <= 1
   // El error guarda la suma del momento en que se validó: se muestra con la suma actual
   // (al agregar o borrar filas) y desaparece en cuanto los pagos cuadran.
   const errorPagos = errors.formas_pago?.root?.message ?? (errors.formas_pago as any)?.message
@@ -492,7 +492,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
     : formasPagoForm.length === 0
       ? errorPagos
       : `La suma de las formas de pago (${cop(sumaPagosForm)}) no coincide con el total (${cop(total)}).`
-  const tieneItemsCobrables = items.some((i) => !i.es_obsequio)
+  const tieneItems = items.length > 0
   // Valor de lista de lo obsequiado (informativo: nunca entra al total).
   const valorObsequios = items.reduce(
     (a, i) => a + (i.es_obsequio ? (i.valor_referencia || 0) * (i.tipo === 'insumo' ? 1 : (i.num_citas || 1)) : 0),
@@ -1087,7 +1087,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
     const totalItems = items.reduce((acc, i) => acc + (i.valor_unitario || 0) * (i.num_citas || 1) * (1 - (i.descuento_porcentaje || 0) / 100), 0)
     const sumPagos = formas_pago.reduce((acc, p) => acc + (p.valor || 0), 0)
 
-    if (formas_pago.length === 0 || Math.abs(sumPagos - totalItems) > 1) {
+    // Solo obsequios (total 0): se acepta sin plan de pagos.
+    if ((formas_pago.length === 0 && totalItems > 0) || Math.abs(sumPagos - totalItems) > 1) {
       const msg = formas_pago.length === 0
         ? 'Debes registrar al menos una forma de pago antes de aprobar.'
         : `La suma de formas de pago (${cop(sumPagos)}) no coincide con el total (${cop(totalItems)}).`
@@ -1438,14 +1439,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 cartera con las cuotas y se habilita agendar las sesiones. Después ya no se puede editar.
               </p>
               <ul className="space-y-1 text-xs">
-                <li className={cn('flex items-center gap-1.5', tieneItemsCobrables ? 'text-green-700' : 'text-muted-foreground')}>
-                  {tieneItemsCobrables ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
+                <li className={cn('flex items-center gap-1.5', tieneItems ? 'text-green-700' : 'text-muted-foreground')}>
+                  {tieneItems ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
                   Al menos un ítem cotizado
                 </li>
                 <li className={cn('flex items-center gap-1.5', pagosCuadran ? 'text-green-700' : 'text-muted-foreground')}>
                   {pagosCuadran ? <CheckCircle2 className="h-3.5 w-3.5" /> : <Circle className="h-3.5 w-3.5" />}
                   {pagosCuadran
-                    ? 'Las formas de pago suman el total'
+                    ? sinCobro && formasPagoForm.length === 0
+                      ? 'Sin cobro: todo es obsequio'
+                      : 'Las formas de pago suman el total'
                     : formasPagoForm.length === 0
                       ? 'Falta registrar las formas de pago'
                       : `Las formas de pago (${cop(sumaPagosForm)}) no suman el total (${cop(total)})`}
