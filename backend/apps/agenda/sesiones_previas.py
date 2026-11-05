@@ -129,7 +129,11 @@ def _estado(item) -> dict:
         "bloqueo": bloqueo,
         "bloqueo_tratamiento": bloqueo_tratamiento,
         "atenciones": [_atencion_payload(c, s) for c, s in atenciones],
-        "sesiones": [{**soporte.sesion_payload(s), "previa": _es_previa(s)} for s in candidatas],
+        # posicion/de: el lugar de la sesión en el protocolo ("sesión 3 de 6"), como en la puesta en marcha.
+        "sesiones": [
+            {**soporte.sesion_payload(s), "previa": _es_previa(s), "posicion": sesiones.index(s) + 1, "de": len(sesiones)}
+            for s in candidatas
+        ],
         "_candidatas": candidatas,
         "_atenciones": atenciones,
     }
