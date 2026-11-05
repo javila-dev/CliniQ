@@ -333,7 +333,7 @@ export interface SoporteCargaMigrada {
   /** Citas del paquete hechas o agendadas en la app, con la sesión que ocupan hoy. */
   atenciones: SoporteAtencionPaquete[]
   /** Sesiones del protocolo sin cita, en el orden en que se marcan como previas. */
-  sesiones: (SoporteSesion & { previa: boolean })[]
+  sesiones: (SoporteSesion & { previa: boolean; posicion: number; de: number })[]
 }
 
 export interface SoporteAtencionPaquete {

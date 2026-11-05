@@ -181,7 +181,7 @@ function AsignarAtenciones({
                   <SelectContent>
                     {tratamiento.sesiones.map((r, i) => (
                       <SelectItem key={r.clave} value={r.clave} disabled={usadas.has(r.clave)}>
-                        Sesión {i + 1} de {total} · {r.nombre} #{r.numero}
+                        {r.nombre} · sesión {i + 1} de {total}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -203,7 +203,7 @@ function ProtocoloResultante({ vista }: { vista: CorreccionMigradoPrevisualizaci
       <div className="divide-y rounded-lg border text-sm">
         {vista.protocolo.map((s) => (
           <div key={s.id} className={cn('flex flex-wrap items-start gap-x-3 gap-y-1 px-3 py-2', s.origen === 'atencion' && 'bg-primary/5')}>
-            <span className="w-28 shrink-0 font-medium">{s.nombre} #{s.numero}</span>
+            <span className="w-40 shrink-0 font-medium">{s.nombre} · sesión {s.posicion} de {vista.protocolo.length}</span>
             <div className="min-w-0 flex-1">
               {s.origen === 'previa' && <span className="text-muted-foreground">Hecha antes de CliniQ</span>}
               {s.origen === 'pendiente' && <span className="text-muted-foreground">Pendiente</span>}
@@ -465,7 +465,7 @@ function CorregirPaquete({
                 return (
                   <FilaSesion
                     key={s.id}
-                    titulo={`${s.nombre} #${s.numero}`}
+                    titulo={`${s.nombre} · sesión ${s.posicion} de ${s.de}`}
                     marcada={hecha}
                     bloqueada={!hecha && lleno}
                     nota={hecha !== s.previa ? (hecha ? 'pasa a hecha' : 'vuelve a pendiente') : undefined}
@@ -478,13 +478,14 @@ function CorregirPaquete({
 
           {modo === 'nuevo' && delCatalogo && (
             <div className="max-h-80 divide-y overflow-y-auto rounded-lg border">
-              {delCatalogo.sesiones.map((r) => {
+              {delCatalogo.sesiones.map((r, i) => {
+                const titulo = `${r.nombre} · sesión ${i + 1} de ${delCatalogo.sesiones.length}`
                 const atencion = atencionEn.get(r.clave)
                 if (atencion) {
                   return (
                     <FilaSesion
                       key={r.clave}
-                      titulo={`${r.nombre} #${r.numero}`}
+                      titulo={titulo}
                       marcada={false}
                       bloqueada
                       detalle={`Atención: ${describirAtencion(atencion)}`}
@@ -495,7 +496,7 @@ function CorregirPaquete({
                 return (
                   <FilaSesion
                     key={r.clave}
-                    titulo={`${r.nombre} #${r.numero}`}
+                    titulo={titulo}
                     marcada={hecha}
                     bloqueada={!hecha && lleno}
                     onToggle={() => alternar(marcadasNuevo, r.clave, setMarcadasNuevo)}
