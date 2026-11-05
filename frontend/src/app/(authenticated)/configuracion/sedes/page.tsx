@@ -25,6 +25,7 @@ import { PageHeader } from '@/components/shared/PageHeader'
 import {
   EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, VacioAjustes,
 } from '@/components/configuracion/ajustes'
+import { SalasYEquipos } from '@/components/configuracion/SalasYEquipos'
 
 // ─── constantes ──────────────────────────────────────────────
 
@@ -474,6 +475,8 @@ export default function SedesPage() {
           </NotaAjuste>
         )}
       </SeccionAjustes>
+
+      {!isLoading && <SalasYEquipos sedes={data?.results ?? []} puedeGestionar={puedeGestionar} />}
 
       <SedeSheet sede={editando} open={sheetOpen} onClose={handleClose} />
     </div>

@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
-import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
+import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, HorariosDetalle, RecursosLibres, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
 import type { Paginated } from '@/types/common'
 import type { TarjetaCita } from '@/types/tarjeta'
 
@@ -9,6 +9,12 @@ export type SlotsParams =
   | (SlotsBase & { servicio_id: string })
   | (SlotsBase & { item_cotizacion_id: string; sesion_ejecutada_id?: string })
   | (SlotsBase & { duracion_min: number })
+
+type FormaCita =
+  | { servicio_id: string }
+  | { item_cotizacion_id: string; sesion_ejecutada_id?: string }
+  | { duracion_min: number }
+export type RecursosLibresParams = { sede_id: string; fecha_inicio: string; cita_id?: string } & FormaCita
 
 export interface CitasSinConfirmar {
   total: number
@@ -30,6 +36,8 @@ export interface CitasFilter {
   fecha_inicio__date__lt?: string
   canal_origen?: string
   firma_asistencia_estado?: string
+  /** Agenda por sala o por equipo. */
+  recurso?: string
   search?: string
   ordering?: string
   page?: number
@@ -96,6 +104,16 @@ export const agendaApi = {
     },
     slotsDisponibles: async (params: SlotsParams): Promise<string[]> => {
       const res = await apiClient.get<string[]>('/agenda/citas/slots_disponibles/', { params })
+      return res.data
+    },
+    /** Horarios con el motivo si se descartaron por una sala o un equipo, y el próximo libre. */
+    horariosDetalle: async (params: SlotsParams): Promise<HorariosDetalle> => {
+      const res = await apiClient.get<HorariosDetalle>('/agenda/citas/slots_disponibles/', { params: { ...params, detalle: 1 } })
+      return res.data
+    },
+    /** Salas y equipos libres para una cita a una hora ("Cambiar" y "+ Sala o equipo"). */
+    recursosLibres: async (params: RecursosLibresParams): Promise<RecursosLibres> => {
+      const res = await apiClient.get<RecursosLibres>('/agenda/citas/recursos_libres/', { params })
       return res.data
     },
     solicitarRecordatorio: async (id: string): Promise<Cita> => {

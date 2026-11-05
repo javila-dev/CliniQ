@@ -39,6 +39,7 @@ import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
 import type { EstadoCita, MedioConfirmacion } from '@/types/agenda'
 import { CancelarConCobroDialog, cobroDeLaCitaDelError, type AccionCobro, type CobroDeLaCita } from './CancelarConCobroDialog'
+import { nombresRecursos, textoFalta } from './AvisoCitasSinSala'
 
 type CambiarEstadoVars = {
   estado: EstadoCita
@@ -347,6 +348,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   <div className="px-4 py-3">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Sede</p>
                     <p className="text-sm font-medium">{cita.sede_nombre}</p>
+                    {/* Sala y equipo (docs/plan-salas-y-equipos.md): solo si la cita ocupa alguno o le falta. */}
+                    {nombresRecursos(cita) && (
+                      <p className="text-[13px] text-muted-foreground mt-0.5">{nombresRecursos(cita)}</p>
+                    )}
+                    {textoFalta(cita) && (
+                      <p className="text-[12px] font-medium text-amber-700 mt-0.5">{textoFalta(cita)} · edítala para moverla</p>
+                    )}
                   </div>
                 </div>
 

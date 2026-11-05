@@ -22,6 +22,7 @@ import { ProfesionalSelect, type ProfesionalFiltro } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
 import { SlotPicker } from './SlotPicker'
+import { ELECCION_AUTOMATICA, RecursosDeLaCita, recursosParaEnviar, type EleccionRecursos } from './RecursosDeLaCita'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -119,6 +120,8 @@ export function NuevaCitaModal({
   // El paciente ya tiene otra cita a esa hora: se avisa y se puede agendar igual (M3-30).
   const [cruce, setCruce] = useState<CitaCruzada[] | null>(null)
   const confirmarCruce = useRef(false)
+  // Sala y equipo: los elige la app; solo se envían si la persona los cambió.
+  const [recursos, setRecursos] = useState<EleccionRecursos>(ELECCION_AUTOMATICA)
 
   // Creación de paciente inline
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
@@ -240,7 +243,10 @@ export function NuevaCitaModal({
     meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: agendaApi.citas.create,
     // Si el horario se ocupó mientras tanto, la lista de horarios se refresca.
-    onError: () => queryClient.invalidateQueries({ queryKey: ['slots'] }),
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['slots'] })
+      queryClient.invalidateQueries({ queryKey: ['recursos-libres'] })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
@@ -274,6 +280,7 @@ export function NuevaCitaModal({
   const handleClose = () => {
     reset()
     setCruce(null)
+    setRecursos(ELECCION_AUTOMATICA)
     setPaciente(null)
     setPacienteError(false)
     setModo('servicio')
@@ -338,6 +345,7 @@ export function NuevaCitaModal({
       fecha_inicio:   values.slot,
       canal_origen:   values.canal_origen,
       notas_internas: values.notas_internas || undefined,
+      ...recursosParaEnviar(recursos),
     }
 
     try {
@@ -738,10 +746,20 @@ export function NuevaCitaModal({
                 value={slot ?? ''}
                 onSelect={(s) => setValue('slot', s)}
                 horaPreferida={defaultHora}
+                onIrA={(s) => { setValue('fecha', s.slice(0, 10)); setValue('slot', s) }}
                 {...slotPickerProps}
               />
             </div>
             {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
+            {slot && (
+              <RecursosDeLaCita
+                sedeId={sedeId ?? ''}
+                fechaInicio={slot}
+                forma={slotPickerProps}
+                value={recursos}
+                onChange={setRecursos}
+              />
+            )}
           </div>
 
           {/* ── Notas internas ── */}

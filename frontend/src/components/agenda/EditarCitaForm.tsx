@@ -17,6 +17,7 @@ import { ProfesionalSelect } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
 import { SlotPicker } from './SlotPicker'
+import { ELECCION_AUTOMATICA, RecursosDeLaCita, recursosParaEnviar, type EleccionRecursos } from './RecursosDeLaCita'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -54,6 +55,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   const { user } = useAuthStore()
   const canAprobarExcepcion = hasPermission(user, PERM.CARTERA_APROBAR_EXCEPCION)
   const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
+  const [recursos, setRecursos] = useState<EleccionRecursos>(ELECCION_AUTOMATICA)
 
   // Una cita de paquete (ítem de cotización), de sesión o de consulta libre
   // tiene la duración fija: se reprograma sin pedir un procedimiento.
@@ -108,6 +110,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
         fecha_inicio: values.slot,
         canal_origen: values.canal_origen,
         notas_internas: values.notas_internas || undefined,
+        ...recursosParaEnviar(recursos),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
@@ -271,10 +274,25 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
             fecha={fecha}
             value={slot}
             onSelect={(s) => setValue('slot', s)}
+            onIrA={(s) => { setValue('fecha', s.slice(0, 10)); setValue('slot', s) }}
             citaId={cita.id}
           />
         </div>
         {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
+        {slot && (
+          <RecursosDeLaCita
+            sedeId={sedeId}
+            fechaInicio={slot}
+            forma={
+              conProcedimiento ? { servicioId }
+                : cita.item_cotizacion_id ? { itemCotizacionId: cita.item_cotizacion_id, sesionEjecutadaId: cita.sesion_ejecutada_id ?? undefined }
+                : { duracionMin: duracionFija }
+            }
+            citaId={cita.id}
+            value={recursos}
+            onChange={setRecursos}
+          />
+        )}
       </div>
 
       <div className="space-y-1.5">

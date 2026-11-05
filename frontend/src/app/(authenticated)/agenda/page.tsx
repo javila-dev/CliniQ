@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, Suspense } from 'react'
-import { useQuery, useQueries } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueries, useQueryClient } from '@tanstack/react-query'
 import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import {
@@ -26,9 +26,13 @@ import { pacientesApi } from '@/lib/api/pacientes'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import { AgendaTour } from '@/components/agenda/AgendaTour'
 import { AvisoCitasSinConfirmar } from '@/components/shared/AvisoCitasSinConfirmar'
+import { AvisoCitasSinSala, nombresRecursos, textoFalta } from '@/components/agenda/AvisoCitasSinSala'
 import { ErrorState } from '@/components/shared/ErrorState'
 import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { addDaysISO, cn, formatTime, todayISO } from '@/lib/utils'
+import { DoorOpen as IconoSala, Zap as IconoEquipo } from 'lucide-react'
+import type { Recurso } from '@/types/clinicas'
 import { ESTADO_CITA_CONFIG } from '@/lib/constants'
 import type { Cita, EstadoCita, BloqueoAgenda } from '@/types/agenda'
 import type { BusquedaPaciente } from '@/types/pacientes'
@@ -66,17 +70,26 @@ type ViewMode = 'dia' | 'semana' | 'mes'
 type AgendaMode = 'calendario' | 'columnas' | 'lista'
 type AgendaDensity = 'compacta' | 'comoda'
 
+/** Vista Columnas del día: una columna por profesional, por sala o por equipo. */
+type ColumnasPor = 'profesional' | 'sala' | 'equipo'
+
 interface AgendaViewPreference {
   view: ViewMode
   mode: AgendaMode
   density: AgendaDensity
+  columnasPor: ColumnasPor
 }
 
 const DEFAULT_AGENDA_PREFERENCE: AgendaViewPreference = {
   view: 'dia',
   mode: 'lista',
   density: 'comoda',
+  columnasPor: 'profesional',
 }
+
+/** Arrastrar una cita entre columnas de sala o equipo (dataTransfer). */
+const ARRASTRE_CITA = 'application/x-cliniq-cita'
+const ESTADOS_QUE_SE_MUEVEN: EstadoCita[] = ['pendiente', 'confirmada', 'en_espera']
 
 interface CitaWithLayout extends Cita {
   colIndex: number
@@ -300,17 +313,22 @@ function heightPx(start: string, end: string, hourPx = HOUR_PX) {
 
 // ─── Cita block (time grid) ───────────────────────────────────
 function CompactCitaCard({
-  cita, onClick, selected, style, className,
+  cita, onClick, selected, style, className, arrastrableDesde,
 }: {
   cita: Cita
   onClick: () => void
   selected: boolean
   style?: React.CSSProperties
   className?: string
+  /** Columna (sala o equipo) de la que sale al arrastrarla a otra. */
+  arrastrableDesde?: string
 }) {
+  const arrastrable = !!arrastrableDesde && ESTADOS_QUE_SE_MUEVEN.includes(cita.estado)
   const color = ESTADO_COLORS[cita.estado]
   const estado = ESTADO_CITA_CONFIG[cita.estado]?.label ?? cita.estado
   const servicio = cita.servicio_nombre || cita.motivo || 'Consulta'
+  const recursos = nombresRecursos(cita)
+  const falta = textoFalta(cita)
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -321,6 +339,11 @@ function CompactCitaCard({
             data-testid="cita-item"
             onClick={(event) => { event.stopPropagation(); onClick() }}
             style={style}
+            draggable={arrastrable}
+            onDragStart={arrastrable ? (event) => {
+              event.dataTransfer.setData(ARRASTRE_CITA, JSON.stringify({ cita: cita.id, desde: arrastrableDesde }))
+              event.dataTransfer.effectAllowed = 'move'
+            } : undefined}
             aria-label={`${formatTime(cita.fecha_inicio)}, ${cita.paciente_nombre}, ${servicio}, ${estado}`}
             className={cn(
               'group flex items-center gap-1.5 overflow-hidden rounded-md border border-l-[3px] border-gray-200 bg-white px-1.5 py-1.5 text-left shadow-sm transition-all hover:-translate-y-px hover:border-primary/30 hover:shadow-md',
@@ -334,7 +357,13 @@ function CompactCitaCard({
             <span className="min-w-0 flex-1 truncate text-[10px] text-gray-900">
               <span className="font-semibold">{cita.paciente_nombre}</span>
               <span className="text-muted-foreground"> · {servicio}</span>
+              {recursos && <span className="text-muted-foreground"> · {recursos}</span>}
             </span>
+            {falta && (
+              <span className="shrink-0 rounded bg-amber-100 px-1 text-[9px] font-semibold text-amber-800" title={falta}>
+                {falta}
+              </span>
+            )}
           </button>
         </TooltipTrigger>
         <TooltipContent side="top" avoidCollisions collisionPadding={12} className="max-w-[240px] space-y-1">
@@ -344,6 +373,8 @@ function CompactCitaCard({
           </div>
           <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
           <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
+          {recursos && <p className="text-xs"><span className="text-muted-foreground">Sala y equipo:</span> {recursos}</p>}
+          {falta && <p className="text-xs font-medium text-amber-700">{falta}: no había uno libre a esa hora.</p>}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -351,10 +382,10 @@ function CompactCitaCard({
 }
 
 function CitaBlock({
-  cita, onClick, selected, hourPx = HOUR_PX, density = 'comoda',
+  cita, onClick, selected, hourPx = HOUR_PX, density = 'comoda', arrastrableDesde,
 }: {
   cita: CitaWithLayout; onClick: () => void; selected: boolean
-  hourPx?: number; density?: AgendaDensity
+  hourPx?: number; density?: AgendaDensity; arrastrableDesde?: string
 }) {
   const top = topPx(cita.fecha_inicio, hourPx)
   const height = heightPx(cita.fecha_inicio, cita.fecha_fin, hourPx)
@@ -367,6 +398,7 @@ function CitaBlock({
       cita={cita}
       onClick={onClick}
       selected={selected}
+      arrastrableDesde={arrastrableDesde}
       style={{
         top,
         height,
@@ -441,12 +473,16 @@ function HourLabels({ hourPx = HOUR_PX, sticky = false }: { hourPx?: number; sti
 // ─── Single day column ────────────────────────────────────────
 function DayColumn({
   citas, fecha, selectedId, onSelectCita, onClickSlot, showNowLine, bloqueos,
-  hourPx = HOUR_PX, density = 'comoda', className,
+  hourPx = HOUR_PX, density = 'comoda', className, columnaId, onSoltar,
 }: {
   citas: Cita[]; fecha: string; selectedId: string | null
   onSelectCita: (id: string) => void; onClickSlot: (iso: string) => void; showNowLine: boolean
   bloqueos?: BloqueoAgenda[]; hourPx?: number; density?: AgendaDensity; className?: string
+  /** Columnas de sala o equipo: sus citas se pueden arrastrar a otra columna. */
+  columnaId?: string
+  onSoltar?: (citaId: string, desde: string) => void
 }) {
+  const [encima, setEncima] = useState(false)
   const hours = Array.from({ length: END_HOUR - START_HOUR }, (_, i) => START_HOUR + i)
   const totalH = (END_HOUR - START_HOUR) * hourPx
 
@@ -460,8 +496,29 @@ function DayColumn({
     return ((now.getHours() - START_HOUR) * 60 + now.getMinutes()) * (hourPx / 60)
   })()
 
+  const recibe = !!onSoltar
   return (
-    <div className={cn('flex-1 relative border-l border-gray-100', className)} style={{ height: totalH, minWidth: 0 }}>
+    <div
+      className={cn('flex-1 relative border-l border-gray-100', encima && 'bg-primary/[0.05] ring-2 ring-inset ring-primary/30', className)}
+      style={{ height: totalH, minWidth: 0 }}
+      onDragOver={recibe ? (e) => {
+        if (!e.dataTransfer.types.includes(ARRASTRE_CITA)) return
+        e.preventDefault()
+        e.dataTransfer.dropEffect = 'move'
+        if (!encima) setEncima(true)
+      } : undefined}
+      onDragLeave={recibe ? (e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setEncima(false)
+      } : undefined}
+      onDrop={recibe ? (e) => {
+        e.preventDefault()
+        setEncima(false)
+        try {
+          const { cita, desde } = JSON.parse(e.dataTransfer.getData(ARRASTRE_CITA))
+          if (cita && desde !== columnaId) onSoltar!(cita, desde)
+        } catch { /* no era una cita */ }
+      } : undefined}
+    >
       {/* Día pasado: sin afordancia de creación */}
       {diaPasado && <div className="absolute inset-0 bg-gray-50/60 pointer-events-none" />}
 
@@ -515,7 +572,8 @@ function DayColumn({
       {/* Appointments */}
       {resolveOverlaps(citas).map((cita) => (
         <CitaBlock key={cita.id} cita={cita} selected={selectedId === cita.id}
-          onClick={() => onSelectCita(cita.id)} hourPx={hourPx} density={density} />
+          onClick={() => onSelectCita(cita.id)} hourPx={hourPx} density={density}
+          arrastrableDesde={columnaId} />
       ))}
     </div>
   )
@@ -576,6 +634,15 @@ function DayListCard({
               {cita.servicio_nombre || cita.motivo || 'Consulta'}
               <span className="mx-1.5 text-gray-300">·</span>
               {cita.profesional_nombre}
+              {nombresRecursos(cita) && (
+                <>
+                  <span className="mx-1.5 text-gray-300">·</span>
+                  {nombresRecursos(cita)}
+                </>
+              )}
+              {textoFalta(cita) && (
+                <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{textoFalta(cita)}</span>
+              )}
             </p>
           </div>
 
@@ -789,13 +856,39 @@ function bloqueoEnColumnaUnica(
 
 function DayView({
   fecha, selectedId, onSelectCita, onClickSlot, filterSede, filterProfesional, filterPaciente,
-  profesionales, mode, density,
+  profesionales, mode, density, columnasPor = 'profesional', onColumnasPor,
 }: {
   fecha: string; selectedId: string | null
   onSelectCita: (id: string) => void; onClickSlot: (iso: string, profesionalId?: string) => void
   filterSede: string; filterProfesional: string[]; filterPaciente: string
   profesionales: ColaboradorProfesional[]; mode: AgendaMode; density: AgendaDensity
+  columnasPor?: ColumnasPor; onColumnasPor?: (v: ColumnasPor) => void
 }) {
+  const queryClient = useQueryClient()
+  // Salas y equipos (docs/plan-salas-y-equipos.md): solo si la clínica los tiene.
+  const { data: recursos = [] } = useQuery({
+    queryKey: ['recursos', 'activos'],
+    queryFn: () => clinicasApi.recursos.list({ activo: true }),
+    staleTime: 5 * 60 * 1000,
+  })
+  const recursosVisibles = recursos.filter((r) => !filterSede || r.sede === filterSede)
+  const tiposDisponibles = (['sala', 'equipo'] as const).filter((t) => recursosVisibles.some((r) => r.tipo === t))
+  const agrupar: ColumnasPor = columnasPor !== 'profesional' && tiposDisponibles.includes(columnasPor) ? columnasPor : 'profesional'
+
+  const mover = useMutation({
+    mutationFn: async ({ cita, destino, desde }: { cita: Cita; destino: Recurso; desde: string }) => {
+      if (destino.tipo === 'sala') return agendaApi.citas.update(cita.id, { sala: destino.id })
+      // Equipo: se cambia el de la columna de origen y se conservan los demás.
+      const equipos = (cita.recursos ?? []).filter((r) => r.tipo === 'equipo' && r.id !== desde).map((r) => r.id)
+      return agendaApi.citas.update(cita.id, { equipos: [destino.id, ...equipos] })
+    },
+    onSuccess: (_d, { destino }) => {
+      queryClient.invalidateQueries({ queryKey: ['citas'] })
+      queryClient.invalidateQueries({ queryKey: ['recursos-libres'] })
+      toast.success(`Cita movida a ${destino.nombre}`)
+    },
+    onError: (err) => toast.error('No se pudo mover la cita', mensajeDeError(err)),
+  })
   const scrollRef = useRef<HTMLDivElement>(null)
   const isToday = fecha === todayISO()
   const hourPx = density === 'compacta' ? 56 : HOUR_PX
@@ -876,6 +969,115 @@ function DayView({
     )
   }
 
+  const selectorColumnas = tiposDisponibles.length > 0 && onColumnasPor && (
+    <div className="flex items-center gap-2 border-b border-gray-100 bg-white px-3 py-2 text-xs">
+      <span className="text-muted-foreground">Columnas por</span>
+      <div className="inline-flex rounded-lg bg-gray-100 p-0.5">
+        {(['profesional', ...tiposDisponibles] as ColumnasPor[]).map((opcion) => (
+          <button
+            key={opcion}
+            type="button"
+            onClick={() => onColumnasPor(opcion)}
+            className={cn(
+              'rounded-md px-3 py-1 font-medium capitalize transition-all',
+              agrupar === opcion ? 'bg-white text-gray-900 shadow-sm' : 'text-muted-foreground hover:text-gray-900',
+            )}
+          >
+            {opcion}
+          </button>
+        ))}
+      </div>
+      {agrupar !== 'profesional' && (
+        <span className="hidden text-muted-foreground sm:inline">Arrastra una cita a otra columna para cambiarla de {agrupar}.</span>
+      )}
+    </div>
+  )
+
+  if (agrupar !== 'profesional') {
+    const columnasRecurso = recursosVisibles
+      .filter((r) => r.tipo === agrupar)
+      .sort((a, b) => a.sede_nombre.localeCompare(b.sede_nombre) || a.orden - b.orden || a.nombre.localeCompare(b.nombre))
+    const variasSedes = new Set(columnasRecurso.map((r) => r.sede)).size > 1
+    const conFalta = citas.filter((c) => c.falta?.some((f) => f.tipo === agrupar))
+    const totalHeight = (END_HOUR - START_HOUR) * hourPx
+    const anchoColumna = 220
+    const columnas = columnasRecurso.length + (conFalta.length ? 1 : 0)
+    const Icono = agrupar === 'sala' ? IconoSala : IconoEquipo
+    const soltar = (destino: Recurso) => (citaId: string, desde: string) => {
+      const cita = citas.find((c) => c.id === citaId)
+      if (cita) mover.mutate({ cita, destino, desde })
+    }
+
+    return (
+      <div className="flex flex-1 flex-col overflow-hidden bg-white">
+        {selectorColumnas}
+        <div ref={scrollRef} className="flex-1 overflow-auto">
+          <div style={{ minWidth: 56 + Math.max(columnas, 1) * anchoColumna }}>
+            <div className="sticky top-0 z-40 flex h-[58px] border-b border-gray-200 bg-white/95 backdrop-blur">
+              <div className="sticky left-0 z-50 w-14 shrink-0 bg-white/95" />
+              {columnasRecurso.map((r) => {
+                const total = citas.filter((c) => c.recursos?.some((x) => x.id === r.id)).length
+                return (
+                  <div key={r.id} className="flex min-w-[220px] flex-1 items-center gap-2.5 border-l border-gray-100 px-3">
+                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <Icono className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-semibold text-gray-900">{r.nombre}{variasSedes && <span className="font-normal text-muted-foreground"> · {r.sede_nombre}</span>}</p>
+                      <p className="mt-0.5 text-[10px] text-muted-foreground">{total} cita{total === 1 ? '' : 's'}</p>
+                    </div>
+                  </div>
+                )
+              })}
+              {conFalta.length > 0 && (
+                <div className="flex min-w-[220px] flex-1 items-center gap-2.5 border-l border-amber-200 bg-amber-50/60 px-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-semibold text-amber-900">Falta {agrupar}</p>
+                    <p className="mt-0.5 text-[10px] text-amber-800">Arrástralas a una columna libre o cámbialas de hora</p>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="flex" style={{ minHeight: totalHeight }}>
+              <HourLabels hourPx={hourPx} sticky />
+              {columnasRecurso.map((r) => (
+                <DayColumn
+                  key={r.id}
+                  columnaId={r.id}
+                  onSoltar={soltar(r)}
+                  citas={citas.filter((c) => c.recursos?.some((x) => x.id === r.id))}
+                  fecha={fecha}
+                  selectedId={selectedId}
+                  onSelectCita={onSelectCita}
+                  onClickSlot={(iso) => onClickSlot(iso)}
+                  showNowLine={isToday}
+                  bloqueos={bloqueos?.filter((b) => !b.profesional)}
+                  hourPx={hourPx}
+                  density={density}
+                  className="min-w-[220px]"
+                />
+              ))}
+              {conFalta.length > 0 && (
+                <DayColumn
+                  columnaId="falta"
+                  citas={conFalta}
+                  fecha={fecha}
+                  selectedId={selectedId}
+                  onSelectCita={onSelectCita}
+                  onClickSlot={(iso) => onClickSlot(iso)}
+                  showNowLine={isToday}
+                  hourPx={hourPx}
+                  density={density}
+                  className="min-w-[220px] bg-amber-50/30"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const activeProfessionals = profesionales.filter((professional) => professional.activo !== false)
   const professionalsFromAppointments = Array.from(
     new Map(citas.map((cita) => [cita.profesional, {
@@ -898,6 +1100,8 @@ function DayView({
   const minGridWidth = 56 + Math.max(columns.length, 1) * 240
 
   return (
+    <div className="flex flex-1 flex-col overflow-hidden bg-white">
+    {selectorColumnas}
     <div ref={scrollRef} className="flex-1 overflow-auto bg-white">
       <div style={{ minWidth: minGridWidth }}>
         <div className="sticky top-0 z-40 flex h-[58px] border-b border-gray-200 bg-white/95 shadow-[0_1px_0_rgba(15,23,42,0.04)] backdrop-blur">
@@ -937,6 +1141,7 @@ function DayView({
           ))}
         </div>
       </div>
+    </div>
     </div>
   )
 }
@@ -1465,6 +1670,7 @@ function AgendaContent() {
         view: restoredView,
         mode: restoredMode,
         density: parsed.density === 'compacta' ? 'compacta' : 'comoda',
+        columnasPor: parsed.columnasPor === 'sala' || parsed.columnasPor === 'equipo' ? parsed.columnasPor : 'profesional',
       }
       setAgendaPreference(restored)
       setView(restored.view)
@@ -1765,6 +1971,11 @@ function AgendaContent() {
             </Popover>
 
           <AvisoCitasSinConfirmar compact className="hidden md:flex" sede={filterSede} profesionales={filterProfesional} />
+          <AvisoCitasSinSala
+            className="hidden md:flex"
+            sede={filterSede}
+            onAbrir={(c) => { setFecha(c.fecha_inicio.split('T')[0]); setSelectedCitaId(c.id) }}
+          />
         </div>
 
         {/* Row 2: Filters (left) + Actions (right) */}
@@ -2013,6 +2224,8 @@ function AgendaContent() {
             profesionales={profesionales ?? []}
             mode={agendaPreference.mode}
             density={agendaPreference.density}
+            columnasPor={agendaPreference.columnasPor}
+            onColumnasPor={(columnasPor) => updateAgendaPreference({ columnasPor })}
           />
         )}
         {view === 'semana' && (

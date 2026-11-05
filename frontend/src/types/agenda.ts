@@ -95,7 +95,50 @@ export interface Cita {
   deuda_info?: DeudaInfo | null
   /** Hay un intento de verificación facial (o un salto registrado) para esta cita. */
   verificacion_identidad_registrada?: boolean
+  /** Sala y equipos asignados. */
+  recursos?: RecursoCita[]
+  /** Sala o equipo que necesita y no tiene ("Falta sala"). */
+  falta?: { tipo: 'sala' | 'equipo'; recursos: string[] }[]
   created_at: string
+}
+
+export interface RecursoCita {
+  id: string
+  nombre: string
+  tipo: 'sala' | 'equipo'
+  /** El procedimiento no lo pedía: se agregó al agendar. */
+  elegido_a_mano: boolean
+}
+
+/** Por qué se descartaron horarios por una sala o un equipo. */
+export interface MotivoHorarios {
+  tipo: 'sala' | 'equipo'
+  causa: 'ocupado' | 'fuera_de_horario' | 'bloqueado' | 'sin_compatible'
+  recursos: string[]
+  a_mano: boolean
+  mensaje: string
+}
+
+export interface HorariosDetalle {
+  horarios: string[]
+  motivo: MotivoHorarios | null
+  /** Primer horario libre de los próximos días, si hoy no hay por la sala o el equipo. */
+  proximo: string | null
+}
+
+export interface RecursoLibre {
+  id: string
+  nombre: string
+  tipo: 'sala' | 'equipo'
+}
+
+export interface RecursosLibres {
+  /** Lo que pide el procedimiento: las unidades que sirven, las libres y la sugerida. */
+  necesarios: { tipo: 'sala' | 'equipo'; recursos: RecursoLibre[]; libres: RecursoLibre[]; sugerido: string | null }[]
+  /** Las demás salas y equipos libres a esa hora (para agregar a mano). */
+  otros: RecursoLibre[]
+  /** Lo que ya tiene la cita (al editar). */
+  actuales: (RecursoLibre & { elegido_a_mano: boolean })[]
 }
 
 export interface DeudaInfo {
@@ -120,6 +163,10 @@ export interface CreateCitaRequest {
   motivo?: string
   // H30: pre-vincula la SesionEjecutada al crear la cita (ignorado hasta que H30 aterrice)
   sesion_ejecutada?: string | null
+  /** Sala elegida (la pedida por el procedimiento o una a mano). null: quitar la elegida a mano. */
+  sala?: string | null
+  /** Equipos elegidos. []: quitar los elegidos a mano. */
+  equipos?: string[]
 }
 
 export type MedioConfirmacion = 'whatsapp' | 'llamada' | 'sms' | 'presencial' | 'link' | 'email'
@@ -178,6 +225,9 @@ export type EstadoBloqueo = 'pendiente' | 'aprobado' | 'rechazado'
 export interface BloqueoAgenda {
   id: string
   sede: string | null
+  /** Bloqueo de una sala o un equipo ("No disponible…"). */
+  recurso?: string | null
+  recurso_nombre?: string | null
   profesional: string | null
   profesional_nombre: string | null
   fecha_inicio: string
