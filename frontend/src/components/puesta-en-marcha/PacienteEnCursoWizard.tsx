@@ -64,6 +64,8 @@ interface SesionRow {
   key: string
   nombre: string
   done: boolean
+  /** Sesión del protocolo ("<tipo de sesión>:<número>"): se marca esa y no la primera libre. */
+  sesion?: string
 }
 
 export function PacienteEnCursoWizard({ onClose, onDone }: {
@@ -133,7 +135,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
       comprometidas.forEach((ts) => {
         for (let i = 1; i <= ts.cantidad; i++) {
           n++
-          rows.push({ key: `${ts.id}-${i}`, nombre: `${ts.nombre} · sesión ${n} de ${total}`, done: false })
+          rows.push({ key: `${ts.id}-${i}`, nombre: `${ts.nombre} · sesión ${n} de ${total}`, done: false, sesion: `${ts.id}:${i}` })
         }
       })
       if (rows.length) return rows
@@ -197,7 +199,7 @@ export function PacienteEnCursoWizard({ onClose, onDone }: {
           precio_total_pactado: total.toFixed(2),
           fecha_inicio: fechaInicio || null,
         },
-        sesiones_realizadas: filas.filter((f) => f.done).map((f) => ({ nombre: f.nombre })),
+        sesiones_realizadas: filas.filter((f) => f.done).map((f) => ({ nombre: f.nombre, sesion: f.sesion })),
         pagos: pagado > 0
           ? [{ valor: pagado.toFixed(2), fecha: today() }]
           : [],

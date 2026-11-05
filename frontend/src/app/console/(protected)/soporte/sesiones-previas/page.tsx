@@ -234,17 +234,59 @@ function ProtocoloResultante({ vista }: { vista: CorreccionMigradoPrevisualizaci
   )
 }
 
+/** Una sesión del protocolo con su casilla: las previas se marcan una a una porque no siempre se hicieron en orden. */
+function FilaSesion({
+  titulo, marcada, bloqueada, detalle, nota, onToggle,
+}: {
+  titulo: string
+  marcada: boolean
+  bloqueada?: boolean
+  detalle?: string
+  nota?: string
+  onToggle?: () => void
+}) {
+  return (
+    <button
+      type="button"
+      disabled={bloqueada || !onToggle}
+      onClick={onToggle}
+      className={cn(
+        'flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm',
+        onToggle && !bloqueada ? 'hover:bg-muted/40' : 'cursor-default',
+        detalle && 'bg-primary/5',
+      )}
+    >
+      <span
+        className={cn(
+          'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
+          marcada ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
+          bloqueada && !marcada && 'opacity-40',
+        )}
+      >
+        {marcada && <Check className="h-3 w-3" />}
+      </span>
+      <span className={cn('shrink-0', !marcada && !detalle && 'text-muted-foreground')}>{titulo}</span>
+      {detalle && <span className="min-w-0 truncate text-xs text-muted-foreground">{detalle}</span>}
+      {nota && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{nota}</span>}
+    </button>
+  )
+}
+
 function CorregirPaquete({
   clinicaId, carga, onListo,
 }: { clinicaId: string; carga: SoporteCargaMigrada; onListo: (texto: string) => void }) {
   const queryClient = useQueryClient()
   const conAtenciones = carga.atenciones.length > 0
-  const [sesiones, setSesiones] = useState(carga.previas)
   // Con sesiones hechas en la app solo queda cambiar el tratamiento: se abre de una vez.
   const [nuevo, setNuevo] = useState<TratamientoNuevo | null>(
     carga.bloqueo ? { tipo: 'tratamiento', tratamiento: '', descripcion: '', numSesiones: '' } : null,
   )
   const [asignadas, setAsignadas] = useState<Record<string, string>>({})
+  // Previas marcadas: ids del protocolo actual, o claves del tratamiento nuevo.
+  const [marcadas, setMarcadas] = useState<Set<string>>(() => new Set(carga.sesiones.filter((s) => s.previa).map((s) => s.id)))
+  const [marcadasNuevo, setMarcadasNuevo] = useState<Set<string>>(new Set())
+  // Sin protocolo por sesiones (tratamiento libre) solo hay un número.
+  const [numero, setNumero] = useState(carga.previas)
   const [motivo, setMotivo] = useState('')
   const [confirmando, setConfirmando] = useState(false)
 
@@ -263,21 +305,32 @@ function CorregirPaquete({
         : null)
   const libreConAtenciones = nuevo?.tipo === 'libre' && conAtenciones
 
-  // Con otro tratamiento el paquete se rehace: el total es el del nuevo, y las
-  // atenciones de la app ocupan las sesiones que se les eligen.
+  // Dónde se marcan las previas: en el protocolo actual, en el del tratamiento
+  // nuevo o, sin protocolo por sesiones, con un número.
+  const modo: 'actual' | 'nuevo' | 'numero' = !nuevo
+    ? (carga.sesiones.length ? 'actual' : 'numero')
+    : (delCatalogo && delCatalogo.sesiones.length ? 'nuevo' : 'numero')
   const total = !nuevo ? carga.total : (delCatalogo?.total_sesiones ?? (pedido?.tipo === 'libre' ? pedido.num_sesiones_total : 0))
   const maximo = !nuevo ? carga.maximo : Math.max(carga.con_cita, total - carga.atenciones.length)
-  const fijar = (n: number) => setSesiones(Math.max(carga.minimo, Math.min(maximo, n)))
+  const sesiones = modo === 'actual'
+    ? carga.con_cita + marcadas.size
+    : modo === 'nuevo' ? carga.con_cita + marcadasNuevo.size : numero
+  const lleno = sesiones >= maximo
   const fueraDeRango = sesiones > maximo
+  const previas = modo === 'actual' ? [...marcadas] : modo === 'nuevo' ? [...marcadasNuevo] : undefined
+
   const asignaciones: AsignacionAtencion[] = carga.atenciones
     .filter((a) => asignadas[a.cita_id])
     .map((a) => ({ cita: a.cita_id, sesion: asignadas[a.cita_id] }))
   const todasAsignadas = !nuevo || asignaciones.length === carga.atenciones.length
-  // Las del protocolo que quedan hechas: las previas sin cita, desde la primera.
-  const sinCita = sesiones - carga.con_cita
+  const atencionEn = new Map(
+    asignaciones.map((x) => [x.sesion, carga.atenciones.find((a) => a.cita_id === x.cita)!] as const),
+  )
+  const previasActuales = carga.sesiones.filter((s) => s.previa)
   const cambia = !!pedido || sesiones !== carga.previas
+    || (modo === 'actual' && previasActuales.some((s) => !marcadas.has(s.id)))
   const datos: CorreccionMigradoRequest = {
-    clinica: clinicaId, item: carga.item_id, sesiones, tratamiento: pedido, asignaciones,
+    clinica: clinicaId, item: carga.item_id, sesiones, tratamiento: pedido, asignaciones, previas,
   }
   const completo = cambia && (!nuevo || !!pedido) && !libreConAtenciones && todasAsignadas && !fueraDeRango
 
@@ -303,6 +356,13 @@ function CorregirPaquete({
     },
   })
 
+  function alternar(conjunto: Set<string>, clave: string, guardar: (s: Set<string>) => void) {
+    const siguiente = new Set(conjunto)
+    if (siguiente.has(clave)) siguiente.delete(clave)
+    else if (!lleno) siguiente.add(clave)
+    guardar(siguiente)
+  }
+
   const movidas = vistaPrevia.data?.atenciones_movidas ?? []
   const descripcionConfirmacion = pedido
     ? `«${carga.descripcion}» pasa a ser «${vistaPrevia.data?.descripcion}» con ${sesionesTexto(sesiones)} hechas antes de CliniQ.`
@@ -310,7 +370,7 @@ function CorregirPaquete({
         ? ` ${movidas.map((m) => `Atención del ${formatDateTime(m.fecha)}: ${m.de ?? 'sin sesión'} → ${m.a}`).join('. ')}.`
         : '')
       + ' Queda registrado con tu usuario y el motivo.'
-    : `«${carga.descripcion}» pasa de ${sesionesTexto(carga.previas)} hechas antes de CliniQ a ${sesionesTexto(sesiones)}. Queda registrado con tu usuario y el motivo.`
+    : `«${carga.descripcion}» queda con ${sesionesTexto(sesiones)} hechas antes de CliniQ (antes ${carga.previas}). Queda registrado con tu usuario y el motivo.`
 
   return (
     <div className="space-y-5">
@@ -319,7 +379,12 @@ function CorregirPaquete({
           <Label>Tratamiento</Label>
           {nuevo ? (
             !carga.bloqueo && (
-              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => { setNuevo(null); setAsignadas({}); setSesiones(carga.previas) }}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => { setNuevo(null); setAsignadas({}); setMarcadasNuevo(new Set()); setNumero(carga.previas) }}
+              >
                 Dejar el actual
               </Button>
             )
@@ -346,7 +411,10 @@ function CorregirPaquete({
             tratamientos={tratamientos}
             valor={nuevo}
             onChange={(v) => {
-              if (v.tratamiento !== nuevo.tratamiento || v.tipo !== nuevo.tipo) setAsignadas({})
+              if (v.tratamiento !== nuevo.tratamiento || v.tipo !== nuevo.tipo) {
+                setAsignadas({})
+                setMarcadasNuevo(new Set())
+              }
               setNuevo(v)
             }}
           />
@@ -363,32 +431,85 @@ function CorregirPaquete({
           atenciones={carga.atenciones}
           tratamiento={delCatalogo}
           asignadas={asignadas}
-          onChange={setAsignadas}
+          onChange={(v) => {
+            // Una sesión que pasa a ser de una atención deja de ser previa.
+            const deAtenciones = new Set(Object.values(v))
+            setMarcadasNuevo(new Set([...marcadasNuevo].filter((c) => !deAtenciones.has(c))))
+            setAsignadas(v)
+          }}
         />
       )}
 
       {(!nuevo || (pedido && !libreConAtenciones)) && (
         <div className="space-y-2">
-          <div className="flex items-center justify-between text-sm">
-            <Label>Sesiones hechas antes de CliniQ</Label>
-            <span className="text-muted-foreground">{sesiones} de {total}</span>
+          <div className="flex items-center justify-between gap-3 text-sm">
+            <Label>{modo === 'numero' ? 'Sesiones hechas antes de CliniQ' : 'Marca las sesiones hechas antes de CliniQ'}</Label>
+            <span className="shrink-0 text-muted-foreground">{sesiones} de {total} · máximo {maximo}</span>
           </div>
-          <div className="flex items-center gap-2 text-sm">
+
+          {modo === 'numero' && (
             <Input
               type="number"
               min={carga.minimo}
               max={maximo}
-              value={sesiones}
-              onChange={(e) => fijar(Number(e.target.value) || 0)}
+              value={numero}
+              onChange={(e) => setNumero(Math.max(carga.minimo, Math.min(maximo, Number(e.target.value) || 0)))}
               className="h-8 w-20"
             />
-            <span className="text-muted-foreground">
-              entre {carga.minimo} y {maximo}
-              {nuevo && conAtenciones && ` (${sesionesTexto(carga.atenciones.length)} en la app ocupan el resto)`}
-            </span>
-          </div>
+          )}
+
+          {modo === 'actual' && (
+            <div className="max-h-80 divide-y overflow-y-auto rounded-lg border">
+              {carga.sesiones.map((s) => {
+                const hecha = marcadas.has(s.id)
+                return (
+                  <FilaSesion
+                    key={s.id}
+                    titulo={`${s.nombre} #${s.numero}`}
+                    marcada={hecha}
+                    bloqueada={!hecha && lleno}
+                    nota={hecha !== s.previa ? (hecha ? 'pasa a hecha' : 'vuelve a pendiente') : undefined}
+                    onToggle={() => alternar(marcadas, s.id, setMarcadas)}
+                  />
+                )
+              })}
+            </div>
+          )}
+
+          {modo === 'nuevo' && delCatalogo && (
+            <div className="max-h-80 divide-y overflow-y-auto rounded-lg border">
+              {delCatalogo.sesiones.map((r) => {
+                const atencion = atencionEn.get(r.clave)
+                if (atencion) {
+                  return (
+                    <FilaSesion
+                      key={r.clave}
+                      titulo={`${r.nombre} #${r.numero}`}
+                      marcada={false}
+                      bloqueada
+                      detalle={`Atención: ${describirAtencion(atencion)}`}
+                    />
+                  )
+                }
+                const hecha = marcadasNuevo.has(r.clave)
+                return (
+                  <FilaSesion
+                    key={r.clave}
+                    titulo={`${r.nombre} #${r.numero}`}
+                    marcada={hecha}
+                    bloqueada={!hecha && lleno}
+                    onToggle={() => alternar(marcadasNuevo, r.clave, setMarcadasNuevo)}
+                  />
+                )
+              })}
+            </div>
+          )}
+
           {fueraDeRango && (
-            <p className="text-xs text-destructive">El tratamiento nuevo no alcanza para {sesionesTexto(sesiones)} previas: bájalas.</p>
+            <p className="text-xs text-destructive">El tratamiento nuevo no alcanza para {sesionesTexto(sesiones)} previas: quita algunas.</p>
+          )}
+          {lleno && !fueraDeRango && modo !== 'numero' && (
+            <p className="text-xs text-muted-foreground">Llegaste al máximo: desmarca una para marcar otra.</p>
           )}
           {carga.con_cita > 0 && (
             <p className="text-xs text-muted-foreground">
@@ -401,36 +522,6 @@ function CorregirPaquete({
               la app con este paquete: siguen igual y ocupan su sesión, por eso el máximo es {carga.maximo}.
             </p>
           )}
-        </div>
-      )}
-
-      {/* Mismo tratamiento: se ve qué sesión del protocolo cambia. */}
-      {!nuevo && carga.sesiones.length > 0 && (
-        <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">
-          {carga.sesiones.map((s, i) => {
-            const hecha = i < sinCita
-            return (
-              <button
-                key={s.id}
-                type="button"
-                onClick={() => fijar(carga.con_cita + (sinCita === i + 1 ? i : i + 1))}
-                className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-sm hover:bg-muted/40"
-              >
-                <span
-                  className={cn(
-                    'flex h-4 w-4 shrink-0 items-center justify-center rounded border',
-                    hecha ? 'border-primary bg-primary text-primary-foreground' : 'border-input',
-                  )}
-                >
-                  {hecha && <Check className="h-3 w-3" />}
-                </span>
-                <span className={cn(!hecha && 'text-muted-foreground')}>{s.nombre} #{s.numero}</span>
-                {hecha !== s.previa && (
-                  <span className="ml-auto text-xs text-muted-foreground">{hecha ? 'pasa a hecha' : 'vuelve a pendiente'}</span>
-                )}
-              </button>
-            )
-          })}
         </div>
       )}
 

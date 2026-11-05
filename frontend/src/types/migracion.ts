@@ -5,6 +5,8 @@ export interface SesionRealizadaInput {
   servicio?: string | null
   profesional?: string | null
   fecha?: string | null
+  /** Sesión del protocolo que se marcó ("<tipo de sesión>:<número>"). */
+  sesion?: string
 }
 
 export interface PagoPrevioInput {

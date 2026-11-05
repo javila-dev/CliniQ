@@ -371,6 +371,8 @@ export interface CorreccionMigradoRequest {
   sesiones: number
   tratamiento?: TratamientoMigradoRequest | null
   asignaciones?: AsignacionAtencion[]
+  /** Sesiones marcadas como hechas antes de CliniQ: ids del protocolo actual, o claves del tratamiento nuevo. */
+  previas?: string[]
 }
 
 /** Cómo queda el paquete: la corrección hecha completa y descartada. */
