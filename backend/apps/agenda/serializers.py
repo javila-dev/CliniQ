@@ -219,6 +219,12 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     cobro_estado = serializers.SerializerMethodField()
     deuda_info = serializers.SerializerMethodField()
     verificacion_identidad_registrada = serializers.SerializerMethodField()
+    # Salas y equipos (docs/plan-salas-y-equipos.md). Al escribir: la sala o los
+    # equipos que elige quien agenda (opcional; si no, se asignan solos).
+    sala = serializers.UUIDField(write_only=True, required=False, allow_null=True)
+    equipos = serializers.ListField(child=serializers.UUIDField(), write_only=True, required=False)
+    recursos = serializers.SerializerMethodField()
+    falta = serializers.SerializerMethodField()
 
     class Meta:
         model = Cita
@@ -268,6 +274,10 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "cobro_estado",
             "deuda_info",
             "verificacion_identidad_registrada",
+            "sala",
+            "equipos",
+            "recursos",
+            "falta",
             "created_by",
             "created_at",
             "updated_at",
@@ -302,6 +312,8 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "cobro_estado",
             "deuda_info",
             "verificacion_identidad_registrada",
+            "recursos",
+            "falta",
             "created_by",
             "created_at",
             "updated_at",
@@ -315,6 +327,26 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
 
     def get_servicio_nombre(self, obj):
         return obj.servicio_nombre or (obj.servicio.nombre if obj.servicio_id else "")
+
+    def get_recursos(self, obj):
+        # Sobre lo precargado (recursos_asignados__recurso en el viewset).
+        asignados = sorted(obj.recursos_asignados.all(), key=lambda a: (a.recurso.tipo != "sala", a.recurso.orden))
+        return [
+            {
+                "id": str(a.recurso_id),
+                "nombre": a.recurso.nombre,
+                "tipo": a.recurso.tipo,
+                "elegido_a_mano": a.elegido_a_mano,
+            }
+            for a in asignados
+        ]
+
+    def get_falta(self, obj):
+        # Salas o equipos que la cita necesita y no tiene ("Falta sala"). Sin
+        # salas ni equipos en la sede no hace más consultas.
+        from apps.agenda.recursos import faltantes
+
+        return faltantes(obj, cache=self.context.setdefault("_recursos_por_sede", {}))
 
     def get_ultimo_registro_confirmacion(self, obj):
         registro = obj.registros_confirmacion.first()
@@ -576,6 +608,7 @@ class BloqueoAgendaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer)
         source="profesional.nombre_completo", read_only=True, allow_null=True
     )
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True, allow_null=True)
+    recurso_nombre = serializers.CharField(source="recurso.nombre", read_only=True, allow_null=True)
     creado_por_nombre = serializers.CharField(
         source="creado_por.nombre_completo", read_only=True, allow_null=True
     )
@@ -591,6 +624,8 @@ class BloqueoAgendaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer)
             "profesional_nombre",
             "sede",
             "sede_nombre",
+            "recurso",
+            "recurso_nombre",
             "fecha_inicio",
             "fecha_fin",
             "motivo",
@@ -618,9 +653,21 @@ class BloqueoAgendaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer)
         extra_kwargs = {
             "profesional": {"required": False, "allow_null": True},
             "sede": {"required": False, "allow_null": True},
+            "recurso": {"required": False, "allow_null": True},
         }
 
     def validate(self, attrs):
+        recurso = attrs.get("recurso", getattr(self.instance, "recurso", None))
+        if recurso is not None:
+            # Bloqueo de una sala o un equipo: solo ese recurso, en su sede.
+            request = self.context.get("request")
+            if request and request.user.rol != "superadmin" and recurso.clinica_id != request.user.clinica_id:
+                raise serializers.ValidationError({"recurso": "La sala o el equipo no pertenece a tu clínica."})
+            if attrs.get("profesional", getattr(self.instance, "profesional", None)):
+                raise serializers.ValidationError(
+                    {"recurso": "Un bloqueo es de un profesional o de una sala o equipo, no de los dos."}
+                )
+            attrs["sede"] = recurso.sede
         validar_sede_del_usuario(self.context.get("request"), attrs.get("sede"))
         profesional = attrs.get("profesional", getattr(self.instance, "profesional", None))
         sede = attrs.get("sede", getattr(self.instance, "sede", None))

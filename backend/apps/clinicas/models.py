@@ -397,7 +397,75 @@ class Sede(BaseModel):
         return f"{self.nombre} - {self.clinica.nombre}"
 
 
+class Recurso(BaseModel):
+    """Sala (cabina, consultorio) o equipo de una sede que no puede estar en dos
+    citas a la vez. En la interfaz: "Salas y equipos"
+    (docs/plan-salas-y-equipos.md)."""
+
+    class Tipo(models.TextChoices):
+        SALA = "sala", "Sala"
+        EQUIPO = "equipo", "Equipo"
+
+    clinica = models.ForeignKey(Clinica, on_delete=models.PROTECT, related_name="recursos")
+    sede = models.ForeignKey(Sede, on_delete=models.PROTECT, related_name="recursos")
+    nombre = models.CharField(max_length=120)
+    tipo = models.CharField(max_length=10, choices=Tipo.choices)
+    orden = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        db_table = "clinicas_recurso"
+        ordering = ["sede", "tipo", "orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(
+                Lower(Trim("nombre")),
+                F("sede"),
+                name="recurso_nombre_unico_por_sede",
+                violation_error_message="Ya existe una sala o un equipo con ese nombre en esta sede.",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.nombre} ({self.sede.nombre})"
+
+
+class HorarioRecurso(BaseModel):
+    """Igual que HorarioColaborador: sin registro para el día, el recurso está
+    disponible todo el horario de la sede. Con registro: horario propio o no
+    disponible ese día (p. ej. un equipo alquilado que solo viene martes y jueves)."""
+
+    DiaSemana = (
+        ("lunes", "Lunes"),
+        ("martes", "Martes"),
+        ("miercoles", "Miercoles"),
+        ("jueves", "Jueves"),
+        ("viernes", "Viernes"),
+        ("sabado", "Sabado"),
+        ("domingo", "Domingo"),
+    )
+
+    recurso = models.ForeignKey(Recurso, on_delete=models.CASCADE, related_name="horarios")
+    dia_semana = models.CharField(max_length=10, choices=DiaSemana)
+    no_disponible = models.BooleanField(default=False)
+    hora_inicio = models.TimeField(null=True, blank=True)
+    hora_fin = models.TimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = "clinicas_horario_recurso"
+        ordering = ["recurso", "dia_semana"]
+        constraints = [
+            models.UniqueConstraint(fields=["recurso", "dia_semana"], name="uniq_horario_recurso_dia"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.recurso.nombre} - {self.dia_semana}"
+
+
 class Servicio(BaseModel):
+    class NecesitaSala(models.TextChoices):
+        NO = "no", "No necesita"
+        CUALQUIERA = "cualquiera", "Cualquier sala libre"
+        ALGUNAS = "algunas", "Solo algunas salas"
+
     clinica = models.ForeignKey(
         Clinica,
         on_delete=models.PROTECT,
@@ -435,6 +503,23 @@ class Servicio(BaseModel):
         through="ServicioConsentimiento",
         blank=True,
         related_name="servicios",
+    )
+    # Salas y equipos que ocupa al agendarse (docs/plan-salas-y-equipos.md). Por
+    # defecto no necesita nada y se agenda como siempre.
+    # db_default: el código anterior (otra rama, o un despliegue a medias) sigue
+    # pudiendo crear procedimientos sin conocer esta columna.
+    necesita_sala = models.CharField(
+        max_length=12, choices=NecesitaSala.choices, default=NecesitaSala.NO, db_default=NecesitaSala.NO,
+    )
+    salas = models.ManyToManyField(
+        Recurso, blank=True, related_name="procedimientos_de_la_sala",
+        limit_choices_to={"tipo": Recurso.Tipo.SALA},
+        help_text="Las únicas salas que sirven cuando necesita_sala = algunas.",
+    )
+    equipos = models.ManyToManyField(
+        Recurso, blank=True, related_name="procedimientos_del_equipo",
+        limit_choices_to={"tipo": Recurso.Tipo.EQUIPO},
+        help_text="Necesita uno de estos equipos (sirve cualquiera libre). Vacío: no necesita equipo.",
     )
 
     class Meta:

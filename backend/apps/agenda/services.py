@@ -85,8 +85,10 @@ def bloqueos_aplicables(profesional_id, sede, desde, hasta):
     clínica. Un bloqueo de varios días cuenta en todos sus días."""
     alcance = Q(profesional_id=profesional_id)
     if sede is not None:
-        alcance |= Q(profesional__isnull=True, sede_id=sede.id)
-        alcance |= Q(profesional__isnull=True, sede__isnull=True, clinica_id=sede.clinica_id)
+        # Un bloqueo de sala o equipo ("No disponible…") lleva sede, pero solo
+        # afecta a ese recurso (apps/agenda/recursos.py), no a toda la sede.
+        alcance |= Q(profesional__isnull=True, recurso__isnull=True, sede_id=sede.id)
+        alcance |= Q(profesional__isnull=True, recurso__isnull=True, sede__isnull=True, clinica_id=sede.clinica_id)
     return BloqueoAgenda.objects.filter(
         alcance,
         estado=BloqueoAgenda.Estado.APROBADO,
@@ -258,6 +260,38 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
         actual = actual + timedelta(minutes=intervalo_min)
 
     return slots
+
+
+def horarios_disponibles(
+    profesional_id, sede, fecha, duracion_min: int, *, procedimientos=(), excluir_cita_id=None, buscar_proximo=True,
+) -> dict:
+    """Horarios del profesional en que además hay sala y equipos libres.
+
+    `motivo`: por qué se descartaron horarios por una sala o un equipo (para
+    decir "El Soprano no viene los lunes" en vez de una lista vacía). Si no
+    quedó ninguno por eso, `proximo` es el primer horario libre de los
+    próximos 21 días."""
+    from apps.agenda import recursos
+
+    slots = get_slots_disponibles(profesional_id, sede.id, fecha, duracion_min, excluir_cita_id=excluir_cita_id)
+    exigencias = recursos.exigencias_de(list(procedimientos), recursos.recursos_activos(sede)) if procedimientos else []
+    horarios, motivo = recursos.filtrar_horarios(
+        sede, slots, duracion_min, exigencias, excluir_cita_id=excluir_cita_id,
+    )
+    proximo = None
+    if not horarios and motivo and buscar_proximo:
+        for dias in range(1, 22):
+            otro_dia = fecha + timedelta(days=dias)
+            candidatos = get_slots_disponibles(
+                profesional_id, sede.id, otro_dia, duracion_min, excluir_cita_id=excluir_cita_id,
+            )
+            libres, _ = recursos.filtrar_horarios(
+                sede, candidatos, duracion_min, exigencias, excluir_cita_id=excluir_cita_id,
+            )
+            if libres:
+                proximo = libres[0]
+                break
+    return {"horarios": horarios, "motivo": motivo, "proximo": proximo}
 
 
 def duracion_de_sesion(sesion) -> tuple[int, str]:
@@ -514,11 +548,15 @@ def _reservar_sesion_del_item(item_cotizacion):
 
 @transaction.atomic
 def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -> Cita:
+    from apps.agenda import recursos
+
     data = dict(data)
     servicio = data.get("servicio")
     item_cotizacion = data.get("item_cotizacion")
     duracion_min_explicito = data.pop("duracion_min", None)
     sesion_ejecutada = data.pop("sesion_ejecutada", None)
+    sala = data.pop("sala", recursos.NO_ENVIADO)
+    equipos = data.pop("equipos", recursos.NO_ENVIADO)
     sede = data["sede"]
     paciente = data["paciente"]
     profesional = data["profesional"]
@@ -543,6 +581,17 @@ def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -
         raise ValidationError({"error": "El profesional no pertenece a la clinica de la sede."})
     _bloquear_agenda_del_profesional(profesional.id)
     validar_horario_cita(sede=sede, profesional=profesional, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin)
+    # Salas y equipos: lo que piden los procedimientos más lo elegido a mano.
+    asignacion = recursos.resolver_recursos(
+        sede=sede,
+        procedimientos=recursos.procedimientos_de(
+            servicio=servicio, item_cotizacion=item_cotizacion, sesion=sesion_ejecutada,
+        ),
+        fecha_inicio=fecha_inicio,
+        fecha_fin=fecha_fin,
+        sala=sala,
+        equipos=equipos,
+    )
     if avisar_cruce_paciente:
         avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin)
 
@@ -557,6 +606,9 @@ def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -
         canal_confirmacion=paciente.canal_confirmacion,
         created_by=created_by,
     )
+
+    if asignacion:
+        recursos.guardar_asignacion(cita, asignacion)
 
     if sesion_ejecutada:
         sesion_ejecutada.cita = cita

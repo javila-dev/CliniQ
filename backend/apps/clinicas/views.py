@@ -7,6 +7,7 @@ User = get_user_model()
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Exists, OuterRef, Prefetch, ProtectedError
 from django.shortcuts import get_object_or_404
+from django.utils import timezone
 from rest_framework import generics, status
 from rest_framework.decorators import action
 from rest_framework.exceptions import MethodNotAllowed, ValidationError
@@ -26,6 +27,7 @@ from apps.clinicas.models import (
     GrupoZonasDiagrama,
     PasoProtocolo,
     Plan,
+    Recurso,
     Sede,
     Servicio,
     ServicioConsentimiento,
@@ -58,6 +60,7 @@ from apps.clinicas.serializers import (
     PlanSerializer,
     PlanUsageSerializer,
     ProcedimientoSerializer,
+    RecursoSerializer,
     SedeSerializer,
     ServicioSerializer,
     ServicioConsentimientoSerializer,
@@ -733,6 +736,147 @@ class ClinicaWriteMixin:
         )
 
 
+def sedes_con_recursos(clinica_id):
+    return list(Sede.objects.filter(clinica_id=clinica_id, recursos__isnull=False).distinct())
+
+
+class RecursoViewSet(HasClinicamente, ModelViewSet):
+    """Salas y equipos de las sedes (docs/plan-salas-y-equipos.md).
+
+    Leerlos es dato de referencia para la agenda y los selectores: cualquiera
+    autenticado de la clínica. Crearlos y editarlos: `sedes.gestionar`. Cada
+    cambio reacomoda las citas futuras de la sede.
+    """
+
+    serializer_class = RecursoSerializer
+    queryset = Recurso.objects.select_related("sede").prefetch_related(
+        "horarios", "procedimientos_del_equipo",
+    ).order_by("sede__nombre", "tipo", "orden", "nombre")
+
+    def get_permissions(self):
+        if self.action in {"list", "retrieve"}:
+            return [IsAuthenticated()]
+        if self.action == "previsualizar":
+            return [RequireAnyPermission("sedes.gestionar", "servicios.gestionar")()]
+        return [RequirePermission("sedes.gestionar")()]
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        params = self.request.query_params
+        if params.get("sede"):
+            queryset = queryset.filter(sede_id=params["sede"])
+        if params.get("tipo"):
+            queryset = queryset.filter(tipo=params["tipo"])
+        if params.get("activo") is not None and params.get("activo") != "":
+            queryset = queryset.filter(activo=params["activo"].lower() == "true")
+        return queryset
+
+    def get_serializer_context(self):
+        return {**super().get_serializer_context(), "clinica": get_clinica_activa(self.request)}
+
+    def _reacomodar(self, *sedes):
+        from apps.agenda.recursos import reasignar_citas_futuras
+
+        return reasignar_citas_futuras([s for s in dict.fromkeys(sedes) if s is not None])
+
+    @transaction.atomic
+    def perform_create(self, serializer):
+        clinica = get_clinica_activa(self.request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa.", "code": "CLINICA_REQUERIDA"})
+        recurso = serializer.save(clinica=clinica)
+        self._reacomodar(recurso.sede)
+
+    @transaction.atomic
+    def perform_update(self, serializer):
+        sede_anterior = serializer.instance.sede
+        recurso = serializer.save()
+        self._reacomodar(sede_anterior, recurso.sede)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        from apps.agenda.models import CitaRecurso
+
+        if CitaRecurso.objects.filter(recurso=instance).exists():
+            raise ValidationError({
+                "error": "Ya tiene citas. Desactívalo en lugar de eliminarlo.",
+                "code": "RECURSO_CON_CITAS",
+            })
+        sede = instance.sede
+        instance.delete()
+        self._reacomodar(sede)
+
+    @action(detail=True, methods=["post"], url_path="no_disponible")
+    @transaction.atomic
+    def no_disponible(self, request, pk=None):
+        """"No disponible…": bloqueo ya aprobado de esta sala o equipo (equipo en
+        mantenimiento, que no llegó). Las citas afectadas se reacomodan; las que
+        no caben quedan con "Falta"."""
+        from apps.agenda.models import BloqueoAgenda
+        from apps.agenda.serializers import BloqueoAgendaSerializer
+
+        recurso = self.get_object()
+        entrada = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
+        datos = BloqueoAgendaSerializer(
+            data={**entrada, "recurso": str(recurso.id), "profesional": None}, context={"request": request},
+        )
+        datos.is_valid(raise_exception=True)
+        ahora = timezone.now()
+        bloqueo = datos.save(
+            clinica=recurso.clinica,
+            sede=recurso.sede,
+            recurso=recurso,
+            estado=BloqueoAgenda.Estado.APROBADO,
+            creado_por=request.user,
+            aprobado_por=request.user,
+            aprobado_en=ahora,
+        )
+        resumen = self._reacomodar(recurso.sede)
+        return Response(
+            {"bloqueo": BloqueoAgendaSerializer(bloqueo, context={"request": request}).data, "citas": resumen},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="previsualizar")
+    def previsualizar(self, request):
+        """Qué pasaría con las citas ya agendadas si se guarda un cambio, sin
+        guardarlo: `{"recurso_id"?, "recurso": {...}}` (crear o editar una sala o
+        un equipo) o `{"procedimiento_id", "procedimiento": {necesita_sala,
+        salas, equipos}}`. Responde cuántas citas futuras se revisan y cuáles
+        quedarían sin sala o equipo."""
+        from apps.agenda.recursos import reasignar_citas_futuras
+
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            raise ValidationError({"clinica": "No hay una clínica activa.", "code": "CLINICA_REQUERIDA"})
+        with transaction.atomic():
+            if "procedimiento" in request.data:
+                servicio = get_object_or_404(Servicio, pk=request.data.get("procedimiento_id"), clinica=clinica)
+                serializer = ServicioSerializer(
+                    servicio, data=request.data["procedimiento"], partial=True, context={"request": request},
+                )
+                serializer.is_valid(raise_exception=True)
+                serializer.save()
+                sedes = sedes_con_recursos(clinica.id)
+            elif "recurso" in request.data:
+                instancia = None
+                if request.data.get("recurso_id"):
+                    instancia = get_object_or_404(Recurso, pk=request.data["recurso_id"], clinica=clinica)
+                serializer = RecursoSerializer(
+                    instancia, data=request.data["recurso"], partial=instancia is not None,
+                    context={"request": request, "clinica": clinica},
+                )
+                serializer.is_valid(raise_exception=True)
+                sede_anterior = instancia.sede if instancia is not None else None
+                recurso = serializer.save(**({} if instancia is not None else {"clinica": clinica}))
+                sedes = [s for s in dict.fromkeys([sede_anterior, recurso.sede]) if s is not None]
+            else:
+                raise ValidationError({"error": "Envía el cambio de un procedimiento o de una sala o equipo."})
+            resumen = reasignar_citas_futuras(sedes)
+            transaction.set_rollback(True)
+        return Response(resumen)
+
+
 class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
     serializer_class = ServicioSerializer
     search_fields = ("nombre", "descripcion")
@@ -748,6 +892,8 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
             queryset=ServicioConsentimiento.objects.filter(activo=True).select_related("template").order_by("orden"),
             to_attr="_consentimientos_requeridos_prefetched",
         ),
+        "salas__sede",
+        "equipos__sede",
     ).all().order_by("nombre")
 
     def get_permissions(self):
@@ -856,7 +1002,14 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         self._guardar_con_nombre_unico(serializer, clinica, {"clinica": clinica})
 
     def perform_update(self, serializer):
+        cambia_recursos = any(c in serializer.validated_data for c in ("necesita_sala", "salas", "equipos"))
         self._guardar_con_nombre_unico(serializer, serializer.instance.clinica)
+        if cambia_recursos:
+            # Lo ya agendado de este procedimiento toma sala y equipo; lo que no
+            # cabe queda con "Falta sala/equipo" (apps/agenda/recursos.py).
+            from apps.agenda.recursos import reasignar_citas_futuras
+
+            reasignar_citas_futuras(sedes_con_recursos(serializer.instance.clinica_id))
 
     # Datos de negocio que impiden eliminar un procedimiento: (accesores, singular, plural).
     # Su configuración propia (pasos, zonas, consentimientos requeridos, profesionales
