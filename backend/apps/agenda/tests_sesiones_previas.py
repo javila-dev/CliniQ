@@ -401,3 +401,53 @@ class SesionesPreviasTests(TestCase):
         ajeno = TratamientoCatalogo.objects.create(clinica=otra, nombre="Ajeno")
         r = self._corregir(2, tratamiento={"tipo": "tratamiento", "tratamiento": str(ajeno.id)})
         self.assertEqual(r.json()["code"], "TRATAMIENTO_NO_ENCONTRADO")
+
+    # ── Marcar las previas una a una (no siempre se hicieron en orden) ─────
+
+    def _sesion_rf(self, numero):
+        return SesionProcedimiento.objects.get(tratamiento__cotizacion_item=self.item, numero=numero)
+
+    def _hechas(self):
+        return sorted(
+            SesionProcedimiento.objects.filter(
+                tratamiento__cotizacion_item=self.item, estado=SesionProcedimiento.Estado.COMPLETADO,
+            ).values_list("numero", flat=True)
+        )
+
+    def test_marca_las_previas_elegidas_aunque_no_sean_seguidas(self):
+        elegidas = [str(self._sesion_rf(n).id) for n in (1, 3, 5)]
+        r = self._corregir(3, previas=elegidas)
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self._hechas(), [1, 3, 5])
+        self.assertEqual(self._sesion_rf(2).observaciones, "")
+
+    def test_las_marcadas_deben_cuadrar_con_el_numero(self):
+        r = self._corregir(3, previas=[str(self._sesion_rf(1).id)])
+        self.assertEqual(r.json()["code"], "PREVIAS_NO_CUADRAN")
+
+    def test_con_otro_tratamiento_marca_las_previas_elegidas(self):
+        cita, _ = self._atencion_en_rf4()
+        datos = {
+            "clinica": str(self.clinica.id), "item": str(self.item.id), "sesiones": 2,
+            "tratamiento": {"tipo": "tratamiento", "tratamiento": str(self.correcto.id)},
+            "asignaciones": [{"cita": str(cita.id), "sesion": self._ranura(3)}],
+            "previas": [self._ranura(1), self._ranura(4)],
+        }
+        r = self.client.post(f"{BASE}/sesiones-previas/previsualizar/", datos, format="json")
+        self.assertEqual(r.status_code, 200, r.content)
+        self.assertEqual(
+            [f["origen"] for f in r.json()["protocolo"]], ["previa", "pendiente", "atencion", "previa"],
+        )
+        r = self.client.post(f"{BASE}/sesiones-previas/corregir/", {**datos, "motivo": "Era HIFU, no RF"}, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual(self._hechas(), [1, 3, 4])
+
+    def test_una_previa_no_puede_ir_en_la_sesion_de_una_atencion(self):
+        cita, _ = self._atencion_en_rf4()
+        r = self.client.post(f"{BASE}/sesiones-previas/corregir/", {
+            "clinica": str(self.clinica.id), "item": str(self.item.id), "sesiones": 1,
+            "tratamiento": {"tipo": "tratamiento", "tratamiento": str(self.correcto.id)},
+            "asignaciones": [{"cita": str(cita.id), "sesion": self._ranura(3)}],
+            "previas": [self._ranura(3)], "motivo": "Era HIFU, no RF",
+        }, format="json")
+        self.assertEqual(r.json()["code"], "PREVIA_NO_ENCONTRADA")

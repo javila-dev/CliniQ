@@ -144,6 +144,8 @@ class PrevisualizarCorreccionMigradoSerializer(serializers.Serializer):
     sesiones = serializers.IntegerField(min_value=0)
     tratamiento = TratamientoMigradoSerializer(required=False, allow_null=True)
     asignaciones = AsignacionAtencionSerializer(many=True, required=False, default=list)
+    # Las sesiones marcadas como hechas antes de CliniQ (ver sesiones_previas.corregir).
+    previas = serializers.ListField(child=serializers.CharField(max_length=80), required=False, allow_null=True)
 
 
 class CorregirSesionesPreviasSerializer(PrevisualizarCorreccionMigradoSerializer):
@@ -200,7 +202,7 @@ class SoportePrevisualizarCorreccionMigradoView(_SoporteView):
         v = datos.validated_data
         return Response(sesiones_previas.corregir(
             _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
-            asignaciones=v["asignaciones"], confirmar=False,
+            asignaciones=v["asignaciones"], previas=v.get("previas"), confirmar=False,
         ))
 
 
@@ -211,7 +213,7 @@ class SoporteCorregirSesionesPreviasView(_SoporteView):
         v = datos.validated_data
         correccion = sesiones_previas.corregir(
             _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
-            asignaciones=v["asignaciones"], motivo=v["motivo"],
+            asignaciones=v["asignaciones"], previas=v.get("previas"), motivo=v["motivo"],
             usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

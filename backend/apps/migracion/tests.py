@@ -131,6 +131,28 @@ class PacienteEnCursoTests(TestCase):
         self.assertEqual(item["citas_restantes"], 3)
         self.assertEqual(item["sesiones_previas"], 3)
 
+    def test_marca_las_sesiones_elegidas_aunque_no_sean_seguidas(self):
+        """El asistente marca sesiones sueltas: quedan hechas esas, no las primeras."""
+        from apps.clinicas.models import Servicio, TratamientoCatalogo
+        from apps.protocolos.models import SesionProcedimiento
+
+        proc = Servicio.objects.create(clinica=self.clinica, nombre="Radiofrecuencia", duracion_min=30, precio="100000.00")
+        trat_cat = TratamientoCatalogo.objects.create(clinica=self.clinica, nombre="RF x6")
+        tipo = trat_cat.tipos_sesion.create(nombre="RF", cantidad=6, orden=1, es_compromiso=True)
+        tipo.procedimientos.create(procedimiento=proc, orden=1)
+        p = self._payload(
+            tratamiento={
+                "tipo": "tratamiento", "tratamiento": str(trat_cat.id), "descripcion": "RF x6",
+                "num_sesiones_total": 6, "precio_total_pactado": "1800000.00",
+            },
+            sesiones_realizadas=[{"sesion": f"{tipo.id}:2"}, {"sesion": f"{tipo.id}:5"}],
+            plan_saldo=[{"valor_esperado": "800000.00", "fecha_esperada": "2026-04-15", "tipo": self._forma_pago()}],
+        )
+        r = self.client.post(URL, p, format="json")
+        self.assertEqual(r.status_code, 201, r.content)
+        hechas = SesionProcedimiento.objects.filter(estado=SesionProcedimiento.Estado.COMPLETADO)
+        self.assertEqual(sorted(hechas.values_list("numero", flat=True)), [2, 5])
+
     def test_crea_cita_para_sesion_con_detalle(self):
         prof = User.objects.create_user(
             email="prof-mig@example.com", password="secret123",

@@ -14,6 +14,8 @@ class SesionRealizadaSerializer(serializers.Serializer):
     servicio = serializers.UUIDField(required=False, allow_null=True)
     profesional = serializers.UUIDField(required=False, allow_null=True)
     fecha = serializers.DateField(required=False, allow_null=True)
+    # Qué sesión del protocolo es ("<tipo de sesión>:<número>"): se marca esa y no la primera libre.
+    sesion = serializers.RegexField(r"^[0-9a-f-]{36}:\d+$", required=False)
 
 
 class PagoPrevioSerializer(serializers.Serializer):

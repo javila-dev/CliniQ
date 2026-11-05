@@ -69,9 +69,14 @@ def campos_item(trat: dict, clinica) -> dict:
     }
 
 
-def crear_protocolo(item, sin_detalle: int, *, fecha=None) -> list[str]:
+def clave_sesion(sesion) -> str:
+    """Identifica una sesión del protocolo por su lugar: "<tipo de sesión>:<número>"."""
+    return f"{sesion.tipo_sesion_id}:{sesion.numero}"
+
+
+def crear_protocolo(item, sin_detalle: int, *, fecha=None, claves=None) -> list[str]:
     """Protocolo de seguimiento del ítem (TratamientoPaciente + sesiones) con las
-    primeras ``sin_detalle`` sesiones ya hechas.
+    ``sin_detalle`` sesiones ya hechas: las de ``claves`` si vienen, si no las primeras.
 
     El asistente NO pasa por aceptar_cotizacion, así que hay que crear el
     protocolo a mano; si no, el panel "Seguimiento de sesiones" no muestra
@@ -83,19 +88,25 @@ def crear_protocolo(item, sin_detalle: int, *, fecha=None) -> list[str]:
     tp = crear_tratamiento_desde_cotizacion(item)
     if tp is None:
         return []
-    marcar_previas(tp, item, sin_detalle, fecha=fecha)
+    marcar_previas(tp, item, sin_detalle, fecha=fecha, claves=claves)
     return [str(tp.id)]
 
 
-def marcar_previas(tp, item, n: int, *, fecha=None) -> None:
-    """Las primeras ``n`` sesiones libres del protocolo (pendientes y sin cita)
-    quedan hechas antes de CliniQ; el protocolo termina si ya no le falta nada."""
+def marcar_previas(tp, item, n: int, *, fecha=None, claves=None) -> None:
+    """Sesiones libres del protocolo (pendientes y sin cita) que quedan hechas antes
+    de CliniQ: las de ``claves`` (no siempre se hicieron en orden) o, sin ellas, las
+    primeras ``n``. El protocolo termina si ya no le falta nada."""
     from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
 
     libres = SesionProcedimiento.objects.filter(
         tratamiento=tp, estado=SesionProcedimiento.Estado.PENDIENTE, cita__isnull=True,
     ).order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at")
-    for s in list(libres[:n]) if n > 0 else []:
+    if claves is not None:
+        elegidas = set(claves)
+        previas = [s for s in libres if clave_sesion(s) in elegidas]
+    else:
+        previas = list(libres[:n]) if n > 0 else []
+    for s in previas:
         s.estado = SesionProcedimiento.Estado.COMPLETADO
         s.fecha = fecha
         s.observaciones = OBSERVACION_PREVIA
@@ -149,7 +160,12 @@ def cargar_paciente_en_curso(data: dict, *, clinica, sede, paciente, actor) -> L
         sesiones_previas_consumidas=sin_detalle,
         **campos_item(trat, clinica),
     )
-    tratamientos_paciente_ids = crear_protocolo(item, sin_detalle, fecha=trat.get("fecha_inicio") or None)
+    # Las que el asistente marcó una por una (no siempre van en orden).
+    claves = [s["sesion"] for s in realizadas if not s.get("profesional") and s.get("sesion")]
+    tratamientos_paciente_ids = crear_protocolo(
+        item, sin_detalle, fecha=trat.get("fecha_inicio") or None,
+        claves=claves if claves and len(claves) == sin_detalle else None,
+    )
 
     # ── 2. Cobro + pagos previos ────────────────────────────────────────────
     cobro = Cobro.objects.create(

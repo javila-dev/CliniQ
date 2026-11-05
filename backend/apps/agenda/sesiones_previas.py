@@ -233,15 +233,16 @@ def _validar_rango(sesiones, *, minimo, maximo, total, con_cita, agendadas):
         error(f"El paquete tiene {total} sesiones{extra}: el máximo de previas es {maximo}.", "SESIONES_SOBRE_MAXIMO")
 
 
-def _remarcar_previas(item, estado, sin_cita) -> tuple[list[str], list[str]]:
-    """Mismo tratamiento: las primeras `sin_cita` sesiones quedan hechas y las demás pendientes."""
+def _remarcar_previas(item, estado, sin_cita, previas=None) -> tuple[list[str], list[str]]:
+    """Mismo tratamiento: quedan hechas las sesiones `previas` (ids) que soporte
+    marcó, o sin ellas las primeras `sin_cita`; las demás quedan pendientes."""
     from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
 
     candidatas = estado["_candidatas"]
     fecha = next((s.fecha for s in candidatas if _es_previa(s) and s.fecha), None)
     marcadas, desmarcadas = [], []
     for i, sesion in enumerate(candidatas):
-        hecha = i < sin_cita
+        hecha = str(sesion.id) in previas if previas is not None else i < sin_cita
         if hecha and not _es_previa(sesion):
             sesion.estado = SesionProcedimiento.Estado.COMPLETADO
             sesion.fecha = fecha
@@ -275,7 +276,17 @@ def _nombre_sesion(sesion) -> str | None:
     return f"{s['nombre']} #{s['numero']}"
 
 
-def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones) -> tuple[list[str], list[dict]]:
+def _validar_previas(previas, sin_cita, permitidas):
+    """Las sesiones marcadas a mano: tantas como previas sin cita y todas válidas."""
+    if previas is None:
+        return
+    if len(set(previas)) != sin_cita:
+        error("Marca exactamente las sesiones hechas antes de CliniQ.", "PREVIAS_NO_CUADRAN")
+    if not set(previas) <= permitidas:
+        error("Una de las sesiones marcadas no está libre en el protocolo.", "PREVIA_NO_ENCONTRADA")
+
+
+def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones, previas=None) -> tuple[list[str], list[dict]]:
     """Rehace el ítem y su protocolo con el otro tratamiento, como en la carga, y
     pasa cada atención de la app a la sesión que soporte eligió."""
     from apps.clinicas.models import TratamientoCatalogo
@@ -306,8 +317,11 @@ def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones) ->
         error("Indica a qué sesión del tratamiento nuevo pasa cada atención.", "ASIGNACIONES_INCOMPLETAS")
     if len(set(destino_de.values())) != len(destino_de):
         error("Dos atenciones no pueden ir a la misma sesión.", "SESION_REPETIDA")
-    if atenciones and not set(destino_de.values()) <= {r["clave"] for r in _ranuras(catalogo)}:
+    ranuras = {r["clave"] for r in _ranuras(catalogo)} if catalogo else set()
+    if atenciones and not set(destino_de.values()) <= ranuras:
         error("Una de las sesiones elegidas no es del tratamiento nuevo.", "SESION_NO_ENCONTRADA")
+    # Las previas se marcan en las sesiones que no quedaron para una atención.
+    _validar_previas(previas, sesiones - estado["con_cita"], ranuras - set(destino_de.values()))
 
     fecha = next((s.fecha for s in estado["_candidatas"] if _es_previa(s) and s.fecha), None)
     # El protocolo viejo se aparta del ítem para crear el nuevo; al final se borra
@@ -356,7 +370,7 @@ def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones) ->
                 destino.profesional = cita.profesional
             destino.save()
     if tp is not None:
-        marcar_previas(tp, item, sin_cita, fecha=fecha)
+        marcar_previas(tp, item, sin_cita, fecha=fecha, claves=previas)
     TratamientoPaciente.objects.filter(pk__in=viejos).delete()
     return ids, movidas
 
@@ -381,11 +395,13 @@ def _protocolo_payload(item) -> list[dict]:
 
 
 def corregir(
-    clinica, item_id, *, sesiones, tratamiento=None, asignaciones=(), motivo="", usuario=None, request=None,
-    confirmar=True,
+    clinica, item_id, *, sesiones, tratamiento=None, asignaciones=(), previas=None, motivo="", usuario=None,
+    request=None, confirmar=True,
 ):
     """Corrige las sesiones previas y, si viene `tratamiento`, el tratamiento del
-    paquete. Con ``confirmar=False`` hace todo, devuelve cómo queda y lo descarta."""
+    paquete. `previas` son las sesiones que soporte marcó como hechas antes de
+    CliniQ: ids del protocolo actual, o con otro tratamiento "<tipo de sesión>:<número>".
+    Con ``confirmar=False`` hace todo, devuelve cómo queda y lo descarta."""
     from apps.cotizaciones.models import ItemCotizacion
 
     motivo = (motivo or "").strip()
@@ -403,20 +419,24 @@ def corregir(
         marcadas = desmarcadas = movidas = []
         if tratamiento:
             manifest["tratamientos_paciente"], movidas = _cambiar_tratamiento(
-                clinica, item, estado, tratamiento, sesiones, asignaciones,
+                clinica, item, estado, tratamiento, sesiones, asignaciones, previas,
             )
         else:
             if estado["bloqueo"]:
                 error(estado["bloqueo"], "SESIONES_HECHAS_EN_APP")
-            if sesiones == antes:
-                error("El paquete ya tiene ese número de sesiones previas.", "SIN_CAMBIOS")
+            actuales = {str(s.id) for s in estado["_candidatas"] if _es_previa(s)}
+            if sesiones == antes and (previas is None or set(previas) == actuales):
+                error("El paquete ya tiene esas sesiones previas.", "SIN_CAMBIOS")
+            _validar_previas(previas, sesiones - estado["con_cita"], {str(s.id) for s in estado["_candidatas"]})
             _validar_rango(
                 sesiones, minimo=estado["minimo"], maximo=estado["maximo"], total=estado["total"],
                 con_cita=estado["con_cita"], agendadas=estado["agendadas_en_app"],
             )
             item.sesiones_previas_consumidas = sesiones - estado["con_cita"]
             item.save(update_fields=["sesiones_previas_consumidas", "updated_at"])
-            marcadas, desmarcadas = _remarcar_previas(item, estado, sesiones - estado["con_cita"])
+            marcadas, desmarcadas = _remarcar_previas(
+                item, estado, sesiones - estado["con_cita"], set(previas) if previas is not None else None,
+            )
 
         # El resumen de la carga (pantalla de puesta en marcha) refleja la corrección.
         total = item.num_sesiones_efectivas()
