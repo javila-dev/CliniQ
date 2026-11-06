@@ -49,6 +49,16 @@ class QuitarFotoAtencionAbiertaTests(ClinicaFixtureMixin, TestCase):
         self.assertEqual(r.status_code, 201, r.content[:300])
         return r.json()["id"]
 
+    def test_varias_fotos_del_mismo_tipo_se_cuentan_en_la_galeria(self):
+        for _ in range(3):
+            self._subir()
+
+        r = self.client.get(f"/api/v1/historia-clinica/historias/{self.nota.historia_id}/galeria/")
+
+        self.assertEqual(r.status_code, 200, r.content[:300])
+        self.assertEqual(r.json()["total"], 3)
+        self.assertEqual(r.json()["por_tipo"]["antes"], 3)
+
     def test_con_la_atencion_abierta_quita_su_foto_sin_permiso_de_eliminar(self):
         foto = self._subir()
 

@@ -82,7 +82,7 @@ from apps.historia_clinica.autoria import (
 )
 from apps.historia_clinica import zonas as zonas_nota
 from apps.users.authorization import atiende_solo_lo_propio, user_has_permission, user_is_tenant_admin
-from apps.users.permissions import IsAdmin, RequirePermission, get_clinica_activa
+from apps.users.permissions import IsAdmin, RequireAnyPermission, RequirePermission, get_clinica_activa
 
 
 logger = logging.getLogger(__name__)
@@ -327,7 +327,9 @@ class HistoriaClinicaViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, m
         if cita:
             fotos = fotos.filter(nota__cita_id=cita)
 
-        por_tipo_qs = fotos.values("tipo").annotate(total=Count("id"))
+        # Sin quitar el orden por fecha, Django agrupa por (tipo, created_at) y cada
+        # foto cuenta aparte: con varias "antes" el contador decía 1.
+        por_tipo_qs = fotos.order_by().values("tipo").annotate(total=Count("id"))
         por_tipo = {item["tipo"]: item["total"] for item in por_tipo_qs}
         payload = []
         for foto in fotos:
@@ -1450,7 +1452,10 @@ class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, Gene
         if self.action == "create":
             return [RequirePermission("inventario.consumo.registrar")()]
         if self.action == "destroy":
-            return [RequirePermission("inventario.consumo.eliminar")()]
+            # Quien registra consumos corrige los de la atención en curso, como con
+            # las fotos; `perform_destroy` exige la nota abierta si no tiene
+            # `inventario.consumo.eliminar` (06/11/2026).
+            return [RequireAnyPermission("inventario.consumo.eliminar", "inventario.consumo.registrar")()]
         return [RequirePermission("historia.ver")()]
 
     def get_queryset(self):
@@ -1483,5 +1488,6 @@ class ConsumoInsumoViewSet(mixins.ListModelMixin, mixins.DestroyModelMixin, Gene
         return Response(ConsumoInsumoSerializer(consumo).data, status=status.HTTP_201_CREATED)
 
     def perform_destroy(self, instance):
-        exigir_documentable(self.request.user, instance.nota, en_borrador=False)
+        puede_eliminar = user_has_permission(self.request.user, "inventario.consumo.eliminar", request=self.request)
+        exigir_documentable(self.request.user, instance.nota, en_borrador=not puede_eliminar)
         eliminar_consumo_insumo(instance, self.request.user)
