@@ -203,7 +203,9 @@ class TratamientoPacienteSerializer(serializers.ModelSerializer):
             "procedimientos_ejecutados",
             "consentimientos_verificados",
             "tipo_sesion__procedimientos__procedimiento",
-        ).all():
+        ).order_by("tipo_sesion__orden", "numero", "paso__orden", "created_at"):
+            # Por su lugar en el protocolo, no por fecha de creación (una atención
+            # pasada de paquete en soporte conserva su fecha de creación antigua).
             tipo = sesion.tipo_sesion
             if tipo is None:
                 continue

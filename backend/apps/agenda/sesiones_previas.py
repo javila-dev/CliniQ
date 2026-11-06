@@ -366,6 +366,9 @@ def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones, pr
             vieja.tratamiento = tp
             destino.delete()
             vieja.save()
+            # El protocolo se lista por fecha de creación: con la suya, la atención
+            # saldría de primera aunque ocupe, p. ej., la sesión 4.
+            SesionProcedimiento.objects.filter(pk=vieja.pk).update(created_at=destino.created_at)
         else:
             destino.cita = cita
             if cita.estado in ESTADOS_HECHA:

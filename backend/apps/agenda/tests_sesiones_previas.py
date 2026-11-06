@@ -13,6 +13,7 @@ from apps.cotizaciones.models import ItemCotizacion
 from apps.migracion.models import LoteMigracion
 from apps.pacientes.models import Paciente
 from apps.protocolos.models import SesionProcedimiento, TratamientoPaciente
+from apps.protocolos.serializers import TratamientoPacienteSerializer
 
 User = get_user_model()
 BASE = "/api/v1/admin/soporte"
@@ -331,11 +332,13 @@ class SesionesPreviasTests(TestCase):
                          (cita.id, SesionProcedimiento.Estado.COMPLETADO, self.profesional.id))
         protocolo = [
             (s.numero, s.estado, s.cita_id is not None)
-            for s in nuevo.sesiones.order_by("numero")
+            for s in nuevo.sesiones.all()  # orden por defecto: la atención no sale de primera
         ]
         self.assertEqual(protocolo, [
             (1, "completado", False), (2, "completado", False), (3, "completado", True), (4, "pendiente", False),
         ])
+        [grupo] = TratamientoPacienteSerializer(nuevo, context={}).data["grupos"]
+        self.assertEqual([s["numero"] for s in grupo["sesiones"]], [1, 2, 3, 4])
         self.item.refresh_from_db()
         self.assertEqual(self.item.citas_restantes(), 1)
         correccion = CorreccionSoporte.objects.get()
