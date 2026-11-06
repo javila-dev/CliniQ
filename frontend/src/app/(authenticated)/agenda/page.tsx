@@ -311,6 +311,11 @@ function CompactCitaCard({
   const color = ESTADO_COLORS[cita.estado]
   const estado = ESTADO_CITA_CONFIG[cita.estado]?.label ?? cita.estado
   const servicio = cita.servicio_nombre || cita.motivo || 'Consulta'
+  const sesion = cita.sesion_tratamiento
+  // El nombre del tipo de sesión solo aporta si no repite el del tratamiento.
+  const nombreSesion = sesion && sesion.tipo_sesion_nombre.trim().toLowerCase() !== servicio.trim().toLowerCase()
+    ? sesion.tipo_sesion_nombre
+    : null
 
   return (
     <TooltipProvider delayDuration={300}>
@@ -343,6 +348,12 @@ function CompactCitaCard({
             <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium', ESTADO_CITA_CONFIG[cita.estado]?.color)}>{estado}</span>
           </div>
           <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
+          {sesion && (
+            <p className="text-xs">
+              <span className="font-medium">Sesión {sesion.numero} de {sesion.total}</span>
+              {nombreSesion && <span className="text-muted-foreground"> · {nombreSesion}</span>}
+            </p>
+          )}
           <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
         </TooltipContent>
       </Tooltip>
