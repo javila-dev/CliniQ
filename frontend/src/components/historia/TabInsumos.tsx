@@ -32,7 +32,9 @@ export function TabInsumos({ notaId, sedeId }: Props) {
   const { toast } = useToast()
 
   const puedeRegistrar = hasPermission(user, PERM.INVENTARIO_CONSUMO_REGISTRAR)
-  const puedeEliminar = hasPermission(user, PERM.INVENTARIO_CONSUMO_ELIMINAR)
+  // Quien registra consumos corrige los de la atención en curso (esta pestaña solo
+  // se muestra con la atención abierta); el backend lo valida.
+  const puedeEliminar = puedeRegistrar || hasPermission(user, PERM.INVENTARIO_CONSUMO_ELIMINAR)
 
   const [open, setOpen] = useState(false)
   const [insumoId, setInsumoId] = useState('')
