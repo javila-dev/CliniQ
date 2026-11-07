@@ -40,6 +40,7 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
     pdf_url = serializers.SerializerMethodField()
     # Siempre enmascarado: solo sirve para confirmar a que numero salio el link.
     link_enviado_a = serializers.SerializerMethodField()
+    firma_desactualizada_pdf_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Consentimiento
@@ -65,6 +66,8 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "link_enviado_en",
             "link_enviado_a",
             "pdf_url",
+            "firma_desactualizada_en",
+            "firma_desactualizada_pdf_url",
             "revocado_en",
             "motivo_revocacion",
             "created_at",
@@ -84,10 +87,20 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "link_enviado_en",
             "link_enviado_a",
             "pdf_url",
+            "firma_desactualizada_en",
+            "firma_desactualizada_pdf_url",
             "revocado_en",
             "motivo_revocacion",
             "created_at",
         )
+
+    def get_firma_desactualizada_pdf_url(self, obj):
+        if not obj.firma_desactualizada_pdf:
+            return None
+        try:
+            return obj.firma_desactualizada_pdf.url
+        except Exception:
+            return None
 
     def get_link_enviado_a(self, obj):
         from apps.pacientes.serializers import enmascarar_cola

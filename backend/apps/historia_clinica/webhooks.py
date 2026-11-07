@@ -189,6 +189,18 @@ def _handle_compromiso_pago(external_id: str, event: str, document_id: str | Non
             "Webhook Documenso compromiso_pago: sobre desactualizado ignorado | id=%s | event=%s | document_id=%s",
             consentimiento_id, event, document_id,
         )
+        # Se deja constancia (con el PDF) para que recepcion vea que firmo una
+        # version anterior y le envie el link nuevo.
+        if event in _EVENTOS_COMPLETADO and document_id:
+            from apps.consentimientos.services import registrar_firma_desactualizada
+
+            try:
+                registrar_firma_desactualizada(consentimiento, document_id, ya_sellado=True)
+            except Exception:
+                logger.exception(
+                    "Webhook Documenso compromiso_pago: fallo al registrar firma desactualizada | id=%s",
+                    consentimiento_id,
+                )
         return
 
     if event not in {"DOCUMENT_COMPLETED", "document.completed"}:

@@ -215,6 +215,27 @@ class WebhookCompromisoPagoIdempotenciaTests(TestCase):
         self.consentimiento.refresh_from_db()
         self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
 
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso", return_value=b"%PDF-viejo")
+    def test_firma_de_un_sobre_anterior_queda_registrada_con_su_pdf(self, descargar):
+        """La firma del link viejo no cuenta, pero queda constancia (fecha y PDF)
+        para que recepcion vea por que hay que enviarle el link nuevo."""
+        self._post_webhook(document_id="doc-viejo", huella="0" * 16)
+
+        self.consentimiento.refresh_from_db()
+        self.assertEqual(self.consentimiento.estado, Consentimiento.Estado.PENDIENTE)
+        self.assertIsNotNone(self.consentimiento.firma_desactualizada_en)
+        self.assertTrue(self.consentimiento.firma_desactualizada_pdf)
+        descargar.assert_called_once_with("doc-viejo")
+
+        # Documenso reintenta el webhook: no se vuelve a descargar.
+        self._post_webhook(document_id="doc-viejo", huella="0" * 16)
+        descargar.assert_called_once()
+
+        self.client.force_authenticate(self.superadmin)
+        data = self.client.get(f"/api/v1/consentimientos/{self.consentimiento.id}/").json()
+        self.assertIsNotNone(data["firma_desactualizada_en"])
+        self.assertTrue(data["firma_desactualizada_pdf_url"])
+
     @patch("apps.historia_clinica.webhooks.descargar_pdf_documenso", return_value=None)
     def test_sobre_sin_huella_ya_descartado_se_ignora(self, _descargar):
         # Sobre creado antes de la huella; el documento se regenero (envelope

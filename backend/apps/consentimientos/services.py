@@ -388,6 +388,87 @@ def eliminar_sobre_documenso(envelope_id: str, *, consentimiento_id=None) -> Non
         )
 
 
+def registrar_firma_desactualizada(consentimiento: Consentimiento, envelope_id: str, *, ya_sellado: bool = False) -> None:
+    """El paciente firmo un sobre de una version anterior del documento (la
+    cotizacion cambio despues de enviarle el link). Esa firma no acepta nada;
+    solo se deja constancia de cuando y del PDF que firmo, para que recepcion
+    entienda por que tiene que enviarle el link nuevo.
+
+    ``ya_sellado``: viene del webhook de documento completado, asi que la
+    descarga ya trae la firma. En otro caso solo se guarda si Documenso ya lo sello.
+    """
+    from django.core.files.base import ContentFile
+
+    from apps.historia_clinica.services import descargar_pdf_documenso, descargar_pdf_documenso_sellado
+
+    if consentimiento.estado != Consentimiento.Estado.PENDIENTE or not envelope_id:
+        return
+    update_fields = []
+    if consentimiento.firma_desactualizada_en is None:
+        consentimiento.firma_desactualizada_en = timezone.now()
+        update_fields.append("firma_desactualizada_en")
+    if not consentimiento.firma_desactualizada_pdf:
+        descargar = descargar_pdf_documenso if ya_sellado else descargar_pdf_documenso_sellado
+        try:
+            pdf_bytes = descargar(str(envelope_id))
+        except Exception:
+            logger.warning(
+                "[registrar_firma_desactualizada] no se pudo descargar el PDF | consentimiento_id=%s | envelope_id=%s",
+                consentimiento.id, envelope_id, exc_info=True,
+            )
+            pdf_bytes = None
+        if pdf_bytes:
+            consentimiento.firma_desactualizada_pdf.save(
+                f"compromiso_pago-version-anterior-{consentimiento.id}.pdf", ContentFile(pdf_bytes), save=False,
+            )
+            update_fields.append("firma_desactualizada_pdf")
+    if update_fields:
+        consentimiento.save(update_fields=[*update_fields, "updated_at"])
+        logger.info(
+            "[registrar_firma_desactualizada] firma de version anterior | consentimiento_id=%s | envelope_id=%s",
+            consentimiento.id, envelope_id,
+        )
+
+
+def _sobre_firmado_en_documenso(envelope_id: str) -> bool:
+    """True si Documenso reporta firmado el sobre; False si no o si no se pudo consultar."""
+    from apps.historia_clinica.services import DocumensoIntegrationError, _fetch_documenso_json
+
+    try:
+        payload = _fetch_documenso_json("GET", f"/api/v2/envelope/{envelope_id}")
+    except (DocumensoIntegrationError, _requests.RequestException):
+        return False
+    return _estado_firma_desde_envelope(payload) == "firmada"
+
+
+def descartar_sobre_reemplazado(envelope_id: str, *, consentimiento_id) -> None:
+    """El documento se regenero: el sobre anterior ya no sirve.
+
+    Si el paciente ya lo habia firmado (el aviso de Documenso no llego a tiempo),
+    se registra como firma desactualizada y el sobre se conserva; si no, se
+    borra para que el link viejo deje de abrirse.
+    """
+    consentimiento = Consentimiento.objects.filter(id=consentimiento_id).first()
+    if consentimiento is not None and _sobre_firmado_en_documenso(envelope_id):
+        registrar_firma_desactualizada(consentimiento, envelope_id)
+        return
+    eliminar_sobre_documenso(envelope_id, consentimiento_id=consentimiento_id)
+
+
+def _revisar_sobre_reemplazado(consentimiento: Consentimiento) -> None:
+    """Respaldo de la verificacion manual: si el aviso de Documenso no llego,
+    consulta si el paciente firmo el sobre de la version anterior."""
+    envelope_id = (consentimiento.documenso_sobre_reemplazado_id or "").strip()
+    if not envelope_id or consentimiento.estado != Consentimiento.Estado.PENDIENTE:
+        return
+    if consentimiento.firma_desactualizada_en is None:
+        if not _sobre_firmado_en_documenso(envelope_id):
+            return
+    elif consentimiento.firma_desactualizada_pdf:
+        return
+    registrar_firma_desactualizada(consentimiento, envelope_id)
+
+
 def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     if consentimiento.plantilla_id:
         return consentimiento.plantilla.nombre
@@ -1131,6 +1212,7 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
             "[verificar_firma_compromiso_pago] sin documento_id | consentimiento_id=%s",
             consentimiento.id,
         )
+        _revisar_sobre_reemplazado(consentimiento)
         return consentimiento.estado
 
     try:
@@ -1161,6 +1243,8 @@ def verificar_firma_compromiso_pago_en_documenso(consentimiento: Consentimiento)
                     consentimiento.id,
                 )
         _auto_aceptar_cotizacion(consentimiento)
+    else:
+        _revisar_sobre_reemplazado(consentimiento)
 
     return consentimiento.estado
 

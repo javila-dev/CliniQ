@@ -112,6 +112,13 @@ class Consentimiento(BaseModel):
     # se regenera (el link anterior deja de servir).
     link_enviado_en = models.DateTimeField(null=True, blank=True)
     link_enviado_a = models.CharField(max_length=30, blank=True)
+    # Sobre de Documenso descartado al regenerar el documento (la cotizacion
+    # cambio despues de crearlo). Si el paciente firma ese link viejo, la firma
+    # no cuenta, pero se registra con su PDF para que recepcion vea que firmo y
+    # por que hay que enviarle el link nuevo.
+    documenso_sobre_reemplazado_id = models.CharField(max_length=200, blank=True)
+    firma_desactualizada_en = models.DateTimeField(null=True, blank=True)
+    firma_desactualizada_pdf = models.FileField(upload_to="consentimientos/%Y/%m/", null=True, blank=True)
     revocado_en = models.DateTimeField(null=True, blank=True)
     motivo_revocacion = models.TextField(blank=True)
 

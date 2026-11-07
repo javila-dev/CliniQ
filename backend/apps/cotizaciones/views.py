@@ -460,7 +460,7 @@ class CotizacionViewSet(ModelViewSet):
         """
         from apps.consentimientos.models import Consentimiento
         from apps.consentimientos.services import (
-            eliminar_sobre_documenso,
+            descartar_sobre_reemplazado,
             es_acta_acuerdo_pago,
             renderizar_compromiso_pago_estandar,
         )
@@ -490,9 +490,12 @@ class CotizacionViewSet(ModelViewSet):
         compromiso.link_enviado_en = None
         compromiso.link_enviado_a = ""
         compromiso.token_expira = timezone.now() + timedelta(hours=48)
+        if sobre_anterior:
+            # Se recuerda para detectar si el paciente firma el link viejo.
+            compromiso.documenso_sobre_reemplazado_id = sobre_anterior
         compromiso.save()
         if sobre_anterior:
-            transaction.on_commit(lambda: eliminar_sobre_documenso(sobre_anterior, consentimiento_id=compromiso.id))
+            transaction.on_commit(lambda: descartar_sobre_reemplazado(sobre_anterior, consentimiento_id=compromiso.id))
         return compromiso
 
     def _serializar_compromiso_pago(self, compromiso_pago):

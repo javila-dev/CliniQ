@@ -1,3 +1,4 @@
+import tempfile
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
@@ -245,3 +246,75 @@ class CompromisoPagoNoAparecEnListadoGlobalTests(TestCase):
         self.assertIsNotNone(compromiso_pago)
         self.assertEqual(compromiso_pago["id"], str(self.compromiso.id))
         self.assertEqual(compromiso_pago["estado"], Consentimiento.Estado.PENDIENTE)
+
+
+@override_settings(
+    DEFAULT_FILE_STORAGE="django.core.files.storage.FileSystemStorage",
+    MEDIA_ROOT=tempfile.gettempdir(),
+)
+class FirmaDeVersionAnteriorTests(TestCase):
+    """El paciente firma el link de una version anterior del compromiso (la
+    cotizacion cambio despues de enviarlo): no cuenta, pero queda constancia con
+    el PDF para que recepcion sepa por que enviar el link nuevo."""
+
+    def setUp(self):
+        self.client = APIClient()
+        self.superadmin = User.objects.create_user(
+            email="root-version-anterior@example.com", password="secret123",
+            first_name="Root", last_name="Version", rol=User.Role.SUPERADMIN,
+        )
+        self.clinica = Clinica.objects.create(nombre="Clinica Version Anterior", nit="901777999")
+        self.paciente = Paciente.objects.create(
+            clinica=self.clinica, tipo_documento=Paciente.TipoDocumento.CC, numero_documento="333444777",
+            nombres="Laura", apellidos="Gil", fecha_nacimiento=timezone.localdate() - timedelta(days=30 * 365),
+            sexo=Paciente.Sexo.FEMENINO, direccion="Calle 6", telefono="3000000009",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP, autoriza_datos=True,
+        )
+        cotizacion = Cotizacion.objects.create(clinica=self.clinica, paciente=self.paciente)
+        self.consentimiento = Consentimiento.objects.create(
+            cotizacion=cotizacion, paciente=self.paciente, plantilla=None,
+            contenido_snapshot="<p>Nuevo</p>", hash_contenido="n" * 64,
+            documenso_documento_id="sobre-nuevo", documenso_sobre_reemplazado_id="sobre-viejo",
+        )
+
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso_sellado", return_value=b"%PDF-viejo")
+    @patch("apps.consentimientos.services.eliminar_sobre_documenso")
+    @patch("apps.consentimientos.services._sobre_firmado_en_documenso", return_value=True)
+    def test_sobre_viejo_ya_firmado_no_se_borra_y_queda_registrado(self, _firmado, eliminar, _descargar):
+        from apps.consentimientos.services import descartar_sobre_reemplazado
+
+        descartar_sobre_reemplazado("sobre-viejo", consentimiento_id=self.consentimiento.id)
+
+        eliminar.assert_not_called()
+        self.consentimiento.refresh_from_db()
+        self.assertIsNotNone(self.consentimiento.firma_desactualizada_en)
+        self.assertTrue(self.consentimiento.firma_desactualizada_pdf)
+
+    @patch("apps.consentimientos.services.eliminar_sobre_documenso")
+    @patch("apps.consentimientos.services._sobre_firmado_en_documenso", return_value=False)
+    def test_sobre_viejo_sin_firmar_se_borra(self, _firmado, eliminar):
+        from apps.consentimientos.services import descartar_sobre_reemplazado
+
+        descartar_sobre_reemplazado("sobre-viejo", consentimiento_id=self.consentimiento.id)
+
+        eliminar.assert_called_once_with("sobre-viejo", consentimiento_id=self.consentimiento.id)
+        self.consentimiento.refresh_from_db()
+        self.assertIsNone(self.consentimiento.firma_desactualizada_en)
+
+    @override_settings(DOCUMENSO_API_URL="https://documenso.test", DOCUMENSO_API_KEY="test-key")
+    @patch("apps.historia_clinica.services.descargar_pdf_documenso_sellado", return_value=b"%PDF-viejo")
+    @patch("apps.historia_clinica.services._fetch_documenso_json")
+    def test_verificar_detecta_la_firma_del_sobre_viejo(self, fetch, _descargar):
+        """Sin el aviso de Documenso, el boton de verificar encuentra la firma del link viejo."""
+        fetch.side_effect = lambda method, path, **kw: (
+            {"status": "COMPLETED"} if path.endswith("sobre-viejo") else {"status": "PENDING", "recipients": []}
+        )
+        self.client.force_authenticate(self.superadmin)
+
+        data = self.client.post(
+            f"/api/v1/consentimientos/{self.consentimiento.id}/verificar_firma_documenso/", {}, format="json",
+        ).json()
+
+        self.assertEqual(data["estado"], Consentimiento.Estado.PENDIENTE)
+        self.assertIsNotNone(data["firma_desactualizada_en"])
+        self.assertTrue(data["firma_desactualizada_pdf_url"])
