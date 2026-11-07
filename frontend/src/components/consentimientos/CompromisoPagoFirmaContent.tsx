@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, CheckCircle2, Copy, FileSignature, Loader2, MessageCircle, PenLine, RefreshCw } from 'lucide-react'
+import { AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, FileSignature, Loader2, MessageCircle, PenLine, RefreshCw } from 'lucide-react'
 import { EmbedSignDocument } from '@documenso/embed-react'
 import { consentimientosApi } from '@/lib/api/consentimientos'
 import { toast } from '@/hooks/use-toast'
@@ -75,14 +75,24 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
     setComprobando(true)
     try {
       const c = await consentimientosApi.verificarFirmaDocumenso(consentimientoId)
+      // Refresca el aviso de "firmó una versión anterior" si la verificación lo encontró.
+      queryClient.setQueryData(['consentimiento', consentimientoId], c)
       if (c.estado === 'firmado') {
         setConfirmacion(null)
         setFirmado(true)
         queryClient.invalidateQueries({ queryKey: ['consentimientos'] })
         onFirmado?.()
         toast.success('Firma confirmada', `El paciente ya firmó el ${documentoLabel.toLowerCase()}.`)
+      } else if (c.firma_desactualizada_en) {
+        toast({
+          title: 'Firmó una versión anterior',
+          description: 'La cotización cambió después de enviarle ese link, así que esa firma no cuenta. Envíale el link nuevo.',
+        })
       } else {
-        toast({ title: 'Todavía sin firmar', description: 'El paciente aún no ha firmado. Espera un momento e inténtalo de nuevo.' })
+        toast({
+          title: 'Documenso aún no registra la firma',
+          description: 'Si el paciente asegura que ya firmó, pídele que abra el último link que le enviamos y verifica de nuevo en un momento.',
+        })
       }
     } catch {
       toast.error('No se pudo comprobar', 'Vuelve a intentarlo en un momento.')
@@ -219,14 +229,53 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
                 ¿Cómo va a firmar el paciente el {documentoLabel.toLowerCase()}?
               </p>
             </div>
-            {estadoConsentimiento?.link_enviado_en && (
-              <div className="flex items-start gap-2 w-full max-w-xs rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-left text-xs text-sky-800">
-                <MessageCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            {estadoConsentimiento?.firma_desactualizada_en && (
+              <div className="flex items-start gap-2 w-full max-w-xs rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs text-amber-800">
+                <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
                 <span>
-                  Ya se envió el link por WhatsApp
-                  {estadoConsentimiento.link_enviado_a ? ` al ${estadoConsentimiento.link_enviado_a}` : ''}
-                  {' · '}{formatDateTime(estadoConsentimiento.link_enviado_en)}. El paciente aún no ha firmado.
+                  El paciente firmó una versión anterior · {formatDateTime(estadoConsentimiento.firma_desactualizada_en)}.
+                  {' '}La cotización cambió después, así que esa firma no cuenta: envíale el link nuevo.
+                  {estadoConsentimiento.firma_desactualizada_pdf_url && (
+                    <>
+                      {' '}
+                      <a
+                        href={estadoConsentimiento.firma_desactualizada_pdf_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-0.5 font-medium underline underline-offset-2 hover:text-amber-900"
+                      >
+                        <Download className="h-3 w-3" />
+                        Ver lo que firmó
+                      </a>
+                    </>
+                  )}
                 </span>
+              </div>
+            )}
+            {estadoConsentimiento?.link_enviado_en && (
+              <div className="w-full max-w-xs rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-left text-xs text-sky-800 space-y-2">
+                <div className="flex items-start gap-2">
+                  <MessageCircle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>
+                    Ya se envió el link por WhatsApp
+                    {estadoConsentimiento.link_enviado_a ? ` al ${estadoConsentimiento.link_enviado_a}` : ''}
+                    {' · '}{formatDateTime(estadoConsentimiento.link_enviado_en)}. Aún no tenemos registrada la firma.
+                  </span>
+                </div>
+                {/* Respaldo manual: si el aviso automático de Documenso no llegó, se consulta directo. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleComprobarEnDocumenso}
+                  disabled={comprobando}
+                  className="w-full h-7 text-xs bg-white border-sky-300 text-sky-800 hover:bg-sky-100 hover:text-sky-900"
+                >
+                  {comprobando ? (
+                    <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />Verificando en Documenso…</>
+                  ) : (
+                    <><RefreshCw className="h-3.5 w-3.5 mr-1.5" />El paciente ya firmó — verificar firma</>
+                  )}
+                </Button>
               </div>
             )}
             <div className="flex flex-col gap-2 w-full max-w-xs pt-2">
@@ -238,7 +287,11 @@ export function CompromisoPagoFirmaContent({ consentimientoId, initialSigningTok
                 {enviando ? (
                   <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Generando enlace…</>
                 ) : (
-                  <><MessageCircle className="h-4 w-4 mr-2" />{estadoConsentimiento?.link_enviado_en ? 'Reenviar link por WhatsApp' : 'Enviar link por WhatsApp'}</>
+                  <><MessageCircle className="h-4 w-4 mr-2" />{estadoConsentimiento?.link_enviado_en
+                    ? 'Reenviar link por WhatsApp'
+                    : estadoConsentimiento?.firma_desactualizada_en
+                      ? 'Enviar link nuevo por WhatsApp'
+                      : 'Enviar link por WhatsApp'}</>
                 )}
               </Button>
             </div>

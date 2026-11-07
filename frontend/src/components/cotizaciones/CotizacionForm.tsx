@@ -6,7 +6,7 @@ import { useForm, useFieldArray, Controller, useWatch, type FieldErrors } from '
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock, MessageCircle, MapPin } from 'lucide-react'
+import { Plus, Loader2, Download, Send, Save, ArrowLeft, X, Maximize2, Package2, Stethoscope, FileText, Receipt, Lock, Zap, FileSignature, ClipboardList, Eye, Trash2, CheckCircle2, Circle, Clock, MessageCircle, MapPin, AlertTriangle } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -1196,6 +1196,27 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               <p className="text-xs text-sky-700 flex items-center gap-1 mt-0.5">
                 <MessageCircle className="h-3 w-3 shrink-0" />
                 Link enviado por WhatsApp{cp.link_enviado_a ? ` al ${cp.link_enviado_a}` : ''} · {formatDateTime(cp.link_enviado_en!)} — esperando la firma
+              </p>
+            )}
+            {cp.estado === 'pendiente' && cp.firma_desactualizada_en && (
+              <p className="text-xs text-amber-700 flex items-center gap-1 mt-0.5">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span>
+                  Firmó una versión anterior · {formatDateTime(cp.firma_desactualizada_en)} — envíale el link nuevo
+                  {cp.firma_desactualizada_pdf_url && (
+                    <>
+                      {' · '}
+                      <a
+                        href={cp.firma_desactualizada_pdf_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline underline-offset-2 hover:text-amber-900"
+                      >
+                        ver lo que firmó
+                      </a>
+                    </>
+                  )}
+                </span>
               </p>
             )}
           </div>

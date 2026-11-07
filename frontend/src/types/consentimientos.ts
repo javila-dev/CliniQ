@@ -42,6 +42,10 @@ export interface Consentimiento {
   /** Último envío del link de firma por WhatsApp (null si nunca se envió). */
   link_enviado_en?: string | null
   link_enviado_a?: string
+  /** El paciente firmó el link de una versión anterior (la cotización cambió después): no cuenta. */
+  firma_desactualizada_en?: string | null
+  /** PDF de esa versión anterior que firmó, para ver por qué hay que enviarle el link nuevo. */
+  firma_desactualizada_pdf_url?: string | null
   pdf_url: string | null
   created_at: string
 }
