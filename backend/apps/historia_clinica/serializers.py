@@ -31,8 +31,19 @@ def generar_url_firmada_storage(field_file, expires_in=3600):
     return get_signed_url(field_file.name, expires_in=expires_in)
 
 
+class FotoClinicaArchivoField(serializers.ImageField):
+    """Las fotos del iPhone llegan en HEIC, que Pillow no abre: el ImageField
+    respondía "Adjunte una imagen válida". Se pasan a JPEG antes de validarlas."""
+
+    def to_internal_value(self, data):
+        if hasattr(data, "read") and _tipo_por_contenido(data) == "image/heic":
+            data = heic_a_jpeg(data)
+        return super().to_internal_value(data)
+
+
 class FotoClinicaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     url_firmada = serializers.SerializerMethodField()
+    archivo = FotoClinicaArchivoField()
 
     class Meta:
         model = FotoClinica
@@ -58,6 +69,31 @@ class FotoClinicaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
         if not tipo_permitido(archivo, TIPOS_FOTO_CLINICA):
             raise serializers.ValidationError("Solo se permiten fotos JPG, PNG, WebP o HEIC.")
         return archivo
+
+
+def heic_a_jpeg(archivo):
+    """Convierte una foto HEIC (iPhone) a JPEG: Chrome y Edge no muestran HEIC, y la
+    galería quedaría en blanco. Se aplica la orientación del celular, porque el
+    JPEG resultante no la lleva."""
+    import io
+    import os
+
+    import pillow_heif
+    from django.core.files.uploadedfile import InMemoryUploadedFile
+    from PIL import ImageOps
+
+    try:
+        archivo.seek(0)
+        imagen = pillow_heif.open_heif(archivo, convert_hdr_to_8bit=True).to_pillow()
+        imagen = ImageOps.exif_transpose(imagen).convert("RGB")
+    except Exception:
+        raise serializers.ValidationError("No se pudo leer la foto HEIC. Intenta con otra.")
+    salida = io.BytesIO()
+    imagen.save(salida, format="JPEG", quality=90)
+    nombre = os.path.splitext(os.path.basename(archivo.name or "foto"))[0] + ".jpg"
+    tamano = salida.tell()
+    salida.seek(0)
+    return InMemoryUploadedFile(salida, "archivo", nombre, "image/jpeg", tamano, None)
 
 
 MAX_FOTO_CLINICA = 15 * 1024 * 1024
