@@ -264,17 +264,29 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
 
 def horarios_disponibles(
     profesional_id, sede, fecha, duracion_min: int, *, procedimientos=(), excluir_cita_id=None, buscar_proximo=True,
+    sala=None, equipos=None,
 ) -> dict:
     """Horarios del profesional en que además hay sala y equipos libres.
 
     `motivo`: por qué se descartaron horarios por una sala o un equipo (para
     decir "El Soprano no viene los lunes" en vez de una lista vacía). Si no
     quedó ninguno por eso, `proximo` es el primer horario libre de los
-    próximos 21 días."""
+    próximos 21 días.
+
+    `sala` / `equipos`: lo elegido al agendar ("Cabina 2", "el Diodo"); los
+    horarios son los de cuando eso está libre."""
     from apps.agenda import recursos
 
     slots = get_slots_disponibles(profesional_id, sede.id, fecha, duracion_min, excluir_cita_id=excluir_cita_id)
-    exigencias = recursos.exigencias_de(list(procedimientos), recursos.recursos_activos(sede)) if procedimientos else []
+    exigencias = []
+    if procedimientos or sala or equipos:
+        activos = recursos.recursos_activos(sede)
+        if activos:
+            exigencias, manuales = recursos.aplicar_eleccion(
+                recursos.exigencias_de(list(procedimientos), activos), activos,
+                sala=sala or recursos.NO_ENVIADO, equipos=equipos or recursos.NO_ENVIADO,
+            )
+            exigencias = exigencias + manuales
     horarios, motivo = recursos.filtrar_horarios(
         sede, slots, duracion_min, exigencias, excluir_cita_id=excluir_cita_id,
     )

@@ -426,6 +426,9 @@ class RecursoSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({"sede": "La sede no pertenece a tu clínica."})
         if self.instance is not None and "tipo" in attrs and attrs["tipo"] != self.instance.tipo:
             raise serializers.ValidationError({"tipo": "No se puede cambiar una sala a equipo ni al revés."})
+        if self.instance is not None and "sede" in attrs and attrs["sede"] != self.instance.sede:
+            # Sus citas son de la otra sede: se crea uno nuevo en esta.
+            raise serializers.ValidationError({"sede": "No se puede cambiar de sede. Crea uno nuevo en la otra sede."})
         nombre = attrs.get("nombre", getattr(self.instance, "nombre", None))
         repetido = Recurso.objects.filter(sede=sede, nombre__iexact=nombre)
         if self.instance is not None:

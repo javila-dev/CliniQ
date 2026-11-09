@@ -667,7 +667,13 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
     def perform_destroy(self, instance):
         if sede_tiene_citas(instance):
             raise ValidationError({"error": "No se puede eliminar una sede con citas asociadas."})
-        instance.delete()
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                "error": "La sede tiene salas o equipos. Elimínalos primero o desactiva la sede.",
+                "code": "SEDE_CON_RECURSOS",
+            })
 
 
 class FormaDePagoViewSet(ModelViewSet):
@@ -737,7 +743,8 @@ class ClinicaWriteMixin:
 
 
 def sedes_con_recursos(clinica_id):
-    return list(Sede.objects.filter(clinica_id=clinica_id, recursos__isnull=False).distinct())
+    # Orden fijo: dos reacomodos a la vez bloquean las salas en el mismo orden.
+    return list(Sede.objects.filter(clinica_id=clinica_id, recursos__isnull=False).distinct().order_by("id"))
 
 
 class RecursoViewSet(HasClinicamente, ModelViewSet):
@@ -777,7 +784,8 @@ class RecursoViewSet(HasClinicamente, ModelViewSet):
     def _reacomodar(self, *sedes):
         from apps.agenda.recursos import reasignar_citas_futuras
 
-        return reasignar_citas_futuras([s for s in dict.fromkeys(sedes) if s is not None])
+        unicas = {s.id: s for s in sedes if s is not None}
+        return reasignar_citas_futuras([unicas[k] for k in sorted(unicas)])
 
     @transaction.atomic
     def perform_create(self, serializer):
@@ -803,7 +811,17 @@ class RecursoViewSet(HasClinicamente, ModelViewSet):
                 "code": "RECURSO_CON_CITAS",
             })
         sede = instance.sede
+        # Un procedimiento "solo estas salas" que se queda sin ninguna en su
+        # lista ya funcionaba como "cualquiera"; se guarda así para que el
+        # formulario no quede pidiendo elegir una sala que no existe.
+        solo_esta = list(
+            Servicio.objects.filter(salas=instance, necesita_sala=Servicio.NecesitaSala.ALGUNAS)
+            .annotate(total_salas=Count("salas"))
+            .filter(total_salas=1)
+            .values_list("id", flat=True)
+        )
         instance.delete()
+        Servicio.objects.filter(id__in=solo_esta).update(necesita_sala=Servicio.NecesitaSala.CUALQUIERA)
         self._reacomodar(sede)
 
     @action(detail=True, methods=["post"], url_path="no_disponible")
@@ -816,6 +834,8 @@ class RecursoViewSet(HasClinicamente, ModelViewSet):
         from apps.agenda.serializers import BloqueoAgendaSerializer
 
         recurso = self.get_object()
+        # Como al agendar: nadie toma esta sala o equipo mientras se bloquea.
+        Recurso.objects.select_for_update().filter(pk=recurso.pk).exists()
         entrada = request.data.dict() if hasattr(request.data, "dict") else dict(request.data)
         datos = BloqueoAgendaSerializer(
             data={**entrada, "recurso": str(recurso.id), "profesional": None}, context={"request": request},
@@ -1001,10 +1021,21 @@ class ServicioViewSet(ClinicaWriteMixin, HasClinicamente, ModelViewSet):
         clinica = self._get_write_clinica()
         self._guardar_con_nombre_unico(serializer, clinica, {"clinica": clinica})
 
+    @staticmethod
+    def _sala_y_equipos(servicio):
+        return (
+            servicio.necesita_sala,
+            frozenset(servicio.salas.values_list("id", flat=True)),
+            frozenset(servicio.equipos.values_list("id", flat=True)),
+        )
+
+    @transaction.atomic
     def perform_update(self, serializer):
-        cambia_recursos = any(c in serializer.validated_data for c in ("necesita_sala", "salas", "equipos"))
+        # El formulario manda siempre sala y equipos: solo se reacomoda si cambian.
+        toca_recursos = any(c in serializer.validated_data for c in ("necesita_sala", "salas", "equipos"))
+        antes = self._sala_y_equipos(serializer.instance) if toca_recursos else None
         self._guardar_con_nombre_unico(serializer, serializer.instance.clinica)
-        if cambia_recursos:
+        if toca_recursos and self._sala_y_equipos(serializer.instance) != antes:
             # Lo ya agendado de este procedimiento toma sala y equipo; lo que no
             # cabe queda con "Falta sala/equipo" (apps/agenda/recursos.py).
             from apps.agenda.recursos import reasignar_citas_futuras

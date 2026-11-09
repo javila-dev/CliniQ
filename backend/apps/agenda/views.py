@@ -140,6 +140,7 @@ class CitaViewSet(ModelViewSet):
         "confirmado_por",
         "item_cotizacion",
         "item_cotizacion__cotizacion",
+        "item_cotizacion__tratamiento",
         "cobro",
     ).prefetch_related(
         "registros_confirmacion",
@@ -362,7 +363,8 @@ class CitaViewSet(ModelViewSet):
             excluir_cita_id=instance.id,
         )
         # Salas y equipos: solo se revisan si cambia algo que los afecte. Editar
-        # una nota de una cita "con falta" no debe fallar.
+        # una nota de una cita "con falta" no debe fallar; pero guardarla desde
+        # el formulario de horario (que manda la hora) sí intenta darle lugar.
         asignacion = None
         if (
             fecha_inicio != instance.fecha_inicio
@@ -371,6 +373,7 @@ class CitaViewSet(ModelViewSet):
             or (servicio.id if servicio else None) != instance.servicio_id
             or sala is not recursos.NO_ENVIADO
             or equipos is not recursos.NO_ENVIADO
+            or ("fecha_inicio" in data and recursos.faltantes(instance))
         ):
             asignacion = recursos.resolver_recursos(
                 sede=sede,
@@ -924,6 +927,16 @@ class CitaViewSet(ModelViewSet):
             if duracion_min < 5:
                 logger.debug("[slots_disponibles] ERROR: duracion_min=%s < 5", duracion_min)
                 raise ValidationError({"duracion_min": "Debe ser al menos 5 minutos."})
+            # Reprogramar una cita de paquete o de sesión: se manda su duración
+            # fija y la cita; sus salas y equipos salen de lo que hace la cita.
+            cita_id = request.query_params.get("cita_id")
+            if cita_id:
+                try:
+                    cita = Cita.objects.filter(id=uuid.UUID(cita_id), sede__clinica=sede.clinica).first()
+                except ValueError as exc:
+                    raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
+                if cita is not None:
+                    procedimientos = recursos.procedimientos_de_cita(cita)
 
         return duracion_min, procedimientos
 
@@ -1004,9 +1017,18 @@ class CitaViewSet(ModelViewSet):
             except ValueError as exc:
                 raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
         detalle = request.query_params.get("detalle", "").lower() in {"1", "true"}
+        # Sala o equipos elegidos al agendar: solo los horarios en que están libres.
+        try:
+            sala = uuid.UUID(request.query_params["sala"]) if request.query_params.get("sala") else None
+            equipos = [
+                uuid.UUID(e) for e in request.query_params.get("equipos", "").split(",") if e.strip()
+            ] or None
+        except ValueError as exc:
+            raise ValidationError({"sala": "Identificador de sala o equipo inválido."}) from exc
         resultado = services.horarios_disponibles(
             profesional.id, sede, fecha_date, duracion_min,
             procedimientos=procedimientos, excluir_cita_id=excluir_cita_id, buscar_proximo=detalle,
+            sala=sala, equipos=equipos,
         )
         slots = resultado["horarios"]
         logger.debug("[slots_disponibles] slots encontrados: %s", slots)
@@ -1024,17 +1046,18 @@ class CitaViewSet(ModelViewSet):
 
     @action(detail=False, methods=["get"], url_path="recursos_libres", pagination_class=None)
     def recursos_libres(self, request, *args, **kwargs):
-        """Salas y equipos para una cita a una hora (lo usan "Cambiar" y
-        "+ Sala o equipo"): por cada sala o equipo que necesita, las unidades
-        libres que sirven y la sugerida; y las demás libres, para elegir a mano.
-        Mismos parámetros que slots_disponibles, con `fecha_inicio` (ISO) en vez
-        de `fecha` y sin profesional."""
+        """Salas y equipos de una cita (el campo "Sala y equipo" al agendar):
+        por cada sala o equipo que necesita, las unidades que sirven y, si se
+        manda `fecha_inicio`, cuáles están libres a esa hora y la que se le
+        asignaría; y las demás de la sede, para reservar una a mano. Sin
+        `fecha_inicio` responde lo que sirve (para elegir antes del horario).
+        Mismos parámetros que slots_disponibles, sin profesional ni `fecha`."""
         from apps.agenda import recursos
 
         sede_id = request.query_params.get("sede_id")
         fecha_inicio_param = request.query_params.get("fecha_inicio")
-        if not sede_id or not fecha_inicio_param:
-            raise ValidationError({"error": "sede_id y fecha_inicio son obligatorios."})
+        if not sede_id:
+            raise ValidationError({"error": "sede_id es obligatorio."})
         clinica_activa = get_clinica_activa(request)
         sede_qs = Sede.objects.select_related("clinica")
         if clinica_activa is not None:
@@ -1045,15 +1068,16 @@ class CitaViewSet(ModelViewSet):
             raise ValidationError({"sede_id": "Identificador de sede inválido."}) from exc
         if sede is None:
             raise ValidationError({"sede_id": "La sede no pertenece a tu clinica."})
-        try:
-            fecha_inicio = datetime.fromisoformat(fecha_inicio_param.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise ValidationError({"fecha_inicio": "Usa una fecha y hora ISO."}) from exc
-        if timezone.is_naive(fecha_inicio):
-            fecha_inicio = timezone.make_aware(fecha_inicio, timezone.get_current_timezone())
+        fecha_inicio = None
+        if fecha_inicio_param:
+            try:
+                fecha_inicio = datetime.fromisoformat(fecha_inicio_param.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValidationError({"fecha_inicio": "Usa una fecha y hora ISO."}) from exc
+            if timezone.is_naive(fecha_inicio):
+                fecha_inicio = timezone.make_aware(fecha_inicio, timezone.get_current_timezone())
 
         duracion_min, procedimientos = self._duracion_y_procedimientos(request, sede, clinica_activa)
-        fecha_fin = fecha_inicio + timedelta(minutes=duracion_min)
 
         cita = None
         cita_id = request.query_params.get("cita_id")
@@ -1065,22 +1089,26 @@ class CitaViewSet(ModelViewSet):
         actuales = recursos.asignacion_actual(cita) if cita is not None and cita.sede_id == sede.id else []
 
         disponibles = recursos.recursos_activos(sede)
-        ocupacion = recursos.Ocupacion(sede, disponibles).cargar(
-            fecha_inicio, fecha_fin, excluir_cita_ids=[cita.id if cita else None],
-        )
         exigencias = recursos.exigencias_de(procedimientos, disponibles)
-        sugeridos = dict(
-            recursos.asignar(
-                ocupacion, exigencias, fecha_inicio, fecha_fin,
-                preferidos=[rid for rid, a_mano in actuales if not a_mano],
-            ).asignados
-        )
+        libres = set(disponibles)
+        sugeridos = {}
+        if fecha_inicio is not None:
+            fecha_fin = fecha_inicio + timedelta(minutes=duracion_min)
+            ocupacion = recursos.Ocupacion(sede, disponibles).cargar(
+                fecha_inicio, fecha_fin, excluir_cita_ids=[cita.id if cita else None],
+            )
+            sugeridos = dict(
+                recursos.asignar(
+                    ocupacion, exigencias, fecha_inicio, fecha_fin,
+                    preferidos=[rid for rid, a_mano in actuales if not a_mano],
+                ).asignados
+            )
+            libres = {rid for rid in disponibles if ocupacion.causa(rid, fecha_inicio, fecha_fin) is None}
 
         def dato(rid):
             r = disponibles[rid]
             return {"id": str(r.id), "nombre": r.nombre, "tipo": r.tipo}
 
-        libres = [rid for rid in disponibles if ocupacion.causa(rid, fecha_inicio, fecha_fin) is None]
         en_exigencias = {rid for ex in exigencias for rid in ex.candidatos}
         return Response(
             {
@@ -1093,7 +1121,7 @@ class CitaViewSet(ModelViewSet):
                     }
                     for ex in exigencias
                 ],
-                "otros": [dato(rid) for rid in libres if rid not in en_exigencias],
+                "otros": [dato(rid) for rid in disponibles if rid in libres and rid not in en_exigencias],
                 "actuales": [
                     {**dato(rid), "elegido_a_mano": a_mano} for rid, a_mano in actuales if rid in disponibles
                 ],
@@ -1598,11 +1626,12 @@ class BloqueoAgendaViewSet(ModelViewSet):
         if profesional:
             queryset = queryset.filter(profesional_id=profesional)
         # Los bloqueos de una sala o un equipo ("No disponible…") no bloquean la
-        # sede: la agenda los dibujaría como si cerrara. Solo se listan al pedirlos.
+        # sede: la agenda los dibujaría como si cerrara. Solo se listan al pedirlos
+        # (aprobar, editar o borrar uno por su id sí los encuentra).
         recurso = self.request.query_params.get("recurso")
         if recurso:
             queryset = queryset.filter(recurso_id=recurso)
-        elif self.request.query_params.get("incluir_recursos", "").lower() not in {"1", "true"}:
+        elif self.action == "list" and self.request.query_params.get("incluir_recursos", "").lower() not in {"1", "true"}:
             queryset = queryset.filter(recurso__isnull=True)
         sede_ids = sede_ids_para_filtro(user, sede)
         if sede_ids is not None:
@@ -1669,11 +1698,13 @@ class BloqueoAgendaViewSet(ModelViewSet):
         self._reacomodar_si_es_de_recurso(bloqueo)
 
     @staticmethod
-    def _reacomodar_si_es_de_recurso(bloqueo, sede=None):
+    def _reacomodar_si_es_de_recurso(bloqueo, sede=None, estaba_aprobado=False):
         """Una sala o un equipo que deja de estar (o vuelve a estar) disponible:
         las citas futuras de la sede se reacomodan; las que no caben quedan con
-        "Falta sala/equipo" (apps/agenda/recursos.py)."""
-        if bloqueo.recurso_id:
+        "Falta sala/equipo" (apps/agenda/recursos.py). Un bloqueo pendiente o
+        rechazado no bloquea nada: solo cuenta si está o estaba aprobado."""
+        aprobado = bloqueo.estado == BloqueoAgenda.Estado.APROBADO
+        if bloqueo.recurso_id and (aprobado or estaba_aprobado):
             from apps.agenda.recursos import reasignar_citas_futuras
 
             reasignar_citas_futuras([sede or bloqueo.sede])
@@ -1746,13 +1777,14 @@ class BloqueoAgendaViewSet(ModelViewSet):
             clinica = getattr(datos["sede"], "clinica", None) or bloqueo.clinica or self.request.user.clinica
             self._avisar_citas_afectadas(datos, datos["sede"], clinica)
         # Un bloqueo aprobado que edita alguien sin permiso de aprobar vuelve a revisión.
-        if serializer.instance.estado == BloqueoAgenda.Estado.APROBADO and not user_has_permission(
+        estaba_aprobado = serializer.instance.estado == BloqueoAgenda.Estado.APROBADO
+        if estaba_aprobado and not user_has_permission(
             self.request.user, "agenda.aprobar_bloqueo", request=self.request
         ):
             bloqueo = serializer.save(estado=BloqueoAgenda.Estado.PENDIENTE, aprobado_por=None, aprobado_en=None)
         else:
             bloqueo = serializer.save()
-        self._reacomodar_si_es_de_recurso(bloqueo)
+        self._reacomodar_si_es_de_recurso(bloqueo, estaba_aprobado=estaba_aprobado)
 
     def perform_destroy(self, instance):
         self._puede_modificar(instance)
@@ -1788,9 +1820,10 @@ class BloqueoAgendaViewSet(ModelViewSet):
         bloqueo = self.get_object()
         if bloqueo.estado == BloqueoAgenda.Estado.RECHAZADO:
             return Response({"detail": "El bloqueo ya está rechazado."}, status=status.HTTP_400_BAD_REQUEST)
+        estaba_aprobado = bloqueo.estado == BloqueoAgenda.Estado.APROBADO
         bloqueo.estado = BloqueoAgenda.Estado.RECHAZADO
         bloqueo.aprobado_por = request.user
         bloqueo.aprobado_en = timezone.now()
         bloqueo.save(update_fields=["estado", "aprobado_por", "aprobado_en", "updated_at"])
-        self._reacomodar_si_es_de_recurso(bloqueo)
+        self._reacomodar_si_es_de_recurso(bloqueo, estaba_aprobado=estaba_aprobado)
         return Response(BloqueoAgendaSerializer(bloqueo, context={"request": request}).data)

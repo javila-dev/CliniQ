@@ -131,6 +131,20 @@ def sesion_de_cita(cita):
     return next((s for s in vinculadas if s.estado == SesionProcedimiento.Estado.PENDIENTE), vinculadas[0])
 
 
+def clave_de_forma(cita):
+    """Lo que decide qué procedimientos hace la cita: dos citas con la misma
+    clave necesitan las mismas salas y equipos (para calcularlo una vez)."""
+    sesion = sesion_de_cita(cita)
+    if sesion is not None:
+        origen = ("tipo", sesion.tipo_sesion_id, sesion.procedimiento_id)
+    elif cita.item_cotizacion_id:
+        item = cita.item_cotizacion
+        origen = ("item", item.tratamiento_id, item.procedimiento_efectivo_id)
+    else:
+        origen = None
+    return (cita.servicio_id, origen)
+
+
 def procedimientos_de_cita(cita, *, servicio=NO_ENVIADO) -> list:
     """Procedimientos de una cita ya guardada. `servicio`: el nuevo, al editar."""
     return procedimientos_de(
@@ -157,6 +171,7 @@ def exigencias_de(procedimientos, recursos: dict) -> list:
     prefetch_related_objects(procedimientos, "salas", "equipos")
     salas = [rid for rid, r in recursos.items() if r.tipo == SALA]
     equipos = [rid for rid, r in recursos.items() if r.tipo == EQUIPO]
+    sede_id = next(iter(recursos.values())).sede_id
     exigencias = []
 
     if salas and any(p.necesita_sala != Servicio.NecesitaSala.NO for p in procedimientos):
@@ -164,10 +179,11 @@ def exigencias_de(procedimientos, recursos: dict) -> list:
         for p in procedimientos:
             if p.necesita_sala != Servicio.NecesitaSala.ALGUNAS:
                 continue
-            admitidas = {s.id for s in p.salas.all()} & set(salas)
             # Sin ninguna sala de esta sede en su lista, aquí sirve cualquiera.
-            if admitidas:
-                candidatos = [s for s in candidatos if s in admitidas]
+            # Si las tiene pero están inactivas, no sirve ninguna: falta sala.
+            de_la_sede = {s.id for s in p.salas.all() if s.sede_id == sede_id}
+            if de_la_sede:
+                candidatos = [s for s in candidatos if s in de_la_sede]
         exigencias.append(Exigencia(SALA, tuple(candidatos)))
 
     vistos = set()
@@ -374,9 +390,9 @@ def _bloquear_filas(ids):
 def _elegido(recursos, recurso_id, tipo):
     recurso = recursos.get(recurso_id)
     if recurso is None or recurso.tipo != tipo:
-        etiqueta = "La sala" if tipo == SALA else "El equipo"
+        etiqueta = "La sala elegida" if tipo == SALA else "El equipo elegido"
         raise ValidationError({
-            "error": f"{etiqueta} elegido no está disponible en esta sede.",
+            "error": f"{etiqueta} no está disponible en esta sede.",
             "code": "RECURSO_INVALIDO",
         })
     return recurso
@@ -401,16 +417,44 @@ def resolver_recursos(
             raise ValidationError({"error": "Esta sede no tiene salas ni equipos.", "code": "RECURSO_INVALIDO"})
         return []
 
-    exigencias = exigencias_de(procedimientos, recursos)
-    manuales = []
+    exigencias, manuales = aplicar_eleccion(
+        exigencias_de(procedimientos, recursos), recursos, sala=sala, equipos=equipos,
+    )
 
     # Lo que ya tenía elegido a mano sigue, salvo que ahora se mande otra cosa.
-    actuales_a_mano = [rid for rid, a_mano in actuales if a_mano and rid in recursos]
-    if sala is NO_ENVIADO:
-        manuales += [Exigencia(SALA, (rid,), True) for rid in actuales_a_mano if recursos[rid].tipo == SALA]
-    if equipos is NO_ENVIADO:
-        manuales += [Exigencia(EQUIPO, (rid,), True) for rid in actuales_a_mano if recursos[rid].tipo == EQUIPO]
+    a_mano_antes = [
+        rid for rid, a_mano in actuales
+        if a_mano and rid in recursos
+        and (sala is NO_ENVIADO if recursos[rid].tipo == SALA else equipos is NO_ENVIADO)
+    ]
+    extra, preferir = manuales_que_siguen(a_mano_antes, exigencias, recursos)
+    manuales += extra
 
+    todas = exigencias + manuales
+    if not todas:
+        return []
+
+    _bloquear_filas({rid for ex in todas for rid in ex.candidatos})
+    ocupacion = Ocupacion(sede, recursos).cargar(fecha_inicio, fecha_fin, excluir_cita_ids=[excluir_cita_id])
+    resultado = asignar(
+        ocupacion, todas, fecha_inicio, fecha_fin,
+        preferidos=preferir + [rid for rid, a_mano in actuales if not a_mano],
+    )
+    if resultado.faltas:
+        exigencia, causa = resultado.faltas[0]
+        raise error_de_falta(exigencia, causa, recursos)
+    return [(rid, ex.a_mano) for ex, rid in resultado.asignados]
+
+
+def aplicar_eleccion(exigencias, recursos, *, sala=NO_ENVIADO, equipos=NO_ENVIADO):
+    """Lo que eligió quien agenda sobre lo que pide el procedimiento. Una sala o
+    un equipo que entra en lo que pide fija esa exigencia ("Cabina 2" en vez de
+    "la que esté libre"); uno que no, se reserva aparte (elegido a mano). Una
+    sala que no sirve cuando el procedimiento pide sala es un error.
+    Devuelve (exigencias, exigencias a mano). Lo usan crear/editar y los
+    horarios (que muestran solo cuándo está libre lo elegido)."""
+    exigencias = list(exigencias)
+    manuales = []
     fijadas = set()
 
     def fijar(recurso_id, tipo):
@@ -421,11 +465,7 @@ def resolver_recursos(
                 fijadas.add(i)
                 return
         if tipo == SALA and any(ex.tipo == SALA for ex in exigencias):
-            nombre = recursos[recurso_id].nombre
-            raise ValidationError({
-                "error": f"{nombre} no sirve para este procedimiento.",
-                "code": "RECURSO_INVALIDO",
-            })
+            raise _no_sirve(recursos[recurso_id])
         manuales.append(Exigencia(tipo, (recurso_id,), True))
 
     if sala not in (NO_ENVIADO, None):
@@ -433,21 +473,31 @@ def resolver_recursos(
     if equipos not in (NO_ENVIADO, None):
         for equipo_id in dict.fromkeys(equipos):
             fijar(equipo_id, EQUIPO)
+    return exigencias, manuales
 
-    todas = exigencias + manuales
-    if not todas:
-        return []
 
-    _bloquear_filas({rid for ex in todas for rid in ex.candidatos})
-    ocupacion = Ocupacion(sede, recursos).cargar(fecha_inicio, fecha_fin, excluir_cita_ids=[excluir_cita_id])
-    resultado = asignar(
-        ocupacion, todas, fecha_inicio, fecha_fin,
-        preferidos=[rid for rid, a_mano in actuales if not a_mano],
-    )
-    if resultado.faltas:
-        exigencia, causa = resultado.faltas[0]
-        raise error_de_falta(exigencia, causa, recursos)
-    return [(rid, ex.a_mano) for ex, rid in resultado.asignados]
+def manuales_que_siguen(ids, exigencias, recursos):
+    """Salas y equipos elegidos a mano antes, frente a lo que pide ahora el
+    procedimiento: si ya entra en lo que pide, no se suma (sería una segunda
+    sala o un equipo de más) y solo se prefiere; una sala que no le sirve se
+    suelta. Devuelve (exigencias a mano que siguen, ids preferidos)."""
+    extra, preferir = [], []
+    for rid in ids:
+        tipo = recursos[rid].tipo
+        if any(ex.tipo == tipo and rid in ex.candidatos for ex in exigencias):
+            preferir.append(rid)
+        elif tipo == SALA and any(ex.tipo == SALA for ex in exigencias):
+            continue
+        else:
+            extra.append(Exigencia(tipo, (rid,), True))
+    return extra, preferir
+
+
+def _no_sirve(recurso):
+    return ValidationError({
+        "error": f"{recurso.nombre} no sirve para este procedimiento.",
+        "code": "RECURSO_INVALIDO",
+    })
 
 
 def guardar_asignacion(cita, asignacion):
@@ -509,12 +559,7 @@ def faltantes(cita, *, cache=None) -> list:
         return []
     # Las citas del mismo procedimiento o tipo de sesión necesitan lo mismo: se
     # calcula una vez por listado.
-    sesion = sesion_de_cita(cita)
-    origen = (
-        ("tipo", sesion.tipo_sesion_id, sesion.procedimiento_id) if sesion is not None
-        else ("item", cita.item_cotizacion_id)
-    )
-    clave = ("exigencias", cita.sede_id, cita.servicio_id, origen)
+    clave = ("exigencias", cita.sede_id, clave_de_forma(cita))
     if clave not in cache:
         cache[clave] = exigencias_de(procedimientos_de_cita(cita), recursos)
     asignados = [a.recurso_id for a in cita.recursos_asignados.all()]
@@ -534,16 +579,24 @@ def faltantes(cita, *, cache=None) -> list:
 @transaction.atomic
 def reasignar_citas_futuras(sedes) -> dict:
     """Asigna salas y equipos a las citas futuras de esas sedes según la
-    configuración actual: conserva lo que sigue libre, reasigna lo que no y deja
-    "sin lugar" lo que no cabe. No cancela ni mueve citas (D4).
+    configuración actual. No cancela ni mueve citas (D4).
 
-    Prioridad: quien agendó primero. Para previsualizar un cambio, llamar dentro
-    de una transacción que después se revierte.
+    1. Primero se conserva lo de cada cita que sigue sirviendo y libre: un
+       cambio no le quita la sala a una cita que estaba bien.
+    2. Después, por orden de agenda (quien agendó primero), las que perdieron
+       algo toman lo libre. La que no cabe completa queda sin nada asignado
+       ("sin lugar"): una asignación a medias ocuparía una sala que no puede usar.
+
+    Para previsualizar un cambio, llamar dentro de una transacción que después
+    se revierte.
     """
     ahora = timezone.now()
     revisadas = 0
     sin_lugar = []
     for sede in sedes:
+        recursos = recursos_activos(sede)
+        # Antes de leer las citas: nadie agenda ni mueve en esta sede mientras tanto.
+        _bloquear_filas(list(recursos))
         citas = list(
             Cita.objects.filter(
                 sede=sede, fecha_inicio__gte=ahora, estado__in=ESTADOS_REASIGNABLES, es_migracion=False,
@@ -554,40 +607,58 @@ def reasignar_citas_futuras(sedes) -> dict:
         )
         if not citas:
             continue
-        recursos = recursos_activos(sede)
-        _bloquear_filas(list(recursos))
         ocupacion = Ocupacion(sede, recursos).cargar(
             min(c.fecha_inicio for c in citas), max(c.fecha_fin for c in citas),
             excluir_cita_ids=[c.id for c in citas],
         )
         cache = {}
+        pendientes = []
         for cita in citas:
             revisadas += 1
-            procedimientos = procedimientos_de_cita(cita)
-            clave = tuple(sorted(p.id for p in procedimientos))
+            clave = clave_de_forma(cita)
             if clave not in cache:
-                cache[clave] = exigencias_de(procedimientos, recursos)
+                cache[clave] = exigencias_de(procedimientos_de_cita(cita), recursos)
             actuales = asignacion_actual(cita)
-            manuales = [
-                Exigencia(recursos[rid].tipo, (rid,), True) for rid, a_mano in actuales if a_mano and rid in recursos
-            ]
-            resultado = asignar(
-                ocupacion, cache[clave] + manuales, cita.fecha_inicio, cita.fecha_fin,
-                preferidos=[rid for rid, a_mano in actuales if not a_mano],
+            extra, preferir = manuales_que_siguen(
+                [rid for rid, a_mano in actuales if a_mano and rid in recursos], cache[clave], recursos,
             )
-            nueva = [(rid, ex.a_mano) for ex, rid in resultado.asignados]
-            for rid, _ in nueva:
-                ocupacion.reservar(rid, cita.fecha_inicio, cita.fecha_fin, cita.id)
-            guardar_asignacion(cita, nueva)
+            exigencias = cache[clave] + extra
+            if not exigencias:
+                guardar_asignacion(cita, [])
+                continue
+            # 1. ¿Le alcanza con lo que ya tiene?
+            tiene = {rid for rid, _ in actuales}
+            restringidas = [
+                Exigencia(ex.tipo, tuple(c for c in ex.candidatos if c in tiene), ex.a_mano) for ex in exigencias
+            ]
+            resultado = asignar(ocupacion, restringidas, cita.fecha_inicio, cita.fecha_fin)
             if resultado.faltas:
-                sin_lugar.append({
-                    "cita_id": str(cita.id),
-                    "paciente": cita.paciente.nombre_completo,
-                    "fecha_inicio": timezone.localtime(cita.fecha_inicio).isoformat(),
-                    "servicio": cita.servicio_nombre,
-                    "faltan": [
-                        {**detalle_falta(ex, causa, recursos), "mensaje": mensaje_falta(ex, causa, recursos)}
-                        for ex, causa in resultado.faltas
-                    ],
-                })
+                pendientes.append((cita, exigencias, preferir + [rid for rid, a_mano in actuales if not a_mano]))
+                continue
+            _guardar_y_reservar(ocupacion, cita, resultado)
+
+        # 2. Las que perdieron algo toman lo que quedó libre.
+        for cita, exigencias, preferidos in pendientes:
+            resultado = asignar(ocupacion, exigencias, cita.fecha_inicio, cita.fecha_fin, preferidos=preferidos)
+            if not resultado.faltas:
+                _guardar_y_reservar(ocupacion, cita, resultado)
+                continue
+            guardar_asignacion(cita, [])
+            sin_lugar.append({
+                "cita_id": str(cita.id),
+                "paciente": cita.paciente.nombre_completo,
+                "fecha_inicio": timezone.localtime(cita.fecha_inicio).isoformat(),
+                "servicio": cita.servicio_nombre,
+                "faltan": [
+                    {**detalle_falta(ex, causa, recursos), "mensaje": mensaje_falta(ex, causa, recursos)}
+                    for ex, causa in resultado.faltas
+                ],
+            })
     return {"citas_revisadas": revisadas, "total_sin_lugar": len(sin_lugar), "sin_lugar": sin_lugar}
+
+
+def _guardar_y_reservar(ocupacion, cita, resultado):
+    nueva = [(rid, ex.a_mano) for ex, rid in resultado.asignados]
+    for rid, _ in nueva:
+        ocupacion.reservar(rid, cita.fecha_inicio, cita.fecha_fin, cita.id)
+    guardar_asignacion(cita, nueva)
