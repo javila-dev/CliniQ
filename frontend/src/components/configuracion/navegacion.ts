@@ -42,8 +42,15 @@ export const CATEGORIAS: CategoriaConfig[] = [
       {
         href: '/configuracion/sedes',
         label: 'Sedes',
-        description: 'Sucursales, horarios, contacto y sus salas/cabinas y equipos.',
-        keywords: 'sucursal horario direccion ciudad apertura cierre salas cabinas consultorios equipos laser aparatos',
+        description: 'Sucursales, horarios de atención y contacto.',
+        keywords: 'sucursal horario direccion ciudad apertura cierre',
+        perm: PERM.SEDES_VER,
+      },
+      {
+        href: '/configuracion/cabinas-y-equipos',
+        label: 'Cabinas y equipos',
+        description: 'Cabinas, consultorios y equipos que no pueden estar en dos citas a la vez.',
+        keywords: 'cabinas consultorios salas equipos laser aparatos espacios agenda cruce',
         perm: PERM.SEDES_VER,
       },
       {

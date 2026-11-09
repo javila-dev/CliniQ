@@ -727,7 +727,7 @@ export function NuevaCitaModal({
 
           {/* 4 · Sala y equipo (solo en sedes que los tienen) */}
           {conSalas && (
-            <Paso n={4} titulo="Sala/cabina y equipo">
+            <Paso n={4} titulo="Cabina/consultorio y equipo">
               <RecursosDeLaCita
                 sedeId={sedeId!}
                 fechaInicio={slot || undefined}

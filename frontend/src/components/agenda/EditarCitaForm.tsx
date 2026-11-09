@@ -240,7 +240,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
 
       {conSalas && (
         <div className="space-y-1.5">
-          <Label>Sala/cabina y equipo</Label>
+          <Label>Cabina/consultorio y equipo</Label>
           <RecursosDeLaCita
             sedeId={sedeId}
             fechaInicio={slot || undefined}

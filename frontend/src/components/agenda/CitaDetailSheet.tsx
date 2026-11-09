@@ -364,7 +364,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                 {((cita.recursos?.length ?? 0) > 0 || (cita.falta?.length ?? 0) > 0
                   || recursosActivos?.some((r) => r.sede === cita.sede)) && (
                   <div className="px-4 py-3">
-                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-1">Sala/cabina y equipo</p>
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-1">Cabina/consultorio y equipo</p>
                     {(cita.recursos?.length ?? 0) > 0 ? (
                       <div className="space-y-1">
                         {cita.recursos!.map((r) => {
@@ -372,7 +372,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                           return (
                             <p key={r.id} className="flex items-center gap-2 text-sm">
                               <Icono className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              <span className="w-14 shrink-0 text-muted-foreground">{r.tipo === 'sala' ? 'Sala/cabina' : 'Equipo'}</span>
+                              <span className="w-14 shrink-0 text-muted-foreground">{r.tipo === 'sala' ? 'Cabina/consultorio' : 'Equipo'}</span>
                               <span className="font-medium">{r.nombre}</span>
                               {r.elegido_a_mano && <span className="text-xs text-muted-foreground">· {r.tipo === 'sala' ? 'elegida' : 'elegido'} al agendar</span>}
                             </p>
@@ -380,7 +380,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                         })}
                       </div>
                     ) : !textoFalta(cita) ? (
-                      <p className="text-sm text-muted-foreground">No usa sala/cabina ni equipo.</p>
+                      <p className="text-sm text-muted-foreground">No usa cabina, consultorio ni equipo.</p>
                     ) : null}
                     {textoFalta(cita) && (
                       <p className="mt-1 text-xs font-medium text-amber-700">

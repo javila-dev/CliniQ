@@ -92,7 +92,7 @@ function Marcables({
   const visibles = n
     ? recursos.filter((r) => normalizar(`${r.nombre} ${r.sede_nombre}`).includes(n))
     : recursos
-  const plural = tipo === 'sala' ? 'salas/cabinas' : 'equipos'
+  const plural = tipo === 'sala' ? 'cabinas y consultorios' : 'equipos'
 
   return (
     <div className="ml-6 overflow-hidden rounded-md border bg-background">
@@ -103,7 +103,7 @@ function Marcables({
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') e.preventDefault() }}
-            placeholder={`Buscar ${tipo === 'sala' ? 'sala/cabina' : 'equipo'}${variasSedes ? ' o sede' : ''}…`}
+            placeholder={`Buscar ${tipo === 'sala' ? 'cabina/consultorio' : 'equipo'}${variasSedes ? ' o sede' : ''}…`}
             className="h-8 pl-8 text-sm"
             aria-label={`Buscar ${plural}`}
           />
@@ -125,7 +125,7 @@ function Marcables({
               {(variasSedes || delGrupo.length > 3) && (
                 <div className="sticky top-0 z-10 flex items-center justify-between bg-background/95 px-3 py-1.5 backdrop-blur">
                   <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    {variasSedes ? sede : tipo === 'sala' ? 'Todas las salas/cabinas' : 'Todos los equipos'}
+                    {variasSedes ? sede : tipo === 'sala' ? 'Todas las cabinas y consultorios' : 'Todos los equipos'}
                   </span>
                   <button
                     type="button"
@@ -350,7 +350,7 @@ export function SalaYEquipoProcedimiento({
     return (
       <p className="text-xs text-muted-foreground">
         ¿Usas cabinas o equipos que no pueden estar en dos citas a la vez?{' '}
-        <Link href="/configuracion/sedes#salas-y-equipos" className="font-medium text-primary hover:underline">Configúralos en Sedes</Link>.
+        <Link href="/configuracion/cabinas-y-equipos" className="font-medium text-primary hover:underline">Configúralos en Sedes</Link>.
       </p>
     )
   }
@@ -358,26 +358,26 @@ export function SalaYEquipoProcedimiento({
   return (
     <div className="space-y-4 rounded-lg border px-4 py-3">
       <div>
-        <p className="text-sm font-medium">Sala/cabina y equipo</p>
-        <p className="text-xs text-muted-foreground">Al agendar, la cita toma una sala/cabina y un equipo libres sola.</p>
+        <p className="text-sm font-medium">Cabina/consultorio y equipo</p>
+        <p className="text-xs text-muted-foreground">Al agendar, la cita toma sola una cabina o consultorio y un equipo libres.</p>
       </div>
 
       {salas.length > 0 && (
         <div className="space-y-1.5">
-          <p className="text-sm font-medium text-muted-foreground">Sala/cabina</p>
+          <p className="text-sm font-medium text-muted-foreground">Cabina/consultorio</p>
           <Opcion marcada={value.necesita_sala === 'no'} onClick={() => onChange({ ...value, necesita_sala: 'no', salas: [] })}>
             No necesita
           </Opcion>
           <Opcion marcada={value.necesita_sala === 'cualquiera'} onClick={() => onChange({ ...value, necesita_sala: 'cualquiera', salas: [] })}>
-            Cualquier sala/cabina libre
+            Cualquier cabina o consultorio libre
           </Opcion>
           <Opcion marcada={value.necesita_sala === 'algunas'} onClick={() => onChange({ ...value, necesita_sala: 'algunas' })}>
-            Solo estas salas/cabinas
+            Solo estas cabinas o consultorios
           </Opcion>
           {value.necesita_sala === 'algunas' && (
             <>
               <Marcables tipo="sala" recursos={salas} marcados={value.salas} onChange={(ids) => onChange({ ...value, salas: ids })} />
-              {value.salas.length === 0 && <p className="pl-6 text-xs text-amber-700">Elige al menos una sala/cabina.</p>}
+              {value.salas.length === 0 && <p className="pl-6 text-xs text-amber-700">Elige al menos una cabina o consultorio.</p>}
             </>
           )}
         </div>
