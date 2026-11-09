@@ -6,6 +6,29 @@ import { agendaApi } from '@/lib/api/agenda'
 import { Skeleton } from '@/components/ui/skeleton'
 import { cn, formatTime } from '@/lib/utils'
 import { mensajeDeError } from '@/lib/errores'
+import type { MotivoHorarios } from '@/types/agenda'
+
+/** Por qué no quedan horarios, cuando es por una sala o un equipo. */
+function textoMotivo(m: MotivoHorarios): string {
+  const uno = m.recursos.length === 1 ? m.recursos[0] : null
+  const sala = m.tipo === 'sala'
+  if (m.causa === 'sin_compatible') return 'Ninguna cabina o consultorio sirve para todos los procedimientos de esta cita.'
+  if (m.causa === 'fuera_de_horario') {
+    if (uno) return `${uno} no está disponible este día.`
+    return sala ? 'Ninguna de las cabinas o consultorios que sirven está disponible este día.' : 'Ninguno de los equipos que sirven está disponible este día.'
+  }
+  if (m.causa === 'bloqueado') {
+    return uno ? `${uno} está marcado como no disponible este día.` : 'Lo que necesita esta cita está marcado como no disponible este día.'
+  }
+  if (uno) return sala ? `${uno} ya tiene citas en los horarios libres de este día.` : `${uno} ya está ocupado en los horarios libres de este día.`
+  return sala ? 'Todas las cabinas y consultorios que sirven están ocupados en los horarios libres de este día.' : `Los equipos que sirven (${m.recursos.join(', ')}) están ocupados en los horarios libres de este día.`
+}
+
+function textoProximo(iso: string): string {
+  const d = new Date(iso)
+  const dia = d.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'short' })
+  return `${dia}, ${formatTime(iso)}`
+}
 
 interface SlotPickerProps {
   profesionalId: string
@@ -23,13 +46,18 @@ interface SlotPickerProps {
   /** Hora (0-23) del hueco en que se hizo clic en la agenda: se elige el
    *  primer horario libre de esa hora (M3-30). */
   horaPreferida?: number
+  /** "Ver el próximo horario libre": cambia la fecha y elige ese horario. */
+  onIrA?: (slot: string) => void
+  /** Sala o equipos elegidos: solo los horarios en que están libres. */
+  sala?: string | null
+  equipos?: string[]
 }
 
 const PLACEHOLDER: Record<string, string> = {
-  profesional: 'profesional',
-  sede:        'sede',
-  fecha:       'fecha',
-  fuente:      'procedimiento o duración',
+  profesional: 'el profesional',
+  sede:        'la sede',
+  fecha:       'la fecha',
+  fuente:      'qué se va a hacer',
 }
 
 export function SlotPicker({
@@ -44,12 +72,20 @@ export function SlotPicker({
   duracionMin,
   citaId,
   horaPreferida,
+  onIrA,
+  sala,
+  equipos,
 }: SlotPickerProps) {
   const tieneFuente = Boolean(servicioId || itemCotizacionId || (duracionMin && duracionMin > 0))
   const enabled = Boolean(profesionalId && sedeId && fecha && tieneFuente)
 
   const slotParams = (() => {
-    const base = { profesional_id: profesionalId, sede_id: sedeId, fecha, ...(citaId ? { cita_id: citaId } : {}) }
+    const base = {
+      profesional_id: profesionalId, sede_id: sedeId, fecha,
+      ...(citaId ? { cita_id: citaId } : {}),
+      ...(sala ? { sala } : {}),
+      ...(equipos?.length ? { equipos: equipos.join(',') } : {}),
+    }
     if (itemCotizacionId) {
       return { ...base, item_cotizacion_id: itemCotizacionId, ...(sesionEjecutadaId ? { sesion_ejecutada_id: sesionEjecutadaId } : {}) }
     }
@@ -57,13 +93,24 @@ export function SlotPicker({
     return { ...base, servicio_id: servicioId! }
   })()
 
-  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, sesionEjecutadaId, duracionMin, citaId]
+  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, sesionEjecutadaId, duracionMin, citaId, sala ?? '', (equipos ?? []).join(',')]
 
-  const { data: slots, isLoading, isError, error, refetch } = useQuery({
+  // Con el detalle: si se descartaron horarios por una sala o un equipo, dice
+  // por qué y cuál es el próximo libre.
+  const { data: detalle, isLoading, isError, error, refetch } = useQuery({
     queryKey,
-    queryFn: () => agendaApi.citas.slotsDisponibles(slotParams),
+    queryFn: () => agendaApi.citas.horariosDetalle(slotParams),
     enabled,
   })
+  const slots = detalle?.horarios
+
+  // El horario elegido dejó de servir (se cambió la sala o el equipo y ya no
+  // está en la lista): se quita para no agendar uno ocupado. Al editar no: la
+  // hora actual de la cita puede no estar en la lista (ya pasó) y se conserva;
+  // el backend valida al guardar.
+  useEffect(() => {
+    if (!citaId && value && slots && !slots.includes(value)) onSelect('')
+  }, [citaId, value, slots, onSelect])
 
   // Solo una vez por hora preferida: si la persona elige otro horario, no se pisa.
   const preferidaAplicada = useRef<number | undefined>(undefined)
@@ -80,13 +127,14 @@ export function SlotPicker({
   }, [horaPreferida, slots, value, onSelect])
 
   if (!enabled) {
-    const falta = !profesionalId ? PLACEHOLDER.profesional
+    // En el orden en que se llena el formulario: qué, dónde, con quién, cuándo.
+    const falta = !tieneFuente ? PLACEHOLDER.fuente
       : !sedeId ? PLACEHOLDER.sede
-      : !fecha ? PLACEHOLDER.fecha
-      : PLACEHOLDER.fuente
+      : !profesionalId ? PLACEHOLDER.profesional
+      : PLACEHOLDER.fecha
     return (
       <p className="text-sm text-muted-foreground text-center py-4">
-        Selecciona {falta} para ver horarios disponibles
+        Elige {falta} para ver los horarios libres.
       </p>
     )
   }
@@ -135,6 +183,30 @@ export function SlotPicker({
       hint = 'Selecciona una fecha futura para ver disponibilidad.'
     } else if (isWeekend) {
       hint = 'Esta fecha es fin de semana. Verifica que la sede o el profesional tengan horario configurado para este día.'
+    }
+
+    // Sin horarios por una sala o un equipo: se explica y se ofrece el próximo libre.
+    if (detalle?.motivo && !(allSlots.length > 0 && isToday)) {
+      return (
+        <div className="text-center py-4 space-y-2">
+          <p className="text-sm text-foreground">{textoMotivo(detalle.motivo)}</p>
+          {detalle.proximo ? (
+            onIrA ? (
+              <button
+                type="button"
+                onClick={() => onIrA(detalle.proximo!)}
+                className="text-sm font-medium text-primary hover:underline"
+              >
+                Primer horario libre: {textoProximo(detalle.proximo)} →
+              </button>
+            ) : (
+              <p className="text-xs text-muted-foreground">Primer horario libre: {textoProximo(detalle.proximo)}</p>
+            )
+          ) : (
+            <p className="text-xs text-muted-foreground">No hay horarios libres en las próximas tres semanas.</p>
+          )}
+        </div>
+      )
     }
 
     return (

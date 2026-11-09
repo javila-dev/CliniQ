@@ -79,6 +79,9 @@ import type {
   ConfiguracionFacial, UpdateConfiguracionFacialRequest,
   PlantillaAsistencia, CreatePlantillaAsistenciaRequest,
   SedesLimite, WizardConfig, ConfiguracionCartera,
+  PrevisualizacionRecursos,
+  Recurso,
+  RecursoInput,
 } from '@/types/clinicas'
 import type { DiagramaCorporal, GrupoZonas } from '@/types/admin'
 import type { Paginated } from '@/types/common'
@@ -231,6 +234,39 @@ export const clinicasApi = {
     },
     delete: async (id: string): Promise<void> => {
       await apiClient.delete(`/clinicas/sedes/${id}/`)
+    },
+  },
+
+  /** Salas y equipos de las sedes (docs/plan-salas-y-equipos.md). */
+  recursos: {
+    list: async (params?: { sede?: string; tipo?: 'sala' | 'equipo'; activo?: boolean }): Promise<Recurso[]> => {
+      const res = await apiClient.get<Recurso[] | Paginated<Recurso>>('/clinicas/recursos/', { params: { page_size: 500, ...params } })
+      return Array.isArray(res.data) ? res.data : res.data.results
+    },
+    create: async (data: RecursoInput): Promise<Recurso> => {
+      const res = await apiClient.post<Recurso>('/clinicas/recursos/', data)
+      return res.data
+    },
+    update: async (id: string, data: RecursoInput): Promise<Recurso> => {
+      const res = await apiClient.patch<Recurso>(`/clinicas/recursos/${id}/`, data)
+      return res.data
+    },
+    delete: async (id: string): Promise<void> => {
+      await apiClient.delete(`/clinicas/recursos/${id}/`)
+    },
+    /** "No disponible…": bloqueo ya aprobado de esa sala o equipo. */
+    noDisponible: async (id: string, data: { fecha_inicio: string; fecha_fin: string; motivo?: string }) => {
+      const res = await apiClient.post<{ citas: PrevisualizacionRecursos }>(`/clinicas/recursos/${id}/no_disponible/`, data)
+      return res.data
+    },
+    /** Qué pasaría con las citas ya agendadas, sin guardar el cambio. */
+    previsualizar: async (
+      data:
+        | { recurso: RecursoInput; recurso_id?: string }
+        | { procedimiento_id: string; procedimiento: { necesita_sala?: string; salas?: string[]; equipos?: string[] } },
+    ): Promise<PrevisualizacionRecursos> => {
+      const res = await apiClient.post<PrevisualizacionRecursos>('/clinicas/recursos/previsualizar/', data)
+      return res.data
     },
   },
 

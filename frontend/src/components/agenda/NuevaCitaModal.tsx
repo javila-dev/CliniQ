@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, useRef } from 'react'
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -14,7 +14,7 @@ import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { protocolosApi } from '@/lib/api/protocolos'
 import { carteraApi } from '@/lib/api/cartera'
 import { useAuthStore } from '@/store/authStore'
-import { hasPermission, PERM } from '@/lib/permissions'
+import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
 import { PacienteSearchInput } from '@/components/pacientes/PacienteSearchInput'
 import { PacienteForm } from '@/components/pacientes/PacienteForm'
@@ -22,6 +22,7 @@ import { ProfesionalSelect, type ProfesionalFiltro } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
 import { SlotPicker } from './SlotPicker'
+import { ELECCION_AUTOMATICA, RecursosDeLaCita, recursosParaEnviar, useSedeConRecursos, type EleccionRecursos } from './RecursosDeLaCita'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
@@ -119,6 +120,8 @@ export function NuevaCitaModal({
   // El paciente ya tiene otra cita a esa hora: se avisa y se puede agendar igual (M3-30).
   const [cruce, setCruce] = useState<CitaCruzada[] | null>(null)
   const confirmarCruce = useRef(false)
+  // Sala y equipo: los elige la app; solo se envían si la persona los cambió.
+  const [recursos, setRecursos] = useState<EleccionRecursos>(ELECCION_AUTOMATICA)
 
   // Creación de paciente inline
   const [crearPacienteOpen, setCrearPacienteOpen] = useState(false)
@@ -179,7 +182,24 @@ export function NuevaCitaModal({
     queryKey: ['sedes'],
     queryFn: () => clinicasApi.sedes.list({ activa: true }),
   })
+  // El procedimiento se elige antes que la sede: la clínica sale de la sede si
+  // ya hay, o de cualquiera de las sedes (todas son de la clínica activa).
   const clinicaId = sedesData?.results.find((s) => s.id === sedeId)?.clinica
+    ?? user?.clinica_id ?? sedesData?.results[0]?.clinica
+  // Sedes que la persona puede usar: con una sola, se elige sola y no se pregunta.
+  const idsUsuario = isAdminOrSuperAdmin(user) ? null : (user?.sedes?.map((s) => s.id) ?? null)
+  const sedesVisibles = (sedesData?.results ?? []).filter((s) => !idsUsuario || idsUsuario.includes(s.id))
+  const unaSola = sedesVisibles.length === 1
+  useEffect(() => {
+    if (open && unaSola && !sedeId) setValue('sede', sedesVisibles[0].id)
+  }, [open, unaSola, sedeId, sedesVisibles, setValue])
+  const conSalas = useSedeConRecursos(sedeId)
+
+  const { data: serviciosActivos } = useQuery({
+    queryKey: ['servicios', 'activos', clinicaId],
+    queryFn: () => clinicasApi.servicios.activos(clinicaId),
+    enabled: !!clinicaId && modo === 'servicio',
+  })
 
   const { data: cotizacionesPaciente } = useQuery({
     queryKey: ['cotizaciones-aceptadas', paciente?.id],
@@ -240,7 +260,10 @@ export function NuevaCitaModal({
     meta: { errorManejado: true }, // el try/catch muestra el error
     mutationFn: agendaApi.citas.create,
     // Si el horario se ocupó mientras tanto, la lista de horarios se refresca.
-    onError: () => queryClient.invalidateQueries({ queryKey: ['slots'] }),
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: ['slots'] })
+      queryClient.invalidateQueries({ queryKey: ['recursos-libres'] })
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['citas'] })
       queryClient.invalidateQueries({ queryKey: ['seguimiento'] })
@@ -274,6 +297,7 @@ export function NuevaCitaModal({
   const handleClose = () => {
     reset()
     setCruce(null)
+    setRecursos(ELECCION_AUTOMATICA)
     setPaciente(null)
     setPacienteError(false)
     setModo('servicio')
@@ -338,6 +362,7 @@ export function NuevaCitaModal({
       fecha_inicio:   values.slot,
       canal_origen:   values.canal_origen,
       notas_internas: values.notas_internas || undefined,
+      ...recursosParaEnviar(recursos),
     }
 
     try {
@@ -420,6 +445,25 @@ export function NuevaCitaModal({
     return { servicioId: '' } as const
   })()
 
+  const elegirHora = useCallback((s: string) => setValue('slot', s), [setValue])
+
+  // Resumen del pie: quién, qué y cuándo, en una línea.
+  const resumen = (() => {
+    if (!paciente) return null
+    const que = modo === 'servicio'
+      ? serviciosActivos?.find((s) => s.id === servicioId)?.nombre
+      : modo === 'cotizacion'
+        ? sesionesQueries.flatMap((q) => q.data?.items ?? []).find((i) => i.item_id === itemCotizacion)?.descripcion
+        : duracionLibre ? `Consulta de ${duracionLibre} min` : null
+    const cuando = slot
+      ? new Date(slot).toLocaleString('es-CO', { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' })
+      : null
+    return {
+      quien: paciente.nombre_completo,
+      resto: [que, cuando].filter(Boolean).map((t) => ` · ${t}`).join(''),
+    }
+  })()
+
   // ── Render ────────────────────────────────────────────────────
 
   return (
@@ -430,11 +474,10 @@ export function NuevaCitaModal({
           <DialogTitle>Nueva cita</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5 py-2">
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6 py-2">
 
-          {/* ── Paciente ── */}
-          <div className="space-y-1.5">
-            <Label>Paciente *</Label>
+          {/* 1 · Paciente */}
+          <Paso n={1} titulo="Paciente">
             <PacienteSearchInput
               onSelect={(p) => {
                 setPaciente(p)
@@ -456,245 +499,35 @@ export function NuevaCitaModal({
               } : undefined}
             />
             {pacienteError && <p className="text-xs text-destructive">Selecciona un paciente</p>}
-          </div>
+          </Paso>
 
-          {/* ── Selector de modo (visible solo con paciente) ── */}
-          {paciente && (
-            <div className="space-y-1.5">
-              <Label>Tipo de cita *</Label>
-              <div className="grid grid-cols-3 gap-2">
-                <ModoBtn
-                  activo={modo === 'cotizacion'}
-                  disabled={!hasCotizaciones}
-                  onClick={() => cambiarModo('cotizacion')}
-                  icon={<FileCheck className="h-4 w-4" />}
-                  label={<>Sesión de<br/>cotización</>}
-                  tooltip={!hasCotizaciones ? 'El paciente no tiene cotizaciones aceptadas' : undefined}
-                />
-                <ModoBtn
-                  activo={modo === 'servicio'}
-                  onClick={() => cambiarModo('servicio')}
-                  icon={<Stethoscope className="h-4 w-4" />}
-                  label={<>Por<br/>procedimiento</>}
-                />
-                <ModoBtn
-                  activo={modo === 'libre'}
-                  onClick={() => cambiarModo('libre')}
-                  icon={<Clock className="h-4 w-4" />}
-                  label={<>Consulta<br/>libre</>}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* ── MODO COTIZACION: selector de ítem ── */}
-          {paciente && modo === 'cotizacion' && (
-            <div className="space-y-1.5">
-              <Label>Ítem de cotización *</Label>
-              <Select
-                value={itemCotizacion ?? 'none'}
-                onValueChange={(v) => {
-                  const val = v === 'none' ? null : v
-                  setItemCotizacion(val)
-                  setSesionEjecutada(null)
-                  const found = sesionesQueries.flatMap((q) => q.data?.items ?? []).find((i) => i.item_id === val)
-                  setItemCotizacionTipo(found?.tipo ?? null)
-                  setItemCotizacionError(false)
-                  setValue('slot', '')
-                  limpiarProfesionalSiFiltra()
-                }}
-              >
-                <SelectTrigger className={itemCotizacionError ? 'border-destructive' : ''}>
-                  <SelectValue placeholder="Selecciona un ítem" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— Selecciona un ítem —</SelectItem>
-                  {sesionesQueries.flatMap((q, idx) => {
-                    if (!q.data) return []
-                    const cotiz = cotizacionesPaciente!.results[idx]
-                    const TIPO_LABELS: Record<string, string> = {
-                      tratamiento:   'Tratamientos',
-                      procedimiento: 'Procedimientos',
-                      libre:         'Ítems adicionales',
-                    }
-                    const disponibles = q.data.items.filter((i) => i.citas_restantes > 0)
-                    if (!disponibles.length) return []
-                    return (['tratamiento', 'procedimiento', 'libre'] as const).flatMap((tipo) => {
-                      const del_tipo = disponibles.filter((i) => (i.tipo ?? 'libre') === tipo)
-                      if (!del_tipo.length) return []
-                      return [
-                        <SelectItem
-                          key={`${cotiz.id}-lbl-${tipo}`}
-                          value={`__lbl_${cotiz.id}_${tipo}`}
-                          disabled
-                          className="text-xs font-semibold text-muted-foreground py-1"
-                        >
-                          {TIPO_LABELS[tipo]}
-                        </SelectItem>,
-                        ...del_tipo.map((item) => (
-                          <SelectItem key={item.item_id} value={item.item_id} className="pl-5">
-                            {item.descripcion}{item.es_obsequio ? ' (obsequio)' : ''} — {item.citas_restantes} de {item.num_citas} restantes
-                          </SelectItem>
-                        )),
-                      ]
-                    })
-                  })}
-                </SelectContent>
-              </Select>
-              {itemCotizacionError && (
-                <p className="text-xs text-destructive">Selecciona un ítem de cotización</p>
-              )}
-            </div>
-          )}
-
-          {/* ── MODO COTIZACION: selector de sesión (solo para ítems de tipo tratamiento) ── */}
-          {paciente && modo === 'cotizacion' && itemCotizacion && itemCotizacionTipo === 'tratamiento' && (
-            <div className="space-y-1.5">
-              <Label>Sesión a consumir</Label>
-              {loadingTratamiento ? (
-                <p className="text-xs text-muted-foreground py-1">Cargando sesiones…</p>
-              ) : sesionesPendientes.length === 0 ? (
-                <p className="text-xs text-muted-foreground py-1">Sin sesiones pendientes para este tratamiento.</p>
-              ) : (
-                <Select
-                  value={sesionEjecutada ?? 'none'}
-                  onValueChange={(v) => { setSesionEjecutada(v === 'none' ? null : v); limpiarProfesionalSiFiltra() }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecciona la sesión (opcional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Sin asignar sesión —</SelectItem>
-                    {sesionesPendientes.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.label}
-                        {s.procedimientos.length > 0 && (
-                          <span className="text-xs text-muted-foreground ml-1">
-                            ({s.procedimientos.join(', ')})
-                          </span>
-                        )}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-          )}
-
-          {/* ── MODO LIBRE: duración + motivo ── */}
-          {paciente && modo === 'libre' && (
-            <>
-              <div className="space-y-1.5">
-                <Label>Duración *</Label>
-                <div className="flex gap-2 flex-wrap">
-                  {DURACIONES_MIN.map((d) => (
-                    <button
-                      key={d}
-                      type="button"
-                      onClick={() => {
-                        setDuracionLibre(d)
-                        setDuracionError(false)
-                        setValue('slot', '')
-                      }}
-                      className={cn(
-                        'px-3 py-1.5 rounded-md border text-sm font-medium transition-colors',
-                        duracionLibre === d
-                          ? 'border-primary bg-primary text-primary-foreground'
-                          : 'border-input bg-background hover:bg-accent'
-                      )}
-                    >
-                      {d} min
-                    </button>
-                  ))}
-                </div>
-                {duracionError && (
-                  <p className="text-xs text-destructive">Selecciona una duración</p>
-                )}
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="motivo">
-                  Motivo{' '}
-                  <span className="text-muted-foreground font-normal">(opcional)</span>
-                </Label>
-                <Textarea
-                  id="motivo"
-                  placeholder="Ej: Evaluación inicial, control post-procedimiento..."
-                  rows={2}
-                  {...register('motivo')}
-                />
-              </div>
-            </>
-          )}
-
-          {/* ── Sede + Canal ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label>Sede *</Label>
-              <Controller
-                name="sede"
-                control={control}
-                render={({ field }) => (
-                  <SedeSelect
-                    value={field.value ?? ''}
-                    onValueChange={(v) => {
-                      field.onChange(v)
-                      setValue('profesional', '')
-                      setValue('servicio', '')
-                      setValue('slot', '')
-                    }}
-                  />
-                )}
+          {/* 2 · Qué se va a hacer */}
+          <Paso n={2} titulo="¿Qué se va a hacer?">
+            <div className="grid grid-cols-3 gap-2">
+              <ModoBtn
+                activo={modo === 'cotizacion'}
+                disabled={!hasCotizaciones}
+                onClick={() => cambiarModo('cotizacion')}
+                icon={<FileCheck className="h-4 w-4" />}
+                label={<>Sesión de un<br/>paquete vendido</>}
+                tooltip={!paciente ? 'Elige primero el paciente' : !hasCotizaciones ? 'El paciente no tiene cotizaciones aceptadas' : undefined}
               />
-              {errors.sede && <p className="text-xs text-destructive">{errors.sede.message}</p>}
-            </div>
-
-            <div className="space-y-1.5">
-              <Label>¿Cómo agendó el paciente? *</Label>
-              <Controller
-                name="canal_origen"
-                control={control}
-                render={({ field }) => (
-                  <Select value={field.value} onValueChange={field.onChange}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="telefono">Teléfono</SelectItem>
-                      <SelectItem value="presencial">Presencial</SelectItem>
-                      <SelectItem value="web">Web</SelectItem>
-                      <SelectItem value="redes">Redes sociales</SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
+              <ModoBtn
+                activo={modo === 'servicio'}
+                onClick={() => cambiarModo('servicio')}
+                icon={<Stethoscope className="h-4 w-4" />}
+                label={<>Un<br/>procedimiento</>}
               />
-            </div>
-          </div>
-
-          {/* ── Profesional + Procedimiento (procedimiento solo en modo 'servicio').
-              Con el filtro activo el procedimiento va primero. ── */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className={cn('space-y-1.5', filtroActivo && modo === 'servicio' && 'order-2')}>
-              <Label>Profesional *</Label>
-              <Controller
-                name="profesional"
-                control={control}
-                render={({ field }) => (
-                  <ProfesionalSelect
-                    value={field.value ?? ''}
-                    onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
-                    sedeId={sedeId}
-                    disabled={!sedeId}
-                    filtro={filtroProfesional}
-                    esperando={esperandoProfesional}
-                  />
-                )}
+              <ModoBtn
+                activo={modo === 'libre'}
+                onClick={() => cambiarModo('libre')}
+                icon={<Clock className="h-4 w-4" />}
+                label={<>Consulta<br/>libre</>}
               />
-              {errors.profesional && (
-                <p className="text-xs text-destructive">{errors.profesional.message}</p>
-              )}
             </div>
 
             {modo === 'servicio' && (
-              <div className={cn('space-y-1.5', filtroActivo && 'order-1')}>
+              <div className="space-y-1.5">
                 <Label>Procedimiento *</Label>
                 <Controller
                   name="servicio"
@@ -707,53 +540,268 @@ export function NuevaCitaModal({
                     />
                   )}
                 />
-                {errors.servicio && (
-                  <p className="text-xs text-destructive">{errors.servicio.message}</p>
+              </div>
+            )}
+
+            {modo === 'cotizacion' && (
+              <div className="space-y-1.5">
+                <Label>Ítem de cotización *</Label>
+                <Select
+                  value={itemCotizacion ?? 'none'}
+                  onValueChange={(v) => {
+                    const val = v === 'none' ? null : v
+                    setItemCotizacion(val)
+                    setSesionEjecutada(null)
+                    const found = sesionesQueries.flatMap((q) => q.data?.items ?? []).find((i) => i.item_id === val)
+                    setItemCotizacionTipo(found?.tipo ?? null)
+                    setItemCotizacionError(false)
+                    setValue('slot', '')
+                    limpiarProfesionalSiFiltra()
+                  }}
+                >
+                  <SelectTrigger className={itemCotizacionError ? 'border-destructive' : ''}>
+                    <SelectValue placeholder="Selecciona un ítem" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Selecciona un ítem —</SelectItem>
+                    {sesionesQueries.flatMap((q, idx) => {
+                      if (!q.data) return []
+                      const cotiz = cotizacionesPaciente!.results[idx]
+                      const TIPO_LABELS: Record<string, string> = {
+                        tratamiento:   'Tratamientos',
+                        procedimiento: 'Procedimientos',
+                        libre:         'Ítems adicionales',
+                      }
+                      const disponibles = q.data.items.filter((i) => i.citas_restantes > 0)
+                      if (!disponibles.length) return []
+                      return (['tratamiento', 'procedimiento', 'libre'] as const).flatMap((tipo) => {
+                        const del_tipo = disponibles.filter((i) => (i.tipo ?? 'libre') === tipo)
+                        if (!del_tipo.length) return []
+                        return [
+                          <SelectItem
+                            key={`${cotiz.id}-lbl-${tipo}`}
+                            value={`__lbl_${cotiz.id}_${tipo}`}
+                            disabled
+                            className="text-xs font-semibold text-muted-foreground py-1"
+                          >
+                            {TIPO_LABELS[tipo]}
+                          </SelectItem>,
+                          ...del_tipo.map((item) => (
+                            <SelectItem key={item.item_id} value={item.item_id} className="pl-5">
+                              {item.descripcion}{item.es_obsequio ? ' (obsequio)' : ''} — {item.citas_restantes} de {item.num_citas} restantes
+                            </SelectItem>
+                          )),
+                        ]
+                      })
+                    })}
+                  </SelectContent>
+                </Select>
+                {itemCotizacionError && (
+                  <p className="text-xs text-destructive">Selecciona un ítem de cotización</p>
                 )}
               </div>
             )}
-          </div>
 
-          {/* ── Fecha ── */}
-          <div className="space-y-1.5">
-            <Label htmlFor="fecha">Fecha *</Label>
-            <Input
-              id="fecha"
-              type="date"
-              min={todayISO()}
-              {...register('fecha', { onChange: () => setValue('slot', '') })}
-              className="max-w-xs"
-            />
-            {errors.fecha && <p className="text-xs text-destructive">{errors.fecha.message}</p>}
-          </div>
+            {modo === 'cotizacion' && itemCotizacion && itemCotizacionTipo === 'tratamiento' && (
+              <div className="space-y-1.5">
+                <Label>Sesión a consumir</Label>
+                {loadingTratamiento ? (
+                  <p className="text-xs text-muted-foreground py-1">Cargando sesiones…</p>
+                ) : sesionesPendientes.length === 0 ? (
+                  <p className="text-xs text-muted-foreground py-1">Sin sesiones pendientes para este tratamiento.</p>
+                ) : (
+                  <Select
+                    value={sesionEjecutada ?? 'none'}
+                    onValueChange={(v) => { setSesionEjecutada(v === 'none' ? null : v); setValue('slot', ''); limpiarProfesionalSiFiltra() }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecciona la sesión (opcional)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Sin asignar sesión —</SelectItem>
+                      {sesionesPendientes.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.label}
+                          {s.procedimientos.length > 0 && (
+                            <span className="text-xs text-muted-foreground ml-1">
+                              ({s.procedimientos.join(', ')})
+                            </span>
+                          )}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+            )}
 
-          {/* ── Slots disponibles ── */}
-          <div className="space-y-2">
-            <Label>Horario disponible *</Label>
-            <div className="rounded-md border p-3 bg-muted/20">
-              <SlotPicker
-                profesionalId={profesionalId ?? ''}
-                sedeId={sedeId ?? ''}
-                fecha={fecha ?? ''}
-                value={slot ?? ''}
-                onSelect={(s) => setValue('slot', s)}
-                horaPreferida={defaultHora}
-                {...slotPickerProps}
-              />
+            {modo === 'libre' && (
+              <>
+                <div className="space-y-1.5">
+                  <Label>Duración *</Label>
+                  <div className="flex gap-2 flex-wrap">
+                    {DURACIONES_MIN.map((d) => (
+                      <button
+                        key={d}
+                        type="button"
+                        onClick={() => {
+                          setDuracionLibre(d)
+                          setDuracionError(false)
+                          setValue('slot', '')
+                        }}
+                        className={cn(
+                          'px-3 py-1.5 rounded-md border text-sm font-medium transition-colors',
+                          duracionLibre === d
+                            ? 'border-primary bg-primary text-primary-foreground'
+                            : 'border-input bg-background hover:bg-accent'
+                        )}
+                      >
+                        {d} min
+                      </button>
+                    ))}
+                  </div>
+                  {duracionError && (
+                    <p className="text-xs text-destructive">Selecciona una duración</p>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="motivo">
+                    Motivo{' '}
+                    <span className="text-muted-foreground font-normal">(opcional)</span>
+                  </Label>
+                  <Textarea
+                    id="motivo"
+                    placeholder="Ej: Evaluación inicial, control post-procedimiento..."
+                    rows={2}
+                    {...register('motivo')}
+                  />
+                </div>
+              </>
+            )}
+          </Paso>
+
+          {/* 3 · Dónde y con quién */}
+          <Paso n={3} titulo={unaSola ? '¿Con quién?' : '¿Dónde y con quién?'}>
+            <div className={cn('grid grid-cols-1 gap-4', !unaSola && 'sm:grid-cols-2')}>
+              {/* Con una sola sede no se pregunta: ya está elegida. */}
+              <div className={cn('space-y-1.5', unaSola && 'hidden')}>
+                <Label>Sede *</Label>
+                <Controller
+                  name="sede"
+                  control={control}
+                  render={({ field }) => (
+                    <SedeSelect
+                      value={field.value ?? ''}
+                      onValueChange={(v) => {
+                        field.onChange(v)
+                        setValue('profesional', '')
+                        setValue('slot', '')
+                      }}
+                    />
+                  )}
+                />
+                {errors.sede && <p className="text-xs text-destructive">{errors.sede.message}</p>}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Profesional *</Label>
+                <Controller
+                  name="profesional"
+                  control={control}
+                  render={({ field }) => (
+                    <ProfesionalSelect
+                      value={field.value ?? ''}
+                      onValueChange={(v) => { field.onChange(v); setValue('slot', '') }}
+                      sedeId={sedeId}
+                      disabled={!sedeId}
+                      filtro={filtroProfesional}
+                      esperando={esperandoProfesional}
+                    />
+                  )}
+                />
+                {errors.profesional && (
+                  <p className="text-xs text-destructive">{errors.profesional.message}</p>
+                )}
+              </div>
             </div>
-            {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
-          </div>
+          </Paso>
 
-          {/* ── Notas internas ── */}
-          <div className="space-y-1.5">
-            <Label htmlFor="notas_internas">Notas internas</Label>
-            <Textarea
-              id="notas_internas"
-              placeholder="Observaciones para el equipo..."
-              rows={2}
-              {...register('notas_internas')}
-            />
-          </div>
+          {/* 4 · Sala y equipo (solo en sedes que los tienen) */}
+          {conSalas && (
+            <Paso n={4} titulo="Cabina/consultorio y equipo">
+              <RecursosDeLaCita
+                sedeId={sedeId!}
+                fechaInicio={slot || undefined}
+                forma={slotPickerProps}
+                value={recursos}
+                onChange={setRecursos}
+              />
+            </Paso>
+          )}
+
+          {/* 5 · Cuándo */}
+          <Paso n={conSalas ? 5 : 4} titulo="¿Cuándo?">
+            <div className="space-y-1.5">
+              <Label htmlFor="fecha">Fecha *</Label>
+              <Input
+                id="fecha"
+                type="date"
+                min={todayISO()}
+                {...register('fecha', { onChange: () => setValue('slot', '') })}
+                className="max-w-xs"
+              />
+              {errors.fecha && <p className="text-xs text-destructive">{errors.fecha.message}</p>}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Hora *</Label>
+              <div className="rounded-lg border p-3 bg-muted/20">
+                <SlotPicker
+                  profesionalId={profesionalId ?? ''}
+                  sedeId={sedeId ?? ''}
+                  fecha={fecha ?? ''}
+                  value={slot ?? ''}
+                  onSelect={elegirHora}
+                  horaPreferida={defaultHora}
+                  onIrA={(s) => { setValue('fecha', s.slice(0, 10)); setValue('slot', s) }}
+                  {...slotPickerProps}
+                  {...recursosParaEnviar(recursos)}
+                />
+              </div>
+              {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
+            </div>
+          </Paso>
+
+          {/* 6 · Detalles administrativos */}
+          <Paso n={conSalas ? 6 : 5} titulo="Detalles">
+            <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,14rem)_1fr] gap-4">
+              <div className="space-y-1.5">
+                <Label>¿Cómo agendó? *</Label>
+                <Controller
+                  name="canal_origen"
+                  control={control}
+                  render={({ field }) => (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="telefono">Teléfono</SelectItem>
+                        <SelectItem value="presencial">Presencial</SelectItem>
+                        <SelectItem value="web">Web</SelectItem>
+                        <SelectItem value="redes">Redes sociales</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="notas_internas">Notas internas <span className="text-muted-foreground font-normal">(opcional)</span></Label>
+                <Textarea
+                  id="notas_internas"
+                  placeholder="Observaciones para el equipo..."
+                  rows={2}
+                  {...register('notas_internas')}
+                />
+              </div>
+            </div>
+          </Paso>
 
           {serverError && (
             <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2">
@@ -830,14 +878,24 @@ export function NuevaCitaModal({
             </div>
           )}
 
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={handleClose}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={isPending}>
-              {isPending ? 'Agendando...' : 'Agendar cita'}
-            </Button>
-          </DialogFooter>
+          {/* Pie fijo: lo que se va a agendar, para leerlo antes de confirmar. */}
+          <div className="sticky -bottom-6 -mx-6 -mb-6 border-t bg-background px-6 py-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="min-w-0 text-sm text-muted-foreground" aria-live="polite">
+                {resumen
+                  ? <><span className="font-medium text-foreground">{resumen.quien}</span>{resumen.resto}</>
+                  : 'Completa los pasos para agendar.'}
+              </p>
+              <DialogFooter className="shrink-0">
+                <Button type="button" variant="outline" onClick={handleClose}>
+                  Cancelar
+                </Button>
+                <Button type="submit" disabled={isPending}>
+                  {isPending ? 'Agendando...' : 'Agendar cita'}
+                </Button>
+              </DialogFooter>
+            </div>
+          </div>
         </form>
       </DialogContent>
     </Dialog>
@@ -857,6 +915,22 @@ export function NuevaCitaModal({
       </DialogContent>
     </Dialog>
     </>
+  )
+}
+
+// ── Paso numerado: se llena en el orden en que se atiende la llamada ──
+
+function Paso({ n, titulo, children }: { n: number; titulo: string; children: React.ReactNode }) {
+  return (
+    <section className="space-y-3">
+      <h3 className="flex items-center gap-2 text-sm font-semibold">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+          {n}
+        </span>
+        {titulo}
+      </h3>
+      <div className="space-y-4 sm:pl-8">{children}</div>
+    </section>
   )
 }
 

@@ -171,6 +171,80 @@ export interface Servicio {
   grupos_detalle?: { id: string; nombre: string }[]
   /** Profesionales disponibles que lo realizan, directos o por grupo. */
   cobertura?: number
+  /** Salas y equipos que ocupa al agendarse (docs/plan-salas-y-equipos.md). */
+  necesita_sala?: NecesitaSala
+  salas?: string[]
+  salas_detalle?: RecursoResumen[]
+  equipos?: string[]
+  equipos_detalle?: RecursoResumen[]
+}
+
+// ── Salas y equipos ────────────────────────────────────────────
+
+export type TipoRecurso = 'sala' | 'equipo'
+export type NecesitaSala = 'no' | 'cualquiera' | 'algunas'
+
+export interface RecursoResumen {
+  id: string
+  nombre: string
+  sede: string
+  sede_nombre: string
+  activo: boolean
+}
+
+export interface HorarioRecurso {
+  dia_semana: DiaSemana
+  no_disponible: boolean
+  hora_inicio: string | null
+  hora_fin: string | null
+}
+
+/** Sala (cabina, consultorio) o equipo de una sede. */
+export interface Recurso {
+  id: string
+  sede: string
+  sede_nombre: string
+  nombre: string
+  tipo: TipoRecurso
+  orden: number
+  activo: boolean
+  /** Sin registros: disponible todo el horario de la sede. */
+  horarios: HorarioRecurso[]
+  /** Solo equipos: procedimientos que lo usan. */
+  procedimientos: string[]
+  total_procedimientos: number
+}
+
+export interface RecursoInput {
+  sede?: string
+  nombre?: string
+  tipo?: TipoRecurso
+  orden?: number
+  activo?: boolean
+  /** Reemplaza todos los días. Sin registros: disponible todo el horario de la sede. */
+  horarios?: HorarioRecurso[]
+  procedimientos?: string[]
+}
+
+export interface FaltaRecursoDetalle {
+  tipo: TipoRecurso
+  causa: 'ocupado' | 'fuera_de_horario' | 'bloqueado' | 'sin_compatible'
+  recursos: string[]
+  a_mano: boolean
+  mensaje: string
+}
+
+/** Qué pasaría con las citas ya agendadas al guardar un cambio. */
+export interface PrevisualizacionRecursos {
+  citas_revisadas: number
+  total_sin_lugar: number
+  sin_lugar: {
+    cita_id: string
+    paciente: string
+    fecha_inicio: string
+    servicio: string
+    faltan: FaltaRecursoDetalle[]
+  }[]
 }
 
 /** Alias semántico post-H26 */
@@ -213,6 +287,9 @@ export interface CreateProcedimientoRequest {
   precios_sede?: PrecioSedeInput[]      // reemplaza la lista completa
   profesionales?: string[]   // ids de Colaborador que realizan el procedimiento
   grupos?: string[]          // ids de GrupoAtencion asignados
+  necesita_sala?: NecesitaSala
+  salas?: string[]
+  equipos?: string[]
 }
 export type UpdateProcedimientoRequest = Partial<CreateProcedimientoRequest> & { activo?: boolean }
 

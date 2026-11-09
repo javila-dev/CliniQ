@@ -140,6 +140,7 @@ class CitaViewSet(ModelViewSet):
         "confirmado_por",
         "item_cotizacion",
         "item_cotizacion__cotizacion",
+        "item_cotizacion__tratamiento",
         "cobro",
     ).prefetch_related(
         "registros_confirmacion",
@@ -147,6 +148,7 @@ class CitaViewSet(ModelViewSet):
         "sesiones_protocolo",
         "sesiones_protocolo__tipo_sesion",
         "sesiones_protocolo__procedimiento",
+        "recursos_asignados__recurso",
     ).all()
     search_fields = ("paciente__nombres", "paciente__apellidos", "paciente__numero_documento")
     ordering_fields = ("fecha_inicio", "created_at")
@@ -242,6 +244,10 @@ class CitaViewSet(ModelViewSet):
             queryset = queryset.filter(paciente_id=paciente)
         if firma_asistencia_estado:
             queryset = queryset.filter(firma_asistencia_estado=firma_asistencia_estado)
+        recurso = self.request.query_params.get("recurso")
+        if recurso:
+            # Vista de la agenda por sala o por equipo.
+            queryset = queryset.filter(recursos_asignados__recurso_id=recurso)
 
         # Paso de verificación de identidad, sin una consulta por fila en la agenda.
         from apps.pacientes.models import CheckIn
@@ -307,7 +313,12 @@ class CitaViewSet(ModelViewSet):
                 "error": "La cita ya está cerrada y no se puede editar.",
                 "code": "CITA_CERRADA",
             })
+        from apps.agenda import recursos
+
         data = serializer.validated_data
+        # Salas y equipos elegidos al editar: no son campos del modelo.
+        sala = data.pop("sala", recursos.NO_ENVIADO)
+        equipos = data.pop("equipos", recursos.NO_ENVIADO)
         servicio = data.get("servicio", instance.servicio)
         sede = data.get("sede", instance.sede)
         paciente = data.get("paciente", instance.paciente)
@@ -351,6 +362,29 @@ class CitaViewSet(ModelViewSet):
             fecha_fin=fecha_fin,
             excluir_cita_id=instance.id,
         )
+        # Salas y equipos: solo se revisan si cambia algo que los afecte. Editar
+        # una nota de una cita "con falta" no debe fallar; pero guardarla desde
+        # el formulario de horario (que manda la hora) sí intenta darle lugar.
+        asignacion = None
+        if (
+            fecha_inicio != instance.fecha_inicio
+            or fecha_fin != instance.fecha_fin
+            or sede.id != instance.sede_id
+            or (servicio.id if servicio else None) != instance.servicio_id
+            or sala is not recursos.NO_ENVIADO
+            or equipos is not recursos.NO_ENVIADO
+            or ("fecha_inicio" in data and recursos.faltantes(instance))
+        ):
+            asignacion = recursos.resolver_recursos(
+                sede=sede,
+                procedimientos=recursos.procedimientos_de_cita(instance, servicio=servicio),
+                fecha_inicio=fecha_inicio,
+                fecha_fin=fecha_fin,
+                excluir_cita_id=instance.id,
+                sala=sala,
+                equipos=equipos,
+                actuales=recursos.asignacion_actual(instance) if sede.id == instance.sede_id else [],
+            )
         if (fecha_inicio != instance.fecha_inicio or fecha_fin != instance.fecha_fin) and not self._confirmo_cruce_paciente():
             services.avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin, excluir_cita_id=instance.id)
 
@@ -370,6 +404,8 @@ class CitaViewSet(ModelViewSet):
             canal_confirmacion=paciente.canal_confirmacion,
             **extra,
         )
+        if asignacion is not None:
+            recursos.guardar_asignacion(serializer.instance, asignacion)
         if serializer.instance.fecha_inicio != fecha_anterior:
             registrar_accion(
                 self.request,
@@ -777,69 +813,24 @@ class CitaViewSet(ModelViewSet):
         response["Content-Disposition"] = f'inline; filename="consentimiento-{consentimiento.id}.pdf"'
         return response
 
-    @action(detail=False, methods=["get"], url_path="slots_disponibles", pagination_class=None)
-    def slots_disponibles(self, request, *args, **kwargs):
-        import logging
+    def _duracion_y_procedimientos(self, request, sede, clinica_activa):
+        """Duración y procedimientos de la cita que se quiere agendar, según la
+        forma: `servicio_id`, `item_cotizacion_id` (+ `sesion_ejecutada_id`) o
+        `duracion_min` (consulta libre, sin procedimientos)."""
+        from apps.agenda import recursos
         from apps.cotizaciones.models import ItemCotizacion
         from django.db.models import Max
 
-        logger = logging.getLogger(__name__)
-
-        profesional_id = request.query_params.get("profesional_id")
-        sede_id = request.query_params.get("sede_id")
-        fecha = request.query_params.get("fecha")
         servicio_id = request.query_params.get("servicio_id")
         item_cotizacion_id = request.query_params.get("item_cotizacion_id")
         duracion_min_param = request.query_params.get("duracion_min")
-        # Al editar una cita, su propio horario no cuenta como ocupado.
-        cita_id = request.query_params.get("cita_id")
-
-        logger.debug(
-            "[slots_disponibles] params: profesional_id=%s, sede_id=%s, fecha=%s, "
-            "servicio_id=%s, item_cotizacion_id=%s, duracion_min=%s, user=%s, rol=%s, clinica=%s",
-            profesional_id, sede_id, fecha, servicio_id, item_cotizacion_id, duracion_min_param,
-            request.user.id, getattr(request.user, "rol", None), getattr(request.user, "clinica_id", None),
-        )
-
-        if not all([profesional_id, sede_id, fecha]):
-            logger.debug("[slots_disponibles] ERROR: faltan params obligatorios")
-            raise ValidationError({"error": "profesional_id, sede_id y fecha son obligatorios."})
         if not any([servicio_id, item_cotizacion_id, duracion_min_param]):
-            logger.debug("[slots_disponibles] ERROR: falta servicio_id, item_cotizacion_id o duracion_min")
             raise ValidationError(
                 {"error": "Se requiere servicio_id, item_cotizacion_id o duracion_min.", "code": "MISSING_DURATION"}
             )
-
-        sede_qs = Sede.objects.select_related("clinica").all()
-        profesional_qs = User.objects.filter(es_profesional=True)
-        clinica_activa = get_clinica_activa(request)
-        if clinica_activa is not None:
-            sede_qs = sede_qs.filter(clinica=clinica_activa)
-            profesional_qs = profesional_qs.filter(clinica=clinica_activa)
-
-        try:
-            sede = sede_qs.get(id=sede_id)
-            logger.debug("[slots_disponibles] sede encontrada: %s (clinica=%s)", sede.id, sede.clinica_id)
-        except Sede.DoesNotExist as exc:
-            logger.debug("[slots_disponibles] ERROR: sede %s no encontrada para clinica del user", sede_id)
-            raise ValidationError({"sede_id": "La sede no pertenece a tu clinica."}) from exc
-
-        try:
-            profesional = profesional_qs.get(id=profesional_id)
-            logger.debug("[slots_disponibles] profesional encontrado: %s (clinica=%s)", profesional.id, profesional.clinica_id)
-        except User.DoesNotExist as exc:
-            logger.debug("[slots_disponibles] ERROR: profesional %s no encontrado para clinica del user", profesional_id)
-            raise ValidationError({"profesional_id": "El profesional no pertenece a tu clinica."}) from exc
-
-        if profesional.clinica_id != sede.clinica_id:
-            logger.debug(
-                "[slots_disponibles] ERROR: clinica profesional (%s) != clinica sede (%s)",
-                profesional.clinica_id, sede.clinica_id,
-            )
-            raise ValidationError({"profesional_id": "El profesional no pertenece a la clinica de la sede."})
-
-        # Resolver duracion_min según la forma
         duracion_min = None
+        procedimientos = []
+        sesion = None
 
         if servicio_id:
             servicio_qs = Servicio.objects.all()
@@ -857,6 +848,7 @@ class CitaViewSet(ModelViewSet):
                 )
                 raise ValidationError({"servicio_id": "El procedimiento no pertenece a la clinica de la sede."})
             duracion_min = servicio.duracion_min
+            procedimientos = [servicio]
             logger.debug("[slots_disponibles] duracion_min desde servicio: %s", duracion_min)
 
         elif item_cotizacion_id:
@@ -924,6 +916,7 @@ class CitaViewSet(ModelViewSet):
                 raise ValidationError(
                     {"item_cotizacion_id": "El item no tiene duracion configurada.", "code": "MISSING_DURATION"}
                 )
+            procedimientos = recursos.procedimientos_de(item_cotizacion=item, sesion=sesion)
 
         else:
             try:
@@ -934,6 +927,80 @@ class CitaViewSet(ModelViewSet):
             if duracion_min < 5:
                 logger.debug("[slots_disponibles] ERROR: duracion_min=%s < 5", duracion_min)
                 raise ValidationError({"duracion_min": "Debe ser al menos 5 minutos."})
+            # Reprogramar una cita de paquete o de sesión: se manda su duración
+            # fija y la cita; sus salas y equipos salen de lo que hace la cita.
+            cita_id = request.query_params.get("cita_id")
+            if cita_id:
+                try:
+                    cita = Cita.objects.filter(id=uuid.UUID(cita_id), sede__clinica=sede.clinica).first()
+                except ValueError as exc:
+                    raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
+                if cita is not None:
+                    procedimientos = recursos.procedimientos_de_cita(cita)
+
+        return duracion_min, procedimientos
+
+    @action(detail=False, methods=["get"], url_path="slots_disponibles", pagination_class=None)
+    def slots_disponibles(self, request, *args, **kwargs):
+        """Horarios libres del profesional. Si el procedimiento necesita sala o
+        equipo, solo los horarios en que están libres. Con `detalle=1` responde
+        `{horarios, motivo, proximo}`: por qué se descartaron horarios (sala o
+        equipo) y el próximo horario libre; sin él, la lista de siempre."""
+
+        profesional_id = request.query_params.get("profesional_id")
+        sede_id = request.query_params.get("sede_id")
+        fecha = request.query_params.get("fecha")
+        servicio_id = request.query_params.get("servicio_id")
+        item_cotizacion_id = request.query_params.get("item_cotizacion_id")
+        duracion_min_param = request.query_params.get("duracion_min")
+        # Al editar una cita, su propio horario no cuenta como ocupado.
+        cita_id = request.query_params.get("cita_id")
+
+        logger.debug(
+            "[slots_disponibles] params: profesional_id=%s, sede_id=%s, fecha=%s, "
+            "servicio_id=%s, item_cotizacion_id=%s, duracion_min=%s, user=%s, rol=%s, clinica=%s",
+            profesional_id, sede_id, fecha, servicio_id, item_cotizacion_id, duracion_min_param,
+            request.user.id, getattr(request.user, "rol", None), getattr(request.user, "clinica_id", None),
+        )
+
+        if not all([profesional_id, sede_id, fecha]):
+            logger.debug("[slots_disponibles] ERROR: faltan params obligatorios")
+            raise ValidationError({"error": "profesional_id, sede_id y fecha son obligatorios."})
+        if not any([servicio_id, item_cotizacion_id, duracion_min_param]):
+            logger.debug("[slots_disponibles] ERROR: falta servicio_id, item_cotizacion_id o duracion_min")
+            raise ValidationError(
+                {"error": "Se requiere servicio_id, item_cotizacion_id o duracion_min.", "code": "MISSING_DURATION"}
+            )
+
+        sede_qs = Sede.objects.select_related("clinica").all()
+        profesional_qs = User.objects.filter(es_profesional=True)
+        clinica_activa = get_clinica_activa(request)
+        if clinica_activa is not None:
+            sede_qs = sede_qs.filter(clinica=clinica_activa)
+            profesional_qs = profesional_qs.filter(clinica=clinica_activa)
+
+        try:
+            sede = sede_qs.get(id=sede_id)
+            logger.debug("[slots_disponibles] sede encontrada: %s (clinica=%s)", sede.id, sede.clinica_id)
+        except Sede.DoesNotExist as exc:
+            logger.debug("[slots_disponibles] ERROR: sede %s no encontrada para clinica del user", sede_id)
+            raise ValidationError({"sede_id": "La sede no pertenece a tu clinica."}) from exc
+
+        try:
+            profesional = profesional_qs.get(id=profesional_id)
+            logger.debug("[slots_disponibles] profesional encontrado: %s (clinica=%s)", profesional.id, profesional.clinica_id)
+        except User.DoesNotExist as exc:
+            logger.debug("[slots_disponibles] ERROR: profesional %s no encontrado para clinica del user", profesional_id)
+            raise ValidationError({"profesional_id": "El profesional no pertenece a tu clinica."}) from exc
+
+        if profesional.clinica_id != sede.clinica_id:
+            logger.debug(
+                "[slots_disponibles] ERROR: clinica profesional (%s) != clinica sede (%s)",
+                profesional.clinica_id, sede.clinica_id,
+            )
+            raise ValidationError({"profesional_id": "El profesional no pertenece a la clinica de la sede."})
+
+        duracion_min, procedimientos = self._duracion_y_procedimientos(request, sede, clinica_activa)
 
         logger.debug("[slots_disponibles] llamando get_slots_disponibles: profesional=%s, sede=%s, fecha=%s, duracion=%s", profesional.id, sede.id, fecha, duracion_min)
         try:
@@ -949,11 +1016,118 @@ class CitaViewSet(ModelViewSet):
                 )
             except ValueError as exc:
                 raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
-        slots = services.get_slots_disponibles(
-            profesional.id, sede.id, fecha_date, duracion_min, excluir_cita_id=excluir_cita_id,
+        detalle = request.query_params.get("detalle", "").lower() in {"1", "true"}
+        # Sala o equipos elegidos al agendar: solo los horarios en que están libres.
+        try:
+            sala = uuid.UUID(request.query_params["sala"]) if request.query_params.get("sala") else None
+            equipos = [
+                uuid.UUID(e) for e in request.query_params.get("equipos", "").split(",") if e.strip()
+            ] or None
+        except ValueError as exc:
+            raise ValidationError({"sala": "Identificador de cabina, consultorio o equipo inválido."}) from exc
+        resultado = services.horarios_disponibles(
+            profesional.id, sede, fecha_date, duracion_min,
+            procedimientos=procedimientos, excluir_cita_id=excluir_cita_id, buscar_proximo=detalle,
+            sala=sala, equipos=equipos,
         )
+        slots = resultado["horarios"]
         logger.debug("[slots_disponibles] slots encontrados: %s", slots)
-        return Response([slot.isoformat() for slot in slots], status=status.HTTP_200_OK)
+        if not detalle:
+            return Response([slot.isoformat() for slot in slots], status=status.HTTP_200_OK)
+        proximo = resultado["proximo"]
+        return Response(
+            {
+                "horarios": [slot.isoformat() for slot in slots],
+                "motivo": resultado["motivo"],
+                "proximo": timezone.localtime(proximo).isoformat() if proximo else None,
+            },
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=False, methods=["get"], url_path="recursos_libres", pagination_class=None)
+    def recursos_libres(self, request, *args, **kwargs):
+        """Salas y equipos de una cita (el campo "Sala y equipo" al agendar):
+        por cada sala o equipo que necesita, las unidades que sirven y, si se
+        manda `fecha_inicio`, cuáles están libres a esa hora y la que se le
+        asignaría; y las demás de la sede, para reservar una a mano. Sin
+        `fecha_inicio` responde lo que sirve (para elegir antes del horario).
+        Mismos parámetros que slots_disponibles, sin profesional ni `fecha`."""
+        from apps.agenda import recursos
+
+        sede_id = request.query_params.get("sede_id")
+        fecha_inicio_param = request.query_params.get("fecha_inicio")
+        if not sede_id:
+            raise ValidationError({"error": "sede_id es obligatorio."})
+        clinica_activa = get_clinica_activa(request)
+        sede_qs = Sede.objects.select_related("clinica")
+        if clinica_activa is not None:
+            sede_qs = sede_qs.filter(clinica=clinica_activa)
+        try:
+            sede = sede_qs.filter(id=uuid.UUID(sede_id)).first()
+        except ValueError as exc:
+            raise ValidationError({"sede_id": "Identificador de sede inválido."}) from exc
+        if sede is None:
+            raise ValidationError({"sede_id": "La sede no pertenece a tu clinica."})
+        fecha_inicio = None
+        if fecha_inicio_param:
+            try:
+                fecha_inicio = datetime.fromisoformat(fecha_inicio_param.replace("Z", "+00:00"))
+            except ValueError as exc:
+                raise ValidationError({"fecha_inicio": "Usa una fecha y hora ISO."}) from exc
+            if timezone.is_naive(fecha_inicio):
+                fecha_inicio = timezone.make_aware(fecha_inicio, timezone.get_current_timezone())
+
+        duracion_min, procedimientos = self._duracion_y_procedimientos(request, sede, clinica_activa)
+
+        cita = None
+        cita_id = request.query_params.get("cita_id")
+        if cita_id:
+            try:
+                cita = Cita.objects.filter(id=uuid.UUID(cita_id), sede__clinica=sede.clinica).first()
+            except ValueError as exc:
+                raise ValidationError({"cita_id": "Identificador de cita inválido."}) from exc
+        actuales = recursos.asignacion_actual(cita) if cita is not None and cita.sede_id == sede.id else []
+
+        disponibles = recursos.recursos_activos(sede)
+        exigencias = recursos.exigencias_de(procedimientos, disponibles)
+        libres = set(disponibles)
+        sugeridos = {}
+        if fecha_inicio is not None:
+            fecha_fin = fecha_inicio + timedelta(minutes=duracion_min)
+            ocupacion = recursos.Ocupacion(sede, disponibles).cargar(
+                fecha_inicio, fecha_fin, excluir_cita_ids=[cita.id if cita else None],
+            )
+            sugeridos = dict(
+                recursos.asignar(
+                    ocupacion, exigencias, fecha_inicio, fecha_fin,
+                    preferidos=[rid for rid, a_mano in actuales if not a_mano],
+                ).asignados
+            )
+            libres = {rid for rid in disponibles if ocupacion.causa(rid, fecha_inicio, fecha_fin) is None}
+
+        def dato(rid):
+            r = disponibles[rid]
+            return {"id": str(r.id), "nombre": r.nombre, "tipo": r.tipo}
+
+        en_exigencias = {rid for ex in exigencias for rid in ex.candidatos}
+        return Response(
+            {
+                "necesarios": [
+                    {
+                        "tipo": ex.tipo,
+                        "recursos": [dato(rid) for rid in ex.candidatos],
+                        "libres": [dato(rid) for rid in ex.candidatos if rid in libres],
+                        "sugerido": str(sugeridos[ex]) if ex in sugeridos else None,
+                    }
+                    for ex in exigencias
+                ],
+                "otros": [dato(rid) for rid in disponibles if rid in libres and rid not in en_exigencias],
+                "actuales": [
+                    {**dato(rid), "elegido_a_mano": a_mano} for rid, a_mano in actuales if rid in disponibles
+                ],
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=False, methods=["get"], url_path="hoy", pagination_class=None)
     def hoy(self, request, *args, **kwargs):
@@ -1418,7 +1592,7 @@ class PuedeVerBloqueos(BasePermission):
 class BloqueoAgendaViewSet(ModelViewSet):
     serializer_class = BloqueoAgendaSerializer
     queryset = BloqueoAgenda.objects.select_related(
-        "profesional", "sede", "sede__clinica", "clinica", "creado_por", "aprobado_por"
+        "profesional", "sede", "sede__clinica", "clinica", "recurso", "creado_por", "aprobado_por"
     ).all()
     ordering_fields = ("fecha_inicio", "created_at")
 
@@ -1451,6 +1625,14 @@ class BloqueoAgendaViewSet(ModelViewSet):
 
         if profesional:
             queryset = queryset.filter(profesional_id=profesional)
+        # Los bloqueos de una sala o un equipo ("No disponible…") no bloquean la
+        # sede: la agenda los dibujaría como si cerrara. Solo se listan al pedirlos
+        # (aprobar, editar o borrar uno por su id sí los encuentra).
+        recurso = self.request.query_params.get("recurso")
+        if recurso:
+            queryset = queryset.filter(recurso_id=recurso)
+        elif self.action == "list" and self.request.query_params.get("incluir_recursos", "").lower() not in {"1", "true"}:
+            queryset = queryset.filter(recurso__isnull=True)
         sede_ids = sede_ids_para_filtro(user, sede)
         if sede_ids is not None:
             # Los bloqueos sin sede aplican a toda la clinica: se incluyen
@@ -1512,7 +1694,20 @@ class BloqueoAgendaViewSet(ModelViewSet):
             estado = BloqueoAgenda.Estado.PENDIENTE
 
         self._avisar_citas_afectadas(serializer.validated_data, sede, clinica)
-        serializer.save(creado_por=user, clinica=clinica, estado=estado)
+        bloqueo = serializer.save(creado_por=user, clinica=clinica, estado=estado)
+        self._reacomodar_si_es_de_recurso(bloqueo)
+
+    @staticmethod
+    def _reacomodar_si_es_de_recurso(bloqueo, sede=None, estaba_aprobado=False):
+        """Una sala o un equipo que deja de estar (o vuelve a estar) disponible:
+        las citas futuras de la sede se reacomodan; las que no caben quedan con
+        "Falta sala/equipo" (apps/agenda/recursos.py). Un bloqueo pendiente o
+        rechazado no bloquea nada: solo cuenta si está o estaba aprobado."""
+        aprobado = bloqueo.estado == BloqueoAgenda.Estado.APROBADO
+        if bloqueo.recurso_id and (aprobado or estaba_aprobado):
+            from apps.agenda.recursos import reasignar_citas_futuras
+
+            reasignar_citas_futuras([sede or bloqueo.sede])
 
     def _avisar_citas_afectadas(self, datos, sede, clinica):
         """Un bloqueo encima de citas ya agendadas no las cancela: antes se creaba
@@ -1527,6 +1722,8 @@ class BloqueoAgendaViewSet(ModelViewSet):
         )
         if datos.get("profesional"):
             citas = citas.filter(profesional=datos["profesional"])
+        elif datos.get("recurso"):
+            citas = citas.filter(recursos_asignados__recurso=datos["recurso"])
         elif sede is not None:
             citas = citas.filter(sede=sede)
         else:
@@ -1569,7 +1766,7 @@ class BloqueoAgendaViewSet(ModelViewSet):
         bloqueo = serializer.instance
         datos = {
             campo: serializer.validated_data.get(campo, getattr(bloqueo, campo))
-            for campo in ("sede", "profesional", "fecha_inicio", "fecha_fin")
+            for campo in ("sede", "profesional", "recurso", "fecha_inicio", "fecha_fin")
         }
         # Lo mismo que al crear: un usuario acotado no lo mueve a otra sede ni lo
         # extiende a toda la clínica con sede vacía (AG-11).
@@ -1580,16 +1777,20 @@ class BloqueoAgendaViewSet(ModelViewSet):
             clinica = getattr(datos["sede"], "clinica", None) or bloqueo.clinica or self.request.user.clinica
             self._avisar_citas_afectadas(datos, datos["sede"], clinica)
         # Un bloqueo aprobado que edita alguien sin permiso de aprobar vuelve a revisión.
-        if serializer.instance.estado == BloqueoAgenda.Estado.APROBADO and not user_has_permission(
+        estaba_aprobado = serializer.instance.estado == BloqueoAgenda.Estado.APROBADO
+        if estaba_aprobado and not user_has_permission(
             self.request.user, "agenda.aprobar_bloqueo", request=self.request
         ):
-            serializer.save(estado=BloqueoAgenda.Estado.PENDIENTE, aprobado_por=None, aprobado_en=None)
-            return
-        serializer.save()
+            bloqueo = serializer.save(estado=BloqueoAgenda.Estado.PENDIENTE, aprobado_por=None, aprobado_en=None)
+        else:
+            bloqueo = serializer.save()
+        self._reacomodar_si_es_de_recurso(bloqueo, estaba_aprobado=estaba_aprobado)
 
     def perform_destroy(self, instance):
         self._puede_modificar(instance)
+        sede = instance.sede
         instance.delete()
+        self._reacomodar_si_es_de_recurso(instance, sede=sede)
 
     @action(detail=True, methods=["post"], url_path="aprobar")
     def aprobar(self, request, pk=None):
@@ -1599,13 +1800,19 @@ class BloqueoAgendaViewSet(ModelViewSet):
         # Mientras estuvo pendiente se pudieron agendar citas en ese horario: se
         # muestran antes de aprobar, como al crearlo (AG-11).
         self._avisar_citas_afectadas(
-            {"profesional": bloqueo.profesional, "fecha_inicio": bloqueo.fecha_inicio, "fecha_fin": bloqueo.fecha_fin},
+            {
+                "profesional": bloqueo.profesional,
+                "recurso": bloqueo.recurso,
+                "fecha_inicio": bloqueo.fecha_inicio,
+                "fecha_fin": bloqueo.fecha_fin,
+            },
             bloqueo.sede, bloqueo.clinica or getattr(bloqueo.sede, "clinica", None),
         )
         bloqueo.estado = BloqueoAgenda.Estado.APROBADO
         bloqueo.aprobado_por = request.user
         bloqueo.aprobado_en = timezone.now()
         bloqueo.save(update_fields=["estado", "aprobado_por", "aprobado_en", "updated_at"])
+        self._reacomodar_si_es_de_recurso(bloqueo)
         return Response(BloqueoAgendaSerializer(bloqueo, context={"request": request}).data)
 
     @action(detail=True, methods=["post"], url_path="rechazar")
@@ -1613,8 +1820,10 @@ class BloqueoAgendaViewSet(ModelViewSet):
         bloqueo = self.get_object()
         if bloqueo.estado == BloqueoAgenda.Estado.RECHAZADO:
             return Response({"detail": "El bloqueo ya está rechazado."}, status=status.HTTP_400_BAD_REQUEST)
+        estaba_aprobado = bloqueo.estado == BloqueoAgenda.Estado.APROBADO
         bloqueo.estado = BloqueoAgenda.Estado.RECHAZADO
         bloqueo.aprobado_por = request.user
         bloqueo.aprobado_en = timezone.now()
         bloqueo.save(update_fields=["estado", "aprobado_por", "aprobado_en", "updated_at"])
+        self._reacomodar_si_es_de_recurso(bloqueo, estaba_aprobado=estaba_aprobado)
         return Response(BloqueoAgendaSerializer(bloqueo, context={"request": request}).data)

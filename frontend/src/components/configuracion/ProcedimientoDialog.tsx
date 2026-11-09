@@ -14,6 +14,7 @@ import { toast } from '@/hooks/use-toast'
 import { DiagramasProcedimiento } from './DiagramasProcedimiento'
 import { GruposAtencionSelect } from '@/components/colaboradores/GruposAtencionSelect'
 import { PreciosPorSedeEditor, preciosSedeAForm, preciosSedeAPayload } from './PreciosPorSedeEditor'
+import { SALA_Y_EQUIPO_VACIO, SalaYEquipoProcedimiento, type SalaYEquipoValor } from './SalaYEquipoProcedimiento'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -44,6 +45,11 @@ const schema = z.object({
   profesionales: z.array(z.string()).optional(),
   grupos: z.array(z.string()).optional(),
   activo: z.boolean().optional(),
+  sala_y_equipo: z.object({
+    necesita_sala: z.enum(['no', 'cualquiera', 'algunas']),
+    salas: z.array(z.string()),
+    equipos: z.array(z.string()),
+  }).refine((v) => v.necesita_sala !== 'algunas' || v.salas.length > 0, { message: 'Elige al menos una cabina o consultorio.' }),
 })
 type FormValues = z.infer<typeof schema>
 
@@ -53,12 +59,23 @@ const DEFAULT_VALUES: FormValues = {
   requiere_consentimiento: false, documenso_template_id: null,
   documenso_template_nombre: null, consentimiento_cada_vez: false,
   vigencia_meses: 12, cada_dias: null, profesionales: [], grupos: [], activo: true,
+  sala_y_equipo: SALA_Y_EQUIPO_VACIO,
 }
 
 const ETIQUETAS_DE_ERROR: Record<string, string> = {
   nombre: 'Nombre', duracion_min: 'Duración', precio_base: 'Precio',
   descuento_maximo_pct: 'Descuento máximo', profesionales: 'Profesionales', grupos: 'Grupos de atención',
   documenso_template_id: 'Plantilla de consentimiento', vigencia_meses: 'Vigencia',
+  salas: 'Cabinas y consultorios', equipos: 'Equipos', necesita_sala: 'Cabina/consultorio',
+}
+
+function salaYEquipoDe(p: Procedimiento | undefined): SalaYEquipoValor {
+  if (!p) return SALA_Y_EQUIPO_VACIO
+  const salas = p.salas ?? []
+  // "Solo estas salas" sin ninguna (se eliminaron): la agenda ya la trata como
+  // "cualquiera"; así el formulario no queda pidiendo una sala que no existe.
+  const necesita = p.necesita_sala === 'algunas' && salas.length === 0 ? 'cualquiera' : p.necesita_sala ?? 'no'
+  return { necesita_sala: necesita, salas, equipos: p.equipos ?? [] }
 }
 
 function ProfesionalesMultiSelect({ opciones, selected, onChange }: {
@@ -218,6 +235,7 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       profesionales: fullTarget.profesionales_detalle?.map((p) => p.id) ?? [],
       grupos: fullTarget.grupos ?? [],
       activo: fullTarget.activo ?? true,
+      sala_y_equipo: salaYEquipoDe(fullTarget),
     })
   }, [open, target?.id, fullTarget])
 
@@ -256,6 +274,9 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
         cada_dias: data.cada_dias ?? null,
         profesionales: data.profesionales ?? [],
         grupos: data.grupos ?? [],
+        necesita_sala: data.sala_y_equipo.necesita_sala,
+        salas: data.sala_y_equipo.salas,
+        equipos: data.sala_y_equipo.equipos,
       }
       const result = isEdit
         ? await clinicasApi.procedimientos.update(target!.id, payload)
@@ -286,6 +307,8 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       qc.invalidateQueries({ queryKey: ['servicios', 'all'] }) // backward compat
       qc.invalidateQueries({ queryKey: ['setup-checklist'] })
       qc.invalidateQueries({ queryKey: ['grupos-atencion'] })
+      qc.invalidateQueries({ queryKey: ['recursos'] })
+      qc.invalidateQueries({ queryKey: ['citas'] })
       onCreated?.(result)
       if (isEdit) {
         handleClose()
@@ -453,6 +476,15 @@ export function ProcedimientoDialog({ open, onOpenChange, procedimiento, servici
       </div>
 
       {campoProfesionales}
+
+      <Controller name="sala_y_equipo" control={control} render={({ field }) => (
+        <SalaYEquipoProcedimiento
+          value={field.value}
+          onChange={field.onChange}
+          procedimientoId={isEdit ? target?.id : undefined}
+          inicial={isEdit ? salaYEquipoDe(fullTarget) : undefined}
+        />
+      )} />
 
       <div className="flex items-center justify-between gap-3 rounded-lg border px-4 py-3">
         <div className="space-y-0.5 min-w-0">

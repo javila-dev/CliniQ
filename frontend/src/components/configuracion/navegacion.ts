@@ -47,6 +47,13 @@ export const CATEGORIAS: CategoriaConfig[] = [
         perm: PERM.SEDES_VER,
       },
       {
+        href: '/configuracion/cabinas-y-equipos',
+        label: 'Cabinas y equipos',
+        description: 'Cabinas, consultorios y equipos que no pueden estar en dos citas a la vez.',
+        keywords: 'cabinas consultorios salas equipos laser aparatos espacios agenda cruce',
+        perm: PERM.SEDES_VER,
+      },
+      {
         href: '/configuracion/plan',
         label: 'Plan',
         description: 'Lo que incluye tu plan y cuánto llevas usado este mes.',

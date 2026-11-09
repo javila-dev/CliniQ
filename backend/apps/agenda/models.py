@@ -1,4 +1,5 @@
 import os
+import uuid
 from datetime import timedelta
 
 from django.conf import settings
@@ -168,6 +169,27 @@ class Cita(BaseModel):
         return f"{self.paciente.nombre_completo} - {self.fecha_inicio}"
 
 
+class CitaRecurso(models.Model):
+    """Sala o equipo asignado a una cita. `elegido_a_mano`: el procedimiento no
+    lo pedía; se agregó al agendar."""
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    cita = models.ForeignKey(Cita, on_delete=models.CASCADE, related_name="recursos_asignados")
+    recurso = models.ForeignKey("clinicas.Recurso", on_delete=models.PROTECT, related_name="citas_asignadas")
+    elegido_a_mano = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "citas_recursos"
+        constraints = [
+            models.UniqueConstraint(fields=["cita", "recurso"], name="uniq_cita_recurso"),
+        ]
+        indexes = [models.Index(fields=["recurso", "cita"])]
+
+    def __str__(self) -> str:
+        return f"{self.cita_id} -> {self.recurso_id}"
+
+
 class CitaCheckinOTP(models.Model):
     cita = models.OneToOneField(Cita, on_delete=models.CASCADE, related_name="otp")
     codigo = models.CharField(max_length=6)
@@ -210,6 +232,15 @@ class BloqueoAgenda(BaseModel):
         null=True,
         blank=True,
         related_name="bloqueos_agenda",
+    )
+    # Bloqueo de una sala o un equipo ("No disponible…"): afecta solo a ese
+    # recurso, no a toda la sede. Lleva también la sede del recurso.
+    recurso = models.ForeignKey(
+        "clinicas.Recurso",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="bloqueos",
     )
     fecha_inicio = models.DateTimeField()
     fecha_fin = models.DateTimeField()

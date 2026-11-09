@@ -1,6 +1,6 @@
 from django.urls import path
 from rest_framework.routers import DefaultRouter
-from apps.clinicas.views import CampanaViewSet, ClinicaViewSet, DiagramaCorporalViewSet, FormaDePagoViewSet, GrupoZonasViewSet, PlantillaAsistenciaViewSet, PlanViewSet, ProcedimientoViewSet, RegistroClinicaView, SedeViewSet, ServicioViewSet, TratamientoCatalogoViewSet
+from apps.clinicas.views import CampanaViewSet, ClinicaViewSet, DiagramaCorporalViewSet, FormaDePagoViewSet, GrupoZonasViewSet, PlantillaAsistenciaViewSet, PlanViewSet, ProcedimientoViewSet, RecursoViewSet, RegistroClinicaView, SedeViewSet, ServicioViewSet, TratamientoCatalogoViewSet
 
 
 router = DefaultRouter()
@@ -8,6 +8,7 @@ router.register("clinicas", ClinicaViewSet, basename="clinicas")
 router.register("planes", PlanViewSet, basename="planes")
 router.register("sedes", SedeViewSet, basename="sedes")
 router.register("formas-pago", FormaDePagoViewSet, basename="formas-pago")
+router.register("recursos", RecursoViewSet, basename="recursos")
 router.register("procedimientos", ProcedimientoViewSet, basename="procedimientos")
 router.register("servicios", ServicioViewSet, basename="servicios")
 router.register("tratamientos", TratamientoCatalogoViewSet, basename="tratamientos")

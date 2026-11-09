@@ -16,8 +16,10 @@ from apps.clinicas.models import (
     FormaDePago,
     GrupoZonas,
     GrupoZonasDiagrama,
+    HorarioRecurso,
     PasoProtocolo,
     Plan,
+    Recurso,
     Sede,
     Servicio,
     ServicioConsentimiento,
@@ -345,6 +347,163 @@ class SedeSerializer(serializers.ModelSerializer):
         return attrs
 
 
+class HorarioRecursoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HorarioRecurso
+        fields = ("dia_semana", "no_disponible", "hora_inicio", "hora_fin")
+
+    def validate(self, attrs):
+        if attrs.get("no_disponible"):
+            attrs["hora_inicio"] = None
+            attrs["hora_fin"] = None
+            return attrs
+        inicio, fin = attrs.get("hora_inicio"), attrs.get("hora_fin")
+        if bool(inicio) != bool(fin):
+            raise serializers.ValidationError("Indica la hora de inicio y la de fin.")
+        if inicio and fin and inicio >= fin:
+            raise serializers.ValidationError("La hora de fin debe ser posterior a la de inicio.")
+        return attrs
+
+
+class RecursoSerializer(serializers.ModelSerializer):
+    """Sala o equipo de una sede. `procedimientos` (solo equipos) es el atajo
+    "¿Qué procedimientos lo usan?": escribe lo mismo que el campo Equipo de
+    cada procedimiento."""
+
+    sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
+    horarios = HorarioRecursoSerializer(many=True, required=False)
+    procedimientos = serializers.PrimaryKeyRelatedField(
+        many=True, required=False, source="procedimientos_del_equipo", queryset=Servicio.objects.all(),
+    )
+    total_procedimientos = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Recurso
+        fields = (
+            "id",
+            "sede",
+            "sede_nombre",
+            "nombre",
+            "tipo",
+            "orden",
+            "activo",
+            "horarios",
+            "procedimientos",
+            "total_procedimientos",
+            "created_at",
+            "updated_at",
+        )
+        read_only_fields = ("id", "created_at", "updated_at")
+        validators = []
+
+    def get_total_procedimientos(self, obj):
+        if obj.tipo == Recurso.Tipo.EQUIPO:
+            return obj.procedimientos_del_equipo.count()
+        # Una sala la usan los que piden "cualquier sala" y los que la eligen.
+        return (
+            Servicio.objects.filter(clinica_id=obj.clinica_id, activo=True)
+            .filter(
+                models.Q(necesita_sala=Servicio.NecesitaSala.CUALQUIERA)
+                | models.Q(necesita_sala=Servicio.NecesitaSala.ALGUNAS, salas=obj)
+            )
+            .distinct()
+            .count()
+        )
+
+    def _validar_nombre_unico(self, nombre, tipo, sede):
+        """El nombre identifica la cabina o el equipo en toda la clínica:
+        - Una cabina o consultorio no repite nombre en la clínica (aunque sea de
+          otra sede): "Cabina 1" de Principal y de H4 se confundirían en la agenda.
+        - Una cabina y un equipo no comparten nombre.
+        - Un equipo con el mismo nombre en otra sede es el mismo equipo (un
+          aparato por sede, docs/plan-salas-y-equipos.md); en la misma sede, no.
+        """
+        mismos = Recurso.objects.filter(clinica_id=sede.clinica_id, nombre__iexact=nombre.strip())
+        if self.instance is not None:
+            mismos = mismos.exclude(pk=self.instance.pk)
+        otro = mismos.select_related("sede").first()
+        if otro is None:
+            return None
+        if tipo == Recurso.Tipo.EQUIPO and otro.tipo == Recurso.Tipo.EQUIPO:
+            en_la_sede = mismos.filter(sede=sede).first()
+            if en_la_sede is not None:
+                raise serializers.ValidationError({"nombre": f"{en_la_sede.nombre} ya está en {sede.nombre}."})
+            # El mismo equipo en otra sede: se escribe igual que allá.
+            return otro.nombre
+        if otro.tipo == Recurso.Tipo.EQUIPO:
+            mensaje = f"Ya hay un equipo llamado {otro.nombre}. Usa otro nombre."
+        elif otro.sede_id == sede.id:
+            mensaje = f"Ya hay una cabina o consultorio llamado {otro.nombre} en esta sede."
+        else:
+            mensaje = (
+                f"Ya hay una cabina o consultorio llamado {otro.nombre} en {otro.sede.nombre}. "
+                f"Usa otro nombre, por ejemplo «{otro.nombre} {sede.nombre}»."
+            )
+        raise serializers.ValidationError({"nombre": mensaje})
+
+    def validate_nombre(self, value):
+        value = " ".join(value.split())
+        if not value:
+            raise serializers.ValidationError("Escribe un nombre.")
+        return value
+
+    def validate(self, attrs):
+        clinica = self.context.get("clinica")
+        sede = attrs.get("sede", getattr(self.instance, "sede", None))
+        tipo = attrs.get("tipo", getattr(self.instance, "tipo", None))
+        if sede is None:
+            raise serializers.ValidationError({"sede": "Elige la sede."})
+        if clinica is not None and sede.clinica_id != clinica.id:
+            raise serializers.ValidationError({"sede": "La sede no pertenece a tu clínica."})
+        if self.instance is not None and "tipo" in attrs and attrs["tipo"] != self.instance.tipo:
+            raise serializers.ValidationError({"tipo": "No se puede cambiar una cabina o consultorio a equipo ni al revés."})
+        if self.instance is not None and "sede" in attrs and attrs["sede"] != self.instance.sede:
+            # Sus citas son de la otra sede: se crea uno nuevo en esta.
+            raise serializers.ValidationError({"sede": "No se puede cambiar de sede. Crea uno nuevo en la otra sede."})
+        nombre = attrs.get("nombre", getattr(self.instance, "nombre", None))
+        if nombre:
+            igual_que = self._validar_nombre_unico(nombre, tipo, sede)
+            if igual_que and "nombre" in attrs:
+                attrs["nombre"] = igual_que
+        procedimientos = attrs.get("procedimientos_del_equipo")
+        if procedimientos:
+            if tipo != Recurso.Tipo.EQUIPO:
+                raise serializers.ValidationError(
+                    {"procedimientos": "Las cabinas y consultorios se eligen desde cada procedimiento."}
+                )
+            if any(p.clinica_id != sede.clinica_id for p in procedimientos):
+                raise serializers.ValidationError({"procedimientos": "Algún procedimiento no pertenece a esta clínica."})
+        dias = [h["dia_semana"] for h in attrs.get("horarios") or []]
+        if len(dias) != len(set(dias)):
+            raise serializers.ValidationError({"horarios": "Hay un día repetido."})
+        return attrs
+
+    def _guardar_relaciones(self, recurso, horarios, procedimientos):
+        if horarios is not None:
+            recurso.horarios.all().delete()
+            HorarioRecurso.objects.bulk_create([HorarioRecurso(recurso=recurso, **h) for h in horarios])
+        if procedimientos is not None:
+            recurso.procedimientos_del_equipo.set(procedimientos)
+
+    @transaction.atomic
+    def create(self, validated_data):
+        horarios = validated_data.pop("horarios", None)
+        procedimientos = validated_data.pop("procedimientos_del_equipo", None)
+        recurso = Recurso.objects.create(**validated_data)
+        self._guardar_relaciones(recurso, horarios, procedimientos)
+        return recurso
+
+    @transaction.atomic
+    def update(self, instance, validated_data):
+        horarios = validated_data.pop("horarios", None)
+        procedimientos = validated_data.pop("procedimientos_del_equipo", None)
+        for campo, valor in validated_data.items():
+            setattr(instance, campo, valor)
+        instance.save()
+        self._guardar_relaciones(instance, horarios, procedimientos)
+        return instance
+
+
 class PrecioSedeEntradaSerializer(serializers.Serializer):
     """Un precio propio de sede: ``{"sede": id, "precio": "320000"}``."""
 
@@ -401,6 +560,15 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
     pasos_protocolo = serializers.SerializerMethodField()
     consentimientos_requeridos = serializers.SerializerMethodField()
     diagramas = serializers.SerializerMethodField()
+    # Salas y equipos que ocupa al agendarse (docs/plan-salas-y-equipos.md).
+    salas = serializers.PrimaryKeyRelatedField(
+        many=True, required=False, queryset=Recurso.objects.filter(tipo=Recurso.Tipo.SALA),
+    )
+    equipos = serializers.PrimaryKeyRelatedField(
+        many=True, required=False, queryset=Recurso.objects.filter(tipo=Recurso.Tipo.EQUIPO),
+    )
+    salas_detalle = serializers.SerializerMethodField()
+    equipos_detalle = serializers.SerializerMethodField()
 
     class Meta:
         model = Servicio
@@ -422,6 +590,11 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
             "pasos_protocolo",
             "consentimientos_requeridos",
             "diagramas",
+            "necesita_sala",
+            "salas",
+            "salas_detalle",
+            "equipos",
+            "equipos_detalle",
             "activo",
             "created_at",
             "updated_at",
@@ -467,7 +640,39 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
             raise serializers.ValidationError("El descuento máximo debe estar entre 0 y 100.")
         return value
 
+    def _validar_recursos_de_la_clinica(self, recursos):
+        request = self.context.get("request")
+        if not request or request.user.rol == "superadmin":
+            return
+        from apps.users.permissions import get_clinica_activa
+
+        clinica = get_clinica_activa(request)
+        clinica_id = clinica.id if clinica is not None else request.user.clinica_id
+        if any(r.clinica_id != clinica_id for r in recursos):
+            raise serializers.ValidationError("Alguna cabina, consultorio o equipo no pertenece a esta clínica.")
+
+    def validate_salas(self, value):
+        self._validar_recursos_de_la_clinica(value)
+        return value
+
+    def validate_equipos(self, value):
+        self._validar_recursos_de_la_clinica(value)
+        return value
+
+    def _validar_sala(self, attrs):
+        necesita = attrs.get("necesita_sala", getattr(self.instance, "necesita_sala", Servicio.NecesitaSala.NO))
+        if "necesita_sala" in attrs and necesita != Servicio.NecesitaSala.ALGUNAS:
+            # "No necesita" o "Cualquier sala": la lista de salas no aplica.
+            attrs["salas"] = []
+        elif necesita == Servicio.NecesitaSala.ALGUNAS:
+            salas = attrs.get("salas")
+            if salas is None and self.instance is not None:
+                salas = list(self.instance.salas.all())
+            if not salas:
+                raise serializers.ValidationError({"salas": "Elige al menos una cabina o consultorio."})
+
     def validate(self, attrs):
+        self._validar_sala(attrs)
         # Un solo precio: `precio_base` es EL precio del catálogo y `precio`
         # (alias legacy `precio_referencia`) queda espejado para los lectores
         # antiguos (cita.servicio_precio, reportes, campañas…). La flexibilidad
@@ -505,6 +710,24 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
         if value < 1:
             raise serializers.ValidationError("La vigencia debe ser de al menos 1 mes.")
         return value
+
+    @staticmethod
+    def _recursos_detalle(recursos):
+        return [
+            {"id": str(r.id), "nombre": r.nombre, "sede": str(r.sede_id), "sede_nombre": r.sede.nombre, "activo": r.activo}
+            for r in recursos
+        ]
+
+    @staticmethod
+    def _ordenados(recursos):
+        return sorted(recursos, key=lambda r: (r.sede.nombre, r.orden, r.nombre))
+
+    def get_salas_detalle(self, obj):
+        # Sobre lo precargado en el viewset (salas__sede, equipos__sede).
+        return self._recursos_detalle(self._ordenados(obj.salas.all()))
+
+    def get_equipos_detalle(self, obj):
+        return self._recursos_detalle(self._ordenados(obj.equipos.all()))
 
     def get_pasos_protocolo(self, obj):
         pasos = getattr(obj, "_pasos_protocolo_prefetched", None)
@@ -591,6 +814,11 @@ class ProcedimientoSerializer(ServicioSerializer):
             "pasos_protocolo",
             "consentimientos_requeridos",
             "diagramas",
+            "necesita_sala",
+            "salas",
+            "salas_detalle",
+            "equipos",
+            "equipos_detalle",
             "profesionales",
             "profesionales_detalle",
             "grupos",
