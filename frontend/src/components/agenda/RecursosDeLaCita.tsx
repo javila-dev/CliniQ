@@ -114,9 +114,9 @@ export function RecursosDeLaCita({
   return (
     <div className="rounded-lg border bg-muted/20 p-3">
       {!tieneForma ? (
-        <p className="text-sm text-muted-foreground">Elige qué se va a hacer y aquí verás la sala y el equipo que necesita.</p>
+        <p className="text-sm text-muted-foreground">Elige qué se va a hacer y aquí verás la sala/cabina y el equipo que necesita.</p>
       ) : !base ? (
-        <p className="text-sm text-muted-foreground">Cargando salas y equipos…</p>
+        <p className="text-sm text-muted-foreground">Cargando salas/cabinas y equipos…</p>
       ) : (
         <Eleccion
           base={base}
@@ -184,7 +184,7 @@ function Eleccion({
   return (
     <div className="space-y-2.5 text-sm">
       {filas.length === 0 && extras.length === 0 && (
-        <p className="text-muted-foreground">No necesita sala ni equipo.</p>
+        <p className="text-muted-foreground">No necesita sala/cabina ni equipo.</p>
       )}
 
       {filas.map(({ n, i, elegido, tocaria }) => {
@@ -194,7 +194,7 @@ function Eleccion({
         return (
           <div key={`n${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="flex w-20 items-center gap-2 text-muted-foreground">
-              <Icono tipo={n.tipo} />{esSala ? 'Sala' : 'Equipo'}
+              <Icono tipo={n.tipo} />{esSala ? 'Sala/cabina' : 'Equipo'}
             </span>
             {unico ? (
               <span className="font-medium">
@@ -203,7 +203,7 @@ function Eleccion({
               </span>
             ) : (
               <SelectorRecurso
-                ariaLabel={esSala ? 'Sala' : 'Equipo'}
+                ariaLabel={esSala ? 'Sala/cabina' : 'Equipo'}
                 opciones={n.recursos}
                 valor={elegido}
                 auto={{ texto: esSala ? 'La que esté libre' : 'El que esté libre' }}
@@ -226,7 +226,7 @@ function Eleccion({
         return (
           <div key={id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="flex w-20 items-center gap-2 text-muted-foreground">
-              <Icono tipo={r.tipo} />{r.tipo === 'sala' ? 'Sala' : 'Equipo'}
+              <Icono tipo={r.tipo} />{r.tipo === 'sala' ? 'Sala/cabina' : 'Equipo'}
             </span>
             <span className="font-medium">{r.nombre}</span>
             <span className="text-muted-foreground">{r.tipo === 'sala' ? 'reservada' : 'reservado'} para esta cita</span>
@@ -245,14 +245,14 @@ function Eleccion({
 
       {agregables.length > 0 && (
         <SelectorRecurso
-          ariaLabel="Reservar sala o equipo"
+          ariaLabel="Reservar sala/cabina o equipo"
           opciones={agregables}
           ayuda="Queda reservado solo para esta cita. Los horarios mostrarán cuándo está libre."
           onElegir={(id) => { if (id) fijar([...elegidos, id]) }}
           trigger={
             <button type="button" className="inline-flex items-center gap-1 text-sm font-medium text-primary hover:underline">
               <Plus className="h-4 w-4" />
-              {filas.length || extras.length ? 'Reservar otra sala o equipo' : 'Reservar una sala o equipo (opcional)'}
+              {filas.length || extras.length ? 'Reservar otra sala/cabina o equipo' : 'Reservar una sala/cabina o equipo (opcional)'}
             </button>
           }
         />

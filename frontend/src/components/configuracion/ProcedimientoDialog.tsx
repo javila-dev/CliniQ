@@ -49,7 +49,7 @@ const schema = z.object({
     necesita_sala: z.enum(['no', 'cualquiera', 'algunas']),
     salas: z.array(z.string()),
     equipos: z.array(z.string()),
-  }).refine((v) => v.necesita_sala !== 'algunas' || v.salas.length > 0, { message: 'Elige al menos una sala.' }),
+  }).refine((v) => v.necesita_sala !== 'algunas' || v.salas.length > 0, { message: 'Elige al menos una sala/cabina.' }),
 })
 type FormValues = z.infer<typeof schema>
 
@@ -66,7 +66,7 @@ const ETIQUETAS_DE_ERROR: Record<string, string> = {
   nombre: 'Nombre', duracion_min: 'Duración', precio_base: 'Precio',
   descuento_maximo_pct: 'Descuento máximo', profesionales: 'Profesionales', grupos: 'Grupos de atención',
   documenso_template_id: 'Plantilla de consentimiento', vigencia_meses: 'Vigencia',
-  salas: 'Salas', equipos: 'Equipos', necesita_sala: 'Sala',
+  salas: 'Salas/cabinas', equipos: 'Equipos', necesita_sala: 'Sala/cabina',
 }
 
 function salaYEquipoDe(p: Procedimiento | undefined): SalaYEquipoValor {

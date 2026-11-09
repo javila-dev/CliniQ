@@ -88,6 +88,9 @@ const DEFAULT_AGENDA_PREFERENCE: AgendaViewPreference = {
 }
 
 /** Arrastrar una cita entre columnas de sala o equipo (dataTransfer). */
+const NOMBRE_COLUMNA: Record<'profesional' | 'sala' | 'equipo', string> = {
+  profesional: 'Profesional', sala: 'Sala/cabina', equipo: 'Equipo',
+}
 const ARRASTRE_CITA = 'application/x-cliniq-cita'
 const ESTADOS_QUE_SE_MUEVEN: EstadoCita[] = ['pendiente', 'confirmada', 'en_espera']
 
@@ -373,7 +376,7 @@ function CompactCitaCard({
           </div>
           <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
           <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
-          {recursos && <p className="text-xs"><span className="text-muted-foreground">Sala y equipo:</span> {recursos}</p>}
+          {recursos && <p className="text-xs"><span className="text-muted-foreground">Sala/cabina y equipo:</span> {recursos}</p>}
           {falta && <p className="text-xs font-medium text-amber-700">{falta} a esa hora.</p>}
         </TooltipContent>
       </Tooltip>
@@ -992,16 +995,16 @@ function DayView({
             type="button"
             onClick={() => onColumnasPor(opcion)}
             className={cn(
-              'rounded-md px-3 py-1 font-medium capitalize transition-all',
+              'rounded-md px-3 py-1 font-medium transition-all',
               agrupar === opcion ? 'bg-white text-gray-900 shadow-sm' : 'text-muted-foreground hover:text-gray-900',
             )}
           >
-            {opcion}
+            {NOMBRE_COLUMNA[opcion]}
           </button>
         ))}
       </div>
       {agrupar !== 'profesional' && (
-        <span className="hidden text-muted-foreground sm:inline">Arrastra una cita a otra columna para cambiarla de {agrupar}.</span>
+        <span className="hidden text-muted-foreground sm:inline">Arrastra una cita a otra columna para cambiarla de {agrupar === 'sala' ? 'sala/cabina' : 'equipo'}.</span>
       )}
     </div>
   )
@@ -1051,7 +1054,7 @@ function DayView({
               {conFalta.length > 0 && (
                 <div className="flex min-w-[220px] flex-1 items-center gap-2.5 border-l border-amber-200 bg-amber-50/60 px-3">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-xs font-semibold text-amber-900">Falta {agrupar}</p>
+                    <p className="truncate text-xs font-semibold text-amber-900">Falta {agrupar === 'sala' ? 'sala/cabina' : 'equipo'}</p>
                     <p className="mt-0.5 text-[10px] text-amber-800">Arrástralas a una columna libre o cámbialas de hora</p>
                   </div>
                 </div>

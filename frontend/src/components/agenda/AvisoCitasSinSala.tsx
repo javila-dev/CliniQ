@@ -18,8 +18,8 @@ export function nombresRecursos(cita: Pick<Cita, 'recursos'>): string {
 export function textoFalta(cita: Pick<Cita, 'falta'>): string {
   const tipos = new Set((cita.falta ?? []).map((f) => f.tipo))
   if (!tipos.size) return ''
-  if (tipos.size === 2) return 'Falta sala y equipo'
-  return tipos.has('sala') ? 'Falta sala' : 'Falta equipo'
+  if (tipos.size === 2) return 'Falta sala/cabina y equipo'
+  return tipos.has('sala') ? 'Falta sala/cabina' : 'Falta equipo'
 }
 
 /**
@@ -59,7 +59,7 @@ export function AvisoCitasSinSala({
 
   const n = conFalta.length
   const tipos = new Set(conFalta.flatMap((c) => c.falta!.map((f) => f.tipo)))
-  const tipo = tipos.size > 1 ? 'sala o equipo' : tipos.has('equipo') ? 'equipo' : 'sala'
+  const tipo = tipos.size > 1 ? 'sala/cabina o equipo' : tipos.has('equipo') ? 'equipo' : 'sala/cabina'
   return (
     <Popover open={abierto} onOpenChange={setAbierto}>
       <PopoverTrigger asChild>
@@ -79,7 +79,7 @@ export function AvisoCitasSinSala({
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-          {tipo === 'equipo' ? 'Necesitan un equipo y no hay uno libre' : tipo === 'sala' ? 'Necesitan una sala y no hay una libre' : 'Les falta sala o equipo libre'} a esa hora. Muévelas a otro horario.
+          {tipo === 'equipo' ? 'Necesitan un equipo y no hay uno libre' : tipo === 'sala/cabina' ? 'Necesitan una sala/cabina y no hay una libre' : 'Les falta sala/cabina o equipo libre'} a esa hora. Muévelas a otro horario.
         </p>
         <div className="max-h-72 overflow-y-auto py-1">
           {conFalta.map((c) => (

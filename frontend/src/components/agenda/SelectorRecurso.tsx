@@ -138,7 +138,7 @@ export function SelectorRecurso({
               autoFocus
               value={q}
               onChange={(e) => { setQ(e.target.value); setActivo(0) }}
-              placeholder={mixtas ? 'Buscar sala o equipo…' : opciones[0]?.tipo === 'sala' ? 'Buscar sala…' : 'Buscar equipo…'}
+              placeholder={mixtas ? 'Buscar sala/cabina o equipo…' : opciones[0]?.tipo === 'sala' ? 'Buscar sala/cabina…' : 'Buscar equipo…'}
               className="h-8 pl-7 text-sm"
               aria-label={`Buscar en ${ariaLabel}`}
             />
@@ -150,7 +150,7 @@ export function SelectorRecurso({
             <p className="px-3 py-3 text-center text-sm text-muted-foreground">Ninguna coincide con «{q}»</p>
           ) : mixtas ? (
             <>
-              {salas.length > 0 && <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Salas</p>}
+              {salas.length > 0 && <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Salas/cabinas</p>}
               {salas.map(fila)}
               {equipos.length > 0 && <p className="px-3 pb-1 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Equipos</p>}
               {equipos.map(fila)}

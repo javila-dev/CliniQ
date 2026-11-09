@@ -23,7 +23,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste,
+  EtiquetaAjuste, FilaAjuste, NotaAjuste, SeccionAjustes,
 } from '@/components/configuracion/ajustes'
 import type {
   DiaSemana, HorarioRecurso, PrevisualizacionRecursos, Recurso, RecursoInput, Sede, TipoRecurso,
@@ -39,7 +39,6 @@ const DIAS: { key: DiaSemana; label: string; short: string }[] = [
   { key: 'domingo', label: 'domingo', short: 'D' },
 ]
 
-const claveRecursos = (sedeId: string) => ['recursos', sedeId] as const
 
 // ── Días disponibles ───────────────────────────────────────────
 
@@ -186,7 +185,7 @@ export function AvisoCitasAfectadas({ previa }: { previa: PrevisualizacionRecurs
   return (
     <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-[13px] text-amber-900">
       <p className="font-medium">
-        {n} cita{n !== 1 ? 's' : ''} agendada{n !== 1 ? 's' : ''} no {n !== 1 ? 'tendrían' : 'tendría'} {tipo === 'equipo' ? 'el equipo' : 'una sala'} libre.
+        {n} cita{n !== 1 ? 's' : ''} agendada{n !== 1 ? 's' : ''} no {n !== 1 ? 'tendrían' : 'tendría'} {tipo === 'equipo' ? 'el equipo' : 'una sala/cabina'} libre.
       </p>
       <p className="mt-0.5 text-amber-800">
         Quedarán marcadas «Falta {tipo}» en la agenda para que las muevas. No se cancela ninguna.
@@ -251,10 +250,18 @@ function ProcedimientosDelEquipo({ value, onChange }: { value: string[]; onChang
 
 // ── Crear o editar ─────────────────────────────────────────────
 
+const mismoNombre = (a: string, b: string) =>
+  a.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  === b.trim().normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+
 function RecursoSheet({
-  sede, tipo, recurso, open, onClose,
+  sede, sedes, existentes, tipo, recurso, open, onClose,
 }: {
   sede: Sede
+  /** Sedes activas: un equipo nuevo se puede crear en varias a la vez. */
+  sedes: Sede[]
+  /** Salas y equipos que ya existen (de todas las sedes). */
+  existentes: Recurso[]
   tipo: TipoRecurso
   recurso: Recurso | null
   open: boolean
@@ -264,52 +271,96 @@ function RecursoSheet({
   const [nombre, setNombre] = useState('')
   const [horarios, setHorarios] = useState<HorarioRecurso[]>([])
   const [procedimientos, setProcedimientos] = useState<string[]>([])
+  const [tocoProcedimientos, setTocoProcedimientos] = useState(false)
+  const [enSedes, setEnSedes] = useState<string[]>([])
   const [previa, setPrevia] = useState<PrevisualizacionRecursos | null>(null)
   const esEquipo = tipo === 'equipo'
+  const creando = !recurso
 
   useEffect(() => {
     if (!open) return
     setNombre(recurso?.nombre ?? '')
     setHorarios(recurso?.horarios ?? [])
     setProcedimientos(recurso?.procedimientos ?? [])
+    setTocoProcedimientos(false)
+    setEnSedes([sede.id])
     setPrevia(null)
-  }, [open, recurso])
+  }, [open, recurso, sede.id])
+
+  // El mismo equipo (mismo nombre) en otras sedes.
+  const gemelos = esEquipo && nombre.trim()
+    ? existentes.filter((r) => r.tipo === 'equipo' && r.id !== recurso?.id && mismoNombre(r.nombre, nombre))
+    : []
+  const sedesConEse = new Set(gemelos.map((g) => g.sede))
+  // Al crear uno que ya existe en otra sede: usa los mismos procedimientos.
+  const copiados = creando && !tocoProcedimientos && gemelos.length > 0
+    ? Array.from(new Set(gemelos.flatMap((g) => g.procedimientos)))
+    : null
+  useEffect(() => {
+    if (copiados) setProcedimientos(copiados)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [copiados?.join(',')])
+  // Las sedes que ya tienen uno con ese nombre no se pueden marcar (sería repetido).
+  useEffect(() => {
+    setEnSedes((actual) => {
+      const sin = actual.filter((id) => !sedesConEse.has(id))
+      return sin.length === actual.length ? actual : sin
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [Array.from(sedesConEse).join(',')])
 
   // Cualquier cambio invalida el aviso: se vuelve a revisar al guardar.
-  useEffect(() => { setPrevia(null) }, [horarios, procedimientos])
+  useEffect(() => { setPrevia(null) }, [horarios, procedimientos, enSedes])
 
-  const datos: RecursoInput = {
-    sede: sede.id,
+  const datosPara = (sedeId: string): RecursoInput => ({
+    sede: sedeId,
     nombre,
     tipo,
     horarios,
     ...(esEquipo ? { procedimientos } : {}),
-  }
+  })
+  const destinos = creando && esEquipo ? enSedes : [recurso?.sede ?? sede.id]
 
   const guardar = useMutation({
     mutationFn: async (forzar: boolean) => {
-      // Antes de guardar se mira qué pasa con lo agendado; si algo queda sin
-      // lugar se avisa y se pide confirmar.
+      // Antes de guardar se mira qué pasa con lo agendado (en cada sede); si
+      // algo queda sin lugar se avisa y se pide confirmar.
       if (!forzar) {
-        const resultado = await clinicasApi.recursos.previsualizar({ recurso: datos, ...(recurso ? { recurso_id: recurso.id } : {}) })
-        if (resultado.total_sin_lugar > 0) {
-          setPrevia(resultado)
+        const previas = await Promise.all(destinos.map((id) => clinicasApi.recursos.previsualizar({
+          recurso: datosPara(id), ...(recurso ? { recurso_id: recurso.id } : {}),
+        })))
+        const total = previas.reduce((n, p) => n + p.total_sin_lugar, 0)
+        if (total > 0) {
+          setPrevia({
+            citas_revisadas: previas.reduce((n, p) => n + p.citas_revisadas, 0),
+            total_sin_lugar: total,
+            sin_lugar: previas.flatMap((p) => p.sin_lugar),
+          })
           return null
         }
       }
-      return recurso ? clinicasApi.recursos.update(recurso.id, datos) : clinicasApi.recursos.create(datos)
+      if (recurso) return [await clinicasApi.recursos.update(recurso.id, datosPara(recurso.sede))]
+      const creados = []
+      for (const id of destinos) creados.push(await clinicasApi.recursos.create(datosPara(id)))
+      return creados
     },
-    onSuccess: (guardado) => {
-      if (!guardado) return
+    onSuccess: (guardados) => {
+      if (!guardados) return
       qc.invalidateQueries({ queryKey: ['recursos'] })
       qc.invalidateQueries({ queryKey: ['procedimiento'] })
       qc.invalidateQueries({ queryKey: ['citas'] })
-      toast.success(recurso ? 'Guardado' : esEquipo ? 'Equipo creado' : 'Sala creada')
+      toast.success(
+        recurso ? 'Guardado'
+          : !esEquipo ? 'Sala/cabina creada'
+          : guardados.length > 1 ? `Equipo creado en ${guardados.length} sedes` : 'Equipo creado',
+      )
       onClose()
     },
+    // Si falló a mitad (varias sedes), las que sí se crearon se muestran.
+    onError: () => qc.invalidateQueries({ queryKey: ['recursos'] }),
   })
 
-  const titulo = recurso ? `Editar ${recurso.nombre}` : esEquipo ? 'Agregar equipo' : 'Agregar sala'
+  const titulo = recurso ? `Editar ${recurso.nombre}` : esEquipo ? 'Agregar equipo' : 'Agregar sala/cabina'
 
   return (
     <Sheet open={open} onOpenChange={(v) => { if (!v) onClose() }}>
@@ -337,10 +388,58 @@ function RecursoSheet({
             <DiasEditor horarios={horarios} onChange={setHorarios} />
           </div>
 
+          {/* Equipo nuevo con varias sedes: se crea uno en cada sede marcada. */}
+          {esEquipo && creando && sedes.length > 1 && (
+            <div className="space-y-2">
+              <Label>¿En qué sedes hay uno?</Label>
+              <div className="space-y-1.5">
+                {sedes.map((s) => {
+                  const yaTiene = sedesConEse.has(s.id)
+                  return (
+                    <label
+                      key={s.id}
+                      className={cn('flex items-center gap-2 text-sm', yaTiene ? 'cursor-not-allowed text-muted-foreground' : 'cursor-pointer')}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-primary"
+                        disabled={yaTiene}
+                        checked={!yaTiene && enSedes.includes(s.id)}
+                        onChange={() => setEnSedes((a) => (a.includes(s.id) ? a.filter((x) => x !== s.id) : [...a, s.id]))}
+                      />
+                      {s.nombre}
+                      {yaTiene && <span className="text-xs">· ya tiene uno con ese nombre</span>}
+                    </label>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {enSedes.length > 1
+                  ? `Se crea uno en cada sede: son ${enSedes.length} aparatos y cada uno se agenda por su lado.`
+                  : 'Si el mismo equipo está en otra sede, márcala también.'}
+              </p>
+            </div>
+          )}
+
+          {esEquipo && !creando && gemelos.length > 0 && (
+            <p className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
+              También hay {nombre.trim()} en {Array.from(new Set(gemelos.map((g) => g.sede_nombre))).join(', ')}.
+              Los cambios de aquí solo aplican a {sedes.find((s) => s.id === recurso?.sede)?.nombre ?? 'esta sede'}.
+            </p>
+          )}
+
           {esEquipo && (
             <div className="space-y-2">
               <Label>¿Qué procedimientos lo usan?</Label>
-              <ProcedimientosDelEquipo value={procedimientos} onChange={setProcedimientos} />
+              {copiados && copiados.length > 0 && (
+                <p className="text-xs text-primary">
+                  Se marcaron los mismos que usa en {Array.from(new Set(gemelos.map((g) => g.sede_nombre))).join(', ')}.
+                </p>
+              )}
+              <ProcedimientosDelEquipo
+                value={procedimientos}
+                onChange={(ids) => { setTocoProcedimientos(true); setProcedimientos(ids) }}
+              />
             </div>
           )}
 
@@ -352,8 +451,9 @@ function RecursoSheet({
 
           <div className="flex gap-2 pt-2">
             <Button type="button" variant="outline" className="flex-1" onClick={onClose}>Cancelar</Button>
-            <Button type="submit" className="flex-1" disabled={guardar.isPending || !nombre.trim()}>
-              {guardar.isPending ? 'Guardando…' : previa ? 'Guardar igual' : recurso ? 'Guardar cambios' : esEquipo ? 'Agregar equipo' : 'Agregar sala'}
+            <Button type="submit" className="flex-1" disabled={guardar.isPending || !nombre.trim() || destinos.length === 0}>
+              {guardar.isPending ? 'Guardando…' : previa ? 'Guardar igual' : recurso ? 'Guardar cambios'
+                : esEquipo ? (destinos.length > 1 ? `Agregar en ${destinos.length} sedes` : 'Agregar equipo') : 'Agregar sala/cabina'}
             </Button>
           </div>
         </form>
@@ -395,7 +495,7 @@ function NoDisponibleDialog({ recurso, onClose }: { recurso: Recurso | null; onC
       const n = citas.total_sin_lugar
       toast.success(
         `${recurso!.nombre} quedó no disponible`,
-        n ? `${n === 1 ? '1 cita quedó' : `${n} citas quedaron`} sin ${recurso!.tipo === 'equipo' ? 'equipo' : 'sala'}: ${n === 1 ? 'aparece' : 'aparecen'} en la agenda para moverla${n === 1 ? '' : 's'}.` : undefined,
+        n ? `${n === 1 ? '1 cita quedó' : `${n} citas quedaron`} sin ${recurso!.tipo === 'equipo' ? 'equipo' : 'sala/cabina'}: ${n === 1 ? 'aparece' : 'aparecen'} en la agenda para moverla${n === 1 ? '' : 's'}.` : undefined,
       )
       onClose()
     },
@@ -407,7 +507,7 @@ function NoDisponibleDialog({ recurso, onClose }: { recurso: Recurso | null; onC
         <DialogHeader>
           <DialogTitle>{recurso?.nombre} no disponible</DialogTitle>
           <DialogDescription>
-            Mientras tanto no se agenda nada que lo necesite. Lo ya agendado se pasa a otra {recurso?.tipo === 'equipo' ? 'unidad' : 'sala'} si hay una libre.
+            Mientras tanto no se agenda nada que lo necesite. Lo ya agendado se pasa a otra {recurso?.tipo === 'equipo' ? 'unidad' : 'sala/cabina'} si hay una libre.
           </DialogDescription>
         </DialogHeader>
         <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); guardar.mutate() }}>
@@ -503,31 +603,142 @@ function resumen(recursos: Recurso[]): string | null {
   const equipos = recursos.filter((r) => r.tipo === 'equipo' && r.activo)
   const partes: string[] = []
   if (salas.length) {
-    partes.push(`no dejará más de ${salas.length === 1 ? 'una cita' : `${salas.length} citas`} a la vez que necesite${salas.length === 1 ? '' : 'n'} sala`)
+    partes.push(`no dejará más de ${salas.length === 1 ? 'una cita' : `${salas.length} citas`} a la vez que necesite${salas.length === 1 ? '' : 'n'} sala/cabina`)
   }
-  for (const e of equipos) {
-    const dias = diasQueViene(e.horarios)
-    const cuando = dias.length === 7 ? '' : dias.length ? `, que viene ${listaDias(dias)}` : ', que ahora no está disponible ningún día'
-    partes.push(`solo una a la vez con ${e.nombre}${cuando}`)
+  if (equipos.length > 3) {
+    // Con muchos equipos la frase sería un párrafo: se resume.
+    partes.push(`solo una a la vez con cada uno de sus ${equipos.length} equipos`)
+  } else {
+    for (const e of equipos) {
+      const dias = diasQueViene(e.horarios)
+      const cuando = dias.length === 7 ? '' : dias.length ? `, que viene ${listaDias(dias)}` : ', que ahora no está disponible ningún día'
+      partes.push(`solo una a la vez con ${e.nombre}${cuando}`)
+    }
   }
   if (!partes.length) return null
   const unidas = partes.length === 1 ? partes[0] : `${partes.slice(0, -1).join('; ')} y ${partes[partes.length - 1]}`
   return `La agenda de esta sede ${unidas}.`
 }
 
+/** Filas que se ven por sede antes de "Ver los otros N". */
+const VISIBLES = 6
+
+function conteo(recursos: Recurso[]): string {
+  const salas = recursos.filter((r) => r.tipo === 'sala').length
+  const equipos = recursos.filter((r) => r.tipo === 'equipo').length
+  const partes = [
+    salas ? `${salas} ${salas === 1 ? 'sala/cabina' : 'salas/cabinas'}` : null,
+    equipos ? `${equipos} ${equipos === 1 ? 'equipo' : 'equipos'}` : null,
+  ].filter(Boolean)
+  return partes.join(' · ')
+}
+
+/**
+ * Salas/cabinas y equipos de todas las sedes a la vez, una debajo de otra:
+ * con un selector de sede era fácil configurar una y olvidar la otra. Una sede
+ * sin nada se ve como tal ("Sin salas/cabinas ni equipos") con su botón.
+ */
 export function SalasYEquipos({ sedes, puedeGestionar }: { sedes: Sede[]; puedeGestionar: boolean }) {
-  const qc = useQueryClient()
   const activas = useMemo(() => sedes.filter((s) => s.activo), [sedes])
-  const [sedeId, setSedeId] = useState('')
-  const sede = activas.find((s) => s.id === sedeId) ?? activas[0]
-  const [editor, setEditor] = useState<{ tipo: TipoRecurso; recurso: Recurso | null } | null>(null)
+  const [editor, setEditor] = useState<{ sede: Sede; tipo: TipoRecurso; recurso: Recurso | null } | null>(null)
   const [noDisponible, setNoDisponible] = useState<Recurso | null>(null)
 
-  const { data: recursos = [], isLoading } = useQuery({
-    queryKey: claveRecursos(sede?.id ?? ''),
-    queryFn: () => clinicasApi.recursos.list({ sede: sede!.id }),
-    enabled: !!sede,
+  const { data: todos = [], isLoading } = useQuery({
+    queryKey: ['recursos', 'todos'],
+    queryFn: () => clinicasApi.recursos.list(),
   })
+
+  if (!activas.length) return null
+  // Sin nada configurado y sin permiso para configurarlo: no se muestra.
+  if (!puedeGestionar && !isLoading && todos.length === 0) return null
+  const varias = activas.length > 1
+
+  return (
+    <>
+      <SeccionAjustes
+        id="salas-y-equipos"
+        titulo="Salas/cabinas y equipos"
+        descripcion={varias
+          ? 'Para que la agenda no cruce citas en la misma cabina ni con el mismo equipo. Cada sede tiene los suyos.'
+          : 'Para que la agenda no cruce citas en la misma cabina ni con el mismo equipo.'}
+      >
+        {isLoading ? (
+          <div className="px-4 py-5 text-sm text-muted-foreground">Cargando…</div>
+        ) : (
+          <>
+            {varias && (
+              <div className="flex flex-wrap gap-2 px-4 py-3">
+                {activas.map((sede) => {
+                  const suyos = todos.filter((r) => r.sede === sede.id)
+                  return (
+                    <a
+                      key={sede.id}
+                      href={`#salas-sede-${sede.id}`}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm transition-colors hover:bg-muted',
+                        !suyos.length && 'border-amber-200 bg-amber-50 hover:bg-amber-100/70',
+                      )}
+                    >
+                      <span className="font-medium">{sede.nombre}</span>
+                      <span className={cn('text-xs', suyos.length ? 'text-muted-foreground' : 'text-amber-700')}>
+                        {suyos.length ? conteo(suyos) : 'Sin configurar'}
+                      </span>
+                    </a>
+                  )
+                })}
+              </div>
+            )}
+            {activas.map((sede) => (
+              <BloqueSede
+                key={sede.id}
+                sede={sede}
+                recursos={todos.filter((r) => r.sede === sede.id)}
+                conEncabezado={varias}
+                puedeGestionar={puedeGestionar}
+                onEditar={(tipo, recurso) => setEditor({ sede, tipo, recurso })}
+                onNoDisponible={setNoDisponible}
+              />
+            ))}
+            {todos.length > 0 && (
+              <NotaAjuste>
+                Qué sala/cabina o equipo necesita cada procedimiento se marca al crearlo o editarlo. Al agendar, la cita toma uno libre sola.
+              </NotaAjuste>
+            )}
+          </>
+        )}
+      </SeccionAjustes>
+
+      {editor && (
+        <RecursoSheet
+          sede={editor.sede}
+          sedes={activas}
+          existentes={todos}
+          tipo={editor.tipo}
+          recurso={editor.recurso}
+          open={!!editor}
+          onClose={() => setEditor(null)}
+        />
+      )}
+      <NoDisponibleDialog recurso={noDisponible} onClose={() => setNoDisponible(null)} />
+    </>
+  )
+}
+
+function BloqueSede({
+  sede, recursos, conEncabezado, puedeGestionar, onEditar, onNoDisponible,
+}: {
+  sede: Sede
+  recursos: Recurso[]
+  conEncabezado: boolean
+  puedeGestionar: boolean
+  onEditar: (tipo: TipoRecurso, recurso: Recurso | null) => void
+  onNoDisponible: (r: Recurso) => void
+}) {
+  const qc = useQueryClient()
+  const vacia = recursos.length === 0
+  // Con varias sedes, la que no tiene nada empieza recogida: una línea con su botón.
+  const [abierta, setAbierta] = useState(!conEncabezado || !vacia)
+  const [verTodos, setVerTodos] = useState(false)
 
   const cambiar = useMutation({
     mutationFn: ({ r, data }: { r: Recurso; data: RecursoInput }) => clinicasApi.recursos.update(r.id, data),
@@ -543,102 +754,98 @@ export function SalasYEquipos({ sedes, puedeGestionar }: { sedes: Sede[]; puedeG
     onError: (err) => toast.error('No se pudo eliminar', mensajeDeError(err)),
   })
 
-  if (!sede) return null
-  // Sin nada configurado y sin permiso para configurarlo: no se muestra.
-  if (!puedeGestionar && !isLoading && recursos.length === 0) return null
-
+  if (!puedeGestionar && vacia) return null
   const frase = resumen(recursos)
   const ordenados = [...recursos].sort((a, b) => (a.tipo === b.tipo ? a.orden - b.orden || a.nombre.localeCompare(b.nombre) : a.tipo === 'sala' ? -1 : 1))
 
-  return (
-    <>
-      <SeccionAjustes
-        id="salas-y-equipos"
-        titulo="Salas y equipos"
-        descripcion="Para que la agenda no cruce citas en la misma cabina ni con el mismo equipo."
-        accion={activas.length > 1 && (
-          <SelectAjuste
-            etiqueta="Sede"
-            valor={sede.id}
-            onCambiar={setSedeId}
-            opciones={activas.map((s) => ({ value: s.id, label: s.nombre }))}
-          />
-        )}
-      >
-        {isLoading ? (
-          <div className="px-4 py-5 text-sm text-muted-foreground">Cargando…</div>
-        ) : recursos.length === 0 ? (
-          <Bienvenida sede={sede} onAgregarEquipo={() => setEditor({ tipo: 'equipo', recurso: null })} />
-        ) : (
-          <>
-            {frase && <div className="bg-primary/[0.03] px-4 py-3 text-[13px] text-foreground">{frase}</div>}
-            {ordenados.map((r) => {
-              const usos = r.total_procedimientos
-              const usan = r.tipo === 'equipo'
-                ? usos ? `Lo ${usos === 1 ? 'usa 1 procedimiento' : `usan ${usos} procedimientos`}` : 'Ningún procedimiento lo usa todavía'
-                : usos ? `La ${usos === 1 ? 'usa 1 procedimiento' : `usan ${usos} procedimientos`}` : 'Ningún procedimiento pide sala todavía'
-              return (
-                <FilaAjuste
-                  key={r.id}
-                  icono={r.tipo === 'sala' ? DoorOpen : Zap}
-                  apagada={!r.activo}
-                  titulo={r.nombre}
-                  extra={!r.activo && <EtiquetaAjuste>Inactiva</EtiquetaAjuste>}
-                  descripcion={`${usan} · ${textoDisponibilidad(r)}`}
-                >
-                  {puedeGestionar && (
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Acciones de ${r.nombre}`}>
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => setEditor({ tipo: r.tipo, recurso: r })}>Editar</DropdownMenuItem>
-                        {r.activo && <DropdownMenuItem onClick={() => setNoDisponible(r)}>No disponible…</DropdownMenuItem>}
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => cambiar.mutate({ r, data: { activo: !r.activo } })}>
-                          {r.activo ? 'Desactivar' : 'Activar'}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className="text-red-600 focus:text-red-600"
-                          onClick={() => { if (window.confirm(`¿Eliminar ${r.nombre}? Si ya tiene citas, desactívalo en su lugar.`)) eliminar.mutate(r) }}
-                        >
-                          Eliminar
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  )}
-                </FilaAjuste>
-              )
-            })}
-            {puedeGestionar && (
-              <div className="flex flex-wrap gap-2 px-4 py-3">
-                <Button size="sm" variant="outline" onClick={() => setEditor({ tipo: 'sala', recurso: null })}>
-                  <Plus className="mr-1.5 h-4 w-4" />Agregar sala
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setEditor({ tipo: 'equipo', recurso: null })}>
-                  <Plus className="mr-1.5 h-4 w-4" />Agregar equipo
-                </Button>
-              </div>
-            )}
-            <NotaAjuste>
-              Qué sala o equipo necesita cada procedimiento se marca al crearlo o editarlo. Al agendar, la cita toma uno libre sola.
-            </NotaAjuste>
-          </>
-        )}
-      </SeccionAjustes>
+  // Listas largas recogidas: no empujan las otras sedes hasta el fondo.
+  const visibles = verTodos ? ordenados : ordenados.slice(0, VISIBLES)
+  const ocultos = ordenados.length - visibles.length
 
-      {editor && (
-        <RecursoSheet
-          sede={sede}
-          tipo={editor.tipo}
-          recurso={editor.recurso}
-          open={!!editor}
-          onClose={() => setEditor(null)}
-        />
+  return (
+    <div id={`salas-sede-${sede.id}`} className="scroll-mt-6 divide-y divide-border/70">
+      {conEncabezado && (
+        <div className="flex flex-wrap items-center justify-between gap-2 bg-muted/40 px-4 py-2.5">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">{sede.nombre}</p>
+            <p className={cn('text-xs', vacia ? 'text-amber-700' : 'text-muted-foreground')}>
+              {vacia ? 'Sin salas/cabinas ni equipos: su agenda no los controla' : conteo(recursos)}
+            </p>
+          </div>
+          {vacia && puedeGestionar && !abierta && (
+            <Button size="sm" variant="outline" onClick={() => setAbierta(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />Configurar
+            </Button>
+          )}
+        </div>
       )}
-      <NoDisponibleDialog recurso={noDisponible} onClose={() => setNoDisponible(null)} />
-    </>
+
+      {vacia ? (
+        abierta && <Bienvenida sede={sede} onAgregarEquipo={() => onEditar('equipo', null)} />
+      ) : (
+        <>
+          {frase && <div className="bg-primary/[0.03] px-4 py-3 text-[13px] text-foreground">{frase}</div>}
+          {visibles.map((r) => {
+            const usos = r.total_procedimientos
+            const usan = r.tipo === 'equipo'
+              ? usos ? `Lo ${usos === 1 ? 'usa 1 procedimiento' : `usan ${usos} procedimientos`}` : 'Ningún procedimiento lo usa todavía'
+              : usos ? `La ${usos === 1 ? 'usa 1 procedimiento' : `usan ${usos} procedimientos`}` : 'Ningún procedimiento pide sala/cabina todavía'
+            return (
+              <FilaAjuste
+                key={r.id}
+                icono={r.tipo === 'sala' ? DoorOpen : Zap}
+                apagada={!r.activo}
+                titulo={r.nombre}
+                extra={!r.activo && <EtiquetaAjuste>Inactiva</EtiquetaAjuste>}
+                descripcion={`${usan} · ${textoDisponibilidad(r)}`}
+              >
+                {puedeGestionar && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Acciones de ${r.nombre}`}>
+                        <MoreHorizontal className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onEditar(r.tipo, r)}>Editar</DropdownMenuItem>
+                      {r.activo && <DropdownMenuItem onClick={() => onNoDisponible(r)}>No disponible…</DropdownMenuItem>}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => cambiar.mutate({ r, data: { activo: !r.activo } })}>
+                        {r.activo ? 'Desactivar' : 'Activar'}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-red-600 focus:text-red-600"
+                        onClick={() => { if (window.confirm(`¿Eliminar ${r.nombre}? Si ya tiene citas, desactívalo en su lugar.`)) eliminar.mutate(r) }}
+                      >
+                        Eliminar
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+              </FilaAjuste>
+            )
+          })}
+          {(ocultos > 0 || verTodos) && ordenados.length > VISIBLES && (
+            <button
+              type="button"
+              onClick={() => setVerTodos((v) => !v)}
+              className="w-full px-4 py-2.5 text-left text-sm font-medium text-primary hover:bg-muted/40"
+            >
+              {verTodos ? 'Ver menos' : `Ver ${ocultos === 1 ? 'el otro' : `los otros ${ocultos}`}`}
+            </button>
+          )}
+          {puedeGestionar && (
+            <div className="flex flex-wrap gap-2 px-4 py-3">
+              <Button size="sm" variant="outline" onClick={() => onEditar('sala', null)}>
+                <Plus className="mr-1.5 h-4 w-4" />Agregar sala/cabina{conEncabezado ? ` en ${sede.nombre}` : ''}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => onEditar('equipo', null)}>
+                <Plus className="mr-1.5 h-4 w-4" />Agregar equipo{conEncabezado ? ` en ${sede.nombre}` : ''}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+    </div>
   )
 }

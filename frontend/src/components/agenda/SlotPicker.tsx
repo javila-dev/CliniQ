@@ -12,16 +12,16 @@ import type { MotivoHorarios } from '@/types/agenda'
 function textoMotivo(m: MotivoHorarios): string {
   const uno = m.recursos.length === 1 ? m.recursos[0] : null
   const sala = m.tipo === 'sala'
-  if (m.causa === 'sin_compatible') return 'Ninguna sala sirve para todos los procedimientos de esta cita.'
+  if (m.causa === 'sin_compatible') return 'Ninguna sala/cabina sirve para todos los procedimientos de esta cita.'
   if (m.causa === 'fuera_de_horario') {
     if (uno) return `${uno} no está disponible este día.`
-    return sala ? 'Ninguna de las salas que sirven está disponible este día.' : 'Ninguno de los equipos que sirven está disponible este día.'
+    return sala ? 'Ninguna de las salas/cabinas que sirven está disponible este día.' : 'Ninguno de los equipos que sirven está disponible este día.'
   }
   if (m.causa === 'bloqueado') {
     return uno ? `${uno} está marcado como no disponible este día.` : 'Lo que necesita esta cita está marcado como no disponible este día.'
   }
   if (uno) return `${uno} ya está ${sala ? 'ocupada' : 'ocupado'} en los horarios libres de este día.`
-  return sala ? 'Todas las salas que sirven están ocupadas en los horarios libres de este día.' : `Los equipos que sirven (${m.recursos.join(', ')}) están ocupados en los horarios libres de este día.`
+  return sala ? 'Todas las salas/cabinas que sirven están ocupadas en los horarios libres de este día.' : `Los equipos que sirven (${m.recursos.join(', ')}) están ocupados en los horarios libres de este día.`
 }
 
 function textoProximo(iso: string): string {
