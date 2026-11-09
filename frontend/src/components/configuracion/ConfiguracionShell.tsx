@@ -32,14 +32,28 @@ function categoriasPendientes(categorias: CategoriaConfig[], checklist?: SetupCh
 }
 
 export function useChecklistConfiguracion() {
+  return useResumenConfiguracion().checklist
+}
+
+/**
+ * El Resumen de Configuración solo existe mientras falta algo de la puesta en
+ * marcha. Con todo listo (o sin permiso para prepararla) no aparece: ni en el
+ * menú ni como página.
+ */
+export function useResumenConfiguracion() {
   const { user } = useAuthStore()
   const puedePreparar = hasPermission(user, PERM.CLINICAS_EDITAR)
-  const { data } = useQuery({
+  const { data, isLoading } = useQuery({
     queryKey: ['setup-checklist'],
     queryFn: clinicasApi.setupChecklist,
     enabled: puedePreparar,
   })
-  return puedePreparar ? data : undefined
+  const checklist = puedePreparar ? data : undefined
+  return {
+    checklist,
+    cargando: puedePreparar && isLoading,
+    mostrar: !!checklist && !checklist.todo_listo,
+  }
 }
 
 export function ConfiguracionShell({ children }: { children: React.ReactNode }) {
@@ -48,7 +62,7 @@ export function ConfiguracionShell({ children }: { children: React.ReactNode }) 
   const categorias = categoriasVisibles(user)
   const categoria = categoriaDeRuta(categorias, pathname)
   const esResumen = pathname === '/configuracion'
-  const checklist = useChecklistConfiguracion()
+  const { checklist, mostrar: conResumen } = useResumenConfiguracion()
   const [ayuda, setAyuda] = useState<string | undefined>()
   const registrarAyuda = useCallback((slug: string | undefined) => setAyuda(slug), [])
 
@@ -77,14 +91,14 @@ export function ConfiguracionShell({ children }: { children: React.ReactNode }) 
     <div className="lg:grid lg:min-h-[calc(100vh-7rem)] lg:grid-cols-[16.5rem_minmax(0,1fr)] lg:rounded-2xl lg:border lg:bg-white lg:shadow-sm">
       <aside className="hidden lg:block rounded-l-2xl border-r bg-muted/30 px-2.5 py-3.5">
         <div className="sticky top-4">
-          <MenuLateral categorias={categorias} activa={categoria?.id} esResumen={esResumen} pendientes={pendientes} checklist={checklist} />
+          <MenuLateral categorias={categorias} activa={categoria?.id} esResumen={esResumen} conResumen={conResumen} pendientes={pendientes} checklist={checklist} />
         </div>
       </aside>
 
       <div className="min-w-0 lg:px-9 lg:py-7">
         {esResumen && (
-          <div className="mb-8 rounded-2xl border bg-white p-3 lg:hidden">
-            <MenuLateral categorias={categorias} esResumen pendientes={pendientes} checklist={checklist} />
+          <div className={cn('rounded-2xl border bg-white p-3 lg:hidden', conResumen && 'mb-8')}>
+            <MenuLateral categorias={categorias} esResumen conResumen={conResumen} pendientes={pendientes} checklist={checklist} />
           </div>
         )}
 
@@ -138,11 +152,13 @@ export function ConfiguracionShell({ children }: { children: React.ReactNode }) 
 }
 
 function MenuLateral({
-  categorias, activa, esResumen, pendientes, checklist,
+  categorias, activa, esResumen, conResumen, pendientes, checklist,
 }: {
   categorias: CategoriaConfig[]
   activa?: string
   esResumen: boolean
+  /** Solo hay "Resumen" mientras falta algo de la puesta en marcha. */
+  conResumen: boolean
   pendientes: Set<string>
   checklist?: SetupChecklist
 }) {
@@ -213,16 +229,18 @@ function MenuLateral({
         )
       ) : (
         <ul className="space-y-0.5">
-          <li>
-            <ItemMenu href="/configuracion" icon={Home} label="Resumen" activo={esResumen}>
-              {checklist && !checklist.todo_listo && (
-                <span className="font-mono text-[10.5px] text-muted-foreground">
-                  {checklist.completados}/{checklist.total}
-                </span>
-              )}
-            </ItemMenu>
-          </li>
-          <li aria-hidden className="mx-2 my-1 h-px bg-border" />
+          {conResumen && checklist && (
+            <>
+              <li>
+                <ItemMenu href="/configuracion" icon={Home} label="Puesta en marcha" activo={esResumen}>
+                  <span className="font-mono text-[10.5px] text-muted-foreground">
+                    {checklist.completados}/{checklist.total}
+                  </span>
+                </ItemMenu>
+              </li>
+              <li aria-hidden className="mx-2 my-1 h-px bg-border" />
+            </>
+          )}
           {categorias.map((c) => (
             <li key={c.id}>
               <ItemMenu href={rutaDe(c.ajustes[0].href)} icon={c.icon} label={c.label} activo={activa === c.id}>
