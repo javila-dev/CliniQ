@@ -333,28 +333,31 @@ def mensaje_falta(exigencia, causa, recursos) -> str:
     uno = len(nombres) == 1
     if causa == SIN_COMPATIBLE:
         return (
-            "Ninguna sala/cabina sirve para todos los procedimientos de esta cita. "
-            "Revisa las salas/cabinas de cada procedimiento."
+            "Ninguna cabina o consultorio sirve para todos los procedimientos de esta cita. "
+            "Revisa las cabinas y consultorios de cada procedimiento."
         )
     if causa == OCUPADO:
         if uno:
-            texto = f"{nombres[0]} está {'ocupada' if es_sala else 'ocupado'} a esa hora."
+            texto = (
+                f"{nombres[0]} ya tiene otra cita a esa hora." if es_sala
+                else f"{nombres[0]} está ocupado a esa hora."
+            )
             if exigencia.a_mano:
-                texto += f" Elige otra hora o {'quítala' if es_sala else 'quítalo'} de la cita."
+                texto += " Elige otra hora o quita esa reserva de la cita."
             return texto
         if es_sala:
-            return "No hay una sala/cabina libre a esa hora."
+            return "No hay cabina ni consultorio libre a esa hora."
         return f"No hay un equipo libre a esa hora ({', '.join(nombres)})."
     if causa == BLOQUEADO:
         if uno:
             return f"{nombres[0]} está marcado como no disponible a esa hora."
         return (
-            f"{'Las salas/cabinas' if es_sala else 'Los equipos'} que sirven están "
-            f"{'marcadas' if es_sala else 'marcados'} como no disponibles a esa hora."
+            f"{'Las cabinas y consultorios' if es_sala else 'Los equipos'} que sirven están "
+            "marcados como no disponibles a esa hora."
         )
     if uno:
         return f"{nombres[0]} no está disponible ese día o a esa hora."
-    return f"{'Ninguna de las salas/cabinas' if es_sala else 'Ninguno de los equipos'} que sirven está disponible ese día o a esa hora."
+    return f"{'Ninguna de las cabinas o consultorios' if es_sala else 'Ninguno de los equipos'} que sirven está disponible ese día o a esa hora."
 
 
 def detalle_falta(exigencia, causa, recursos) -> dict:
@@ -393,7 +396,7 @@ def _bloquear_filas(ids):
 def _elegido(recursos, recurso_id, tipo):
     recurso = recursos.get(recurso_id)
     if recurso is None or recurso.tipo != tipo:
-        etiqueta = "La sala/cabina elegida" if tipo == SALA else "El equipo elegido"
+        etiqueta = "La cabina o consultorio elegido" if tipo == SALA else "El equipo elegido"
         raise ValidationError({
             "error": f"{etiqueta} no está disponible en esta sede.",
             "code": "RECURSO_INVALIDO",
@@ -417,7 +420,7 @@ def resolver_recursos(
     recursos = recursos_activos(sede)
     if not recursos:
         if (sala not in (NO_ENVIADO, None)) or (equipos not in (NO_ENVIADO, None) and equipos):
-            raise ValidationError({"error": "Esta sede no tiene salas/cabinas ni equipos.", "code": "RECURSO_INVALIDO"})
+            raise ValidationError({"error": "Esta sede no tiene cabinas, consultorios ni equipos.", "code": "RECURSO_INVALIDO"})
         return []
 
     exigencias, manuales = aplicar_eleccion(

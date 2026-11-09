@@ -425,7 +425,7 @@ class RecursoSerializer(serializers.ModelSerializer):
         if clinica is not None and sede.clinica_id != clinica.id:
             raise serializers.ValidationError({"sede": "La sede no pertenece a tu clínica."})
         if self.instance is not None and "tipo" in attrs and attrs["tipo"] != self.instance.tipo:
-            raise serializers.ValidationError({"tipo": "No se puede cambiar una sala/cabina a equipo ni al revés."})
+            raise serializers.ValidationError({"tipo": "No se puede cambiar una cabina o consultorio a equipo ni al revés."})
         if self.instance is not None and "sede" in attrs and attrs["sede"] != self.instance.sede:
             # Sus citas son de la otra sede: se crea uno nuevo en esta.
             raise serializers.ValidationError({"sede": "No se puede cambiar de sede. Crea uno nuevo en la otra sede."})
@@ -434,12 +434,12 @@ class RecursoSerializer(serializers.ModelSerializer):
         if self.instance is not None:
             repetido = repetido.exclude(pk=self.instance.pk)
         if nombre and repetido.exists():
-            raise serializers.ValidationError({"nombre": "Ya existe una sala/cabina o un equipo con ese nombre en esta sede."})
+            raise serializers.ValidationError({"nombre": "Ya existe una cabina, consultorio o equipo con ese nombre en esta sede."})
         procedimientos = attrs.get("procedimientos_del_equipo")
         if procedimientos:
             if tipo != Recurso.Tipo.EQUIPO:
                 raise serializers.ValidationError(
-                    {"procedimientos": "Las salas/cabinas se eligen desde cada procedimiento."}
+                    {"procedimientos": "Las cabinas y consultorios se eligen desde cada procedimiento."}
                 )
             if any(p.clinica_id != sede.clinica_id for p in procedimientos):
                 raise serializers.ValidationError({"procedimientos": "Algún procedimiento no pertenece a esta clínica."})
@@ -619,7 +619,7 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
         clinica = get_clinica_activa(request)
         clinica_id = clinica.id if clinica is not None else request.user.clinica_id
         if any(r.clinica_id != clinica_id for r in recursos):
-            raise serializers.ValidationError("Alguna sala/cabina o equipo no pertenece a esta clínica.")
+            raise serializers.ValidationError("Alguna cabina, consultorio o equipo no pertenece a esta clínica.")
 
     def validate_salas(self, value):
         self._validar_recursos_de_la_clinica(value)
@@ -639,7 +639,7 @@ class ServicioSerializer(PreciosSedeMixin, serializers.ModelSerializer):
             if salas is None and self.instance is not None:
                 salas = list(self.instance.salas.all())
             if not salas:
-                raise serializers.ValidationError({"salas": "Elige al menos una sala/cabina."})
+                raise serializers.ValidationError({"salas": "Elige al menos una cabina o consultorio."})
 
     def validate(self, attrs):
         self._validar_sala(attrs)

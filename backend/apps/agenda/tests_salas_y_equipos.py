@@ -170,7 +170,7 @@ class SalasTests(SalasYEquiposBase):
         self.assertEqual(self._crear(1, self.facial).status_code, 201)
         response = self._crear(2, self.facial)
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "No hay una sala/cabina libre a esa hora.")
+        self.assertEqual(response.json()["error"], "No hay cabina ni consultorio libre a esa hora.")
 
     def test_no_asistio_libera_la_sala(self):
         primera = self._crear(0, self.facial).json()
@@ -187,7 +187,7 @@ class SalasTests(SalasYEquiposBase):
         # Con la Cabina 2 ocupada no recibe la 1, aunque esté libre.
         response = self._crear(1, self.facial)
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "Cabina 2 está ocupada a esa hora.")
+        self.assertEqual(response.json()["error"], "Cabina 2 ya tiene otra cita a esa hora.")
 
     def test_salas_de_otra_sede_no_cuentan(self):
         norte = self._sede("Norte")
@@ -217,7 +217,7 @@ class ElegidoAManoTests(SalasYEquiposBase):
         datos = response.json()
         self.assertEqual(datos["code"], "RECURSO_OCUPADO")
         self.assertIn("recurso_a_mano", datos)
-        self.assertIn("quítala", datos["error"])
+        self.assertIn("quita esa reserva", datos["error"])
 
     def test_error_de_lo_pedido_por_el_procedimiento_no_dice_a_mano(self):
         self._crear(0, self.depilacion)

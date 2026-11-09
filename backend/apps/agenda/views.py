@@ -1024,7 +1024,7 @@ class CitaViewSet(ModelViewSet):
                 uuid.UUID(e) for e in request.query_params.get("equipos", "").split(",") if e.strip()
             ] or None
         except ValueError as exc:
-            raise ValidationError({"sala": "Identificador de sala/cabina o equipo inválido."}) from exc
+            raise ValidationError({"sala": "Identificador de cabina, consultorio o equipo inválido."}) from exc
         resultado = services.horarios_disponibles(
             profesional.id, sede, fecha_date, duracion_min,
             procedimientos=procedimientos, excluir_cita_id=excluir_cita_id, buscar_proximo=detalle,
