@@ -6,6 +6,23 @@ e2e/test-results-capturas/
 # Salida de las capturas de ayuda: se copian a frontend/public/img/ayuda/
 e2e/capturas-out/
 e2e/node_modules/
+# Videos de ayuda: cuadros, audio de ElevenLabs y MP4 se regeneran con e2e/video/
+e2e/video/*/salida/
+e2e/video/*/audio/
+e2e/video/*/tomas/
+e2e/video/promo/node_modules/
+e2e/video/promo/public/
+e2e/video/promo/videos/*/clips/
+e2e/video/promo/videos/*/tomas/
+e2e/video/promo/salida/
+e2e/video/promo/_exploracion/
+docs/videos/muestras/
+# Publicidad: los videos e imágenes se copian de e2e/video/promo/salida/ con
+# e2e/video/promo/organizar_publicidad.py; los LEEME y documentos sí se versionan.
+publicidad/**/*.mp4
+publicidad/**/*.png
+publicidad/**/*.jpg
+publicidad/**/*.pdf
 
 # Environment
 .env

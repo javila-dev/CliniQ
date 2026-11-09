@@ -57,7 +57,7 @@ services:
       - ./agents/.codex:/root/.codex
       - ./agents/.claude:/root/.claude
     ports:
-      - "8000:8000"
+      - "8003:8000"
     env_file:
       - ./.env
     depends_on:
@@ -75,6 +75,10 @@ services:
     container_name: cliniq_frontend
     restart: unless-stopped
     working_dir: /app
+    # next dev directo: `pnpm run` verifica las dependencias al arrancar, ve que
+    # pnpm-workspace.yaml cambió desde el install de la imagen e intenta
+    # reinstalar node_modules, lo que aborta sin TTY.
+    command: ["npx", "next", "dev"]
     volumes:
       - ./frontend:/app
       - /app/node_modules
@@ -83,7 +87,10 @@ services:
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+      NEXT_PUBLIC_API_URL: http://localhost:8003/api/v1
+      NEXT_PUBLIC_BACKEND_ORIGIN: http://localhost:8003
+      # Rewrites del servidor Next: dentro de la red de Docker, no localhost.
+      BACKEND_URL: http://backend:8000
       NEXT_DEV_POLLING: "true"
     depends_on:
       - backend
