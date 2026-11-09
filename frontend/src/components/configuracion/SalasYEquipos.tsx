@@ -68,7 +68,13 @@ export function textoDisponibilidad(recurso: Pick<Recurso, 'horarios' | 'tipo'>)
 function DiasEditor({ horarios, onChange }: { horarios: HorarioRecurso[]; onChange: (h: HorarioRecurso[]) => void }) {
   const dias = diasQueViene(horarios)
   const todos = dias.length === 7 && !horarios.some((h) => h.hora_inicio)
-  const [conHoras, setConHoras] = useState(horarios.some((h) => !h.no_disponible && h.hora_inicio))
+  const tieneHoras = horarios.some((h) => !h.no_disponible && h.hora_inicio)
+  const [conHoras, setConHoras] = useState(tieneHoras)
+  // Al editar, el horario llega después del primer render.
+  useEffect(() => { if (tieneHoras) setConHoras(true) }, [tieneHoras])
+  // Horas a medio escribir (solo "desde" o solo "hasta"): no se guardan todavía,
+  // pero tienen que seguir en el campo mientras se escribe la otra.
+  const [borrador, setBorrador] = useState<Record<string, [string | null, string | null]>>({})
 
   const fijar = (siguientes: DiaSemana[], horas: Record<string, [string | null, string | null]> = {}) => {
     onChange(DIAS.flatMap(({ key }): HorarioRecurso[] => {
@@ -77,9 +83,12 @@ function DiasEditor({ horarios, onChange }: { horarios: HorarioRecurso[]; onChan
       return ini && fin ? [{ dia_semana: key, no_disponible: false, hora_inicio: ini, hora_fin: fin }] : []
     }))
   }
-  const horasActuales = Object.fromEntries(
-    horarios.filter((h) => !h.no_disponible && h.hora_inicio).map((h) => [h.dia_semana, [h.hora_inicio, h.hora_fin]]),
-  ) as Record<string, [string | null, string | null]>
+  const horasActuales = {
+    ...Object.fromEntries(
+      horarios.filter((h) => !h.no_disponible && h.hora_inicio).map((h) => [h.dia_semana, [h.hora_inicio, h.hora_fin]]),
+    ),
+    ...borrador,
+  } as Record<string, [string | null, string | null]>
 
   return (
     <div className="space-y-2.5">
@@ -136,6 +145,7 @@ function DiasEditor({ horarios, onChange }: { horarios: HorarioRecurso[]; onChan
                 const cambiar = (i: 0 | 1, valor: string) => {
                   const actual: [string | null, string | null] = [ini, fin]
                   actual[i] = valor || null
+                  setBorrador((b) => ({ ...b, [key]: actual }))
                   fijar(dias, { ...horasActuales, [key]: actual })
                 }
                 return (
@@ -165,7 +175,9 @@ export function AvisoCitasAfectadas({ previa }: { previa: PrevisualizacionRecurs
         <Check className="h-3.5 w-3.5" />
         {previa.citas_revisadas === 0
           ? 'No hay citas agendadas que se vean afectadas.'
-          : `Las ${previa.citas_revisadas} citas agendadas tienen lugar.`}
+          : previa.citas_revisadas === 1
+            ? 'La cita agendada tiene lugar.'
+            : `Las ${previa.citas_revisadas} citas agendadas tienen lugar.`}
       </p>
     )
   }
@@ -292,7 +304,7 @@ function RecursoSheet({
       qc.invalidateQueries({ queryKey: ['recursos'] })
       qc.invalidateQueries({ queryKey: ['procedimiento'] })
       qc.invalidateQueries({ queryKey: ['citas'] })
-      toast.success(recurso ? 'Guardado' : `${esEquipo ? 'Equipo' : 'Sala'} creado${esEquipo ? '' : 'a'}`)
+      toast.success(recurso ? 'Guardado' : esEquipo ? 'Equipo creado' : 'Sala creada')
       onClose()
     },
   })
@@ -383,7 +395,7 @@ function NoDisponibleDialog({ recurso, onClose }: { recurso: Recurso | null; onC
       const n = citas.total_sin_lugar
       toast.success(
         `${recurso!.nombre} quedó no disponible`,
-        n ? `${n} cita${n !== 1 ? 's' : ''} quedaron sin ${recurso!.tipo === 'equipo' ? 'equipo' : 'sala'}: aparecen en la agenda para moverlas.` : undefined,
+        n ? `${n === 1 ? '1 cita quedó' : `${n} citas quedaron`} sin ${recurso!.tipo === 'equipo' ? 'equipo' : 'sala'}: ${n === 1 ? 'aparece' : 'aparecen'} en la agenda para moverla${n === 1 ? '' : 's'}.` : undefined,
       )
       onClose()
     },
@@ -441,7 +453,11 @@ function Bienvenida({ sede, onAgregarEquipo }: { sede: Sede; onAgregarEquipo: ()
       qc.invalidateQueries({ queryKey: ['recursos'] })
       toast.success(`${cabinas} cabina${cabinas !== 1 ? 's' : ''} creada${cabinas !== 1 ? 's' : ''}`, 'Puedes cambiarles el nombre.')
     },
-    onError: (err) => toast.error('No se pudieron crear las cabinas', mensajeDeError(err)),
+    onError: (err) => {
+      // Las que alcanzaron a crearse se muestran (y no se repiten al reintentar).
+      qc.invalidateQueries({ queryKey: ['recursos'] })
+      toast.error('No se pudieron crear las cabinas', mensajeDeError(err))
+    },
   })
 
   return (

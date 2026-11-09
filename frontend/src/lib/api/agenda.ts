@@ -4,7 +4,11 @@ import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAge
 import type { Paginated } from '@/types/common'
 import type { TarjetaCita } from '@/types/tarjeta'
 
-type SlotsBase = { profesional_id: string; sede_id: string; fecha: string; cita_id?: string }
+type SlotsBase = {
+  profesional_id: string; sede_id: string; fecha: string; cita_id?: string
+  /** Sala o equipos elegidos al agendar (ids; equipos separados por coma): solo cuando están libres. */
+  sala?: string; equipos?: string
+}
 export type SlotsParams =
   | (SlotsBase & { servicio_id: string })
   | (SlotsBase & { item_cotizacion_id: string; sesion_ejecutada_id?: string })
@@ -14,7 +18,8 @@ type FormaCita =
   | { servicio_id: string }
   | { item_cotizacion_id: string; sesion_ejecutada_id?: string }
   | { duracion_min: number }
-export type RecursosLibresParams = { sede_id: string; fecha_inicio: string; cita_id?: string } & FormaCita
+/** Sin `fecha_inicio`: lo que sirve a la cita (para elegir antes del horario). */
+export type RecursosLibresParams = { sede_id: string; fecha_inicio?: string; cita_id?: string } & FormaCita
 
 export interface CitasSinConfirmar {
   total: number

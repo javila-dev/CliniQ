@@ -48,13 +48,16 @@ interface SlotPickerProps {
   horaPreferida?: number
   /** "Ver el próximo horario libre": cambia la fecha y elige ese horario. */
   onIrA?: (slot: string) => void
+  /** Sala o equipos elegidos: solo los horarios en que están libres. */
+  sala?: string | null
+  equipos?: string[]
 }
 
 const PLACEHOLDER: Record<string, string> = {
-  profesional: 'profesional',
-  sede:        'sede',
-  fecha:       'fecha',
-  fuente:      'procedimiento o duración',
+  profesional: 'el profesional',
+  sede:        'la sede',
+  fecha:       'la fecha',
+  fuente:      'qué se va a hacer',
 }
 
 export function SlotPicker({
@@ -70,12 +73,19 @@ export function SlotPicker({
   citaId,
   horaPreferida,
   onIrA,
+  sala,
+  equipos,
 }: SlotPickerProps) {
   const tieneFuente = Boolean(servicioId || itemCotizacionId || (duracionMin && duracionMin > 0))
   const enabled = Boolean(profesionalId && sedeId && fecha && tieneFuente)
 
   const slotParams = (() => {
-    const base = { profesional_id: profesionalId, sede_id: sedeId, fecha, ...(citaId ? { cita_id: citaId } : {}) }
+    const base = {
+      profesional_id: profesionalId, sede_id: sedeId, fecha,
+      ...(citaId ? { cita_id: citaId } : {}),
+      ...(sala ? { sala } : {}),
+      ...(equipos?.length ? { equipos: equipos.join(',') } : {}),
+    }
     if (itemCotizacionId) {
       return { ...base, item_cotizacion_id: itemCotizacionId, ...(sesionEjecutadaId ? { sesion_ejecutada_id: sesionEjecutadaId } : {}) }
     }
@@ -83,7 +93,7 @@ export function SlotPicker({
     return { ...base, servicio_id: servicioId! }
   })()
 
-  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, sesionEjecutadaId, duracionMin, citaId]
+  const queryKey = ['slots', profesionalId, sedeId, fecha, servicioId, itemCotizacionId, sesionEjecutadaId, duracionMin, citaId, sala ?? '', (equipos ?? []).join(',')]
 
   // Con el detalle: si se descartaron horarios por una sala o un equipo, dice
   // por qué y cuál es el próximo libre.
@@ -93,6 +103,14 @@ export function SlotPicker({
     enabled,
   })
   const slots = detalle?.horarios
+
+  // El horario elegido dejó de servir (se cambió la sala o el equipo y ya no
+  // está en la lista): se quita para no agendar uno ocupado. Al editar no: la
+  // hora actual de la cita puede no estar en la lista (ya pasó) y se conserva;
+  // el backend valida al guardar.
+  useEffect(() => {
+    if (!citaId && value && slots && !slots.includes(value)) onSelect('')
+  }, [citaId, value, slots, onSelect])
 
   // Solo una vez por hora preferida: si la persona elige otro horario, no se pisa.
   const preferidaAplicada = useRef<number | undefined>(undefined)
@@ -109,13 +127,14 @@ export function SlotPicker({
   }, [horaPreferida, slots, value, onSelect])
 
   if (!enabled) {
-    const falta = !profesionalId ? PLACEHOLDER.profesional
+    // En el orden en que se llena el formulario: qué, dónde, con quién, cuándo.
+    const falta = !tieneFuente ? PLACEHOLDER.fuente
       : !sedeId ? PLACEHOLDER.sede
-      : !fecha ? PLACEHOLDER.fecha
-      : PLACEHOLDER.fuente
+      : !profesionalId ? PLACEHOLDER.profesional
+      : PLACEHOLDER.fecha
     return (
       <p className="text-sm text-muted-foreground text-center py-4">
-        Selecciona {falta} para ver horarios disponibles
+        Elige {falta} para ver los horarios libres.
       </p>
     )
   }

@@ -58,7 +58,8 @@ export function AvisoCitasSinSala({
   if (!hay || !conFalta.length) return null
 
   const n = conFalta.length
-  const tipo = conFalta.every((c) => c.falta!.every((f) => f.tipo === 'equipo')) ? 'equipo' : 'sala'
+  const tipos = new Set(conFalta.flatMap((c) => c.falta!.map((f) => f.tipo)))
+  const tipo = tipos.size > 1 ? 'sala o equipo' : tipos.has('equipo') ? 'equipo' : 'sala'
   return (
     <Popover open={abierto} onOpenChange={setAbierto}>
       <PopoverTrigger asChild>
@@ -71,14 +72,14 @@ export function AvisoCitasSinSala({
         >
           <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
           <span>
-            <span className="font-semibold">{n} cita{n !== 1 ? 's' : ''}</span> sin {tipo === 'equipo' ? 'equipo' : 'sala'} esta semana
+            <span className="font-semibold">{n} cita{n !== 1 ? 's' : ''}</span> sin {tipo} en los próximos 7 días
             <span className="ml-1.5 font-medium underline-offset-2 hover:underline">Revisar</span>
           </span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 p-0">
         <p className="border-b px-3 py-2 text-xs text-muted-foreground">
-          Necesitan {tipo === 'equipo' ? 'un equipo' : 'una sala'} y no hay uno libre a esa hora. Muévelas a otro horario.
+          {tipo === 'equipo' ? 'Necesitan un equipo y no hay uno libre' : tipo === 'sala' ? 'Necesitan una sala y no hay una libre' : 'Les falta sala o equipo libre'} a esa hora. Muévelas a otro horario.
         </p>
         <div className="max-h-72 overflow-y-auto py-1">
           {conFalta.map((c) => (

@@ -71,7 +71,11 @@ const ETIQUETAS_DE_ERROR: Record<string, string> = {
 
 function salaYEquipoDe(p: Procedimiento | undefined): SalaYEquipoValor {
   if (!p) return SALA_Y_EQUIPO_VACIO
-  return { necesita_sala: p.necesita_sala ?? 'no', salas: p.salas ?? [], equipos: p.equipos ?? [] }
+  const salas = p.salas ?? []
+  // "Solo estas salas" sin ninguna (se eliminaron): la agenda ya la trata como
+  // "cualquiera"; así el formulario no queda pidiendo una sala que no existe.
+  const necesita = p.necesita_sala === 'algunas' && salas.length === 0 ? 'cualquiera' : p.necesita_sala ?? 'no'
+  return { necesita_sala: necesita, salas, equipos: p.equipos ?? [] }
 }
 
 function ProfesionalesMultiSelect({ opciones, selected, onChange }: {

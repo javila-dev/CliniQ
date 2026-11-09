@@ -12,12 +12,12 @@ import { clinicasApi } from '@/lib/api/clinicas'
 import { carteraApi } from '@/lib/api/cartera'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
-import { cn, todayISO } from '@/lib/utils'
+import { todayISO } from '@/lib/utils'
 import { ProfesionalSelect } from './ProfesionalSelect'
 import { ServicioSelect } from './ServicioSelect'
 import { SedeSelect } from './SedeSelect'
 import { SlotPicker } from './SlotPicker'
-import { ELECCION_AUTOMATICA, RecursosDeLaCita, recursosParaEnviar, type EleccionRecursos } from './RecursosDeLaCita'
+import { ELECCION_AUTOMATICA, RecursosDeLaCita, recursosParaEnviar, useSedeConRecursos, type EleccionRecursos } from './RecursosDeLaCita'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -85,6 +85,7 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
   })
 
   const sedeId = watch('sede')
+  const conSalas = useSedeConRecursos(sedeId)
   const profesionalId = watch('profesional')
   const servicioId = watch('servicio')
   const fecha = watch('fecha')
@@ -160,30 +161,64 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
     ejecutarAprobarExcepcion(deudaError.cuotaIds)
   }
 
+  // Qué hace la cita: decide qué sala y equipo necesita.
+  const forma = conProcedimiento ? { servicioId }
+    : cita.item_cotizacion_id ? { itemCotizacionId: cita.item_cotizacion_id, sesionEjecutadaId: cita.sesion_ejecutada_id ?? undefined }
+    : { duracionMin: duracionFija }
+
   return (
     <form onSubmit={handleSubmit((v) => mutate({ values: v }))} className="space-y-4">
+      {/* Mismo orden que al agendar: qué, dónde y con quién, sala y equipo, cuándo, detalles. */}
       <div className="space-y-1.5">
-        <Label>Sede *</Label>
-        <Controller
-          name="sede"
-          control={control}
-          render={({ field }) => (
-            <SedeSelect
-              value={field.value}
-              onValueChange={(v) => {
-                field.onChange(v)
-                setValue('profesional', '')
-                if (conProcedimiento) setValue('servicio', '')
-                setValue('slot', '')
-              }}
-            />
-          )}
-        />
-        {errors.sede && <p className="text-xs text-destructive">{errors.sede.message}</p>}
+        <Label>Procedimiento{conProcedimiento && ' *'}</Label>
+        {conProcedimiento ? (
+          <Controller
+            name="servicio"
+            control={control}
+            render={({ field }) => (
+              <ServicioSelect
+                value={field.value ?? ''}
+                onValueChange={(v) => {
+                  field.onChange(v)
+                  setValue('slot', '')
+                  if (filtroActivo) setValue('profesional', '')
+                }}
+                clinicaId={clinicaId}
+              />
+            )}
+          />
+        ) : (
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            <p className="truncate">{cita.servicio_nombre || 'Consulta libre'}</p>
+            {duracionFija ? (
+              <p className="text-xs text-muted-foreground">{duracionFija} min</p>
+            ) : null}
+          </div>
+        )}
+        {errors.servicio && <p className="text-xs text-destructive">{errors.servicio.message}</p>}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
-        <div className={cn('space-y-1.5', filtroActivo && 'order-2')}>
+        <div className="space-y-1.5">
+          <Label>Sede *</Label>
+          <Controller
+            name="sede"
+            control={control}
+            render={({ field }) => (
+              <SedeSelect
+                value={field.value}
+                onValueChange={(v) => {
+                  field.onChange(v)
+                  setValue('profesional', '')
+                  setValue('slot', '')
+                }}
+              />
+            )}
+          />
+          {errors.sede && <p className="text-xs text-destructive">{errors.sede.message}</p>}
+        </div>
+
+        <div className="space-y-1.5">
           <Label>Profesional *</Label>
           <Controller
             name="profesional"
@@ -201,70 +236,35 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
           />
           {errors.profesional && <p className="text-xs text-destructive">{errors.profesional.message}</p>}
         </div>
-
-        <div className={cn('space-y-1.5', filtroActivo && 'order-1')}>
-          <Label>Procedimiento{conProcedimiento && ' *'}</Label>
-          {conProcedimiento ? (
-            <Controller
-              name="servicio"
-              control={control}
-              render={({ field }) => (
-                <ServicioSelect
-                  value={field.value ?? ''}
-                  onValueChange={(v) => {
-                    field.onChange(v)
-                    setValue('slot', '')
-                    if (filtroActivo) setValue('profesional', '')
-                  }}
-                  clinicaId={clinicaId}
-                />
-              )}
-            />
-          ) : (
-            <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
-              <p className="truncate">{cita.servicio_nombre || 'Consulta libre'}</p>
-              {duracionFija ? (
-                <p className="text-xs text-muted-foreground">{duracionFija} min</p>
-              ) : null}
-            </div>
-          )}
-          {errors.servicio && <p className="text-xs text-destructive">{errors.servicio.message}</p>}
-        </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-3">
+      {conSalas && (
         <div className="space-y-1.5">
-          <Label>Fecha *</Label>
-          <Input
-            type="date"
-            min={todayISO()}
-            {...register('fecha', { onChange: () => setValue('slot', '') })}
+          <Label>Sala y equipo</Label>
+          <RecursosDeLaCita
+            sedeId={sedeId}
+            fechaInicio={slot || undefined}
+            forma={forma}
+            citaId={cita.id}
+            value={recursos}
+            onChange={setRecursos}
           />
-          {errors.fecha && <p className="text-xs text-destructive">{errors.fecha.message}</p>}
         </div>
+      )}
 
-        <div className="space-y-1.5">
-          <Label>¿Cómo agendó el paciente? *</Label>
-          <Controller
-            name="canal_origen"
-            control={control}
-            render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="telefono">Teléfono</SelectItem>
-                  <SelectItem value="presencial">Presencial</SelectItem>
-                  <SelectItem value="web">Web</SelectItem>
-                  <SelectItem value="redes">Redes sociales</SelectItem>
-                </SelectContent>
-              </Select>
-            )}
-          />
-        </div>
+      <div className="space-y-1.5">
+        <Label>Fecha *</Label>
+        <Input
+          type="date"
+          min={todayISO()}
+          className="max-w-[12rem]"
+          {...register('fecha', { onChange: () => setValue('slot', '') })}
+        />
+        {errors.fecha && <p className="text-xs text-destructive">{errors.fecha.message}</p>}
       </div>
 
       <div className="space-y-1.5">
-        <Label>Horario *</Label>
+        <Label>Hora *</Label>
         <div className="rounded-md border p-2 bg-muted/20">
           <SlotPicker
             profesionalId={profesionalId}
@@ -276,23 +276,29 @@ export function EditarCitaForm({ cita, onCancel, onSuccess }: EditarCitaFormProp
             onSelect={(s) => setValue('slot', s)}
             onIrA={(s) => { setValue('fecha', s.slice(0, 10)); setValue('slot', s) }}
             citaId={cita.id}
+            {...recursosParaEnviar(recursos)}
           />
         </div>
         {errors.slot && <p className="text-xs text-destructive">{errors.slot.message}</p>}
-        {slot && (
-          <RecursosDeLaCita
-            sedeId={sedeId}
-            fechaInicio={slot}
-            forma={
-              conProcedimiento ? { servicioId }
-                : cita.item_cotizacion_id ? { itemCotizacionId: cita.item_cotizacion_id, sesionEjecutadaId: cita.sesion_ejecutada_id ?? undefined }
-                : { duracionMin: duracionFija }
-            }
-            citaId={cita.id}
-            value={recursos}
-            onChange={setRecursos}
-          />
-        )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label>¿Cómo agendó el paciente? *</Label>
+        <Controller
+          name="canal_origen"
+          control={control}
+          render={({ field }) => (
+            <Select value={field.value} onValueChange={field.onChange}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="telefono">Teléfono</SelectItem>
+                <SelectItem value="presencial">Presencial</SelectItem>
+                <SelectItem value="web">Web</SelectItem>
+                <SelectItem value="redes">Redes sociales</SelectItem>
+              </SelectContent>
+            </Select>
+          )}
+        />
       </div>
 
       <div className="space-y-1.5">

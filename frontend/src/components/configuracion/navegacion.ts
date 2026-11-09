@@ -42,8 +42,8 @@ export const CATEGORIAS: CategoriaConfig[] = [
       {
         href: '/configuracion/sedes',
         label: 'Sedes',
-        description: 'Sucursales, horarios de atención y contacto.',
-        keywords: 'sucursal horario direccion ciudad apertura cierre',
+        description: 'Sucursales, horarios, contacto y sus salas y equipos.',
+        keywords: 'sucursal horario direccion ciudad apertura cierre salas cabinas consultorios equipos laser aparatos',
         perm: PERM.SEDES_VER,
       },
       {

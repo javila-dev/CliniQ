@@ -374,7 +374,7 @@ function CompactCitaCard({
           <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
           <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
           {recursos && <p className="text-xs"><span className="text-muted-foreground">Sala y equipo:</span> {recursos}</p>}
-          {falta && <p className="text-xs font-medium text-amber-700">{falta}: no había uno libre a esa hora.</p>}
+          {falta && <p className="text-xs font-medium text-amber-700">{falta} a esa hora.</p>}
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -878,7 +878,17 @@ function DayView({
   const mover = useMutation({
     mutationFn: async ({ cita, destino, desde }: { cita: Cita; destino: Recurso; desde: string }) => {
       if (destino.tipo === 'sala') return agendaApi.citas.update(cita.id, { sala: destino.id })
-      // Equipo: se cambia el de la columna de origen y se conservan los demás.
+      // Equipo: si el de origen es el que pide el procedimiento, el destino
+      // tiene que servirle (si no, se sumaría como extra y ocuparía los dos).
+      const origen = (cita.recursos ?? []).find((r) => r.id === desde)
+      if (origen && !origen.elegido_a_mano) {
+        const duracion = cita.duracion_min
+          || Math.round((new Date(cita.fecha_fin).getTime() - new Date(cita.fecha_inicio).getTime()) / 60000)
+        const usa = await agendaApi.citas.recursosLibres({ sede_id: cita.sede, cita_id: cita.id, duracion_min: duracion })
+        const sirve = usa.necesarios.some((n) => n.recursos.some((r) => r.id === desde) && n.recursos.some((r) => r.id === destino.id))
+        if (!sirve) throw new Error(`${destino.nombre} no sirve para este procedimiento.`)
+      }
+      // Se cambia el de la columna de origen y se conservan los demás.
       const equipos = (cita.recursos ?? []).filter((r) => r.tipo === 'equipo' && r.id !== desde).map((r) => r.id)
       return agendaApi.citas.update(cita.id, { equipos: [destino.id, ...equipos] })
     },
@@ -887,7 +897,10 @@ function DayView({
       queryClient.invalidateQueries({ queryKey: ['recursos-libres'] })
       toast.success(`Cita movida a ${destino.nombre}`)
     },
-    onError: (err) => toast.error('No se pudo mover la cita', mensajeDeError(err)),
+    onError: (err) => toast.error(
+      'No se pudo mover la cita',
+      err instanceof Error && !(err as { response?: unknown }).response ? err.message : mensajeDeError(err),
+    ),
   })
   const scrollRef = useRef<HTMLDivElement>(null)
   const isToday = fecha === todayISO()
@@ -1005,7 +1018,13 @@ function DayView({
     const Icono = agrupar === 'sala' ? IconoSala : IconoEquipo
     const soltar = (destino: Recurso) => (citaId: string, desde: string) => {
       const cita = citas.find((c) => c.id === citaId)
-      if (cita) mover.mutate({ cita, destino, desde })
+      if (!cita) return
+      // Cada sede usa solo sus salas y equipos: no se cambia de sede arrastrando.
+      if (cita.sede !== destino.sede) {
+        toast.error('No se pudo mover la cita', `${destino.nombre} es de ${destino.sede_nombre}; la cita es de otra sede.`)
+        return
+      }
+      mover.mutate({ cita, destino, desde })
     }
 
     return (

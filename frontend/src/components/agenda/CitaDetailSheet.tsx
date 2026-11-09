@@ -39,7 +39,8 @@ import { toast } from '@/hooks/use-toast'
 import { mensajeDeError } from '@/lib/errores'
 import type { EstadoCita, MedioConfirmacion } from '@/types/agenda'
 import { CancelarConCobroDialog, cobroDeLaCitaDelError, type AccionCobro, type CobroDeLaCita } from './CancelarConCobroDialog'
-import { nombresRecursos, textoFalta } from './AvisoCitasSinSala'
+import { textoFalta } from './AvisoCitasSinSala'
+import { DoorOpen, Zap } from 'lucide-react'
 
 type CambiarEstadoVars = {
   estado: EstadoCita
@@ -104,6 +105,13 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
     queryKey: ['citas', citaId],
     queryFn: () => agendaApi.citas.get(citaId!),
     enabled: Boolean(citaId),
+  })
+
+  // Salas y equipos activos: la sección "Sala y equipo" solo aparece en sedes que los tienen.
+  const { data: recursosActivos } = useQuery({
+    queryKey: ['recursos', 'activos'],
+    queryFn: () => clinicasApi.recursos.list({ activo: true }),
+    staleTime: 5 * 60 * 1000,
   })
 
   const { data: wizardConfig } = useQuery({
@@ -298,12 +306,26 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
               {/* Card principal — toda la info clave sin scroll */}
               <div className="rounded-lg border bg-card divide-y">
 
-                {/* Fila: estado + confirmación */}
-                <div className="flex items-center justify-between px-4 py-2.5">
-                  <CitaStatusBadge estado={cita.estado} />
-                  {cita.estado_confirmacion === 'confirmado' && (
-                    <Badge variant="success" className="text-xs">Confirmado</Badge>
-                  )}
+                {/* Paciente + profesional, con el estado a la derecha */}
+                <div className="px-4 py-3 space-y-1">
+                  <div className="flex items-start justify-between gap-3">
+                    <Link
+                      href={`/pacientes/${cita.paciente}`}
+                      className="min-w-0 text-base font-semibold text-primary hover:underline leading-tight"
+                    >
+                      {cita.paciente_nombre}
+                    </Link>
+                    <div className="flex shrink-0 items-center gap-1.5">
+                      <CitaStatusBadge estado={cita.estado} />
+                      {cita.estado_confirmacion === 'confirmado' && (
+                        <Badge variant="success" className="text-xs">Confirmado</Badge>
+                      )}
+                    </div>
+                  </div>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
+                    <Stethoscope className="h-3.5 w-3.5 shrink-0" />
+                    {cita.profesional_nombre}
+                  </p>
                 </div>
 
                 {/* Último contacto: quién confirmó / canceló / no confirmó y cuándo */}
@@ -325,20 +347,6 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   </div>
                 )}
 
-                {/* Paciente + profesional */}
-                <div className="px-4 py-3 space-y-1">
-                  <Link
-                    href={`/pacientes/${cita.paciente}`}
-                    className="text-base font-semibold text-primary hover:underline leading-tight block"
-                  >
-                    {cita.paciente_nombre}
-                  </Link>
-                  <p className="text-sm text-muted-foreground flex items-center gap-1.5">
-                    <Stethoscope className="h-3.5 w-3.5 shrink-0" />
-                    {cita.profesional_nombre}
-                  </p>
-                </div>
-
                 {/* Procedimiento + Sede (2 col) */}
                 <div className="grid grid-cols-2 divide-x">
                   <div className="px-4 py-3">
@@ -348,15 +356,39 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   <div className="px-4 py-3">
                     <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-0.5">Sede</p>
                     <p className="text-sm font-medium">{cita.sede_nombre}</p>
-                    {/* Sala y equipo (docs/plan-salas-y-equipos.md): solo si la cita ocupa alguno o le falta. */}
-                    {nombresRecursos(cita) && (
-                      <p className="text-[13px] text-muted-foreground mt-0.5">{nombresRecursos(cita)}</p>
-                    )}
-                    {textoFalta(cita) && (
-                      <p className="text-[12px] font-medium text-amber-700 mt-0.5">{textoFalta(cita)} · edítala para moverla</p>
-                    )}
                   </div>
                 </div>
+
+                {/* Sala y equipo (docs/plan-salas-y-equipos.md): en sedes que los tienen,
+                    o si la cita ocupa alguno. */}
+                {((cita.recursos?.length ?? 0) > 0 || (cita.falta?.length ?? 0) > 0
+                  || recursosActivos?.some((r) => r.sede === cita.sede)) && (
+                  <div className="px-4 py-3">
+                    <p className="text-[11px] text-muted-foreground uppercase tracking-wide mb-1">Sala y equipo</p>
+                    {(cita.recursos?.length ?? 0) > 0 ? (
+                      <div className="space-y-1">
+                        {cita.recursos!.map((r) => {
+                          const Icono = r.tipo === 'sala' ? DoorOpen : Zap
+                          return (
+                            <p key={r.id} className="flex items-center gap-2 text-sm">
+                              <Icono className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                              <span className="w-14 shrink-0 text-muted-foreground">{r.tipo === 'sala' ? 'Sala' : 'Equipo'}</span>
+                              <span className="font-medium">{r.nombre}</span>
+                              {r.elegido_a_mano && <span className="text-xs text-muted-foreground">· {r.tipo === 'sala' ? 'elegida' : 'elegido'} al agendar</span>}
+                            </p>
+                          )
+                        })}
+                      </div>
+                    ) : !textoFalta(cita) ? (
+                      <p className="text-sm text-muted-foreground">No usa sala ni equipo.</p>
+                    ) : null}
+                    {textoFalta(cita) && (
+                      <p className="mt-1 text-xs font-medium text-amber-700">
+                        {textoFalta(cita)} a esa hora. Edítala para moverla.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {/* Horario + Canal (2 col) */}
                 <div className="grid grid-cols-2 divide-x">
