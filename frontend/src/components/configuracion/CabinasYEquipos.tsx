@@ -93,7 +93,7 @@ export function CabinasYEquipos({ puedeGestionar }: { puedeGestionar: boolean })
     <div className="space-y-6">
       <SeccionAjustes
         titulo="Cabinas y consultorios"
-        descripcion="Cuántas citas que necesitan cabina o consultorio pueden ir a la vez en cada sede."
+        descripcion="Ponen un límite a la agenda: cada cabina o consultorio recibe una cita a la vez. Si una sede tiene 2, no se pueden agendar más de 2 citas a la misma hora que los necesiten. Solo cuentan los procedimientos que piden cabina o consultorio."
       >
         {sedes.map((s) => (
           <FilaCabinas
@@ -111,7 +111,7 @@ export function CabinasYEquipos({ puedeGestionar }: { puedeGestionar: boolean })
 
       <SeccionAjustes
         titulo="Equipos"
-        descripcion="Aparatos que no pueden estar en dos citas a la vez, como un láser."
+        descripcion="También ponen un límite: cada equipo se usa en una cita a la vez. Si el láser ya está ocupado a las 10:00, la agenda ofrece otra hora a los procedimientos que lo usan."
         accion={puedeGestionar && grupos.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setEquipo('nuevo')}>
             <Plus className="mr-1.5 h-4 w-4" />Agregar equipo
