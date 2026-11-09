@@ -27,6 +27,19 @@ export interface ResumenPacientes {
   inactivos: number
 }
 
+export interface CumpleanosPaciente {
+  id: string
+  nombre_completo: string
+  nombres: string
+  /** Fecha (aaaa-mm-dd) en que cae el cumpleaños dentro de la ventana. */
+  fecha: string
+  /** 0 = hoy. */
+  dias_faltan: number
+  edad_cumple: number
+  /** Enmascarado ("••••4567") sin el permiso de datos sensibles. */
+  telefono: string
+}
+
 export interface PacientesFilter {
   search?: string
   activo?: boolean
@@ -79,6 +92,12 @@ export const pacientesApi = {
   /** Pacientes con el mismo teléfono o correo: aviso no bloqueante (M2-20). */
   posiblesDuplicados: async (params: { telefono?: string; email?: string; excluir?: string }): Promise<PosibleDuplicado[]> => {
     const res = await apiClient.get<PosibleDuplicado[]>('/pacientes/posibles_duplicados/', { params })
+    return res.data
+  },
+
+  /** Activos que cumplen años hoy o en los próximos `dias` (7 por defecto). */
+  cumpleanos: async (dias = 7): Promise<CumpleanosPaciente[]> => {
+    const res = await apiClient.get<CumpleanosPaciente[]>('/pacientes/cumpleanos/', { params: { dias } })
     return res.data
   },
 

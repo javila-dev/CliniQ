@@ -1,5 +1,7 @@
 import asyncio
+import calendar
 import re
+from datetime import timedelta
 import unicodedata
 import uuid
 
@@ -23,6 +25,8 @@ from apps.pacientes.serializers import (
     AntecedentePacienteSerializer,
     BusquedaPacienteSerializer,
     PacienteSerializer,
+    enmascarar_cola,
+    usuario_ve_datos_sensibles,
 )
 from apps.historia_clinica.models import ConsentimientoInformado
 from apps.historia_clinica.serializers import ConsentimientoInformadoSerializer
@@ -228,6 +232,52 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         total = totales["total"] or 0
         activos = totales["activos"] or 0
         return Response({"total": total, "activos": activos, "inactivos": total - activos})
+
+    @action(detail=False, methods=["get"], url_path="cumpleanos", pagination_class=None)
+    def cumpleanos(self, request):
+        """Pacientes activos que cumplen años hoy o en los próximos `dias` (7 por
+        defecto, máximo 31). Los del 29 de febrero, en años no bisiestos, se
+        felicitan el 28. El teléfono sale enmascarado si falta el permiso de
+        datos sensibles, igual que en la ficha."""
+        try:
+            dias = int(request.query_params.get("dias", 7))
+        except (TypeError, ValueError):
+            dias = 7
+        dias = max(0, min(dias, 31))
+
+        hoy = timezone.localdate()
+        # Fecha en que cae el cumpleaños de cada (mes, día) dentro de la ventana.
+        fechas_por_mes_dia = {}
+        for i in range(dias + 1):
+            d = hoy + timedelta(days=i)
+            fechas_por_mes_dia[(d.month, d.day)] = d
+            if d.month == 2 and d.day == 28 and not calendar.isleap(d.year):
+                fechas_por_mes_dia[(2, 29)] = d
+
+        condicion = Q()
+        for mes, dia in fechas_por_mes_dia:
+            condicion |= Q(fecha_nacimiento__month=mes, fecha_nacimiento__day=dia)
+
+        pacientes = (
+            Paciente.objects.filter(clinica=get_clinica_activa(request), activo=True, fecha_nacimiento__isnull=False)
+            .filter(condicion)
+            .only("id", "nombres", "apellidos", "fecha_nacimiento", "telefono")
+        )
+        ve_sensibles = usuario_ve_datos_sensibles(self.get_serializer_context())
+        payload = []
+        for p in pacientes:
+            fecha = fechas_por_mes_dia[(p.fecha_nacimiento.month, p.fecha_nacimiento.day)]
+            payload.append({
+                "id": str(p.id),
+                "nombre_completo": p.nombre_completo,
+                "nombres": p.nombres,
+                "fecha": fecha.isoformat(),
+                "dias_faltan": (fecha - hoy).days,
+                "edad_cumple": fecha.year - p.fecha_nacimiento.year,
+                "telefono": p.telefono if ve_sensibles else enmascarar_cola(p.telefono),
+            })
+        payload.sort(key=lambda x: (x["dias_faltan"], x["nombre_completo"].lower()))
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get", "put", "patch"], url_path="antecedentes")
     def antecedentes(self, request, pk=None):

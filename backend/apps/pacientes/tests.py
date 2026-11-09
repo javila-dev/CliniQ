@@ -1,4 +1,5 @@
-from datetime import timedelta
+from datetime import date, timedelta
+from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
@@ -431,3 +432,83 @@ class DatosSensiblesPacienteTests(TestCase):
         self._auth(self.admin)
         resultados = self.client.get("/api/v1/pacientes/buscar/?q=Restrepo").json()
         self.assertEqual(resultados[0]["numero_documento"], "1098765432")
+
+
+class CumpleanosPacientesTests(TestCase):
+    URL = "/api/v1/pacientes/cumpleanos/"
+
+    def setUp(self):
+        self.client = APIClient()
+        self.clinica = Clinica.objects.create(nombre="Clinica Cumple", nit="900111222")
+        self.otra = Clinica.objects.create(nombre="Otra Clinica", nit="900333444")
+        self.admin = User.objects.create_user(
+            email="admin-cumple@example.com", password="secret123", first_name="Admin",
+            last_name="Cumple", rol=User.Role.ADMIN, clinica=self.clinica,
+        )
+        self.recepcion = User.objects.create_user(
+            email="recepcion-cumple@example.com", password="secret123", first_name="Recepcion",
+            last_name="Cumple", rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        self._n = 0
+
+    def _paciente(self, nacimiento, clinica=None, activo=True, nombres="Ana"):
+        self._n += 1
+        return Paciente.objects.create(
+            clinica=clinica or self.clinica,
+            tipo_documento=Paciente.TipoDocumento.CC,
+            numero_documento=f"10{self._n:08d}",
+            nombres=nombres,
+            apellidos=f"Prueba {self._n}",
+            fecha_nacimiento=nacimiento,
+            sexo=Paciente.Sexo.FEMENINO,
+            telefono="+573001234567",
+            canal_confirmacion=Paciente.CanalConfirmacion.WHATSAPP,
+            activo=activo,
+        )
+
+    def _get(self, user, hoy, params=""):
+        self.client.force_authenticate(user)
+        self.client.credentials(HTTP_X_ACTIVE_CLINICA=str(self.clinica.id))
+        with patch("apps.pacientes.views.timezone.localdate", return_value=hoy):
+            resp = self.client.get(f"{self.URL}{params}")
+        self.assertEqual(resp.status_code, 200)
+        return resp.json()
+
+    def test_lista_hoy_y_proximos_dias_ordenados(self):
+        hoy = date(2026, 11, 5)
+        en_tres = self._paciente(date(1990, 11, 8), nombres="Beatriz")
+        hoy_p = self._paciente(date(1986, 11, 5), nombres="Carla")
+        self._paciente(date(1990, 11, 20))  # fuera de la ventana de 7 días
+        self._paciente(date(1990, 11, 4))  # ya pasó
+        self._paciente(date(1990, 11, 6), activo=False)  # inactivo
+        self._paciente(date(1990, 11, 6), clinica=self.otra)  # otra clínica
+
+        data = self._get(self.admin, hoy)
+
+        self.assertEqual([p["id"] for p in data], [str(hoy_p.id), str(en_tres.id)])
+        self.assertEqual(data[0]["dias_faltan"], 0)
+        self.assertEqual(data[0]["edad_cumple"], 40)
+        self.assertEqual(data[1]["fecha"], "2026-11-08")
+        self.assertEqual(data[1]["dias_faltan"], 3)
+        self.assertEqual(data[0]["telefono"], "+573001234567")
+
+    def test_ventana_cruza_fin_de_anio(self):
+        p = self._paciente(date(2000, 1, 2))
+        data = self._get(self.admin, date(2026, 12, 29))
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]["id"], str(p.id))
+        self.assertEqual(data[0]["fecha"], "2027-01-02")
+        self.assertEqual(data[0]["edad_cumple"], 27)
+
+    def test_29_de_febrero_en_anio_no_bisiesto_cae_el_28(self):
+        p = self._paciente(date(2000, 2, 29))
+        data = self._get(self.admin, date(2027, 2, 28), "?dias=0")
+        self.assertEqual([x["id"] for x in data], [str(p.id)])
+        self.assertEqual(data[0]["fecha"], "2027-02-28")
+
+    def test_recepcion_ve_telefono_enmascarado(self):
+        self._paciente(date(1990, 11, 5))
+        data = self._get(self.recepcion, date(2026, 11, 5))
+        self.assertEqual(len(data), 1)
+        self.assertIn("•", data[0]["telefono"])
+        self.assertTrue(data[0]["telefono"].endswith("4567"))

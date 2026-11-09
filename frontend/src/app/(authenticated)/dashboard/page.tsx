@@ -23,6 +23,7 @@ import { useAuthStore } from '@/store/authStore'
 import { ParaHoyResumen } from '@/components/seguimiento/ParaHoyResumen'
 import { AvisoDatosProfesionales } from '@/components/shared/AvisoDatosProfesionales'
 import { CitasHoyCard } from '@/components/dashboard/CitasHoyCard'
+import { CumpleanosCard } from '@/components/dashboard/CumpleanosCard'
 import { IngresosAcumuladosCard } from '@/components/dashboard/IngresosAcumuladosCard'
 import { AutorizacionesPendientesBanner } from '@/components/cotizaciones/AutorizacionesPrecioAcceso'
 import { Button } from '@/components/ui/button'
@@ -667,12 +668,16 @@ function DashboardProfesional() {
           />
         </div>
 
-        <CitasHoyCard
-          citas={citasHoy}
-          loading={citasLoading}
-          titulo="Mis citas de hoy"
-          accionVacia={canAccess.agenda(user) ? { href: '/agenda', label: 'Ver agenda' } : undefined}
-        />
+        <div className={cn('grid grid-cols-1 gap-4 items-start', canAccess.pacientes(user) && 'lg:grid-cols-3')}>
+          <CitasHoyCard
+            className={canAccess.pacientes(user) ? 'lg:col-span-2' : undefined}
+            citas={citasHoy}
+            loading={citasLoading}
+            titulo="Mis citas de hoy"
+            accionVacia={canAccess.agenda(user) ? { href: '/agenda', label: 'Ver agenda' } : undefined}
+          />
+          {canAccess.pacientes(user) && <CumpleanosCard />}
+        </div>
       </div>
     )
 }
@@ -950,6 +955,7 @@ function DashboardContent() {
   const sinReagendar = pacientesSinReagendar ?? []
   const canVerSinReagendar = hasPermission(user, PERM.REPORTES_VER)
   const canVerSeguimiento = hasPermission(user, PERM.SEGUIMIENTO_VER)
+  const veCumpleanos = canAccess.pacientes(user)
   // 4 o 5 tarjetas según permisos (Ingresos y Sin reagendar son opcionales).
   const nKpis = 3 + (canVerFinanzas ? 1 : 0) + (canVerSinReagendar ? 1 : 0)
 
@@ -1138,11 +1144,11 @@ function DashboardContent() {
 
       {/* Citas del día + a quién contactar: segunda fila, justo después de los KPI.
           Si falta una de las dos, la otra ocupa todo el ancho. */}
-      {(veAgenda || canVerSeguimiento) && (
-        <div className={cn('grid grid-cols-1 gap-4', veAgenda && canVerSeguimiento && 'lg:grid-cols-3')}>
+      {(veAgenda || canVerSeguimiento || veCumpleanos) && (
+        <div className={cn('grid grid-cols-1 gap-4 items-start', veAgenda && (canVerSeguimiento || veCumpleanos) && 'lg:grid-cols-3')}>
           {veAgenda && (
             <CitasHoyCard
-              className={canVerSeguimiento ? 'lg:col-span-2' : undefined}
+              className={canVerSeguimiento || veCumpleanos ? 'lg:col-span-2' : undefined}
               citas={citasHoy}
               loading={citasLoading}
               titulo="Citas de hoy"
@@ -1150,7 +1156,12 @@ function DashboardContent() {
               accionVacia={hasPermission(user, PERM.AGENDA_CREAR) ? { href: '/agenda', label: 'Agendar cita', crear: true } : undefined}
             />
           )}
-          {canVerSeguimiento && <ParaHoyResumen sede={sede} />}
+          {(canVerSeguimiento || veCumpleanos) && (
+            <div className="space-y-4">
+              {canVerSeguimiento && <ParaHoyResumen sede={sede} />}
+              {veCumpleanos && <CumpleanosCard />}
+            </div>
+          )}
         </div>
       )}
 
