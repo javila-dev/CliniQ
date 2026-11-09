@@ -3,7 +3,7 @@ import secrets
 
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models, transaction
-from django.db.models import F
+from django.db.models import F, Q
 from django.db.models.functions import Lower, Trim
 from django.utils import timezone
 
@@ -420,7 +420,16 @@ class Recurso(BaseModel):
                 Lower(Trim("nombre")),
                 F("sede"),
                 name="recurso_nombre_unico_por_sede",
-                violation_error_message="Ya existe una sala o un equipo con ese nombre en esta sede.",
+                violation_error_message="Ya existe una cabina, consultorio o equipo con ese nombre en esta sede.",
+            ),
+            # Cabinas y consultorios: nombre único en toda la clínica. Los equipos
+            # sí repiten nombre entre sedes (el mismo equipo, un aparato por sede).
+            models.UniqueConstraint(
+                Lower(Trim("nombre")),
+                F("clinica"),
+                condition=Q(tipo="sala"),
+                name="recurso_sala_nombre_unico_por_clinica",
+                violation_error_message="Ya hay una cabina o consultorio con ese nombre en la clínica.",
             ),
         ]
 

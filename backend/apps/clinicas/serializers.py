@@ -410,6 +410,37 @@ class RecursoSerializer(serializers.ModelSerializer):
             .count()
         )
 
+    def _validar_nombre_unico(self, nombre, tipo, sede):
+        """El nombre identifica la cabina o el equipo en toda la clínica:
+        - Una cabina o consultorio no repite nombre en la clínica (aunque sea de
+          otra sede): "Cabina 1" de Principal y de H4 se confundirían en la agenda.
+        - Una cabina y un equipo no comparten nombre.
+        - Un equipo con el mismo nombre en otra sede es el mismo equipo (un
+          aparato por sede, docs/plan-salas-y-equipos.md); en la misma sede, no.
+        """
+        mismos = Recurso.objects.filter(clinica_id=sede.clinica_id, nombre__iexact=nombre.strip())
+        if self.instance is not None:
+            mismos = mismos.exclude(pk=self.instance.pk)
+        otro = mismos.select_related("sede").first()
+        if otro is None:
+            return None
+        if tipo == Recurso.Tipo.EQUIPO and otro.tipo == Recurso.Tipo.EQUIPO:
+            en_la_sede = mismos.filter(sede=sede).first()
+            if en_la_sede is not None:
+                raise serializers.ValidationError({"nombre": f"{en_la_sede.nombre} ya está en {sede.nombre}."})
+            # El mismo equipo en otra sede: se escribe igual que allá.
+            return otro.nombre
+        if otro.tipo == Recurso.Tipo.EQUIPO:
+            mensaje = f"Ya hay un equipo llamado {otro.nombre}. Usa otro nombre."
+        elif otro.sede_id == sede.id:
+            mensaje = f"Ya hay una cabina o consultorio llamado {otro.nombre} en esta sede."
+        else:
+            mensaje = (
+                f"Ya hay una cabina o consultorio llamado {otro.nombre} en {otro.sede.nombre}. "
+                f"Usa otro nombre, por ejemplo «{otro.nombre} {sede.nombre}»."
+            )
+        raise serializers.ValidationError({"nombre": mensaje})
+
     def validate_nombre(self, value):
         value = " ".join(value.split())
         if not value:
@@ -430,11 +461,10 @@ class RecursoSerializer(serializers.ModelSerializer):
             # Sus citas son de la otra sede: se crea uno nuevo en esta.
             raise serializers.ValidationError({"sede": "No se puede cambiar de sede. Crea uno nuevo en la otra sede."})
         nombre = attrs.get("nombre", getattr(self.instance, "nombre", None))
-        repetido = Recurso.objects.filter(sede=sede, nombre__iexact=nombre)
-        if self.instance is not None:
-            repetido = repetido.exclude(pk=self.instance.pk)
-        if nombre and repetido.exists():
-            raise serializers.ValidationError({"nombre": "Ya existe una cabina, consultorio o equipo con ese nombre en esta sede."})
+        if nombre:
+            igual_que = self._validar_nombre_unico(nombre, tipo, sede)
+            if igual_que and "nombre" in attrs:
+                attrs["nombre"] = igual_que
         procedimientos = attrs.get("procedimientos_del_equipo")
         if procedimientos:
             if tipo != Recurso.Tipo.EQUIPO:

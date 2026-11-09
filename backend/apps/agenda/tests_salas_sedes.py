@@ -84,7 +84,7 @@ class SeparacionPorSedeTests(SalasYEquiposBase):
     def setUp(self):
         super().setUp()
         self.norte = self._sede("Norte")
-        self.cabina_norte = self._recurso("Cabina 1", Recurso.Tipo.SALA, sede=self.norte)
+        self.cabina_norte = self._recurso("Cabina Norte", Recurso.Tipo.SALA, sede=self.norte)
         self.soprano_norte = self._recurso("Soprano", Recurso.Tipo.EQUIPO, sede=self.norte)
         self.depilacion.equipos.add(self.soprano_norte)
 
@@ -450,3 +450,37 @@ class CorreccionesDeLaRevisionTests(SalasYEquiposBase):
         response = self.client.delete(f"/api/v1/clinicas/sedes/{norte.id}/")
         self.assertEqual(response.status_code, 400, response.content)
         self.assertEqual(response.json()["code"], "SEDE_CON_RECURSOS")
+
+
+class NombreUnicoEnLaClinicaTests(SalasYEquiposBase):
+    """Cabinas y equipos se reconocen por el nombre en toda la clínica."""
+
+    def setUp(self):
+        super().setUp()
+        self.norte = self._sede("Norte")
+
+    def _crear_recurso(self, nombre, tipo, sede):
+        return self.client.post(
+            "/api/v1/clinicas/recursos/", {"sede": str(sede.id), "nombre": nombre, "tipo": tipo}, format="json",
+        )
+
+    def test_una_cabina_no_repite_nombre_en_otra_sede(self):
+        response = self._crear_recurso("cabina 1", "sala", self.norte)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("Cabina 1 Norte", response.json()["nombre"][0])
+        self.assertEqual(self._crear_recurso("Cabina 1 Norte", "sala", self.norte).status_code, 201)
+
+    def test_renombrar_una_cabina_con_el_nombre_de_otra(self):
+        norte = self._recurso("Consultorio", Recurso.Tipo.SALA, sede=self.norte)
+        response = self.client.patch(f"/api/v1/clinicas/recursos/{norte.id}/", {"nombre": "Cabina 2"}, format="json")
+        self.assertEqual(response.status_code, 400, response.content)
+
+    def test_cabina_y_equipo_no_comparten_nombre(self):
+        self.assertEqual(self._crear_recurso("Soprano", "sala", self.norte).status_code, 400)
+        self.assertEqual(self._crear_recurso("Cabina 2", "equipo", self.norte).status_code, 400)
+
+    def test_el_mismo_equipo_en_otra_sede_si_pero_no_dos_veces_en_la_misma(self):
+        self.assertEqual(self._crear_recurso("soprano", "equipo", self.norte).status_code, 201)
+        response = self._crear_recurso("Soprano", "equipo", self.sede)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["nombre"][0], "Soprano ya está en Principal.")
