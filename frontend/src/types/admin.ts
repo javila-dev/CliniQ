@@ -420,3 +420,36 @@ export interface CorreccionSoporte {
   realizado_por: string | null
   created_at: string
 }
+
+// ── Soporte: cambiar el correo de acceso de un usuario ──────────────────────
+
+export interface CambiarCorreoRequest {
+  usuario: string
+  correo_nuevo: string
+  motivo: string
+  enviar_enlace: boolean
+  cerrar_sesiones: boolean
+}
+
+export interface CambiarCorreoResultado {
+  id: string
+  email: string
+  correo_anterior: string
+  /** null si no se pidió o si el usuario está desactivado en su clínica. */
+  enlace: {
+    tipo: 'invitacion' | 'restablecer'
+    url: string
+    email_enviado: boolean
+    vence: string
+  } | null
+}
+
+export interface CambioCorreoReciente {
+  id: string
+  fecha: string
+  usuario_nombre: string
+  correo_anterior: string
+  correo_nuevo: string
+  motivo: string
+  hecho_por: string
+}

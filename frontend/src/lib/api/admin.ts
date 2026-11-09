@@ -9,6 +9,7 @@ import type {
   SoporteAtencion, SoportePaciente, TrasladoPrevisualizacion, TrasladarAtencionRequest,
   EliminacionPrevisualizacion, EliminarAtencionRequest, CorreccionSoporte, TipoCorreccionSoporte,
   SoporteCargaMigrada, SoporteTratamientoCatalogo, CorreccionMigradoRequest, CorreccionMigradoPrevisualizacion,
+  CambiarCorreoRequest, CambiarCorreoResultado, CambioCorreoReciente,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
 
@@ -60,6 +61,14 @@ export const adminApi = {
     },
     correcciones: async (clinica: string, tipo?: TipoCorreccionSoporte): Promise<CorreccionSoporte[]> => {
       const res = await apiClient.get<CorreccionSoporte[]>('/admin/soporte/correcciones/', { params: { clinica, tipo } })
+      return res.data
+    },
+    cambiosDeCorreo: async (clinica: string): Promise<CambioCorreoReciente[]> => {
+      const res = await apiClient.get<CambioCorreoReciente[]>('/admin/soporte/cambiar-correo/', { params: { clinica } })
+      return res.data
+    },
+    cambiarCorreo: async (data: CambiarCorreoRequest): Promise<CambiarCorreoResultado> => {
+      const res = await apiClient.post<CambiarCorreoResultado>('/admin/soporte/cambiar-correo/', data)
       return res.data
     },
   },

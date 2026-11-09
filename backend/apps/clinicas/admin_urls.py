@@ -21,6 +21,7 @@ from apps.notificaciones.views import (
     AdminWhatsappPropioView,
     AdminWhatsappRegistrarInboxView,
 )
+from apps.users.soporte_views import SoporteCambiarCorreoView
 from apps.users.views import ConsoleUsuarioViewSet
 
 router = DefaultRouter()
@@ -60,6 +61,7 @@ urlpatterns = [
         name="admin-soporte-sesiones-previas-tratamientos",
     ),
     path("soporte/correcciones/", SoporteCorreccionesView.as_view(), name="admin-soporte-correcciones"),
+    path("soporte/cambiar-correo/", SoporteCambiarCorreoView.as_view(), name="admin-soporte-cambiar-correo"),
     path("tenants/<uuid:clinica_id>/whatsapp-propio/", AdminWhatsappPropioView.as_view(), name="admin-whatsapp-propio"),
     path(
         "tenants/<uuid:clinica_id>/whatsapp-propio/registrar-inbox/",
