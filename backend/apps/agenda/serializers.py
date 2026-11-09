@@ -662,10 +662,10 @@ class BloqueoAgendaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer)
             # Bloqueo de una sala o un equipo: solo ese recurso, en su sede.
             request = self.context.get("request")
             if request and request.user.rol != "superadmin" and recurso.clinica_id != request.user.clinica_id:
-                raise serializers.ValidationError({"recurso": "La sala o el equipo no pertenece a tu clínica."})
+                raise serializers.ValidationError({"recurso": "La sala/cabina o el equipo no pertenece a tu clínica."})
             if attrs.get("profesional", getattr(self.instance, "profesional", None)):
                 raise serializers.ValidationError(
-                    {"recurso": "Un bloqueo es de un profesional o de una sala o equipo, no de los dos."}
+                    {"recurso": "Un bloqueo es de un profesional o de una sala/cabina o equipo, no de los dos."}
                 )
             attrs["sede"] = recurso.sede
         validar_sede_del_usuario(self.context.get("request"), attrs.get("sede"))

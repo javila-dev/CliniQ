@@ -671,7 +671,7 @@ class SedeViewSet(HasClinicamente, ModelViewSet):
             instance.delete()
         except ProtectedError:
             raise ValidationError({
-                "error": "La sede tiene salas o equipos. Elimínalos primero o desactiva la sede.",
+                "error": "La sede tiene salas/cabinas o equipos. Elimínalos primero o desactiva la sede.",
                 "code": "SEDE_CON_RECURSOS",
             })
 
@@ -891,7 +891,7 @@ class RecursoViewSet(HasClinicamente, ModelViewSet):
                 recurso = serializer.save(**({} if instancia is not None else {"clinica": clinica}))
                 sedes = [s for s in dict.fromkeys([sede_anterior, recurso.sede]) if s is not None]
             else:
-                raise ValidationError({"error": "Envía el cambio de un procedimiento o de una sala o equipo."})
+                raise ValidationError({"error": "Envía el cambio de un procedimiento o de una sala/cabina o equipo."})
             resumen = reasignar_citas_futuras(sedes)
             transaction.set_rollback(True)
         return Response(resumen)

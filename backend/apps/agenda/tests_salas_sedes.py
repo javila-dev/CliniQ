@@ -104,7 +104,7 @@ class SeparacionPorSedeTests(SalasYEquiposBase):
     def test_no_se_puede_elegir_a_mano_una_sala_de_otra_sede(self):
         response = self._crear(0, self.valoracion, sala=str(self.cabina_norte.id))
         self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(response.json()["error"], "La sala elegida no está disponible en esta sede.")
+        self.assertEqual(response.json()["error"], "La sala/cabina elegida no está disponible en esta sede.")
         self.assertFalse(CitaRecurso.objects.exists())
         response = self._crear(0, self.valoracion, equipos=[str(self.soprano_norte.id)])
         self.assertEqual(response.status_code, 400, response.content)

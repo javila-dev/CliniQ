@@ -170,7 +170,7 @@ class SalasTests(SalasYEquiposBase):
         self.assertEqual(self._crear(1, self.facial).status_code, 201)
         response = self._crear(2, self.facial)
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.json()["error"], "No hay una sala libre a esa hora.")
+        self.assertEqual(response.json()["error"], "No hay una sala/cabina libre a esa hora.")
 
     def test_no_asistio_libera_la_sala(self):
         primera = self._crear(0, self.facial).json()
