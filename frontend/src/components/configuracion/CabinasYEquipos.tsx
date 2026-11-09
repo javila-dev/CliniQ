@@ -100,6 +100,7 @@ export function CabinasYEquipos({ puedeGestionar }: { puedeGestionar: boolean })
             key={s.id}
             sede={s}
             cabinas={cabinas.filter((c) => c.sede === s.id)}
+            todos={todos}
             conNombreDeSede={sedes.length > 1}
             puedeGestionar={puedeGestionar}
             onEditar={(recurso) => setCabina({ sede: s, recurso })}
@@ -162,6 +163,7 @@ export function CabinasYEquipos({ puedeGestionar }: { puedeGestionar: boolean })
           grupo={equipo === 'nuevo' ? null : equipo}
           sedes={sedes}
           grupos={grupos}
+          cabinas={cabinas}
           onClose={() => setEquipo(null)}
         />
       )}
@@ -173,10 +175,11 @@ export function CabinasYEquipos({ puedeGestionar }: { puedeGestionar: boolean })
 // ── Cabinas de una sede ────────────────────────────────────────
 
 function FilaCabinas({
-  sede, cabinas, conNombreDeSede, puedeGestionar, onEditar, onNoDisponible,
+  sede, cabinas, todos, conNombreDeSede, puedeGestionar, onEditar, onNoDisponible,
 }: {
   sede: Sede
   cabinas: Recurso[]
+  todos: Recurso[]
   conNombreDeSede: boolean
   puedeGestionar: boolean
   onEditar: (r: Recurso) => void
@@ -236,22 +239,25 @@ function FilaCabinas({
             </DropdownMenu>
           )
         })}
-        {puedeGestionar && <AgregarCabina sede={sede} cabinas={cabinas} />}
+        {puedeGestionar && <AgregarCabina sede={sede} cabinas={cabinas} todos={todos} />}
       </div>
     </div>
   )
 }
 
-function AgregarCabina({ sede, cabinas }: { sede: Sede; cabinas: Recurso[] }) {
+function AgregarCabina({ sede, cabinas, todos }: { sede: Sede; cabinas: Recurso[]; todos: Recurso[] }) {
   const qc = useQueryClient()
   const [abierto, setAbierto] = useState(false)
   const [nombre, setNombre] = useState('')
-  const sugerido = () => {
-    const usados = new Set(cabinas.map((c) => normalizar(c.nombre)))
+  // El nombre es único en toda la clínica (cabinas de otras sedes y equipos).
+  const usados = new Map(todos.map((r) => [normalizar(r.nombre), r]))
+  const sugerido = (extra: string[] = []) => {
+    const ocupados = new Set([...usados.keys(), ...extra.map(normalizar)])
     let n = cabinas.length + 1
-    while (usados.has(normalizar(`Cabina ${n}`))) n += 1
+    while (ocupados.has(normalizar(`Cabina ${n}`))) n += 1
     return `Cabina ${n}`
   }
+  const choca = nombre.trim() ? usados.get(normalizar(nombre)) : undefined
   const crear = useMutation({
     mutationFn: () => clinicasApi.recursos.create({
       sede: sede.id, nombre: nombre.trim(), tipo: 'sala', orden: cabinas.length + 1,
@@ -260,7 +266,7 @@ function AgregarCabina({ sede, cabinas }: { sede: Sede; cabinas: Recurso[] }) {
       qc.invalidateQueries({ queryKey: ['recursos'] })
       qc.invalidateQueries({ queryKey: ['citas'] })
       // Queda abierto con el siguiente nombre: agregar varias seguidas es rápido.
-      setNombre(sugerido().replace(/\d+$/, (d) => String(Number(d) + 1)))
+      setNombre(sugerido([nombre]))
     },
     onError: (err) => toast.error('No se pudo agregar', mensajeDeError(err)),
   })
@@ -275,7 +281,7 @@ function AgregarCabina({ sede, cabinas }: { sede: Sede; cabinas: Recurso[] }) {
       <PopoverContent align="start" className="w-72 p-3">
         <form
           className="space-y-2"
-          onSubmit={(e) => { e.preventDefault(); if (nombre.trim()) crear.mutate() }}
+          onSubmit={(e) => { e.preventDefault(); if (nombre.trim() && !choca) crear.mutate() }}
         >
           <Label htmlFor={`cabina-${sede.id}`}>Nombre</Label>
           <div className="flex gap-2">
@@ -287,11 +293,19 @@ function AgregarCabina({ sede, cabinas }: { sede: Sede; cabinas: Recurso[] }) {
               placeholder="Cabina 3, Consultorio 2…"
               className="h-9"
             />
-            <Button type="submit" size="sm" className="h-9" disabled={crear.isPending || !nombre.trim()}>
+            <Button type="submit" size="sm" className="h-9" disabled={crear.isPending || !nombre.trim() || !!choca}>
               Agregar
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">Puedes agregar varias seguidas.</p>
+          {choca ? (
+            <p className="text-xs text-amber-700">
+              {choca.tipo === 'equipo'
+                ? `Ya hay un equipo llamado ${choca.nombre}.`
+                : `Ya hay ${choca.nombre} en ${choca.sede_nombre}. Prueba «${choca.nombre} ${sede.nombre}».`}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">Puedes agregar varias seguidas.</p>
+          )}
         </form>
       </PopoverContent>
     </Popover>
@@ -393,11 +407,12 @@ function FilaEquipo({
  * quita de las que se desmarcan (si ya tiene citas, se desactiva).
  */
 function EquipoSheet({
-  grupo, sedes, grupos, onClose,
+  grupo, sedes, grupos, cabinas, onClose,
 }: {
   grupo: GrupoEquipo | null
   sedes: Sede[]
   grupos: GrupoEquipo[]
+  cabinas: Recurso[]
   onClose: () => void
 }) {
   const qc = useQueryClient()
@@ -418,6 +433,7 @@ function EquipoSheet({
   const repetido = nombre.trim()
     ? grupos.find((g) => g.clave !== grupo?.clave && mismoNombre(g.nombre, nombre))
     : undefined
+  const comoCabina = nombre.trim() ? cabinas.find((c) => mismoNombre(c.nombre, nombre)) : undefined
 
   type Paso =
     | { tipo: 'actualizar'; recurso: Recurso; sede: string }
@@ -502,6 +518,9 @@ function EquipoSheet({
             {repetido && (
               <p className="text-xs text-amber-700">Ya hay un equipo llamado {repetido.nombre}. Edítalo para agregarlo a otra sede.</p>
             )}
+            {comoCabina && (
+              <p className="text-xs text-amber-700">Ya hay una cabina o consultorio llamado {comoCabina.nombre} en {comoCabina.sede_nombre}. Usa otro nombre.</p>
+            )}
           </div>
 
           {sedes.length > 1 && (
@@ -548,7 +567,7 @@ function EquipoSheet({
             <Button
               type="submit"
               className="flex-1"
-              disabled={guardar.isPending || !nombre.trim() || !!repetido || enSedes.length === 0}
+              disabled={guardar.isPending || !nombre.trim() || !!repetido || !!comoCabina || enSedes.length === 0}
             >
               {guardar.isPending ? 'Guardando…' : previa ? 'Guardar igual' : grupo ? 'Guardar cambios' : 'Agregar equipo'}
             </Button>
