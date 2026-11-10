@@ -372,7 +372,7 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                           return (
                             <p key={r.id} className="flex items-center gap-2 text-sm">
                               <Icono className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                              <span className="w-14 shrink-0 text-muted-foreground">{r.tipo === 'sala' ? 'Cabina/consultorio' : 'Equipo'}</span>
+                              <span className="w-36 shrink-0 whitespace-nowrap text-muted-foreground">{r.tipo === 'sala' ? 'Cabina/consultorio' : 'Equipo'}</span>
                               <span className="font-medium">{r.nombre}</span>
                               {r.elegido_a_mano && <span className="text-xs text-muted-foreground">· {r.tipo === 'sala' ? 'elegida' : 'elegido'} al agendar</span>}
                             </p>

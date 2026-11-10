@@ -193,7 +193,7 @@ function Eleccion({
         const nombreTocaria = tocaria ? nombres.get(tocaria)?.nombre : null
         return (
           <div key={`n${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="flex w-20 items-center gap-2 text-muted-foreground">
+            <span className="flex w-40 shrink-0 items-center gap-2 whitespace-nowrap text-muted-foreground">
               <Icono tipo={n.tipo} />{esSala ? 'Cabina/consultorio' : 'Equipo'}
             </span>
             {unico ? (
@@ -225,7 +225,7 @@ function Eleccion({
         if (!r) return null
         return (
           <div key={id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span className="flex w-20 items-center gap-2 text-muted-foreground">
+            <span className="flex w-40 shrink-0 items-center gap-2 whitespace-nowrap text-muted-foreground">
               <Icono tipo={r.tipo} />{r.tipo === 'sala' ? 'Cabina/consultorio' : 'Equipo'}
             </span>
             <span className="font-medium">{r.nombre}</span>
