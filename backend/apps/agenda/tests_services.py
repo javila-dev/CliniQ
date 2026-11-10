@@ -14,6 +14,7 @@ from apps.agenda.services import (
     calcular_fecha_fin,
     crear_cita,
     get_slots_disponibles,
+    validar_horario_cita,
     verificar_disponibilidad_profesional,
     verificar_horario_profesional,
     verificar_horario_sede,
@@ -124,6 +125,33 @@ class AgendaServicesTests(ClinicaFixtureMixin, TestCase):
         tarde = self.inicio.replace(hour=16)
         self.assertTrue(verificar_horario_profesional(self.profesional.id, self.sede.id, self.inicio, self.inicio + timedelta(minutes=30)))
         self.assertFalse(verificar_horario_profesional(self.profesional.id, self.sede.id, tarde, tarde + timedelta(minutes=30)))
+
+    def test_horario_especial_fuera_del_horario_de_la_sede(self):
+        """Sede de 8 a 18, profesional de 7 a 17: se agenda desde las 7 y no después de las 17."""
+        self._horario_profesional(hora_inicio="07:00", hora_fin="17:00")
+        siete = self.inicio.replace(hour=7, minute=0)
+        slots = get_slots_disponibles(self.profesional.id, self.sede.id, self.inicio.date(), 30)
+        self.assertEqual(slots[0], siete)
+        self.assertEqual(slots[-1], self.inicio.replace(hour=16, minute=30))
+
+        validar_horario_cita(
+            sede=self.sede, profesional=self.profesional,
+            fecha_inicio=siete, fecha_fin=siete + timedelta(minutes=30),
+        )
+        tarde = self.inicio.replace(hour=17, minute=30)
+        with self.assertRaises(ValidationError):
+            validar_horario_cita(
+                sede=self.sede, profesional=self.profesional,
+                fecha_inicio=tarde, fecha_fin=tarde + timedelta(minutes=30),
+            )
+
+    def test_sin_horario_especial_sigue_el_de_la_sede(self):
+        siete = self.inicio.replace(hour=7, minute=0)
+        with self.assertRaises(ValidationError):
+            validar_horario_cita(
+                sede=self.sede, profesional=self.profesional,
+                fecha_inicio=siete, fecha_fin=siete + timedelta(minutes=30),
+            )
 
     def test_profesional_que_no_atiende_ese_dia(self):
         self._horario_profesional(no_atiende=True)

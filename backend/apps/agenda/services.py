@@ -241,6 +241,8 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
     actual = timezone.make_aware(datetime.combine(fecha, hora_inicio), tz)
     limite = timezone.make_aware(datetime.combine(fecha, hora_fin), tz)
 
+    # El horario especial reemplaza las horas de la sede ese día: una profesional
+    # que atiende de 7 a 18 en una sede de 8 a 19 se agenda desde las 7.
     rango_profesional = obtener_rango_horario_profesional(profesional_id, sede_id, fecha)
     if rango_profesional == NO_ATIENDE:
         return []
@@ -255,7 +257,8 @@ def get_slots_disponibles(profesional_id, sede_id, fecha, duracion_min: int, exc
     slots = []
     while actual + timedelta(minutes=duracion_min) <= limite:
         fin = calcular_fecha_fin(actual, duracion_min)
-        if not _se_cruza(ocupados, actual, fin) and verificar_horario_sede(sede, actual, fin):
+        dentro_del_horario = bool(rango_profesional) or verificar_horario_sede(sede, actual, fin)
+        if not _se_cruza(ocupados, actual, fin) and dentro_del_horario:
             slots.append(actual)
         actual = actual + timedelta(minutes=intervalo_min)
 
@@ -506,7 +509,13 @@ def validar_horario_cita(*, sede, profesional, fecha_inicio, fecha_fin, excluir_
             "error": f"{profesional.nombre_completo} no atiende en la sede {sede.nombre}.",
             "code": "PROFESIONAL_FUERA_DE_SEDE",
         })
-    if not verificar_horario_sede(sede, fecha_inicio, fecha_fin):
+    # Con horario especial ese día, ese horario reemplaza el de la sede (que igual
+    # tiene que abrir ese día: la ficha del colaborador solo deja horario especial
+    # en los días que abre la sede).
+    dia = timezone.localtime(fecha_inicio).date()
+    rango_profesional = obtener_rango_horario_profesional(profesional.id, sede.id, dia)
+    sede_abre = bool(sede.horario.get(DIAS_SEMANA.get(dia.weekday())))
+    if not sede_abre or (rango_profesional is None and not verificar_horario_sede(sede, fecha_inicio, fecha_fin)):
         raise ValidationError({"error": "La cita está fuera del horario de la sede."})
     if not verificar_horario_profesional(profesional.id, sede.id, fecha_inicio, fecha_fin):
         raise ValidationError({"error": "La cita está fuera del horario del colaborador."})
