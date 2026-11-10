@@ -310,21 +310,22 @@ function DiaHorarioRow({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="w-24 shrink-0 font-medium text-muted-foreground">{dia.label}</span>
         <Select value={modo} onValueChange={(v) => cambiarModo(v as ModoDia)} disabled={guardarMut.isPending}>
-          <SelectTrigger className="h-8 w-56 text-sm">
+          <SelectTrigger className="h-8 w-60 text-sm">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="sede">Igual a la sede ({rangoSede[0]} – {rangoSede[1]})</SelectItem>
+            <SelectItem value="sede">Igual a la sede ({rangoSede[0]}–{rangoSede[1]})</SelectItem>
             <SelectItem value="especial">Horario especial</SelectItem>
             <SelectItem value="no_atiende">No atiende</SelectItem>
           </SelectContent>
         </Select>
         {modo === 'especial' && (
           <div className="flex items-center gap-1.5">
-            <Input type="time" className="h-8 w-28 text-sm" value={inicio}
+            {/* El navegador muestra "07:00 a.m." más el reloj: con w-28 se cortaba. */}
+            <Input type="time" className="h-8 w-[8.75rem] text-sm" value={inicio}
               onChange={(e) => { guardarMut.reset(); setInicio(e.target.value) }} />
             <span className="text-xs text-muted-foreground">a</span>
-            <Input type="time" className="h-8 w-28 text-sm" value={fin}
+            <Input type="time" className="h-8 w-[8.75rem] text-sm" value={fin}
               onChange={(e) => { guardarMut.reset(); setFin(e.target.value) }} />
             {especialSinGuardar && (
               <Button type="button" size="sm" className="h-8 text-xs"
