@@ -3,16 +3,19 @@ from rest_framework.routers import DefaultRouter
 
 from apps.agenda.soporte_views import (
     SoporteAtencionesView,
+    SoporteCambiarTratamientoView,
     SoporteCargasMigradasView,
     SoporteCorreccionesView,
     SoporteCorregirSesionesPreviasView,
     SoporteEliminarAtencionView,
     SoportePacientesView,
+    SoportePrevisualizarCambioTratamientoView,
     SoportePrevisualizarCorreccionMigradoView,
     SoportePrevisualizarEliminacionView,
     SoportePrevisualizarTrasladoView,
     SoporteTrasladoAtencionView,
     SoporteTratamientosMigracionView,
+    SoporteVentasPacienteView,
 )
 from apps.clinicas.views import AdminTenantViewSet, PlanViewSet
 from apps.notificaciones.views import (
@@ -59,6 +62,17 @@ urlpatterns = [
         "soporte/sesiones-previas/tratamientos/",
         SoporteTratamientosMigracionView.as_view(),
         name="admin-soporte-sesiones-previas-tratamientos",
+    ),
+    path("soporte/cambiar-tratamiento/", SoporteVentasPacienteView.as_view(), name="admin-soporte-cambiar-tratamiento-ventas"),
+    path(
+        "soporte/cambiar-tratamiento/previsualizar/",
+        SoportePrevisualizarCambioTratamientoView.as_view(),
+        name="admin-soporte-cambiar-tratamiento-previsualizar",
+    ),
+    path(
+        "soporte/cambiar-tratamiento/confirmar/",
+        SoporteCambiarTratamientoView.as_view(),
+        name="admin-soporte-cambiar-tratamiento",
     ),
     path("soporte/correcciones/", SoporteCorreccionesView.as_view(), name="admin-soporte-correcciones"),
     path("soporte/cambiar-correo/", SoporteCambiarCorreoView.as_view(), name="admin-soporte-cambiar-correo"),

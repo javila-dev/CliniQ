@@ -5,7 +5,7 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.agenda import eliminacion, sesiones_previas, soporte, traslado
+from apps.agenda import cambio_tratamiento, eliminacion, sesiones_previas, soporte, traslado
 from apps.agenda.models import CorreccionSoporte
 from apps.migracion.serializers import TratamientoPrevioSerializer
 from apps.users.permissions import IsSuperAdmin
@@ -215,5 +215,54 @@ class SoporteCorregirSesionesPreviasView(_SoporteView):
             _clinica(v["clinica"]), v["item"], sesiones=v["sesiones"], tratamiento=v.get("tratamiento"),
             asignaciones=v["asignaciones"], previas=v.get("previas"), motivo=v["motivo"],
             usuario=request.user, request=request,
+        )
+        return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)
+
+
+class SoporteVentasPacienteView(_SoporteView):
+    """Tratamientos vendidos (cotización aceptada) de un paciente, con sus atenciones."""
+
+    def get(self, request):
+        from apps.pacientes.models import Paciente
+
+        clinica = _clinica(request.query_params.get("clinica"))
+        paciente = Paciente.objects.filter(pk=request.query_params.get("paciente"), clinica=clinica).first()
+        if paciente is None:
+            raise serializers.ValidationError({"error": "Elige un paciente.", "code": "PACIENTE_REQUERIDO"})
+        return Response(cambio_tratamiento.ventas_del_paciente(clinica, paciente))
+
+
+class PrevisualizarCambioTratamientoSerializer(serializers.Serializer):
+    clinica = serializers.UUIDField()
+    item = serializers.UUIDField()
+    tratamiento = serializers.UUIDField()
+    asignaciones = AsignacionAtencionSerializer(many=True, required=False, default=list)
+
+
+class CambiarTratamientoSerializer(PrevisualizarCambioTratamientoSerializer):
+    motivo = serializers.CharField(max_length=1000)
+
+
+class SoportePrevisualizarCambioTratamientoView(_SoporteView):
+    """Hace el cambio completo, devuelve el protocolo como queda y lo descarta."""
+
+    def post(self, request):
+        datos = PrevisualizarCambioTratamientoSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        return Response(cambio_tratamiento.cambiar(
+            _clinica(v["clinica"]), v["item"], tratamiento=v["tratamiento"], asignaciones=v["asignaciones"],
+            confirmar=False,
+        ))
+
+
+class SoporteCambiarTratamientoView(_SoporteView):
+    def post(self, request):
+        datos = CambiarTratamientoSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        correccion = cambio_tratamiento.cambiar(
+            _clinica(v["clinica"]), v["item"], tratamiento=v["tratamiento"], asignaciones=v["asignaciones"],
+            motivo=v["motivo"], usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

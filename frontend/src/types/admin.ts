@@ -387,7 +387,15 @@ export interface CorreccionMigradoPrevisualizacion {
     atencion: SoporteAtencionPaquete | null
     consentimientos_faltantes?: string[]
   })[]
-  atenciones_movidas: { cita: string; fecha: string; de: string | null; a: string }[]
+  atenciones_movidas: {
+    cita: string
+    fecha: string
+    de: string | null
+    a: string
+    /** Solo en una cita aún sin atender cuyo procedimiento cambia con su sesión nueva. */
+    servicio_antes?: string
+    servicio_despues?: string
+  }[]
 }
 
 /** El tratamiento nuevo de un paquete migrado: del catálogo o libre. */
@@ -395,7 +403,34 @@ export type TratamientoMigradoRequest =
   | { tipo: 'tratamiento'; tratamiento: string }
   | { tipo: 'libre'; descripcion: string; num_sesiones_total: number }
 
-export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas'
+// ─── Soporte: cambiar el tratamiento de una venta ya aceptada ─────────
+
+/** Un tratamiento vendido (cotización aceptada, no migrada) con sus atenciones. */
+export interface SoporteVentaTratamiento {
+  item_id: string
+  cotizacion_id: string
+  descripcion: string
+  aceptada_en: string | null
+  /** Lo que vale el ítem en la venta: no cambia con el tratamiento. */
+  valor: string
+  tratamiento_id: string | null
+  total: number
+  restantes: number
+  /** Por qué no se puede cambiar el tratamiento (null: sí se puede). */
+  bloqueo_tratamiento: string | null
+  atenciones: SoporteAtencionPaquete[]
+  /** Documentos firmados con el tratamiento anterior: se revisan, no bloquean. */
+  avisos: { code: string; texto: string }[]
+}
+
+export interface CambioTratamientoRequest {
+  clinica: string
+  item: string
+  tratamiento: string
+  asignaciones: AsignacionAtencion[]
+}
+
+export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas' | 'cambiar_tratamiento'
 
 export interface CorreccionSoporte {
   id: string
@@ -413,7 +448,7 @@ export interface CorreccionSoporte {
   /** Solo al corregir sesiones previas. */
   sesiones_antes: number | null
   sesiones_despues: number | null
-  /** Solo si al corregir el paquete migrado se cambió el tratamiento. */
+  /** Al cambiar el tratamiento (de un paquete migrado o de una venta). */
   tratamiento_antes: string | null
   tratamiento_despues: string | null
   motivo: string

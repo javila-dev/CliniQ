@@ -265,6 +265,7 @@ const ESTADO_CITA_TEXTO: Record<string, string> = {
 }
 
 function resultado(c: CorreccionSoporte): string {
+  if (c.tipo === 'cambiar_tratamiento') return `${c.tratamiento_antes} → ${c.tratamiento_despues}`
   if (c.sesiones_antes != null && c.sesiones_despues != null) {
     const sesiones = `Sesiones previas: ${c.sesiones_antes} → ${c.sesiones_despues}`
     return c.tratamiento_despues ? `${c.tratamiento_antes} → ${c.tratamiento_despues} · ${sesiones}` : sesiones
@@ -285,7 +286,7 @@ export function CorreccionesRecientes({ clinicaId, tipo }: { clinicaId: string; 
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>{tipo === 'corregir_sesiones_previas' ? 'Paquete' : 'Atención'}</TableHead>
+              <TableHead>{tipo === 'corregir_sesiones_previas' || tipo === 'cambiar_tratamiento' ? 'Paquete' : 'Atención'}</TableHead>
               <TableHead>Paciente</TableHead>
               <TableHead>Resultado</TableHead>
               <TableHead>Motivo</TableHead>

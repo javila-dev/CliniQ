@@ -114,7 +114,12 @@ def _estado(item) -> dict:
             f"Tiene {a_mano} sesión{'es' if a_mano != 1 else ''} marcada{'s' if a_mano != 1 else ''} como "
             "hecha sin cita: no hay atención que pasar al tratamiento nuevo."
         )
-    elif SesionProcedimiento.objects.filter(tratamiento__cotizacion_item=item, item_obsequio__isnull=False).exists():
+    elif (
+        SesionProcedimiento.objects.filter(tratamiento__cotizacion_item=item, item_obsequio__isnull=False).exists()
+        # Un obsequio clonado de una sesión de este tratamiento (aún sin agendar)
+        # apunta a un tipo de sesión del tratamiento viejo.
+        or item.obsequios.filter(activo=True, es_obsequio=True).exists()
+    ):
         bloqueo_tratamiento = "El paquete tiene sesiones obsequiadas: no se puede cambiar el tratamiento."
     return {
         "tipo": item.tipo,
@@ -352,12 +357,26 @@ def _cambiar_tratamiento(clinica, item, estado, trat, sesiones, asignaciones, pr
         destino = SesionProcedimiento.objects.select_related("tipo_sesion").get(
             tratamiento=tp, tipo_sesion_id=tipo_id, numero=int(numero),
         )
-        movidas.append({
+        movida = {
             "cita": str(cita.id),
             "fecha": cita.fecha_inicio.isoformat(),
             "de": _nombre_sesion(vieja),
             "a": _nombre_sesion(destino),
-        })
+        }
+        # Una cita que aún no se atiende se agenda con el procedimiento de su
+        # sesión nueva; la ya atendida conserva el que se hizo.
+        if (
+            cita.estado not in ESTADOS_HECHA and destino.procedimiento_id
+            and destino.procedimiento_id != cita.servicio_id
+        ):
+            movida["servicio_antes"] = cita.servicio_nombre
+            movida["servicio_despues"] = destino.procedimiento.nombre
+            cita.servicio_id = destino.procedimiento_id
+            cita.servicio_nombre = destino.procedimiento.nombre
+            Cita.objects.filter(pk=cita.pk).update(
+                servicio_id=cita.servicio_id, servicio_nombre=cita.servicio_nombre, updated_at=timezone.now(),
+            )
+        movidas.append(movida)
         if vieja is not None:
             # La sesión de la atención pasa al protocolo nuevo en el lugar elegido y
             # conserva lo registrado (procedimientos, consentimientos, check-in).

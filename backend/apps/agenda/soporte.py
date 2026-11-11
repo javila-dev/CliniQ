@@ -251,6 +251,7 @@ def registrar(
         CorreccionSoporte.Tipo.TRASLADAR_ATENCION: "cita.trasladar",
         CorreccionSoporte.Tipo.ELIMINAR_ATENCION: "cita.eliminar_atencion",
         CorreccionSoporte.Tipo.CORREGIR_SESIONES_PREVIAS: "cotizacion.corregir_sesiones_previas",
+        CorreccionSoporte.Tipo.CAMBIAR_TRATAMIENTO: "cotizacion.cambiar_tratamiento",
     }[tipo]
     registrar_accion(
         request, accion, cita or item_origen,

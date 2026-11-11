@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeftRight, AtSign, ChevronRight, ListChecks, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, AtSign, ChevronRight, ListChecks, Replace, Trash2, type LucideIcon } from 'lucide-react'
 
 // Cada error común de los usuarios que soporte corrige tiene su herramienta:
 // una tarjeta aquí y su página en /console/soporte/<herramienta>.
@@ -23,6 +23,12 @@ const HERRAMIENTAS: { href: string; titulo: string; descripcion: string; icon: L
     titulo: 'Corregir paquete migrado',
     descripcion: 'Al migrar un paciente se cargó otro tratamiento o se marcaron mal las sesiones que ya había hecho. Se corrige mientras no haya hecho ninguna en la app.',
     icon: ListChecks,
+  },
+  {
+    href: '/console/soporte/cambiar-tratamiento',
+    titulo: 'Cambiar tratamiento de una venta',
+    descripcion: 'Se cotizó otro tratamiento y la venta ya se aceptó, con citas hechas o agendadas. Pasa al tratamiento correcto sin cambiar lo cobrado.',
+    icon: Replace,
   },
   {
     href: '/console/soporte/cambiar-correo',
