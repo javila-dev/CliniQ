@@ -315,6 +315,40 @@ function heightPx(start: string, end: string, hourPx = HOUR_PX) {
 }
 
 // ─── Cita block (time grid) ───────────────────────────────────
+/** Resumen de la cita al pasar el mouse: el mismo en calendario, columnas y lista. */
+function CitaTooltipContent({ cita, side = 'top', align = 'center' }: {
+  cita: Cita; side?: 'top' | 'bottom' | 'left' | 'right'; align?: 'start' | 'center' | 'end'
+}) {
+  const estado = ESTADO_CITA_CONFIG[cita.estado]?.label ?? cita.estado
+  const servicio = cita.servicio_nombre || cita.motivo || 'Consulta'
+  const sesion = cita.sesion_tratamiento
+  // El nombre del tipo de sesión solo aporta si no repite el del tratamiento.
+  const nombreSesion = sesion && sesion.tipo_sesion_nombre.trim().toLowerCase() !== servicio.trim().toLowerCase()
+    ? sesion.tipo_sesion_nombre
+    : null
+  const recursos = nombresRecursos(cita)
+  const falta = textoFalta(cita)
+
+  return (
+    <TooltipContent side={side} align={align} avoidCollisions collisionPadding={12} className="max-w-[240px] space-y-1">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold leading-tight">{cita.paciente_nombre}</p>
+        <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium', ESTADO_CITA_CONFIG[cita.estado]?.color)}>{estado}</span>
+      </div>
+      <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
+      {sesion && (
+        <p className="text-xs">
+          <span className="font-medium">Sesión {sesion.numero} de {sesion.total}</span>
+          {nombreSesion && <span className="text-muted-foreground"> · {nombreSesion}</span>}
+        </p>
+      )}
+      <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
+      {recursos && <p className="text-xs"><span className="text-muted-foreground">Cabina/consultorio y equipo:</span> {recursos}</p>}
+      {falta && <p className="text-xs font-medium text-amber-700">{falta} a esa hora.</p>}
+    </TooltipContent>
+  )
+}
+
 function CompactCitaCard({
   cita, onClick, selected, style, className, arrastrableDesde,
 }: {
@@ -330,11 +364,6 @@ function CompactCitaCard({
   const color = ESTADO_COLORS[cita.estado]
   const estado = ESTADO_CITA_CONFIG[cita.estado]?.label ?? cita.estado
   const servicio = cita.servicio_nombre || cita.motivo || 'Consulta'
-  const sesion = cita.sesion_tratamiento
-  // El nombre del tipo de sesión solo aporta si no repite el del tratamiento.
-  const nombreSesion = sesion && sesion.tipo_sesion_nombre.trim().toLowerCase() !== servicio.trim().toLowerCase()
-    ? sesion.tipo_sesion_nombre
-    : null
   const recursos = nombresRecursos(cita)
   const falta = textoFalta(cita)
 
@@ -374,22 +403,7 @@ function CompactCitaCard({
             )}
           </button>
         </TooltipTrigger>
-        <TooltipContent side="top" avoidCollisions collisionPadding={12} className="max-w-[240px] space-y-1">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold leading-tight">{cita.paciente_nombre}</p>
-            <span className={cn('shrink-0 rounded border px-1.5 py-0.5 text-[10px] font-medium', ESTADO_CITA_CONFIG[cita.estado]?.color)}>{estado}</span>
-          </div>
-          <p className="text-xs text-muted-foreground">{formatTime(cita.fecha_inicio)} – {formatTime(cita.fecha_fin)} · {servicio}</p>
-          {sesion && (
-            <p className="text-xs">
-              <span className="font-medium">Sesión {sesion.numero} de {sesion.total}</span>
-              {nombreSesion && <span className="text-muted-foreground"> · {nombreSesion}</span>}
-            </p>
-          )}
-          <p className="border-t border-border pt-1 text-xs"><span className="text-muted-foreground">Profesional:</span> {cita.profesional_nombre}</p>
-          {recursos && <p className="text-xs"><span className="text-muted-foreground">Cabina/consultorio y equipo:</span> {recursos}</p>}
-          {falta && <p className="text-xs font-medium text-amber-700">{falta} a esa hora.</p>}
-        </TooltipContent>
+        <CitaTooltipContent cita={cita} />
       </Tooltip>
     </TooltipProvider>
   )
@@ -616,65 +630,73 @@ function DayListCard({
   const mostrarConfirmacion = pideConfirmacion(cita)
 
   return (
-    <button
-      type="button"
-      data-testid="cita-item"
-      onClick={onClick}
-      className={cn(
-        'group w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md',
-        selected ? 'border-primary ring-2 ring-primary/15' : 'border-gray-200',
-      )}
-    >
-      <div className="flex">
-        <div className={cn('w-1 shrink-0', color.dot)} />
-        <div className={cn('flex min-w-0 flex-1 items-center gap-3', density === 'compacta' ? 'px-3 py-2.5' : 'px-4 py-3.5')}>
-          <div className="w-[88px] shrink-0">
-            <p className="text-sm font-semibold tabular-nums text-gray-900">{formatTime(cita.fecha_inicio)}</p>
-            <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">hasta {formatTime(cita.fecha_fin)}</p>
-          </div>
+    <TooltipProvider delayDuration={300}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            type="button"
+            data-testid="cita-item"
+            onClick={onClick}
+            className={cn(
+              'group w-full overflow-hidden rounded-xl border bg-white text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:shadow-md',
+              selected ? 'border-primary ring-2 ring-primary/15' : 'border-gray-200',
+            )}
+          >
+            <div className="flex">
+              <div className={cn('w-1 shrink-0', color.dot)} />
+              <div className={cn('flex min-w-0 flex-1 items-center gap-3', density === 'compacta' ? 'px-3 py-2.5' : 'px-4 py-3.5')}>
+                <div className="w-[88px] shrink-0">
+                  <p className="text-sm font-semibold tabular-nums text-gray-900">{formatTime(cita.fecha_inicio)}</p>
+                  <p className="mt-0.5 text-[11px] tabular-nums text-muted-foreground">hasta {formatTime(cita.fecha_fin)}</p>
+                </div>
 
-          <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center text-xs font-semibold text-primary">
-            {initials(cita.paciente_nombre)}
-          </div>
+                <div className="h-9 w-9 shrink-0 rounded-full bg-gradient-to-br from-primary/15 to-primary/5 flex items-center justify-center text-xs font-semibold text-primary">
+                  {initials(cita.paciente_nombre)}
+                </div>
 
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-semibold text-gray-900">{cita.paciente_nombre}</p>
-              <span className={cn('hidden rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex', color.bg, color.text)}>
-                {estado}
-              </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-sm font-semibold text-gray-900">{cita.paciente_nombre}</p>
+                    <span className={cn('hidden rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex', color.bg, color.text)}>
+                      {estado}
+                    </span>
+                  </div>
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    {cita.servicio_nombre || cita.motivo || 'Consulta'}
+                    <span className="mx-1.5 text-gray-300">·</span>
+                    {cita.profesional_nombre}
+                    {nombresRecursos(cita) && (
+                      <>
+                        <span className="mx-1.5 text-gray-300">·</span>
+                        {nombresRecursos(cita)}
+                      </>
+                    )}
+                    {textoFalta(cita) && (
+                      <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{textoFalta(cita)}</span>
+                    )}
+                  </p>
+                </div>
+
+                <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
+                  {mostrarConfirmacion && (confirmada ? (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">
+                      <CircleCheck className="h-3.5 w-3.5" /> Paciente confirmó
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
+                      <CircleDashed className="h-3.5 w-3.5" /> Por confirmar
+                    </span>
+                  ))}
+                  <ChevronRight className="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
+                </div>
+              </div>
             </div>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {cita.servicio_nombre || cita.motivo || 'Consulta'}
-              <span className="mx-1.5 text-gray-300">·</span>
-              {cita.profesional_nombre}
-              {nombresRecursos(cita) && (
-                <>
-                  <span className="mx-1.5 text-gray-300">·</span>
-                  {nombresRecursos(cita)}
-                </>
-              )}
-              {textoFalta(cita) && (
-                <span className="ml-2 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">{textoFalta(cita)}</span>
-              )}
-            </p>
-          </div>
-
-          <div className="hidden shrink-0 items-center gap-1.5 lg:flex">
-            {mostrarConfirmacion && (confirmada ? (
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700">
-                <CircleCheck className="h-3.5 w-3.5" /> Paciente confirmó
-              </span>
-            ) : (
-              <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700">
-                <CircleDashed className="h-3.5 w-3.5" /> Por confirmar
-              </span>
-            ))}
-            <ChevronRight className="h-4 w-4 text-gray-300 transition-transform group-hover:translate-x-0.5 group-hover:text-primary" />
-          </div>
-        </div>
-      </div>
-    </button>
+          </button>
+        </TooltipTrigger>
+        {/* La tarjeta ocupa todo el ancho: el resumen sale arriba, junto al nombre. */}
+        <CitaTooltipContent cita={cita} align="start" />
+      </Tooltip>
+    </TooltipProvider>
   )
 }
 
