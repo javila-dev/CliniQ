@@ -63,10 +63,11 @@ quirófano, se ven como franjas marcadas sobre el calendario. Consulta
 
 ## Pacientes con deuda vencida
 
-Si tu clínica activó el bloqueo por mora, al agendar a un paciente con cuotas
-vencidas aparece un aviso con el monto y el número de cuotas en mora, y la cita
-no se crea. Un usuario con permiso puede aprobar una excepción sobre esa cuota
-para dejar agendar. Está explicado en
+Al elegir un paciente con cuotas vencidas aparece un aviso con el monto y el
+número de cuotas en mora. La cita se puede crear igual. Si tu clínica activó el
+bloqueo por mora, el aviso sale en rojo: el día de la cita no se lo podrá
+recibir hasta que pague o alguien con permiso apruebe una excepción, que se
+puede hacer desde el mismo aviso. Está explicado en
 [Mora y bloqueo de agenda](/ayuda/articulo/mora-bloqueo-de-agenda-y-excepciones).
 
 ## Después de crear la cita
@@ -319,7 +320,10 @@ Las causas más frecuentes, en orden:
    habilita el agendamiento.
 3. **El paciente traía sesiones consumidas de antes.** Si se cargó por la
    puesta en marcha, las sesiones que ya había hecho se descuentan del total.
-4. **Hay cuotas vencidas** y la clínica bloquea la agenda por mora.
+
+La mora no impide agendar: si el paciente tiene cuotas vencidas, *Nueva cita*
+lo avisa, y si la clínica bloquea por mora, lo que se frena es recibirlo el día
+de la cita.
 
 ## Citas canceladas
 

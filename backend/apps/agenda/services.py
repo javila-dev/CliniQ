@@ -446,6 +446,26 @@ def deuda_bloqueante_info(paciente, clinica):
     }
 
 
+def aviso_deuda_paciente(paciente, clinica):
+    """Cuotas vencidas del paciente para avisar al agendar, o ``None`` si no
+    debe nada vencido. Avisa aunque la clínica no bloquee: ``bloquea_recepcion``
+    dice si, con lo que debe hoy, no se lo podría recibir.
+    """
+    from decimal import Decimal
+    from django.db.models import Count, Sum
+
+    cuotas = _cuotas_vencidas_bloqueantes(paciente, clinica)
+    agg = cuotas.aggregate(n=Count("id"), s=Sum("pendiente"))
+    if not agg["n"]:
+        return None
+    return {
+        "cuotas_vencidas": agg["n"],
+        "monto_total": f"{agg['s'] or Decimal('0'):.2f}",
+        "cuota_ids": [str(cid) for cid in cuotas.values_list("id", flat=True)],
+        "bloquea_recepcion": bool(clinica.bloquear_agenda_por_deuda),
+    }
+
+
 @transaction.atomic
 def _validar_deuda_paciente(paciente, clinica, *, accion="iniciar la atención"):
     info = deuda_bloqueante_info(paciente, clinica)
@@ -616,8 +636,9 @@ def crear_cita(data: dict, created_by, *, avisar_cruce_paciente: bool = False) -
     if avisar_cruce_paciente:
         avisar_si_paciente_tiene_otra_cita(paciente, fecha_inicio, fecha_fin)
 
-    # La mora no bloquea agendar ni reprogramar: el bloqueo es al iniciar la
-    # atención (decisión del 15/10/2026). Ver cambiar_estado → en_curso.
+    # La mora no bloquea agendar ni reprogramar: el modal avisa (deuda_paciente)
+    # y el bloqueo es al recibir al paciente y al iniciar la atención
+    # (decisiones del 15/10 y 12/11/2026). Ver cambiar_estado.
 
     cita = Cita.objects.create(
         **data,

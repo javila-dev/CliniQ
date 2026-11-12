@@ -139,7 +139,7 @@ export const CATEGORIAS: CategoriaConfig[] = [
         href: '/configuracion/recepcion',
         label: 'Pasos de recepción',
         description: 'Pasos antes de atender: llegada por código, pago y firma de asistencia.',
-        keywords: 'llegada checkin check-in otp codigo whatsapp verificacion pago firma asistencia flujo pasos preparar paciente iniciar atencion',
+        keywords: 'llegada checkin check-in otp codigo whatsapp verificacion pago firma asistencia flujo pasos preparar paciente iniciar atencion mora deuda cuotas vencidas bloqueo dias de gracia',
         perm: PERM.CLINICAS_EDITAR,
       },
       {

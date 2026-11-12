@@ -11,7 +11,7 @@ export function formatMontoDeuda(monto: string | number): string {
   return Number.isFinite(n) ? COP.format(n) : ''
 }
 
-/** Frase para el aviso de mora en el wizard de inicio de atención. */
+/** Frase para el aviso de mora (modal de agendar y Preparar paciente). */
 export function textoDeudaBloqueante(deuda: DeudaInfo): string {
   const n = Number(deuda.cuotas_vencidas) || 0
   const cuotas = n === 1 ? 'cuota vencida' : 'cuotas vencidas'
@@ -20,7 +20,7 @@ export function textoDeudaBloqueante(deuda: DeudaInfo): string {
 
 /**
  * Extrae el mensaje del error PACIENTE_CON_DEUDA que devuelve
- * `POST /agenda/citas/{id}/cambiar_estado/` al intentar iniciar la atención.
+ * `POST /agenda/citas/{id}/cambiar_estado/` al recibir al paciente o iniciar la atención.
  * Devuelve null si el error no es por mora.
  */
 export function mensajeErrorDeuda(err: unknown): string | null {
@@ -28,5 +28,5 @@ export function mensajeErrorDeuda(err: unknown): string | null {
   if (data?.code !== 'PACIENTE_CON_DEUDA') return null
   const n = Number(data.detalle?.cuotas_vencidas) || 0
   const cuotas = n === 1 ? 'cuota vencida' : 'cuotas vencidas'
-  return `El paciente tiene ${n} ${cuotas} en cartera. No se puede iniciar la atención hasta registrar el pago o aprobar una excepción desde Cartera.`
+  return `El paciente tiene ${n} ${cuotas} en cartera. No se puede recibir ni atender al paciente hasta registrar el pago o aprobar una excepción desde Cartera.`
 }

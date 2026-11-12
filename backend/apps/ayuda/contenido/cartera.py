@@ -158,12 +158,20 @@ una fecha pactada pasó sin pagarse.
 
 ## El bloqueo por deuda
 
-Es una opción de la clínica, apagada por defecto. Cuando está activa:
+Es una opción de la clínica, apagada por defecto. Se enciende en
+**Configuración → Recepción → Pasos de recepción**, en *Pacientes en mora*.
+Cuando está activa:
 
-- **No se pueden crear citas** para un paciente con cuotas vencidas.
-- **No se puede iniciar la atención** de un paciente en mora.
+- **Sí se puede agendar** a un paciente con cuotas vencidas. Al elegirlo en
+  *Nueva cita* aparece un aviso en rojo con cuántas cuotas debe y por cuánto, y
+  que el día de la cita no se lo podrá recibir si no se pone al día.
+- **No se lo puede recibir**: *Preparar paciente* muestra el aviso de mora y no
+  deja registrar la llegada.
+- **No se puede iniciar su atención**, aunque ya estuviera en sala de espera.
 
-En ambos casos aparece un aviso con cuántas cuotas están vencidas y por cuánto.
+Con el bloqueo apagado, el aviso de *Nueva cita* sale igual, en amarillo, pero
+el paciente se recibe y se atiende normalmente.
+
 No es un error del sistema: es la política de cobro de la clínica aplicándose.
 
 ## Días de gracia
@@ -178,7 +186,8 @@ que lleva semanas.
 ## Excepciones
 
 Cuando hay que atender igual, alguien con el permiso **Aprobar excepción de
-cartera** puede autorizar una excepción sobre la cuota vencida. Con la excepción
+cartera** puede autorizar una excepción sobre la cuota vencida, desde Cartera o
+desde el aviso de *Nueva cita*. Con la excepción
 aprobada, esa cuota deja de bloquear, aunque la deuda sigue viva y visible.
 
 La excepción queda registrada con quién la aprobó. Úsala para casos puntuales

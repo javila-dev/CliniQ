@@ -21,6 +21,7 @@ import type { ConfiguracionFacial } from '@/types/clinicas'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { FiltroProfesionalesPorProcedimiento } from '@/components/configuracion/FiltroProfesionalesPorProcedimiento'
 import { FlujoRecepcionEditor } from '@/components/configuracion/FlujoRecepcionEditor'
+import { BloqueoPorMora } from '@/components/configuracion/BloqueoPorMora'
 import {
   avisarGuardado, BarraGuardado, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste, VacioAjustes,
 } from '@/components/configuracion/ajustes'
@@ -503,6 +504,20 @@ export function ClinicaConfig({
               >
                 <FlujoRecepcionEditor />
               </SeccionAjustes>
+
+              {clinicaId && (
+                <SeccionAjustes
+                  titulo="Pacientes en mora"
+                  descripcion="Qué pasa cuando llega un paciente con cuotas vencidas en cartera."
+                >
+                  <BloqueoPorMora
+                    clinicaId={clinicaId}
+                    activo={clinica?.bloquear_agenda_por_deuda ?? false}
+                    diasGracia={clinica?.dias_gracia_deuda ?? 0}
+                    puedeEditar={isAdmin}
+                  />
+                </SeccionAjustes>
+              )}
 
             </>
           )}

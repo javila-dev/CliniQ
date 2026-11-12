@@ -13,6 +13,9 @@ import { pacientesApi } from '@/lib/api/pacientes'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
 import { protocolosApi } from '@/lib/api/protocolos'
 import { carteraApi } from '@/lib/api/cartera'
+import { textoDeudaBloqueante } from '@/lib/deuda'
+import { mensajeDeError } from '@/lib/errores'
+import { toast } from '@/hooks/use-toast'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, isAdminOrSuperAdmin, PERM } from '@/lib/permissions'
 import type { TipoItemCotizacion } from '@/types/cotizaciones'
@@ -74,10 +77,7 @@ interface NuevaCitaModalProps {
   onCreated?: () => void
 }
 
-type DeudaError = { cuotas: number; total: string; cuotaIds: string[]; pacienteId: string }
 type CitaCruzada = { id: string; fecha_inicio: string; servicio: string; profesional: string }
-
-const COP = new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', maximumFractionDigits: 0 })
 
 export function NuevaCitaModal({
   open,
@@ -116,7 +116,6 @@ export function NuevaCitaModal({
 
   // Errores de servidor
   const [serverError, setServerError] = useState<string | null>(null)
-  const [deudaError, setDeudaError] = useState<DeudaError | null>(null)
   // El paciente ya tiene otra cita a esa hora: se avisa y se puede agendar igual (M3-30).
   const [cruce, setCruce] = useState<CitaCruzada[] | null>(null)
   const confirmarCruce = useRef(false)
@@ -295,7 +294,6 @@ export function NuevaCitaModal({
     setDuracionLibre(0)
     setDuracionError(false)
     setServerError(null)
-    setDeudaError(null)
   }
 
   const handleClose = () => {
@@ -312,7 +310,6 @@ export function NuevaCitaModal({
     setDuracionLibre(0)
     setDuracionError(false)
     setServerError(null)
-    setDeudaError(null)
     onOpenChange(false)
   }
 
@@ -353,7 +350,6 @@ export function NuevaCitaModal({
     setItemCotizacionError(false)
     setDuracionError(false)
     setServerError(null)
-    setDeudaError(null)
     setCruce(null)
     const confirmoCruce = confirmarCruce.current
     confirmarCruce.current = false
@@ -392,15 +388,6 @@ export function NuevaCitaModal({
           setCruce(Array.isArray(data.citas) ? data.citas : [])
           return
         }
-        if (data.code === 'PACIENTE_CON_DEUDA') {
-          setDeudaError({
-            cuotas:     data.detalle?.cuotas_vencidas ?? 0,
-            total:      data.detalle?.monto_total ?? '0',
-            cuotaIds:   data.detalle?.cuota_ids ?? [],
-            pacienteId: paciente.id,
-          })
-          return
-        }
         if (data.error)  { setServerError(String(data.error));  return }
         if (data.detail) { setServerError(String(data.detail)); return }
         const fieldLabels: Record<string, string> = {
@@ -424,17 +411,27 @@ export function NuevaCitaModal({
     }
   }
 
+  // Mora del paciente: se agenda igual, pero se avisa (12/11/2026). Si la
+  // clínica bloquea por mora, recepción no lo podrá recibir hasta que pague.
+  const { data: avisoDeuda } = useQuery({
+    queryKey: ['deuda-paciente', paciente?.id],
+    queryFn: () => agendaApi.citas.deudaPaciente(paciente!.id),
+    enabled: open && Boolean(paciente?.id),
+    staleTime: 30_000,
+  })
+
   const { mutate: ejecutarAprobarExcepcion, isPending: aprobandoExcepcion } = useMutation({
     mutationFn: (cuotaIds: string[]) => Promise.all(cuotaIds.map((id) => carteraApi.aprobarExcepcion(id))),
-    onSuccess: () => setDeudaError(null),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['deuda-paciente', paciente?.id] }),
+    onError: (err) => toast.error('No se aprobó la excepción', mensajeDeError(err)),
   })
 
   function handleAprobarExcepcion() {
-    if (!deudaError?.cuotaIds.length) return
+    if (!avisoDeuda?.cuota_ids.length) return
     if (!window.confirm(
-      `¿Aprobar excepción de deuda para este paciente? Esto permitirá agendar la cita a pesar de las ${deudaError.cuotas} cuotas vencidas.`
+      `¿Aprobar excepción de deuda para este paciente? Podrá recibirse y atenderse a pesar de ${avisoDeuda.cuotas_vencidas === 1 ? 'la cuota vencida' : `las ${avisoDeuda.cuotas_vencidas} cuotas vencidas`}.`
     )) return
-    ejecutarAprobarExcepcion(deudaError.cuotaIds)
+    ejecutarAprobarExcepcion(avisoDeuda.cuota_ids)
   }
 
   // Props dinámicos para SlotPicker según el modo activo
@@ -502,6 +499,54 @@ export function NuevaCitaModal({
                 setCrearPacienteOpen(true)
               } : undefined}
             />
+            {paciente && avisoDeuda && (
+              <div
+                role="status"
+                className={cn(
+                  'mt-2 rounded-md border px-3 py-3 space-y-2',
+                  avisoDeuda.bloquea_recepcion ? 'bg-red-50 border-red-200' : 'bg-amber-50 border-amber-200',
+                )}
+              >
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className={cn('h-4 w-4 mt-0.5 shrink-0', avisoDeuda.bloquea_recepcion ? 'text-red-600' : 'text-amber-600')} />
+                  <div>
+                    <p className={cn('text-sm font-medium', avisoDeuda.bloquea_recepcion ? 'text-red-900' : 'text-amber-900')}>
+                      Paciente en mora
+                    </p>
+                    <p className={cn('text-sm', avisoDeuda.bloquea_recepcion ? 'text-red-800' : 'text-amber-800')}>
+                      {textoDeudaBloqueante(avisoDeuda)}{' '}
+                      {avisoDeuda.bloquea_recepcion
+                        ? 'Puedes agendar, pero el día de la cita no se podrá recibir hasta que pague o se apruebe una excepción.'
+                        : 'Puedes agendar y atenderlo; conviene recordarle el pago.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2 sm:pl-6">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      router.push(`/cartera?paciente=${paciente.id}`)
+                      handleClose()
+                    }}
+                  >
+                    Ver cartera del paciente
+                  </Button>
+                  {canAprobarExcepcion && avisoDeuda.bloquea_recepcion && avisoDeuda.cuota_ids.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={handleAprobarExcepcion}
+                      disabled={aprobandoExcepcion}
+                    >
+                      {aprobandoExcepcion ? 'Aprobando...' : 'Aprobar excepción'}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
             {pacienteError && <p className="text-xs text-destructive">Selecciona un paciente</p>}
           </Paso>
 
@@ -840,44 +885,6 @@ export function NuevaCitaModal({
                 >
                   Agendar de todas formas
                 </Button>
-              </div>
-            </div>
-          )}
-
-          {deudaError && (
-            <div className="rounded-md bg-amber-50 border border-amber-200 px-3 py-3 space-y-2">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-                <div>
-                  <p className="text-sm font-medium text-amber-900">No se puede agendar</p>
-                  <p className="text-sm text-amber-800">
-                    El paciente tiene {deudaError.cuotas} {deudaError.cuotas === 1 ? 'cuota vencida' : 'cuotas vencidas'} por un total de {COP.format(parseFloat(deudaError.total))}.
-                  </p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    router.push(`/cartera?paciente=${deudaError.pacienteId}`)
-                    handleClose()
-                  }}
-                >
-                  Ver cartera del paciente
-                </Button>
-                {canAprobarExcepcion && deudaError.cuotaIds.length > 0 && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={handleAprobarExcepcion}
-                    disabled={aprobandoExcepcion}
-                  >
-                    {aprobandoExcepcion ? 'Aprobando...' : 'Aprobar excepción'}
-                  </Button>
-                )}
               </div>
             </div>
           )}

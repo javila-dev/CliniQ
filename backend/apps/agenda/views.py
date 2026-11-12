@@ -168,6 +168,9 @@ class CitaViewSet(ModelViewSet):
             # Registrar la llamada de confirmación es parte de gestionar la agenda:
             # quien puede crear o editar citas puede confirmarlas.
             permission_classes = (RequireAnyPermission("agenda.citas.crear", "agenda.citas.editar"),)
+        elif self.action == "deuda_paciente":
+            # El aviso de mora es para quien agenda o reprograma.
+            permission_classes = (RequireAnyPermission("agenda.citas.crear", "agenda.citas.editar"),)
         elif self.action in {"solicitar_recordatorio", "enviar_recordatorio_inmediato"}:
             permission_classes = (RequirePermission("agenda.citas.editar"),)
         elif self.action in {
@@ -471,12 +474,17 @@ class CitaViewSet(ModelViewSet):
         if nuevo_estado in {Cita.Estado.EN_CURSO, Cita.Estado.COMPLETADA} and not puede_atender_la_cita(request.user, cita):
             raise PermissionDenied("Solo quien atiende esta cita puede iniciar o cerrar la atención.")
 
+        # Bloqueo duro por mora (clínica con bloquear_agenda_por_deuda y cuotas
+        # vencidas en cualquier cartera del paciente): se agenda con aviso, pero
+        # no se recibe al paciente ni se inicia su atención (decisión del
+        # 12/11/2026). Se resuelve pagando o aprobando la excepción en Cartera.
+        # Volver de "en curso" a "en espera" (desiniciar) no se frena.
+        if nuevo_estado == Cita.Estado.EN_ESPERA and cita.estado != Cita.Estado.EN_CURSO:
+            services._validar_deuda_paciente(
+                cita.paciente, cita.sede.clinica, accion="recibir al paciente"
+            )
+
         if nuevo_estado == Cita.Estado.EN_CURSO:
-            # Bloqueo duro por mora: si la cotización que originó la cita (o
-            # cualquier cartera del paciente) tiene cuotas vencidas y la clínica
-            # activó bloquear_agenda_por_deuda, no se puede iniciar la atención.
-            # Sin excepción en el wizard: se resuelve pagando o aprobando la
-            # excepción desde Cartera.
             services._validar_deuda_paciente(
                 cita.paciente, cita.sede.clinica, accion="iniciar la atención"
             )
@@ -1128,6 +1136,25 @@ class CitaViewSet(ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=False, methods=["get"], url_path="deuda_paciente", pagination_class=None)
+    def deuda_paciente(self, request, *args, **kwargs):
+        """Aviso de mora para el modal de agendar: cuotas vencidas del paciente
+        y si la clínica bloquea recibirlo. ``{"deuda": null}`` si no debe nada vencido."""
+        from django.core.exceptions import ValidationError as DjangoValidationError
+        from apps.pacientes.models import Paciente
+
+        paciente_id = request.query_params.get("paciente")
+        if not paciente_id:
+            raise ValidationError({"error": "paciente es obligatorio."})
+        pacientes = Paciente.objects.select_related("clinica")
+        if request.user.rol != "superadmin":
+            pacientes = pacientes.filter(clinica=request.user.clinica)
+        try:
+            paciente = pacientes.get(pk=paciente_id)
+        except (Paciente.DoesNotExist, DjangoValidationError, ValueError):
+            return Response({"error": "Paciente no encontrado."}, status=status.HTTP_404_NOT_FOUND)
+        return Response({"deuda": services.aviso_deuda_paciente(paciente, paciente.clinica)}, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="hoy", pagination_class=None)
     def hoy(self, request, *args, **kwargs):

@@ -58,8 +58,8 @@ abrió por error, ciérrala igual y deja constancia.
 
 ## Pacientes con deuda vencida
 
-Si la clínica bloquea la atención por mora, al intentar iniciar aparece el aviso
-con las cuotas vencidas y no deja continuar. Se resuelve cobrando, registrando
+Si la clínica bloquea por mora, *Preparar paciente* muestra el aviso con las
+cuotas vencidas y no deja registrar la llegada ni iniciar la atención. Se resuelve cobrando, registrando
 un acuerdo de pago o aprobando una excepción sobre esa cuota.
 
 ## Cerrar la atención

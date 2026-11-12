@@ -43,6 +43,9 @@ export interface Clinica {
   whatsapp_numero_propio_habilitado?: boolean
   modo_puesta_en_marcha?: boolean
   filtrar_profesionales_por_procedimiento?: boolean
+  /** No recibir ni atender pacientes con cuotas vencidas (se agenda con aviso). */
+  bloquear_agenda_por_deuda?: boolean
+  dias_gracia_deuda?: number
   created_at: string
   updated_at: string
 }
@@ -53,6 +56,8 @@ export interface UpdateClinicaRequest {
   telefono?: string
   slot_interval_min?: number
   filtrar_profesionales_por_procedimiento?: boolean
+  bloquear_agenda_por_deuda?: boolean
+  dias_gracia_deuda?: number
   activo?: boolean
   tab_personal_requerido?: boolean
   tab_salud_requerido?: boolean

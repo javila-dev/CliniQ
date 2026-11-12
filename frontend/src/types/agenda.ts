@@ -147,6 +147,11 @@ export interface DeudaInfo {
   cuota_ids: string[]
 }
 
+/** Aviso de mora al agendar: la clínica puede bloquear recibir al paciente. */
+export interface AvisoDeuda extends DeudaInfo {
+  bloquea_recepcion: boolean
+}
+
 export interface CreateCitaRequest {
   /** El paciente ya tiene otra cita en ese horario y quien agenda lo confirmó. */
   confirmar_cruce_paciente?: boolean

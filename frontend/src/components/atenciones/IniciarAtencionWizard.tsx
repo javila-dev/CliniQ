@@ -307,10 +307,10 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
                 <AlertTriangle className="h-8 w-8 text-red-600" />
               </div>
               <div className="max-w-md">
-                <p className="text-lg font-semibold text-red-700">Atención bloqueada por mora</p>
+                <p className="text-lg font-semibold text-red-700">Paciente en mora</p>
                 <p className="text-sm text-muted-foreground mt-1.5">
-                  {textoDeudaBloqueante(cita.deuda_info)} No se puede iniciar la atención hasta
-                  registrar el pago o aprobar una excepción desde <span className="font-medium text-foreground">Cartera</span>.
+                  {textoDeudaBloqueante(cita.deuda_info)} No se puede recibir al paciente ni iniciar su
+                  atención hasta registrar el pago o aprobar una excepción desde <span className="font-medium text-foreground">Cartera</span>.
                 </p>
               </div>
               <div className="flex gap-2">

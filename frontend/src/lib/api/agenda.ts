@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion, linkSinEnviar } from '@/store/numeroCliniqStore'
-import type { Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, HorariosDetalle, RecursosLibres, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
+import type { AvisoDeuda, Cita, CreateCitaRequest, CambiarEstadoRequest, Bloqueo, BloqueoAgenda, CreateBloqueoRequest, HorariosDetalle, RecursosLibres, RegistroConfirmacion, RecordatorioPendiente } from '@/types/agenda'
 import type { Paginated } from '@/types/common'
 import type { TarjetaCita } from '@/types/tarjeta'
 
@@ -106,6 +106,11 @@ export const agendaApi = {
     registrosConfirmacion: async (id: string): Promise<RegistroConfirmacion[]> => {
       const res = await apiClient.get<RegistroConfirmacion[]>(`/agenda/citas/${id}/registros_confirmacion/`)
       return res.data
+    },
+    /** Cuotas vencidas del paciente, para avisar al agendar (null si no debe nada vencido). */
+    deudaPaciente: async (pacienteId: string): Promise<AvisoDeuda | null> => {
+      const res = await apiClient.get<{ deuda: AvisoDeuda | null }>('/agenda/citas/deuda_paciente/', { params: { paciente: pacienteId } })
+      return res.data.deuda
     },
     slotsDisponibles: async (params: SlotsParams): Promise<string[]> => {
       const res = await apiClient.get<string[]>('/agenda/citas/slots_disponibles/', { params })
