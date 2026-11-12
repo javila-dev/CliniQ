@@ -2,7 +2,7 @@ import { apiClient } from './client'
 import type {
   DashboardData, IngresosPeriodo, ServicioReporte,
   OcupacionReporte, ReportesParams, IngresosPorOrigen, CotizacionesMesMetrics, ComercialMetrics,
-  PacienteSinReagendar, EstadoFinanciero, Vendedor,
+  ReportePaquetes, EstadoFinanciero, Vendedor, EstadoRegularizacion, SesionARegistrar,
 } from '@/types/reportes'
 
 export const reportesApi = {
@@ -62,8 +62,32 @@ export const reportesApi = {
     return res.data
   },
 
-  getPacientesSinReagendar: async (params?: Pick<ReportesParams, 'sede_id'>): Promise<PacienteSinReagendar[]> => {
-    const res = await apiClient.get<PacienteSinReagendar[]>('/reportes/pacientes-sin-reagendar/', { params })
+  getPaquetesSinMovimiento: async (params?: {
+    sede_id?: string
+    dias?: number
+    responsable?: string
+    origen?: 'venta' | 'importado'
+  }): Promise<ReportePaquetes> => {
+    const res = await apiClient.get<ReportePaquetes>('/reportes/paquetes-sin-movimiento/', { params })
+    return res.data
+  },
+
+  regularizacionPaquete: async (itemId: string): Promise<EstadoRegularizacion> => {
+    const res = await apiClient.get<EstadoRegularizacion>(`/reportes/paquetes-sin-movimiento/${itemId}/regularizar/`)
+    return res.data
+  },
+
+  registrarSesionesPorFuera: async (itemId: string, sesiones: SesionARegistrar[]): Promise<EstadoRegularizacion> => {
+    const res = await apiClient.post<EstadoRegularizacion>(
+      `/reportes/paquetes-sin-movimiento/${itemId}/regularizar/`, { sesiones },
+    )
+    return res.data
+  },
+
+  deshacerSesionRegistrada: async (itemId: string, sesionId: string, motivo: string): Promise<EstadoRegularizacion> => {
+    const res = await apiClient.post<EstadoRegularizacion>(
+      `/reportes/paquetes-sin-movimiento/${itemId}/regularizar/${sesionId}/deshacer/`, { motivo },
+    )
     return res.data
   },
 

@@ -10,6 +10,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer,
@@ -41,7 +42,7 @@ import {
   Sheet, SheetContent, SheetHeader, SheetTitle,
 } from '@/components/ui/sheet'
 import { toast } from '@/hooks/use-toast'
-import type { ComercialMetrics, PacienteSinReagendar, Vendedor } from '@/types/reportes'
+import type { ComercialMetrics, Vendedor } from '@/types/reportes'
 import type { ResumenCartera } from '@/types/cartera'
 import type { AuthUser } from '@/types/auth'
 
@@ -452,63 +453,6 @@ function MetricaCotizacion({
   )
 }
 
-function SheetPacientesSinReagendar({
-  open, onClose, pacientes,
-}: {
-  open: boolean
-  onClose: () => void
-  pacientes: PacienteSinReagendar[]
-}) {
-  return (
-    <Sheet open={open} onOpenChange={v => !v && onClose()}>
-      <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-        <SheetHeader className="mb-4">
-          <SheetTitle className="flex items-center gap-2">
-            <UserX className="h-5 w-5 text-amber-500" />
-            Pacientes sin reagendar
-          </SheetTitle>
-          <p className="text-sm text-muted-foreground">
-            {pacientes.length} paciente{pacientes.length !== 1 ? 's' : ''} con sesiones pendientes hace más de un mes
-          </p>
-        </SheetHeader>
-
-        <div className="space-y-2">
-          {pacientes.map(p => (
-            <Link
-              key={`${p.paciente_id}-${p.cotizacion_id}-${p.tratamiento}`}
-              href={`/cotizaciones/${p.cotizacion_id}`}
-              onClick={onClose}
-              className="flex items-start gap-3 p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors group"
-            >
-              <div className="h-8 w-8 rounded-full bg-amber-50 flex items-center justify-center shrink-0 mt-0.5">
-                <UserX className="h-4 w-4 text-amber-500" />
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{p.paciente_nombre}</p>
-                <p className="text-xs text-muted-foreground truncate">{p.tratamiento}</p>
-                <div className="flex items-center gap-3 mt-1">
-                  <span className="text-[11px] text-amber-600 font-medium">
-                    {p.dias_sin_agendar} días sin agendar
-                  </span>
-                  <span className="text-[11px] text-muted-foreground">
-                    {p.sesiones_pendientes} sesión{p.sesiones_pendientes !== 1 ? 'es' : ''} pendiente{p.sesiones_pendientes !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                {p.ultima_cita && (
-                  <p className="text-[11px] text-muted-foreground/70 mt-0.5">
-                    Última cita: {new Date(p.ultima_cita).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}
-                  </p>
-                )}
-              </div>
-              <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0 mt-2 opacity-0 group-hover:opacity-100 transition-opacity" />
-            </Link>
-          ))}
-        </div>
-      </SheetContent>
-    </Sheet>
-  )
-}
-
 function SheetNotificacionesFallidas({
   open, onClose, notificaciones,
 }: {
@@ -742,7 +686,7 @@ function DashboardSinReportes() {
 function DashboardContent() {
   const { user } = useAuthStore()
   const [tabOcupacion, setTabOcupacion] = useState<'mes' | 'hoy'>('mes')
-  const [sheetPacientes, setSheetPacientes] = useState(false)
+  const router = useRouter()
   const [sheetNotificacionesFallidas, setSheetNotificacionesFallidas] = useState(false)
   const [sedeId, setSedeId] = useState<string | null>(null)
   const [periodo, setPeriodo] = useState<PeriodoKey>('hoy')
@@ -917,11 +861,12 @@ function DashboardContent() {
     enabled: veAgenda,
   })
 
-  const { data: pacientesSinReagendar, isLoading: pacientesLoading } = useQuery({
-    queryKey: ['reportes', 'pacientes-sin-reagendar', sede],
-    queryFn: () => reportesApi.getPacientesSinReagendar({ sede_id: sede }),
+  const { data: paquetesData, isLoading: pacientesLoading } = useQuery({
+    queryKey: ['reportes', 'paquetes-sin-movimiento', sede, 30],
+    queryFn: () => reportesApi.getPaquetesSinMovimiento({ sede_id: sede, dias: 30 }),
     staleTime: STALE,
     refetchInterval: STALE,
+    enabled: hasPermission(user, PERM.REPORTES_VER),
   })
 
   const { data: notificacionesFallidasData } = useQuery({
@@ -952,11 +897,11 @@ function DashboardContent() {
   const ocupacionActiva = tabOcupacionActivo === 'mes' ? ocupacionMes : ocupacionHoy
   const ocupacionLoading = tabOcupacionActivo === 'mes' ? ocupacionMesLoading : ocupacionHoyLoading
 
-  const sinReagendar = pacientesSinReagendar ?? []
+  const sinMovimiento = paquetesData?.totales.sin_movimiento ?? 0
   const canVerSinReagendar = hasPermission(user, PERM.REPORTES_VER)
   const canVerSeguimiento = hasPermission(user, PERM.SEGUIMIENTO_VER)
   const veCumpleanos = canAccess.pacientes(user)
-  // 4 o 5 tarjetas según permisos (Ingresos y Sin reagendar son opcionales).
+  // 4 o 5 tarjetas según permisos (Ingresos y Paquetes sin movimiento son opcionales).
   const nKpis = 3 + (canVerFinanzas ? 1 : 0) + (canVerSinReagendar ? 1 : 0)
 
   // Citas del periodo por desenlace (todo por fecha de la cita).
@@ -1018,15 +963,15 @@ function DashboardContent() {
       />
       {canVerSinReagendar && (
         <KPICard
-          label="Sin reagendar"
-          value={sinReagendar.length}
-          sub={sinReagendar.length > 0 ? 'más de un mes sin cita · ver lista' : 'todos tienen su próxima cita'}
+          label="Paquetes sin movimiento"
+          value={sinMovimiento}
+          sub={sinMovimiento > 0 ? 'más de un mes sin cita · ver reporte' : 'todos tienen su próxima cita'}
           icon={CalendarX}
-          iconBg={sinReagendar.length > 0 ? 'bg-amber-50' : 'bg-gray-50'}
-          iconColor={sinReagendar.length > 0 ? 'text-amber-500' : 'text-gray-400'}
-          alert={sinReagendar.length > 0}
+          iconBg={sinMovimiento > 0 ? 'bg-amber-50' : 'bg-gray-50'}
+          iconColor={sinMovimiento > 0 ? 'text-amber-500' : 'text-gray-400'}
+          alert={sinMovimiento > 0}
           loading={pacientesLoading}
-          onClick={sinReagendar.length > 0 ? () => setSheetPacientes(true) : undefined}
+          onClick={() => router.push('/paquetes-sin-movimiento')}
         />
       )}
     </>
@@ -1263,13 +1208,6 @@ function DashboardContent() {
           </div>
         )}
       </div>
-
-      {/* Lista de pacientes sin reagendar (se abre desde su tarjeta de KPI) */}
-      <SheetPacientesSinReagendar
-        open={sheetPacientes}
-        onClose={() => setSheetPacientes(false)}
-        pacientes={sinReagendar}
-      />
 
       {/* Envíos de WhatsApp fallidos (recordatorios, OTP, cotizaciones, órdenes) */}
       {notificacionesFallidas.length > 0 && (

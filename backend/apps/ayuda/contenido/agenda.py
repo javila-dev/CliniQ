@@ -337,7 +337,7 @@ están completadas, cuáles pendientes y con qué fechas. Es la forma rápida de
 responder la pregunta más común del mostrador, «¿cuántas sesiones me quedan?».
 
 > Si un paciente lleva más de un mes sin volver y tiene sesiones pendientes,
-> aparece en el reporte de pacientes sin reagendar del dashboard. Es una buena
+> aparece en el reporte de paquetes sin movimiento del dashboard. Es una buena
 > lista de llamadas para una tarde floja.
 """,
     },

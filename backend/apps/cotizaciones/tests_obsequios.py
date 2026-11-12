@@ -860,7 +860,7 @@ class ObsequiosCotizacionTests(TestCase):
 
     # ── reporte ────────────────────────────────────────────────────────────
 
-    def test_reporte_sin_reagendar_excluye_obsequios_sin_cupo_propio(self):
+    def test_reporte_sin_movimiento_excluye_obsequios_sin_cupo_propio(self):
         creada = self._crear(
             [
                 self._item_pagado(),
@@ -876,7 +876,9 @@ class ObsequiosCotizacionTests(TestCase):
         hace_90 = timezone.now() - timedelta(days=90)
         Cotizacion.objects.filter(id=creada["id"]).update(created_at=hace_90, aceptada_en=hace_90)
 
-        response = self.client.get("/api/v1/reportes/pacientes-sin-reagendar/")
+        response = self.client.get(
+            "/api/v1/reportes/paquetes-sin-movimiento/", HTTP_X_ACTIVE_CLINICA=str(self.clinica.id),
+        )
 
         self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual([fila["tratamiento"] for fila in response.json()], ["Toxina"])
+        self.assertEqual([fila["tratamiento"] for fila in response.json()["paquetes"]], ["Toxina"])
