@@ -11,6 +11,7 @@ export const PERM = {
   // Reportes / dashboard
   REPORTES_VER:              'reportes.ver_operativos',
   REPORTES_VER_FINANCIEROS:  'reportes.ver_financieros',
+  REPORTES_REGULARIZAR:      'reportes.paquetes.regularizar',
 
   // Agenda
   AGENDA_VER:                'agenda.citas.ver',

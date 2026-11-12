@@ -165,12 +165,105 @@ export interface Vendedor {
   activo: boolean
 }
 
-export interface PacienteSinReagendar {
+/** Un paquete vendido o importado al que le faltan sesiones (backend: reportes/paquetes.py). */
+export interface PaqueteSinMovimiento {
+  item_id: string
+  cotizacion_id: string
   paciente_id: string
   paciente_nombre: string
-  ultima_cita: string | null
-  dias_sin_agendar: number
-  cotizacion_id: string
   tratamiento: string
-  sesiones_pendientes: number
+  sede_id: string | null
+  sede_nombre: string | null
+  origen: 'venta' | 'importado'
+  /** Quien lo vendió o, si es importado, quien hizo la carga. */
+  responsable_id: string | null
+  responsable_nombre: string | null
+  /** Fecha de la venta o de la carga (YYYY-MM-DD). */
+  inicio: string
+  sesiones_total: number
+  sesiones_hechas: number
+  /** Citas del paquete en la app (sin las canceladas). */
+  citas_en_app: number
+  ultima_atencion: string | null
+  proxima_cita: string | null
+  dias_sin_movimiento: number
+  estado: 'nunca_agendado' | 'sin_proxima_cita' | 'con_cita'
+  /** Sesiones hechas por fuera de la app y registradas después. */
+  registradas_despues: number
+}
+
+export interface ResumenPaquetes {
+  id: string | null
+  nombre: string | null
+  /** Paquetes a los que les faltan sesiones. */
+  activos: number
+  sin_movimiento: number
+  nunca_agendados: number
+  /** Sesiones registradas después, también de paquetes ya completos. */
+  registradas_despues: number
+}
+
+export interface ReportePaquetes {
+  dias: number
+  totales: {
+    activos: number
+    sin_movimiento: number
+    nunca_agendados: number
+    sesiones_pendientes: number
+    registradas_despues: number
+  }
+  por_responsable: ResumenPaquetes[]
+  por_sede: ResumenPaquetes[]
+  paquetes: PaqueteSinMovimiento[]
+}
+
+// ── Regularizar un paquete: sesiones hechas por fuera de la app ─────────────
+
+export interface SesionPorRegistrar {
+  id: string
+  nombre: string
+  /** Lugar en el protocolo: "sesión {posicion} de {de}". */
+  posicion: number
+  de: number
+}
+
+export interface SesionRegistradaDespues extends SesionPorRegistrar {
+  estado: string
+  fecha: string | null
+  profesional_nombre: string | null
+  observaciones: string
+  con_nota_clinica: boolean
+  registrada_por: string | null
+  registrada_en: string
+}
+
+export interface EstadoRegularizacion {
+  item_id: string
+  cotizacion_id: string
+  paciente_id: string
+  paciente_nombre: string
+  tratamiento: string
+  origen: 'venta' | 'importado'
+  /** Fecha de la venta o de la carga: la sesión no puede ser anterior. */
+  fecha_minima: string
+  hoy: string
+  sesiones_total: number
+  /** Sesiones del paquete sin cita agendada: el máximo que se puede registrar. */
+  sin_agendar: number
+  pendientes: SesionPorRegistrar[]
+  registradas: SesionRegistradaDespues[]
+  profesionales: { id: string; nombre: string; activo: boolean }[]
+  /** Puede escribir la nota clínica (permiso de crear notas). */
+  puede_nota_clinica: boolean
+}
+
+export type ModoRegistro = 'sesion' | 'nota_clinica'
+
+export interface SesionARegistrar {
+  sesion_id: string
+  fecha: string
+  profesional_id: string
+  modo: ModoRegistro
+  nota?: string
+  nota_clinica?: string
 }
