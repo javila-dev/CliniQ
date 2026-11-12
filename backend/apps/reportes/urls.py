@@ -8,7 +8,9 @@ from apps.reportes.views import (
     IngresosPorOrigenView,
     IngresosView,
     OcupacionView,
-    PacientesSinReagendarView,
+    DeshacerRegularizacionView,
+    PaquetesSinMovimientoView,
+    RegularizarPaqueteView,
     ServiciosView,
     VendedoresView,
 )
@@ -23,5 +25,15 @@ urlpatterns = [
     path("cotizaciones/", CotizacionesReporteView.as_view(), name="reportes-cotizaciones"),
     path("comercial/", ComercialReporteView.as_view(), name="reportes-comercial"),
     path("vendedores/", VendedoresView.as_view(), name="reportes-vendedores"),
-    path("pacientes-sin-reagendar/", PacientesSinReagendarView.as_view(), name="reportes-pacientes-sin-reagendar"),
+    path("paquetes-sin-movimiento/", PaquetesSinMovimientoView.as_view(), name="reportes-paquetes-sin-movimiento"),
+    path(
+        "paquetes-sin-movimiento/<uuid:item_id>/regularizar/",
+        RegularizarPaqueteView.as_view(),
+        name="reportes-regularizar-paquete",
+    ),
+    path(
+        "paquetes-sin-movimiento/<uuid:item_id>/regularizar/<uuid:sesion_id>/deshacer/",
+        DeshacerRegularizacionView.as_view(),
+        name="reportes-deshacer-regularizacion",
+    ),
 ]

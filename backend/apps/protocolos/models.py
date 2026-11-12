@@ -167,6 +167,24 @@ class SesionProcedimiento(BaseModel):
     checkin_ip = models.GenericIPAddressField(null=True, blank=True)
     foto_presencia = models.ImageField(upload_to=checkin_upload_path, null=True, blank=True)
     foto_presencia_url = models.CharField(max_length=2048, blank=True)
+    # Sesión hecha por fuera de la app y registrada después (regularizar un
+    # paquete, ver ``reportes.regularizacion``): quién la registró, cuándo y,
+    # si se escribió, la evolución con la nota clínica.
+    registrada_despues_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sesiones_registradas_despues",
+    )
+    registrada_despues_en = models.DateTimeField(null=True, blank=True)
+    evolucion_regularizacion = models.ForeignKey(
+        "historia_clinica.NotaClinica",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="sesiones_regularizadas",
+    )
 
     class Meta:
         db_table = "sesiones_procedimiento"

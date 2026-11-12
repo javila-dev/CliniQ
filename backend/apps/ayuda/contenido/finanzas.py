@@ -264,7 +264,7 @@ necesita ver la plata de la clínica.
         "slug": "el-dashboard-que-muestra-y-a-quien",
         "categoria": "caja-e-ingresos",
         "titulo": "El dashboard: qué muestra y a quién",
-        "resumen": "Los bloques del tablero principal, cómo cambia según tu rol, qué periodos se pueden comparar y cómo usar el listado de pacientes sin reagendar.",
+        "resumen": "Los bloques del tablero principal, cómo cambia según tu rol, qué periodos se pueden comparar y cómo usar el reporte de paquetes sin movimiento.",
         "area": "reportes",
         "keywords": "dashboard, tablero, indicadores, métricas, ocupación, resumen, inicio, kpi",
         "destacado": False,
@@ -295,13 +295,45 @@ este mes, tres meses, seis meses o el último año:
 Los bloques financieros solo aparecen si tu rol tiene el permiso de reportes
 financieros. Si un compañero ve un bloque de dinero que tú no ves, es eso.
 
-## Pacientes sin reagendar
+## Paquetes sin movimiento
 
-Uno de los bloques más útiles: pacientes con **sesiones pendientes que llevan más
-de un mes sin volver**. Son tratamientos empezados y no terminados, es decir,
-ingresos comprometidos que se están enfriando.
+Uno de los bloques más útiles: tratamientos **vendidos o importados a los que les
+faltan sesiones y no tienen próxima cita** desde hace un mes o más. Son ingresos
+comprometidos que se están enfriando.
 
-Es la mejor lista de llamadas para una tarde de baja ocupación.
+Al tocar la tarjeta se abre el reporte completo:
+
+- **Nunca agendados**: se vendieron o importaron y nunca tuvieron una cita en la
+  app. Si son muchos, lo más probable es que se estén atendiendo por fuera de la
+  agenda.
+- **Por responsable**: quién vendió o importó cada paquete y cuántos de los suyos
+  están quietos. Toca una fila para ver solo los de esa persona.
+- **Por sede**, si tienes varias.
+- Puedes cambiar los días (15, 30, 60 o 90), filtrar solo ventas o solo
+  importados y exportar la lista a Excel.
+
+Es la mejor lista de llamadas para una tarde de baja ocupación, y la forma de ver
+si alguien está vendiendo sin agendar.
+
+### Registrar sesiones hechas por fuera
+
+Si las sesiones sí se hicieron pero nadie las agendó en la app, el administrador
+(o quien tenga el permiso **Registrar sesiones hechas por fuera**) las pone al día
+con el botón **Regularizar** de cada paquete:
+
+1. Marca las sesiones que se hicieron.
+2. Para cada una, indica la fecha (entre la venta o la carga y hoy) y el
+   profesional que atendió. Si no se sabe quién fue, elige a quien registra y
+   acláralo en la nota.
+3. Elige **Solo la sesión** (con una nota corta opcional) o **Con nota clínica**:
+   esta queda como una evolución en la historia del paciente, firmada por quien
+   la escribe.
+
+No se crean citas: esas sesiones no cuentan para ocupación, comisiones, insumos
+ni ingresos, solo para el avance del paquete. Quedan marcadas como **registradas
+después**, con quién y cuándo, y el reporte muestra cuántas lleva cada
+responsable. Si te equivocas, **Deshacer** devuelve la sesión a pendiente (la
+nota clínica no se borra: se agrega otra que anula el registro).
 
 ## Cómo usarlo en la rutina diaria
 
@@ -309,8 +341,8 @@ Es la mejor lista de llamadas para una tarde de baja ocupación.
 - **A media tarde**: mira el progreso del día y la ocupación de los
   profesionales.
 - **Al cierre**: cuadra cobros por medio de pago contra la caja.
-- **Una vez por semana**: cotizaciones aceptadas, cartera vencida y pacientes sin
-  reagendar.
+- **Una vez por semana**: cotizaciones aceptadas, cartera vencida y paquetes sin
+  movimiento.
 
 > El dashboard sirve para decidir hoy. Para analizar tendencias, usa Resultados y
 > los listados con sus filtros de periodo.

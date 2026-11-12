@@ -12,9 +12,7 @@ from django.db.models import (
     F,
     Max,
     Min,
-    OuterRef,
     Q,
-    Subquery,
     Sum,
     When,
 )
@@ -766,89 +764,85 @@ class VendedoresView(APIView):
         return Response(resultado)
 
 
-class PacientesSinReagendarView(APIView):
+class PaquetesSinMovimientoView(APIView):
+    """Paquetes vendidos o importados que no se están atendiendo en la app
+    (ver ``reportes.paquetes``), con el resumen por responsable y por sede."""
+
     permission_classes = (RequirePermission("reportes.ver_operativos"),)
 
     def get(self, request: Request):
-        user = request.user
-        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
+        from apps.reportes.paquetes import DIAS_POR_DEFECTO, paquetes_sin_movimiento
+
+        clinica = get_clinica_activa(request)
+        params = request.query_params
         try:
-            dias_minimos = int(request.query_params.get("dias_minimos", 30))
+            dias = max(0, int(params.get("dias", DIAS_POR_DEFECTO)))
         except (ValueError, TypeError):
-            dias_minimos = 30
-
-        hoy = timezone.localdate()
-        corte = hoy - timedelta(days=dias_minimos)
-
-        ultima_cita_qs = (
-            Cita.objects.filter(
-                item_cotizacion=OuterRef("pk"),
-                estado__in=["completada", "pendiente", "confirmada", "en_curso", "en_espera"],
-            )
-            .order_by("-fecha_inicio")
-            .values("fecha_inicio__date")[:1]
-        )
-
-        items = (
-            ItemCotizacion.objects.filter(
-                activo=True,
-                cotizacion__estado=Cotizacion.Estado.ACEPTADA,
-                cotizacion__activo=True,
-            )
-            .annotate(ultima_cita_fecha=Subquery(ultima_cita_qs))
-            .annotate(
-                citas_no_canceladas=Count(
-                    "citas",
-                    filter=~Q(citas__estado__in=["cancelada", "no_asistio"]),
-                )
-            )
-        )
-
-        # Obsequios informativos, productos y sesiones clonadas no tienen cupo
-        # propio: no hay nada que reagendar en ellos.
-        items = items.exclude(
-            Q(es_obsequio=True)
-            & (Q(agendable=False) | Q(item_origen__isnull=False) | Q(tipo=ItemCotizacion.Tipo.INSUMO))
-        )
-
-        if user.rol != "superadmin":
-            items = items.filter(cotizacion__clinica=user.clinica)
-        if sede_ids is not None:
-            items = items.filter(cotizacion__sede_id__in=sede_ids)
-
-        items = items.select_related("cotizacion__paciente")
-
-        resultado = []
-        for item in items:
-            citas_restantes = max(0, item.num_citas - item.citas_no_canceladas)
-            if citas_restantes == 0:
-                continue
-
-            ultima_cita = item.ultima_cita_fecha
-            if ultima_cita is not None:
-                if ultima_cita > corte:
-                    continue
-                dias_sin_agendar = (hoy - ultima_cita).days
-            else:
-                compra = item.cotizacion.aceptada_en or item.cotizacion.created_at
-                fecha_ref = timezone.localdate(compra)
-                if fecha_ref > corte:
-                    continue
-                dias_sin_agendar = (hoy - fecha_ref).days
-
-            paciente = item.cotizacion.paciente
-            resultado.append({
-                "paciente_id": str(paciente.id),
-                "paciente_nombre": paciente.nombre_completo,
-                "ultima_cita": str(ultima_cita) if ultima_cita else None,
-                "dias_sin_agendar": dias_sin_agendar,
-                "cotizacion_id": str(item.cotizacion_id),
-                "tratamiento": item.descripcion,
-                "sesiones_pendientes": citas_restantes,
+            dias = DIAS_POR_DEFECTO
+        if clinica is None:
+            return Response({
+                "dias": dias, "totales": {
+                    "activos": 0, "sin_movimiento": 0, "nunca_agendados": 0, "sesiones_pendientes": 0,
+                    "registradas_despues": 0,
+                },
+                "por_responsable": [], "por_sede": [], "paquetes": [],
             })
+        origen = params.get("origen")
+        return Response(paquetes_sin_movimiento(
+            clinica,
+            sede_ids=sede_ids_para_filtro(request.user, params.get("sede_id")),
+            dias=dias,
+            responsable=params.get("responsable") or None,
+            origen=origen if origen in ("venta", "importado") else None,
+        ))
 
-        resultado.sort(key=lambda r: r["dias_sin_agendar"], reverse=True)
-        return Response(resultado)
+
+class RegularizarPaqueteView(APIView):
+    """Registrar las sesiones de un paquete que se hicieron por fuera de la app
+    (ver ``reportes.regularizacion``). GET: sesiones pendientes y registradas;
+    POST ``{"sesiones": [...]}``: las marca como hechas."""
+
+    permission_classes = (RequirePermission("reportes.paquetes.regularizar"),)
+
+    def _ejecutar(self, request, funcion, *args, **kwargs):
+        from apps.reportes.regularizacion import RegularizacionError
+
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response({"error": "Elige una clínica.", "code": "SIN_CLINICA"}, status=400)
+        try:
+            data = funcion(
+                clinica, *args, usuario=request.user, sede_ids=sede_ids_para_filtro(request.user), request=request,
+                **kwargs,
+            )
+        except RegularizacionError as exc:
+            return Response({"error": exc.mensaje, "code": exc.code, **exc.extra}, status=exc.status)
+        return Response(data)
+
+    def get(self, request: Request, item_id):
+        from apps.reportes.regularizacion import estado
+
+        return self._ejecutar(request, estado, item_id)
+
+    def post(self, request: Request, item_id):
+        from apps.reportes.regularizacion import registrar
+
+        filas = request.data.get("sesiones")
+        if not isinstance(filas, list) or not all(isinstance(f, dict) for f in filas):
+            return Response({"error": "Elige al menos una sesión.", "code": "SIN_SESIONES"}, status=400)
+        return self._ejecutar(request, registrar, item_id, filas)
+
+
+class DeshacerRegularizacionView(RegularizarPaqueteView):
+    """POST ``{"motivo": ...}``: la sesión registrada después vuelve a pendiente."""
+
+    def get(self, request, *args, **kwargs):
+        return Response(status=405)
+
+    def post(self, request: Request, item_id, sesion_id):
+        from apps.reportes.regularizacion import deshacer
+
+        return self._ejecutar(request, deshacer, item_id, sesion_id, motivo=request.data.get("motivo"))
 
 
 class OcupacionView(APIView):
