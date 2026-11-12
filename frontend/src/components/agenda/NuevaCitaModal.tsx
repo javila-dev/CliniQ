@@ -236,19 +236,23 @@ export function NuevaCitaModal({
 
   const sesionesPendientes = useMemo(() => {
     if (!tratamientoDetalle) return []
+    // Solo las que se pueden agendar: pendientes y sin cita. Una pendiente con
+    // cita ya está agendada otro día y el backend la rechaza (SESION_YA_VINCULADA).
     if (tratamientoDetalle.grupos?.length) {
-      return tratamientoDetalle.grupos.flatMap((g) =>
-        g.sesiones
-          .filter((s) => s.estado === 'pendiente')
-          .map((s) => ({
-            id: s.id,
-            label: `Sesión ${s.numero}/${g.total} · ${g.tipo_sesion_nombre}${s.es_obsequio ? ' (obsequio)' : ''}`,
-            procedimientos: g.procedimientos,
-          }))
-      )
+      // Numeración corrida en todo el tratamiento, como en la pantalla de
+      // atención: con un tipo de sesión por sesión, contar por grupo daba "1/1".
+      const todas = tratamientoDetalle.grupos.flatMap((g) => g.sesiones.map((s) => ({ s, g })))
+      return todas
+        .map(({ s, g }, i) => ({ s, g, posicion: i + 1 }))
+        .filter(({ s }) => s.estado === 'pendiente' && !s.cita)
+        .map(({ s, g, posicion }) => ({
+          id: s.id,
+          label: `Sesión ${posicion}/${todas.length} · ${g.tipo_sesion_nombre}${s.es_obsequio ? ' (obsequio)' : ''}`,
+          procedimientos: g.procedimientos,
+        }))
     }
     return (tratamientoDetalle.sesiones ?? [])
-      .filter((s) => s.estado === 'pendiente')
+      .filter((s) => s.estado === 'pendiente' && !s.cita)
       .map((s) => ({
         id: s.id,
         label: `Sesión ${s.sesion_numero} · ${s.paso_nombre}`,
