@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import {
   Plus, Search, ChevronLeft, ChevronRight, Upload,
   Phone, Mail, MessageCircle, PhoneCall, MessageSquare,
-  ChevronRight as ArrowRight, Users, UserCheck, UserX, Loader2,
+  ChevronRight as ArrowRight, Users, UserCheck, UserX, Loader2, MapPin,
 } from 'lucide-react'
 import Link from 'next/link'
 import { pacientesApi } from '@/lib/api/pacientes'
@@ -16,6 +16,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useDebounce } from '@/hooks/useDebounce'
+import { useUserSedes } from '@/hooks/useUserSedes'
 import { cn } from '@/lib/utils'
 import { HelpButton } from '@/components/ayuda/HelpButton'
 import type { Paciente } from '@/types/pacientes'
@@ -129,7 +130,9 @@ function Pagination({
 
 // ─── Patient row ──────────────────────────────────────────────
 
-function PatientRow({ paciente, onClick, isLoading }: { paciente: Paciente; onClick: () => void; isLoading?: boolean }) {
+function PatientRow({ paciente, onClick, isLoading, mostrarSede }: {
+  paciente: Paciente; onClick: () => void; isLoading?: boolean; mostrarSede?: boolean
+}) {
   const canal = CANAL_CONFIG[paciente.canal_confirmacion]
   const CanalIcon = canal?.icon ?? MessageCircle
 
@@ -170,6 +173,16 @@ function PatientRow({ paciente, onClick, isLoading }: { paciente: Paciente; onCl
         <Mail className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
         <span className="text-sm text-muted-foreground truncate">{paciente.email ?? '—'}</span>
       </div>
+
+      {/* Sede habitual */}
+      {mostrarSede && (
+        <div className="hidden xl:flex items-center gap-1.5 w-32 shrink-0">
+          <MapPin className="h-3.5 w-3.5 text-muted-foreground/50 shrink-0" />
+          <span className="text-sm text-muted-foreground truncate" title={paciente.sede_habitual_nombre ?? undefined}>
+            {paciente.sede_habitual_nombre ?? '—'}
+          </span>
+        </div>
+      )}
 
       {/* Canal */}
       <div className="hidden md:block shrink-0">
@@ -229,19 +242,21 @@ function SkeletonRow() {
 
 // ─── Empty state ──────────────────────────────────────────────
 
-function EmptyState({ search }: { search: string }) {
+function EmptyState({ search, filtrado }: { search: string; filtrado?: boolean }) {
   return (
     <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="flex items-center justify-center h-14 w-14 rounded-2xl bg-muted mb-4">
         <Users className="h-7 w-7 text-muted-foreground/50" />
       </div>
       <p className="text-sm font-semibold text-foreground">
-        {search ? 'Sin resultados' : 'Aún no hay pacientes'}
+        {search || filtrado ? 'Sin resultados' : 'Aún no hay pacientes'}
       </p>
       <p className="text-sm text-muted-foreground mt-1 max-w-xs">
         {search
           ? `No se encontraron pacientes para "${search}"`
-          : 'Crea el primer paciente usando el botón de arriba'}
+          : filtrado
+            ? 'Ningún paciente tiene esta sede como habitual'
+            : 'Crea el primer paciente usando el botón de arriba'}
       </p>
     </div>
   )
@@ -258,6 +273,12 @@ export default function PacientesPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(25)
   const [filtroActivo, setFiltroActivo] = useState<string>('todos')
+  // El paciente es de la clínica: el filtro arranca en "todas" y usa la sede
+  // habitual (la de su última cita).
+  const [filtroSede, setFiltroSede] = useState<string>('todas')
+  const { sedes, isAllSedes } = useUserSedes()
+  const ofrecerFiltroSede = sedes.length > 1 || (!isAllSedes && sedes.length === 1)
+  const sede = filtroSede === 'todas' ? undefined : filtroSede
   const [cargaMasivaOpen, setCargaMasivaOpen] = useState(false)
   const puedeCrear = hasPermission(useAuthStore((s) => s.user), PERM.PACIENTES_CREAR)
   const debouncedSearch = useDebounce(search, 400)
@@ -265,6 +286,7 @@ export default function PacientesPage() {
   const params = {
     search: debouncedSearch || undefined,
     activo: filtroActivo === 'todos' ? undefined : filtroActivo === 'activos',
+    sede,
     page,
     page_size: pageSize,
   }
@@ -276,16 +298,20 @@ export default function PacientesPage() {
 
   const handleSearch = (v: string) => { setSearch(v); setPage(1) }
   const handleFiltro = (v: string) => { setFiltroActivo(v); setPage(1) }
+  const handleSede = (v: string) => { setFiltroSede(v); setPage(1) }
 
-  // Totales de la clínica (sin filtros): antes Activos e Inactivos salían
-  // siempre "—" (M2-26).
+  // Totales de la clínica (o de la sede elegida; sin los demás filtros): antes
+  // Activos e Inactivos salían siempre "—" (M2-26).
   const { data: resumen } = useQuery({
-    queryKey: ['pacientes', 'resumen'],
-    queryFn: () => pacientesApi.resumen(),
+    queryKey: ['pacientes', 'resumen', sede ?? null],
+    queryFn: () => pacientesApi.resumen(sede),
   })
 
   // Stats
   const total = data?.count ?? 0
+  const mostrarSede = sedes.length > 1
+    || new Set((data?.results ?? []).map((p) => p.sede_habitual ?? '')).size > 1
+  const nombreSede = sedes.find((s) => s.id === sede)?.nombre
 
   return (
     <div className="space-y-5">
@@ -299,7 +325,7 @@ export default function PacientesPage() {
           </div>
           <p className="text-sm text-muted-foreground mt-0.5">
             {resumen
-              ? `${resumen.total} paciente${resumen.total !== 1 ? 's' : ''} registrado${resumen.total !== 1 ? 's' : ''}`
+              ? `${resumen.total} paciente${resumen.total !== 1 ? 's' : ''} ${nombreSede ? `con sede habitual ${nombreSede}` : `registrado${resumen.total !== 1 ? 's' : ''}`}`
               : isLoading ? 'Cargando...' : ''}
           </p>
         </div>
@@ -367,6 +393,19 @@ export default function PacientesPage() {
             <SelectItem value="inactivos">Inactivos</SelectItem>
           </SelectContent>
         </Select>
+        {ofrecerFiltroSede && (
+          <Select value={filtroSede} onValueChange={handleSede}>
+            <SelectTrigger className="w-44 bg-white" title="Sede habitual: la de su última cita">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="todas">Todas las sedes</SelectItem>
+              {sedes.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
         <Select value={String(pageSize)} onValueChange={(v) => { setPageSize(Number(v)); setPage(1) }}>
           <SelectTrigger className="w-24 bg-white">
             <SelectValue />
@@ -394,6 +433,11 @@ export default function PacientesPage() {
           <div className="hidden lg:block w-48 shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Correo</span>
           </div>
+          {mostrarSede && (
+            <div className="hidden xl:block w-32 shrink-0" title="La sede de su última cita">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Sede</span>
+            </div>
+          )}
           <div className="hidden md:block w-[88px] shrink-0">
             <span className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide">Canal</span>
           </div>
@@ -415,13 +459,14 @@ export default function PacientesPage() {
             </Button>
           </div>
         ) : data?.results.length === 0 ? (
-          <EmptyState search={debouncedSearch} />
+          <EmptyState search={debouncedSearch} filtrado={!!sede} />
         ) : (
           data?.results.map((p) => (
             <PatientRow
               key={p.id}
               paciente={p}
               isLoading={loadingId === p.id}
+              mostrarSede={mostrarSede}
               onClick={() => { setLoadingId(p.id); router.push(`/pacientes/${p.id}`) }}
             />
           ))
