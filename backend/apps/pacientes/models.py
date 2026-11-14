@@ -79,6 +79,16 @@ class Paciente(BaseModel):
         on_delete=models.PROTECT,
         related_name="pacientes",
     )
+    # El paciente es de la clínica, no de una sede: esta es solo la sede donde
+    # se registró, para filtrar (cumpleaños, estadísticas). No limita quién lo ve.
+    # La sede "habitual" se calcula de sus citas (ver apps.pacientes.sedes).
+    sede_registro = models.ForeignKey(
+        "clinicas.Sede",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="pacientes_registrados",
+    )
     tipo_documento = models.CharField(max_length=3, choices=TipoDocumento.choices)
     numero_documento = models.CharField(max_length=30)
     nombres = models.CharField(max_length=100)

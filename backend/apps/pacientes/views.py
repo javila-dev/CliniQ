@@ -21,6 +21,7 @@ from apps.clinicas.models import TratamientoCatalogo
 from apps.pacientes import face_client, face_service
 from apps.pacientes.carga_masiva import CargaMasivaError, procesar_carga_masiva_pacientes
 from apps.pacientes.models import AntecedentePaciente, CheckIn, ConfiguracionFacial, Paciente
+from apps.pacientes.sedes import anotar_sede_habitual, q_vinculado_a_sede
 from apps.pacientes.serializers import (
     AntecedentePacienteSerializer,
     BusquedaPacienteSerializer,
@@ -125,7 +126,17 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             queryset = queryset.filter(canal_confirmacion=canal_confirmacion)
         if tipo_documento:
             queryset = queryset.filter(tipo_documento=tipo_documento)
+        sede = self._sede_param()
+        if self.action in {"list", "retrieve", "update", "partial_update"} or sede:
+            queryset = anotar_sede_habitual(queryset)
+        if sede:
+            queryset = queryset.filter(sede_habitual_id=sede)
         return queryset.order_by("apellidos", "nombres")
+
+    def _sede_param(self):
+        """`?sede=<id>` filtra; un valor que no es un id se ignora."""
+        sede = self.request.query_params.get("sede")
+        return sede if sede and es_uuid(sede) else None
 
     def perform_create(self, serializer):
         clinica = serializer.validated_data.get("clinica") or get_clinica_activa(self.request)
@@ -225,7 +236,12 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         Inactivos mostraban siempre "—" (M2-26)."""
         # Sin los filtros de get_queryset (activo, sexo...): son totales de la clínica.
         clinica = get_clinica_activa(request)
-        totales = Paciente.objects.filter(clinica=clinica).aggregate(
+        pacientes = Paciente.objects.filter(clinica=clinica)
+        sede = self._sede_param()
+        if sede:
+            # Cada paciente cuenta en una sola sede: la habitual.
+            pacientes = anotar_sede_habitual(pacientes).filter(sede_habitual_id=sede)
+        totales = pacientes.aggregate(
             total=Count("id"),
             activos=Count("id", filter=Q(activo=True)),
         )
@@ -238,7 +254,8 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         """Pacientes activos que cumplen años hoy o en los próximos `dias` (7 por
         defecto, máximo 31). Los del 29 de febrero, en años no bisiestos, se
         felicitan el 28. El teléfono sale enmascarado si falta el permiso de
-        datos sensibles, igual que en la ficha."""
+        datos sensibles, igual que en la ficha. `?sede=<id>` deja los pacientes
+        vinculados a esa sede."""
         try:
             dias = int(request.query_params.get("dias", 7))
         except (TypeError, ValueError):
@@ -263,6 +280,11 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
             .filter(condicion)
             .only("id", "nombres", "apellidos", "fecha_nacimiento", "telefono")
         )
+        sede = self._sede_param()
+        if sede:
+            # Registrados en la sede o atendidos/cotizados ahí: quien va a dos
+            # sedes sale en las dos.
+            pacientes = pacientes.filter(q_vinculado_a_sede(sede))
         ve_sensibles = usuario_ve_datos_sensibles(self.get_serializer_context())
         payload = []
         for p in pacientes:

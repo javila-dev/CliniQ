@@ -7,7 +7,7 @@ ARTICULOS = [
         "titulo": "Registrar un paciente nuevo",
         "resumen": "Qué datos son obligatorios, cuáles conviene completar aunque no lo sean, cómo evitar fichas duplicadas y qué hacer con la autorización de datos.",
         "area": "pacientes",
-        "keywords": "paciente, crear, registrar, ficha, nuevo, datos, duplicado, documento",
+        "keywords": "paciente, crear, registrar, ficha, nuevo, datos, duplicado, documento, sede",
         "destacado": False,
         "contenido": """
 La ficha del paciente es la base de todo lo demás: citas, historia clínica,
@@ -44,6 +44,17 @@ y en algunos protocolos.
 Ocupación, estado civil, escolaridad, grupo étnico, grupo sanguíneo, EPS,
 régimen y tipo de afiliado. No frenan nada si quedan vacíos, pero son los campos
 que después echas de menos cuando alguien pide un reporte.
+
+## Sede del paciente
+
+El paciente es de la clínica, no de una sede: se puede atender en cualquiera y
+todos lo ven. Si la clínica tiene varias sedes, el formulario pide la **sede de
+registro** y propone la tuya. Sirve solo para filtrar:
+
+- En **Pacientes**, el filtro de sede usa la **sede habitual**, que es la de su
+  última cita. Si cambia de sede, cambia sola.
+- En **Cumpleaños**, la sede muestra a quien se registró, se atendió o se cotizó
+  ahí. Quien va a dos sedes aparece en las dos.
 
 ## Autorización de tratamiento de datos
 

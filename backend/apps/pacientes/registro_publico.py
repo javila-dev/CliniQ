@@ -7,6 +7,7 @@ from rest_framework.throttling import SimpleRateThrottle
 from rest_framework.views import APIView
 
 from apps.clinicas.models import Clinica
+from apps.pacientes.sedes import sede_por_defecto
 from apps.configuracion.models import ConfiguracionWizard
 from apps.configuracion.registro_publico import registro_publico_config_as_dict, validate_registro_publico_tabs
 from apps.core.storage import get_public_url
@@ -110,6 +111,9 @@ class RegistroPublicoPacienteSerializer(PacienteSerializer):
             raise serializers.ValidationError(tab_error)
 
         attrs["clinica"] = clinica
+        # El formulario público no elige sede: se ignora la que venga y se usa
+        # la única de la clínica, si tiene una sola.
+        attrs["sede_registro"] = sede_por_defecto(clinica)
         return attrs
 
     def create(self, validated_data):

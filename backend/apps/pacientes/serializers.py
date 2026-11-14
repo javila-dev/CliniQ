@@ -3,8 +3,9 @@ from datetime import date, timedelta
 from django.db import IntegrityError, transaction
 from rest_framework import serializers
 
-from apps.clinicas.models import Clinica
+from apps.clinicas.models import Clinica, Sede
 from apps.pacientes.models import AntecedentePaciente, CheckIn, Paciente
+from apps.pacientes.sedes import nombres_de_sedes, sede_por_defecto
 from apps.users.authorization import user_has_permission
 
 PERMISO_DATOS_SENSIBLES = "pacientes.datos_sensibles.ver"
@@ -60,6 +61,12 @@ class PacienteSerializer(serializers.ModelSerializer):
     nombre_completo = serializers.CharField(read_only=True)
     edad = serializers.IntegerField(read_only=True)
     clinica_nombre = serializers.CharField(source="clinica.nombre", read_only=True)
+    sede_registro = serializers.PrimaryKeyRelatedField(
+        queryset=Sede.objects.all(), required=False, allow_null=True
+    )
+    sede_registro_nombre = serializers.SerializerMethodField()
+    sede_habitual = serializers.SerializerMethodField()
+    sede_habitual_nombre = serializers.SerializerMethodField()
     direccion = serializers.CharField(required=False, allow_blank=True, default="")
     ciudad = serializers.CharField(required=False, allow_blank=True, default="")
     barrio = serializers.CharField(required=False, allow_blank=True, default="")
@@ -114,6 +121,10 @@ class PacienteSerializer(serializers.ModelSerializer):
             "id",
             "clinica",
             "clinica_nombre",
+            "sede_registro",
+            "sede_registro_nombre",
+            "sede_habitual",
+            "sede_habitual_nombre",
             "tipo_documento",
             "numero_documento",
             "nombres",
@@ -153,6 +164,9 @@ class PacienteSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "clinica_nombre",
+            "sede_registro_nombre",
+            "sede_habitual",
+            "sede_habitual_nombre",
             "nombre_completo",
             "edad",
             "fecha_autorizacion",
@@ -163,6 +177,27 @@ class PacienteSerializer(serializers.ModelSerializer):
             "created_at",
             "updated_at",
         )
+
+    def _nombre_sede(self, obj, sede_id):
+        if not sede_id:
+            return None
+        cache = self.context.setdefault("_sedes_por_clinica", {})
+        return nombres_de_sedes(obj.clinica_id, cache).get(sede_id)
+
+    def get_sede_registro_nombre(self, obj):
+        return self._nombre_sede(obj, obj.sede_registro_id)
+
+    def _sede_habitual_id(self, obj):
+        # Viene anotada en el listado y el detalle (anotar_sede_habitual); en
+        # otros caminos (crear, carga masiva) cae a la de registro.
+        return getattr(obj, "sede_habitual_id", obj.sede_registro_id)
+
+    def get_sede_habitual(self, obj):
+        sede_id = self._sede_habitual_id(obj)
+        return str(sede_id) if sede_id else None
+
+    def get_sede_habitual_nombre(self, obj):
+        return self._nombre_sede(obj, self._sede_habitual_id(obj))
 
     def get_tiene_antecedentes(self, obj):
         return hasattr(obj, "antecedentes")
@@ -203,6 +238,12 @@ class PacienteSerializer(serializers.ModelSerializer):
     MENSAJE_DOCUMENTO_DUPLICADO = "Ya existe un paciente con ese documento en la clínica."
 
     def create(self, validated_data):
+        if "sede_registro" not in validated_data:
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            if user is not None and not user.is_authenticated:
+                user = None
+            validated_data["sede_registro"] = sede_por_defecto(validated_data.get("clinica"), user)
         try:
             with transaction.atomic():
                 return super().create(validated_data)
@@ -263,6 +304,10 @@ class PacienteSerializer(serializers.ModelSerializer):
                 from apps.users.permissions import get_clinica_activa
 
                 clinica = get_clinica_activa(request)
+
+        sede_registro = attrs.get("sede_registro")
+        if sede_registro is not None and clinica is not None and sede_registro.clinica_id != clinica.id:
+            raise serializers.ValidationError({"sede_registro": "La sede no pertenece a la clínica."})
 
         tipo_documento = attrs.get("tipo_documento", getattr(self.instance, "tipo_documento", None))
         numero_documento = attrs.get("numero_documento", getattr(self.instance, "numero_documento", None))
