@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion } from '@/store/numeroCliniqStore'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoAutorizacionCotizacion, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, SolicitudAutorizacionPrecio, Venta } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoAutorizacionCotizacion, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, SolicitudAutorizacionPrecio, TerminarVentaRequest, Venta, VistaPreviaTerminacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { NotaClinica } from '@/types/historia'
 import type { Paginated } from '@/types/common'
@@ -97,6 +97,22 @@ export const cotizacionesApi = {
     return res.data
   },
 
+  // Terminar una venta que el paciente deja a medias (docs/plan-terminacion-ventas.md).
+  terminacion: async (id: string): Promise<VistaPreviaTerminacion> => {
+    const res = await apiClient.get<VistaPreviaTerminacion>(`/cotizaciones/${id}/terminacion/`)
+    return res.data
+  },
+
+  terminar: async (id: string, data: TerminarVentaRequest): Promise<Cotizacion> => {
+    const res = await apiClient.post<Cotizacion>(`/cotizaciones/${id}/terminar/`, data)
+    return res.data
+  },
+
+  reanudar: async (id: string): Promise<Cotizacion> => {
+    const res = await apiClient.post<Cotizacion>(`/cotizaciones/${id}/reanudar/`)
+    return res.data
+  },
+
   consentimientos: async (id: string): Promise<ConsentimientoRequeridoCotizacion[]> => {
     const res = await apiClient.get<ConsentimientoRequeridoCotizacion[]>(`/cotizaciones/${id}/consentimientos/`)
     return res.data
@@ -188,6 +204,7 @@ export const ventasApi = {
     vendedor?: string
     paciente?: string
     con_mora?: '1'
+    terminada?: 'true' | 'false'
     ordering?: string
     page?: number
   }): Promise<Paginated<Venta>> => {

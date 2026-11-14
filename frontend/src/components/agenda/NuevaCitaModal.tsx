@@ -621,6 +621,8 @@ export function NuevaCitaModal({
                         procedimiento: 'Procedimientos',
                         libre:         'Ítems adicionales',
                       }
+                      // Venta terminada: lo que quedaba ya no se agenda.
+                      if (q.data.terminada) return []
                       const disponibles = q.data.items.filter((i) => i.citas_restantes > 0)
                       if (!disponibles.length) return []
                       return (['tratamiento', 'procedimiento', 'libre'] as const).flatMap((tipo) => {

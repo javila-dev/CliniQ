@@ -109,6 +109,8 @@ export interface RitmoPaquete {
 export interface SesionesCotizacion {
   cotizacion_id: string
   paciente_nombre: string
+  /** Venta terminada: no se agendan más sesiones. */
+  terminada?: boolean
   items: ItemSesiones[]
 }
 
@@ -177,6 +179,15 @@ export interface Cotizacion {
   es_migracion?: boolean
   saldo_pendiente: string | null // Saldo por cobrar; null si aún no hay cartera
   cartera_id?: string | null    // id de la cartera asociada; null si aún no hay cartera
+  // Terminación: el paciente dejó la venta a medias (docs/plan-terminacion-ventas.md).
+  terminada_en?: string | null
+  terminada_por_nombre?: string | null
+  motivo_terminacion?: MotivoTerminacion | ''
+  motivo_terminacion_display?: string
+  nota_terminacion?: string
+  saldo_al_terminar?: string | null
+  valor_perdonado?: string
+  puede_reanudar?: boolean
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
   /** Tiene precios fuera de regla sin autorizar: no se envía, no sale el PDF ni se acepta. */
@@ -306,4 +317,42 @@ export interface Venta {
   en_mora: boolean
   cartera_id: string | null
   sesiones: { completadas: number; total: number } | null
+  terminada_en?: string | null
+  valor_perdonado?: string
+}
+
+// ── Terminación de ventas (docs/plan-terminacion-ventas.md) ─────────────────
+
+export type MotivoTerminacion = 'economico' | 'insatisfaccion' | 'salud' | 'traslado' | 'no_responde' | 'otro'
+
+export interface CitaSinCerrar {
+  id: string
+  fecha_inicio: string
+  estado: string
+  profesional_nombre: string | null
+  sede_nombre: string | null
+  descripcion: string
+}
+
+export interface VistaPreviaTerminacion {
+  terminada: boolean
+  puede_reanudar: boolean
+  sesiones: { item_id: string; descripcion: string; total: number; hechas: number; pendientes: number }[]
+  citas: { agendadas: CitaSinCerrar[]; sin_cerrar: CitaSinCerrar[]; en_atencion: CitaSinCerrar[] }
+  oportunidades_abiertas: number
+  saldo: string
+  cuotas_pendientes: { id: string; descripcion: string; fecha_esperada: string | null; saldo: string; vencida: boolean }[]
+  forma_pago_sugerida: string | null
+  acuerdo_pendiente: boolean
+  motivos: { value: MotivoTerminacion; label: string }[]
+}
+
+export interface TerminarVentaRequest {
+  motivo: MotivoTerminacion
+  nota?: string
+  citas?: 'cancelar' | 'manual' | null
+  modo?: 'perdonar' | 'cobrar' | null
+  valor?: string | null
+  fecha?: string | null
+  forma_pago?: string | null
 }

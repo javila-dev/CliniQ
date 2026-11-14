@@ -34,6 +34,7 @@ import { precioEnSede, precioGeneralProcedimiento, precioPropioSede } from '@/li
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
 import { CotizacionVencidaDialog } from './CotizacionVencidaDialog'
+import { TerminarVentaDialog, VentaTerminadaBanner } from './TerminarVentaDialog'
 import { AutorizacionPrecioBanner, SolicitarAutorizacionDialog, type ItemPorAutorizar } from './AutorizacionPrecioPanel'
 import { BuscadorPopover } from '@/components/ui/buscador-popover'
 import { cotizacionesApi } from '@/lib/api/cotizaciones'
@@ -383,6 +384,9 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   const esDeOtraSede = !!cotizacion?.sede && !isAdminOrSuperAdmin(user) && Array.isArray(user?.sedes)
     && !user.sedes.some((s) => s.id === cotizacion.sede)
   const canGestionar = tienePermisoGestionar && !esAjena && !esDeOtraSede
+  // Terminar una venta que el paciente deja a medias: permiso propio, mismas reglas de sede.
+  const puedeTerminar = hasPermission(user, PERM.COTIZACIONES_TERMINAR) && !esAjena && !esDeOtraSede
+  const terminada = !!cotizacion?.terminada_en
   // Sin cobros.ver el panel decía "Sin cobros registrados" aunque los hubiera.
   const canVerCobros = hasPermission(user, PERM.COBROS_VER)
   const canFirmarConsentimientos = hasPermission(user, 'historia.consentimientos.gestionar')
@@ -403,6 +407,7 @@ export function CotizacionForm({ cotizacion, pacienteInicial, vista = 'cotizacio
   const [descargandoPdf, setDescargandoPdf] = useState(false)
   const pdfRegistradoRef = useRef(false)
   const [cobrosOpen, setCobrosOpen] = useState(false)
+  const [terminarOpen, setTerminarOpen] = useState(false)
   const [datosClinicosOpen, setDatosClinicosOpen] = useState(false)
   const [detalleSesiones, setDetalleSesiones] = useState<TratamientoCatalogo | null>(null)
 
@@ -1306,9 +1311,14 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               )}
             </div>
             {cotizacion && !esVenta && <CotizacionEstadoBadge estado={cotizacion.estado_comercial ?? cotizacion.estado} />}
-            {cotizacion && esVenta && (
+            {cotizacion && esVenta && !terminada && (
               <span className="hidden sm:inline-flex shrink-0 items-center rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700 ring-1 ring-inset ring-green-200/60">
                 Venta en firme
+              </span>
+            )}
+            {cotizacion && esVenta && terminada && (
+              <span className="hidden sm:inline-flex shrink-0 items-center rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600 ring-1 ring-inset ring-gray-500/15">
+                Terminada
               </span>
             )}
             {cotizacion?.estado === 'borrador' && <CotizacionEnviadaChip enviadaEn={cotizacion.enviada_en} />}
@@ -1349,6 +1359,16 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
               >
                 <Receipt className="h-3.5 w-3.5 mr-1.5" />
                 Cobros
+              </Button>
+            )}
+            {cotizacion?.estado === 'aceptada' && !terminada && puedeTerminar && (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="text-muted-foreground hover:bg-red-50 hover:text-red-700"
+                onClick={() => setTerminarOpen(true)}
+              >
+                Terminar venta
               </Button>
             )}
             {cotizacion?.estado_comercial === 'vencida' && canGestionar && (
@@ -1428,6 +1448,8 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
 
       {/* ── Body ───────────────────────────────────────────────────────────── */}
       <div className="max-w-6xl mx-auto px-4 py-6 space-y-4">
+
+        {cotizacion && terminada && <VentaTerminadaBanner cotizacion={cotizacion} puedeGestionar={puedeTerminar} />}
 
         {esDeOtraSede && tienePermisoGestionar && (
           <p className="rounded-lg border bg-muted/50 px-4 py-2.5 text-sm text-muted-foreground">
@@ -2349,6 +2371,11 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           open={cobrosOpen}
           onClose={() => setCobrosOpen(false)}
         />
+      )}
+
+      {/* ── Terminar venta (el paciente la deja a medias) ─────────────── */}
+      {cotizacion?.estado === 'aceptada' && puedeTerminar && !terminada && (
+        <TerminarVentaDialog cotizacion={cotizacion} open={terminarOpen} onOpenChange={setTerminarOpen} />
       )}
 
       {/* ── Modal enviar cotización ────────────────────────────────────── */}

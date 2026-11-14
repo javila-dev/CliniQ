@@ -448,6 +448,14 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   <p className="text-sm font-medium">
                     {itemSesiones?.descripcion ?? cita.cotizacion_resumen.descripcion}
                   </p>
+                  {cita.cotizacion_resumen.venta_terminada && (
+                    <p className="text-xs text-muted-foreground">
+                      <span className="mr-1.5 inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-500/15">
+                        Venta terminada
+                      </span>
+                      El paciente no continúa: no se agendan más sesiones.
+                    </p>
+                  )}
                   {cita.sesion_tratamiento && (
                     <div className="rounded-md bg-primary/5 border border-primary/20 px-3 py-2">
                       <p className="text-[11px] font-medium text-primary uppercase tracking-wide mb-0.5">

@@ -96,6 +96,8 @@ const ACCION_MAP: Record<string, AccionMeta> = {
   'cotizacion.autorizacion_precio.autorizar': { label: conPaciente('Autorizó un precio para', 'Autorizó un precio'), icon: BadgeCheck, color: VERDE },
   'cotizacion.precio_autorizado_directo': { label: conPaciente('Aplicó un precio especial para', 'Aplicó un precio especial'), icon: BadgeCheck, color: VERDE },
   'cotizacion.renovar': { label: conPaciente('Renovó la cotización de', 'Renovó una cotización'), icon: FileText, color: AZUL },
+  'venta.terminar': { label: conPaciente('Terminó la venta de', 'Terminó una venta'), icon: FileText, color: ROJO },
+  'venta.reanudar': { label: conPaciente('Reanudó la venta de', 'Reanudó una venta'), icon: FileText, color: AZUL },
   'cotizacion.entregar_obsequio': { label: conPaciente('Entregó un obsequio a', 'Entregó un obsequio'), icon: Gift, color: VERDE },
   'cotizacion.revertir_entrega_obsequio': { label: conPaciente('Revirtió la entrega de un obsequio a', 'Revirtió la entrega de un obsequio'), icon: Gift, color: ROJO },
   'cartera.acuerdo_pago.crear': { label: conPaciente('Creó un acuerdo de pago con', 'Creó un acuerdo de pago'), icon: Handshake, color: AZUL },
