@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  ComercialAsesores,
   DashboardData, IngresosPeriodo, ServicioReporte,
   OcupacionReporte, ReportesParams, IngresosPorOrigen, CotizacionesMesMetrics, ComercialMetrics,
   ReportePaquetes, EstadoFinanciero, Vendedor, EstadoRegularizacion, SesionARegistrar,
@@ -53,6 +54,16 @@ export const reportesApi = {
     const { vendedores, ...rest } = params ?? {}
     const res = await apiClient.get<CotizacionesMesMetrics>('/reportes/cotizaciones/', {
       params: { ...rest, ...(vendedores?.length ? { vendedores: vendedores.join(',') } : {}) },
+    })
+    return res.data
+  },
+
+  getComercialAsesores: async (
+    params: Pick<ReportesParams, 'sede_id' | 'fecha_inicio' | 'fecha_fin'> & { tratamiento?: string[] },
+  ): Promise<ComercialAsesores> => {
+    const { tratamiento, ...rest } = params
+    const res = await apiClient.get<ComercialAsesores>('/reportes/comercial/asesores/', {
+      params: { ...rest, ...(tratamiento?.length ? { tratamiento: tratamiento.join(',') } : {}) },
     })
     return res.data
   },

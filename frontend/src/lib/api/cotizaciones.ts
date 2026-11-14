@@ -1,6 +1,6 @@
 import { apiClient } from './client'
 import { cuerpoNumeroCliniq, enviarConConfirmacion } from '@/store/numeroCliniqStore'
-import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoAutorizacionCotizacion, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, SolicitudAutorizacionPrecio, TerminarVentaRequest, Venta, VistaPreviaTerminacion } from '@/types/cotizaciones'
+import type { Cotizacion, CotizacionEnvio, CreateCotizacionRequest, EntregarObsequioRequest, EstadoAutorizacionCotizacion, EstadoComercial, EstadoCotizacion, HistorialSesionesCotizacion, ItemCotizacion, MotivoDescarte, PreciosCampanaMap, SesionesCotizacion, SolicitudAutorizacionPrecio, CatalogoVendido, TerminarVentaRequest, Venta, VistaPreviaTerminacion } from '@/types/cotizaciones'
 import type { Consentimiento } from '@/types/consentimientos'
 import type { NotaClinica } from '@/types/historia'
 import type { Paginated } from '@/types/common'
@@ -205,6 +205,8 @@ export const ventasApi = {
     paciente?: string
     con_mora?: '1'
     terminada?: 'true' | 'false'
+    /** Tratamientos o procedimientos del catálogo, separados por comas. */
+    tratamiento?: string
     ordering?: string
     page?: number
   }): Promise<Paginated<Venta>> => {
@@ -212,9 +214,15 @@ export const ventasApi = {
     return res.data
   },
 
+  // Tratamientos y procedimientos que se han vendido, para el filtro de la lista.
+  tratamientos: async (): Promise<CatalogoVendido[]> => {
+    const res = await apiClient.get<CatalogoVendido[]>('/ventas/tratamientos/')
+    return res.data
+  },
+
   // Profesionales con ventas, para el filtro de la lista.
-  vendedores: async (): Promise<{ id: string; nombre: string }[]> => {
-    const res = await apiClient.get<{ id: string; nombre: string }[]>('/ventas/vendedores/')
+  vendedores: async (): Promise<{ id: string; nombre: string; email?: string }[]> => {
+    const res = await apiClient.get<{ id: string; nombre: string; email?: string }[]>('/ventas/vendedores/')
     return res.data
   },
 }

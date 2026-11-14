@@ -165,6 +165,30 @@ export interface Vendedor {
   activo: boolean
 }
 
+// GET /reportes/comercial/asesores/: una fila por asesor (quien creó la
+// cotización) con las mismas reglas que /reportes/comercial/.
+export interface FilaAsesor {
+  asesor_id: string | null      // null = cotizaciones sin asesor, o la fila de totales
+  nombre: string
+  email?: string | null         // distingue a dos usuarios con el mismo nombre
+  activo: boolean
+  cotizaciones: { cantidad: number; valor: string }
+  ventas: {
+    cantidad: number
+    valor: string
+    ticket_promedio: string | null
+    dias_promedio_cierre: number | null
+  }
+  creadas_vendidas: number      // de las creadas en el periodo, cuántas ya se vendieron
+  tasa_cierre_pct: string | null
+}
+
+export interface ComercialAsesores {
+  periodo: { desde: string; hasta: string }
+  asesores: FilaAsesor[]
+  totales: FilaAsesor
+}
+
 /** Un paquete vendido o importado al que le faltan sesiones (backend: reportes/paquetes.py). */
 export interface PaqueteSinMovimiento {
   item_id: string

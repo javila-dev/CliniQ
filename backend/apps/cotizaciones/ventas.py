@@ -50,6 +50,39 @@ def ventas_queryset(clinica=None):
     return queryset
 
 
+def ids_catalogo(params, nombre="tratamiento") -> list[str]:
+    """IDs de catálogo (tratamientos o procedimientos) separados por comas; 400 si alguno no es UUID."""
+    raw = params.get(nombre) or ""
+    ids = [v.strip() for v in raw.split(",") if v.strip()]
+    try:
+        return [str(uuid.UUID(v)) for v in ids]
+    except ValueError:
+        raise ValidationError({"error": f"El filtro '{nombre}' no es valido.", "code": "FILTRO_INVALIDO"})
+
+
+def filtrar_por_catalogo(queryset, ids):
+    """Cotizaciones con algún ítem vendido (no obsequio) de esos tratamientos o
+    procedimientos del catálogo. Sin ids no filtra."""
+    if not ids:
+        return queryset
+    items = ItemCotizacion.objects.filter(cotizacion=OuterRef("pk"), activo=True, es_obsequio=False).filter(
+        Q(tratamiento_id__in=ids) | Q(procedimiento_id__in=ids) | Q(servicio_id__in=ids)
+    )
+    return queryset.filter(Exists(items))
+
+
+def catalogo_vendido(cotizaciones) -> list[dict]:
+    """Tratamientos y procedimientos que aparecen en esas cotizaciones (opciones del filtro)."""
+    items = ItemCotizacion.objects.filter(cotizacion__in=cotizaciones.values("pk"), activo=True, es_obsequio=False)
+    opciones = {}
+    for tid, nombre in items.exclude(tratamiento=None).values_list("tratamiento_id", "tratamiento__nombre").distinct():
+        opciones[str(tid)] = {"id": str(tid), "nombre": nombre, "tipo": "tratamiento"}
+    for campo in ("procedimiento", "servicio"):
+        for pid, nombre in items.exclude(**{campo: None}).values_list(f"{campo}_id", f"{campo}__nombre").distinct():
+            opciones.setdefault(str(pid), {"id": str(pid), "nombre": nombre, "tipo": "procedimiento"})
+    return sorted(opciones.values(), key=lambda o: (o["tipo"] != "tratamiento", o["nombre"].lower()))
+
+
 def _uuid_param(params, nombre):
     """Valor UUID de un parámetro de la URL; 400 (no 500) si viene mal formado."""
     valor = params.get(nombre)
@@ -168,6 +201,8 @@ class VentaViewSet(ReadOnlyModelViewSet):
             queryset = queryset.filter(profesional_id=vendedor)
         if paciente := _uuid_param(params, "paciente"):
             queryset = queryset.filter(paciente_id=paciente)
+        # Ventas de uno o varios tratamientos/procedimientos (?tratamiento=id1,id2).
+        queryset = filtrar_por_catalogo(queryset, ids_catalogo(params))
 
         cuota_vencida = (
             CuotaCartera.objects.filter(
@@ -240,6 +275,19 @@ class VentaViewSet(ReadOnlyModelViewSet):
         if sede_ids is not None:
             ventas = ventas.filter(sede_id__in=sede_ids)
         usuarios = User.objects.filter(pk__in=ventas.exclude(profesional=None).values("profesional_id"))
-        vendedores = [{"id": str(u.id), "nombre": u.nombre_completo} for u in usuarios]
+        # El correo distingue a dos usuarios con el mismo nombre en el filtro.
+        vendedores = [{"id": str(u.id), "nombre": u.nombre_completo, "email": u.email} for u in usuarios]
         vendedores.sort(key=lambda v: v["nombre"].lower())
         return Response(vendedores)
+
+    @action(detail=False, methods=["get"], url_path="tratamientos")
+    def tratamientos(self, request):
+        """Tratamientos y procedimientos que se han vendido, para el filtro de la lista."""
+        user = request.user
+        ventas = ventas_queryset(get_clinica_activa(request))
+        if ve_solo_su_actividad_comercial(user, request):
+            ventas = ventas.filter(profesional=user)
+        sede_ids = sede_ids_para_filtro(user)
+        if sede_ids is not None:
+            ventas = ventas.filter(sede_id__in=sede_ids)
+        return Response(catalogo_vendido(ventas))

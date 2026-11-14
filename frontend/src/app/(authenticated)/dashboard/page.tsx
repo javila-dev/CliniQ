@@ -1122,6 +1122,7 @@ function DashboardContent() {
               <div className="flex items-center gap-3">
                 <FiltroVendedores opciones={vendedoresOpciones} selected={vendedores} onChange={setVendedores} />
                 <Link href="/cotizaciones" className="text-xs text-primary hover:underline">Cotizaciones</Link>
+                <Link href="/ventas/asesores" className="text-xs text-primary hover:underline">Por asesor</Link>
                 <Link href="/ventas" className="text-xs text-primary hover:underline flex items-center gap-1">
                   Ventas <ArrowRight className="h-3 w-3" />
                 </Link>
