@@ -602,29 +602,7 @@ class CitaViewSet(ModelViewSet):
             cita.save(update_fields=list(dict.fromkeys(update_fields)))
 
         if nuevo_estado in {Cita.Estado.CANCELADA, Cita.Estado.NO_ASISTIO}:
-            # Liberar las sesiones de tratamiento vinculadas a esta cita para que
-            # puedan reagendarse ("no asistió" tampoco consume la sesión). El cupo del ítem de cotización ya queda libre vía
-            # citas_no_canceladas(); esto suelta además el FK de la SesionProcedimiento,
-            # que si no bloquea el reagendado con SESION_YA_VINCULADA.
-            from apps.protocolos.models import SesionProcedimiento
-
-            cita.sesiones_protocolo.filter(
-                estado=SesionProcedimiento.Estado.PENDIENTE
-            ).update(cita=None, updated_at=timezone.now())
-
-            # Los insumos registrados en la atención vuelven al stock. No solo si
-            # estaba en curso: tras "Desiniciar" la cita queda en espera con los
-            # consumos de su nota, y al cancelarla se quedaban descontados (AT-07).
-            from apps.historia_clinica.models import ConsumoInsumo
-            from apps.historia_clinica.services import eliminar_consumo_insumo
-
-            for consumo in ConsumoInsumo.objects.filter(nota__cita=cita, activo=True):
-                try:
-                    with transaction.atomic():
-                        eliminar_consumo_insumo(consumo, request.user)
-                except ValidationError:
-                    # Ya lo devolvió otra petición a la vez.
-                    continue
+            services.liberar_cita_no_atendida(cita, request.user)
 
         if nuevo_estado in {
             Cita.Estado.CONFIRMADA,

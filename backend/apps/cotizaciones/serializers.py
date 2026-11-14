@@ -754,6 +754,10 @@ class CotizacionSerializer(serializers.ModelSerializer):
     total_pagado = serializers.SerializerMethodField()
     saldo_pendiente = serializers.SerializerMethodField()
     cartera_id = serializers.SerializerMethodField()
+    # Terminación de la venta (docs/plan-terminacion-ventas.md).
+    terminada_por_nombre = serializers.CharField(source="terminada_por.nombre_completo", read_only=True, default=None)
+    motivo_terminacion_display = serializers.CharField(source="get_motivo_terminacion_display", read_only=True)
+    puede_reanudar = serializers.SerializerMethodField()
     # Estado de la autorización de precios (la última solicitud no cancelada).
     autorizacion_precio = serializers.SerializerMethodField()
     # Motivo para pedir autorización de los precios fuera de regla en este guardado.
@@ -796,6 +800,15 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total_pagado",
             "saldo_pendiente",
             "cartera_id",
+            "terminada_en",
+            "terminada_por",
+            "terminada_por_nombre",
+            "motivo_terminacion",
+            "motivo_terminacion_display",
+            "nota_terminacion",
+            "saldo_al_terminar",
+            "valor_perdonado",
+            "puede_reanudar",
             "precio_por_autorizar",
             "autorizacion_precio",
             "solicitar_autorizacion",
@@ -819,6 +832,12 @@ class CotizacionSerializer(serializers.ModelSerializer):
             "total_pagado",
             "saldo_pendiente",
             "cartera_id",
+            "terminada_en",
+            "terminada_por",
+            "motivo_terminacion",
+            "nota_terminacion",
+            "saldo_al_terminar",
+            "valor_perdonado",
             "precio_por_autorizar",
             "created_at",
             "updated_at",
@@ -859,11 +878,17 @@ class CotizacionSerializer(serializers.ModelSerializer):
         return str(self._total_pagado_valor(obj).quantize(Decimal("0.01")))
 
     def get_saldo_pendiente(self, obj):
-        """Saldo por cobrar = total - pagado (string 2 decimales). None si no esta aceptada."""
+        """Saldo por cobrar = total - pagado - perdonado al terminar (string 2
+        decimales). None si no esta aceptada."""
         if obj.estado != Cotizacion.Estado.ACEPTADA:
             return None
-        saldo = Decimal(obj.total) - self._total_pagado_valor(obj)
+        saldo = Decimal(obj.total) - self._total_pagado_valor(obj) - Decimal(obj.valor_perdonado or 0)
         return str(saldo.quantize(Decimal("0.01")))
+
+    def get_puede_reanudar(self, obj):
+        from apps.cotizaciones.terminacion import se_puede_reanudar
+
+        return se_puede_reanudar(obj)
 
     def get_cartera_id(self, obj):
         cartera = getattr(obj, "cartera", None)

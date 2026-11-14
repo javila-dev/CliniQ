@@ -582,9 +582,64 @@ def _reservar_sesion_del_item(item_cotizacion):
     """
     from apps.cotizaciones.models import ItemCotizacion
 
-    item = ItemCotizacion.objects.select_for_update().get(pk=item_cotizacion.pk)
+    item = ItemCotizacion.objects.select_for_update().select_related("cotizacion").get(pk=item_cotizacion.pk)
+    if item.cotizacion.terminada_en is not None:
+        raise ValidationError({"error": "La venta está terminada: no se agendan más sesiones.", "code": "VENTA_TERMINADA"})
     if item.citas_no_canceladas() + item.sesiones_previas_consumidas >= item.num_sesiones_efectivas():
         raise ValidationError({"error": "Este item no tiene sesiones disponibles.", "code": "SIN_SESIONES_DISPONIBLES"})
+
+
+def liberar_cita_no_atendida(cita: Cita, usuario) -> None:
+    """Lo que suelta una cita cancelada o en "no asistió".
+
+    Libera las sesiones de tratamiento vinculadas para que puedan reagendarse
+    ("no asistió" tampoco consume la sesión). El cupo del ítem de cotización ya
+    queda libre vía citas_no_canceladas(); esto suelta además el FK de la
+    SesionProcedimiento, que si no bloquea el reagendado con SESION_YA_VINCULADA.
+
+    Los insumos registrados en la atención vuelven al stock. No solo si estaba en
+    curso: tras "Desiniciar" la cita queda en espera con los consumos de su nota,
+    y al cancelarla se quedaban descontados (AT-07).
+    """
+    from apps.historia_clinica.models import ConsumoInsumo
+    from apps.historia_clinica.services import eliminar_consumo_insumo
+    from apps.protocolos.models import SesionProcedimiento
+
+    cita.sesiones_protocolo.filter(
+        estado=SesionProcedimiento.Estado.PENDIENTE
+    ).update(cita=None, updated_at=timezone.now())
+
+    for consumo in ConsumoInsumo.objects.filter(nota__cita=cita, activo=True):
+        try:
+            with transaction.atomic():
+                eliminar_consumo_insumo(consumo, usuario)
+        except ValidationError:
+            # Ya lo devolvió otra petición a la vez.
+            continue
+
+
+ESTADOS_CANCELABLES_SIN_ATENCION = (Cita.Estado.PENDIENTE, Cita.Estado.CONFIRMADA)
+
+
+def cancelar_cita(cita: Cita, *, motivo: str, usuario, request=None) -> Cita:
+    """Cancela una cita que no ha empezado (pendiente o confirmada), igual que
+    cancelarla desde la agenda. Si tiene un cobro, se mantiene: quien cancela
+    desde aquí no decide devoluciones.
+    """
+    from apps.agenda.confirmacion import crear_registro_confirmacion
+    from apps.core.logging import registrar_accion
+
+    if cita.estado not in ESTADOS_CANCELABLES_SIN_ATENCION:
+        raise ValidationError({"error": "Solo se cancelan citas que no han empezado.", "code": "CITA_NO_CANCELABLE"})
+    cita.estado = Cita.Estado.CANCELADA
+    cita.motivo_cancelacion = motivo
+    cita.fecha_inicio_real = None
+    cita.fecha_fin_real = None
+    cita.save(update_fields=["estado", "motivo_cancelacion", "fecha_inicio_real", "fecha_fin_real", "updated_at"])
+    liberar_cita_no_atendida(cita, usuario)
+    crear_registro_confirmacion(cita=cita, estado_resultante=Cita.Estado.CANCELADA, usuario=usuario, nota=motivo)
+    registrar_accion(request, "cita.cancelar", cita, {"motivo": motivo}, actor=usuario)
+    return cita
 
 
 @transaction.atomic
