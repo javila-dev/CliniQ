@@ -152,11 +152,20 @@ function ColaboradorRow({
 
       <p className="hidden truncate text-[13px] text-muted-foreground lg:block">{colaborador.email}</p>
 
-      <div className="hidden min-w-0 md:block">
+      <div className="hidden min-w-0 items-center gap-1 md:flex">
         {rol && (
-          <span className={cn('inline-flex max-w-full items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium', rol.className)}>
+          <span className={cn('inline-flex min-w-0 items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium', rol.className)}>
             <RolIcon className="h-3 w-3 shrink-0" />
             <span className="truncate">{rol.label}</span>
+          </span>
+        )}
+        {/* Permisos que tiene además de su rol: a la vista, para que no queden ocultos. */}
+        {(colaborador.permisos_extra_count ?? 0) > 0 && (
+          <span
+            className="shrink-0 rounded-full bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-800"
+            title={`${colaborador.permisos_extra_count} permiso(s) además de su rol`}
+          >
+            +{colaborador.permisos_extra_count}
           </span>
         )}
       </div>

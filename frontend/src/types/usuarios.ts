@@ -91,6 +91,8 @@ export interface UsuarioAdmin {
   role_id: string | null
   role_nombre: string | null
   permissions: string[]
+  /** Claves otorgadas además de su rol (solo suman). Vacío para el administrador. */
+  permisos_extra: string[]
   telefono: string | null
   foto_perfil: string | null
   activo: boolean
