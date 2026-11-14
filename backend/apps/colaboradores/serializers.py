@@ -16,6 +16,7 @@ from apps.users.serializers import (
     user_role_name,
     user_role_slug,
 )
+from apps.users.authorization import permisos_extra_de, user_is_tenant_admin
 from apps.users.services import send_invitation_email
 
 
@@ -504,6 +505,7 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
     especialidades = serializers.SerializerMethodField()
     grupos_detalle = serializers.SerializerMethodField()
     invitacion_pendiente = serializers.SerializerMethodField()
+    permisos_extra_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Colaborador
@@ -527,10 +529,17 @@ class ColaboradorListSerializer(serializers.ModelSerializer):
             "numero_documento",
             "activo",
             "invitacion_pendiente",
+            "permisos_extra_count",
             "created_at",
             "updated_at",
         )
         read_only_fields = fields
+
+    def get_permisos_extra_count(self, obj):
+        """Cuántos permisos tiene además de su rol (para marcarlo en el listado)."""
+        if user_is_tenant_admin(obj.user):
+            return 0
+        return len(permisos_extra_de(obj.user))
 
     def get_grupos_detalle(self, obj):
         return [{"id": str(grupo.id), "nombre": grupo.nombre} for grupo in obj.grupos_atencion.all()]

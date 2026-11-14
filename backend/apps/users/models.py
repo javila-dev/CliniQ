@@ -55,6 +55,15 @@ class User(AbstractUser, BaseModel):
     sesion_actual_dispositivo = models.CharField(max_length=255, blank=True, default="")
     sesion_actual_iniciada_en = models.DateTimeField(null=True, blank=True)
 
+    # Permisos que este usuario tiene además de los de su rol (solo suman).
+    permisos_extra = models.ManyToManyField(
+        "users.Permiso",
+        through="users.UsuarioPermisoExtra",
+        through_fields=("usuario", "permiso"),
+        related_name="usuarios_con_extra",
+        blank=True,
+    )
+
     objects = CustomUserManager()
 
     USERNAME_FIELD = "email"
@@ -136,6 +145,30 @@ class RolPermiso(BaseModel):
 
     def __str__(self) -> str:
         return f"{self.rol_id}:{self.permiso_id}"
+
+
+class UsuarioPermisoExtra(BaseModel):
+    """Permiso otorgado a un usuario por fuera de su rol. Solo suma: no quita
+    nada de lo que el rol ya da. Si el rol está desactivado, tampoco cuenta."""
+
+    usuario = models.ForeignKey("users.User", on_delete=models.CASCADE, related_name="permisos_extra_asignados")
+    permiso = models.ForeignKey(Permiso, on_delete=models.CASCADE, related_name="asignaciones_usuario")
+    otorgado_por = models.ForeignKey(
+        "users.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="permisos_extra_otorgados",
+    )
+
+    class Meta:
+        db_table = "usuarios_permisos_extra"
+        constraints = [
+            models.UniqueConstraint(fields=["usuario", "permiso"], name="unique_permiso_extra_por_usuario"),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.usuario_id}:{self.permiso_id}"
 
 
 class RolAuditoria(BaseModel):

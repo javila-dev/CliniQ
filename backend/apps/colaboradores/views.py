@@ -36,7 +36,9 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         "user__rol_dinamico",
         "sede_principal",
         "sede_principal__clinica",
-    ).prefetch_related("especialidades", "sedes", "horarios", "horarios__sede", "grupos_atencion").all()
+    ).prefetch_related(
+        "especialidades", "sedes", "horarios", "horarios__sede", "grupos_atencion", "user__permisos_extra",
+    ).all()
     search_fields = ("user__first_name", "user__last_name", "user__email")
     ordering_fields = ("fecha_ingreso", "created_at", "user__first_name", "user__last_name")
 

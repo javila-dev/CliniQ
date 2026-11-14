@@ -25,8 +25,8 @@ from apps.core.logging import registrar_accion
 from apps.suscripciones.acceso import permitido_en_solo_lectura
 from apps.users import services
 from apps.users.cookie_sesion import borrar_cookie, refresh_de_la_peticion, respuesta_con_sesion
-from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso
-from apps.users.authorization import user_has_permission, user_is_tenant_admin
+from apps.users.models import Permiso, Rol, RolAuditoria, RolPermiso, UsuarioPermisoExtra
+from apps.users.authorization import get_user_permission_keys, user_has_permission, user_is_tenant_admin
 from apps.users.permissions import IsAdmin, IsSuperAdmin, RequireAnyPermission, RequirePermission, get_clinica_activa
 from apps.users.permissions_catalog import (
     CAPABILITY_CATALOG,
@@ -929,6 +929,10 @@ class UserViewSet(GenericViewSet):
             return [IsAdmin()]
         if self.action == "reenviar_invitacion":
             return [RequirePermission("usuarios.editar")()]
+        if self.action == "permisos_extra":
+            # Otorgar permisos sueltos es asignar permisos: pide lo mismo que
+            # cambiar los de un rol, además de poder editar usuarios.
+            return [RequirePermission("usuarios.editar")(), RequirePermission("roles.asignar_permisos")()]
         return [RequirePermission(permission_map.get(self.action, "usuarios.ver"))()]
 
     def get_queryset(self):
@@ -936,6 +940,7 @@ class UserViewSet(GenericViewSet):
             __import__("django.contrib.auth", fromlist=["get_user_model"])
             .get_user_model()
             .objects.select_related("clinica", "rol_dinamico", "colaborador__sede_principal")
+            .prefetch_related("permisos_extra")
         )
         clinica_activa = get_clinica_activa(self.request)
         if clinica_activa is not None:
@@ -1128,6 +1133,72 @@ class UserViewSet(GenericViewSet):
             clinica=user.clinica,
         )
         return Response({"ok": True})
+
+    @action(detail=True, methods=["put"], url_path="permisos-extra")
+    def permisos_extra(self, request, pk=None):
+        """Reemplaza los permisos que el usuario tiene además de su rol.
+
+        Límites (para que no sirva de escalera):
+        - nadie se los cambia a sí mismo;
+        - quien no es administrador no toca a un administrador ni otorga
+          permisos que él mismo no tiene;
+        - al administrador no se le asignan: ya los tiene todos.
+        """
+        user = self.get_object()
+        actor = request.user
+        if user.pk == actor.pk:
+            return error_response(
+                "No puedes cambiar tus propios permisos. Pídeselo a un administrador.",
+                "PERMISOS_PROPIOS",
+                status.HTTP_403_FORBIDDEN,
+            )
+        validar_cambio_sobre_usuario(request, user, cambia_rol=False)
+        if user_is_tenant_admin(user):
+            return error_response(
+                "El administrador ya tiene todos los permisos.",
+                "ADMIN_TIENE_TODO",
+                status.HTTP_400_BAD_REQUEST,
+            )
+
+        serializer = RolPermisosUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        nuevas = set(serializer.validated_data["permission_keys"])
+        actuales = set(user.permisos_extra.values_list("clave", flat=True))
+        agregadas = nuevas - actuales
+        quitadas = actuales - nuevas
+
+        if not user_is_tenant_admin(actor):
+            ajenas = agregadas - get_user_permission_keys(actor, request=request)
+            if ajenas:
+                return Response(
+                    {
+                        "error": "Solo puedes otorgar permisos que tú tienes.",
+                        "code": "PERMISO_NO_PROPIO",
+                        "permission_keys": sorted(ajenas),
+                    },
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        with transaction.atomic():
+            UsuarioPermisoExtra.objects.filter(usuario=user, permiso__clave__in=quitadas).delete()
+            UsuarioPermisoExtra.objects.bulk_create([
+                UsuarioPermisoExtra(usuario=user, permiso=permiso, otorgado_por=actor)
+                for permiso in Permiso.objects.filter(clave__in=agregadas)
+            ])
+
+        if agregadas or quitadas:
+            registrar_accion(
+                request, "usuario.permisos_extra", user,
+                {
+                    "resumen": f"Permisos adicionales de {user.email} actualizados",
+                    "usuario_email": user.email,
+                    "agregados": sorted(agregadas),
+                    "quitados": sorted(quitadas),
+                },
+                clinica=user.clinica,
+            )
+        user = self.get_queryset().get(pk=user.pk)
+        return Response(UserAdminSerializer(user, context=self.get_serializer_context()).data)
 
     @action(detail=True, methods=["post"], url_path="reenviar_invitacion")
     def reenviar_invitacion(self, request, pk=None):
