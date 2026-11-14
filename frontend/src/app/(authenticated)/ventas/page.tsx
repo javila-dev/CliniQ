@@ -1,16 +1,20 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Loader2, ShoppingBag, X } from 'lucide-react'
+import { Download, Loader2, Search, ShoppingBag } from 'lucide-react'
 import * as XLSX from 'xlsx'
 import { ventasApi } from '@/lib/api/cotizaciones'
 import { PageHeader } from '@/components/shared/PageHeader'
 import { LoadingState } from '@/components/shared/LoadingState'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import {
+  ChipsFiltros, FiltroPeriodo, ListaSeleccion, MenuFiltros, SeccionFiltro, Segmentado, etiquetaPeriodo, nombresRepetidos,
+  type ChipFiltro,
+} from '@/components/shared/Filtros'
+import { VentasTabs } from '@/components/cotizaciones/VentasTabs'
 import { useDebounce } from '@/hooks/useDebounce'
 import { toast } from '@/hooks/use-toast'
 import { useUserSedes } from '@/hooks/useUserSedes'
@@ -114,11 +118,30 @@ export default function VentasPage() {
   // El backend ya filtraba ?con_mora=1; faltaba en la pantalla (M5-30).
   const [pagos, setPagos] = useState<typeof TODAS | 'mora'>(TODAS)
   const [estado, setEstado] = useState<typeof TODAS | 'en_curso' | 'terminadas'>(TODAS)
+  const [tratamientos, setTratamientos] = useState<string[]>([])
   const [orden, setOrden] = useState<Orden>(ORDEN_INICIAL)
   const [page, setPage] = useState(1)
   const [abriendo, setAbriendo] = useState<string | null>(null)
   const [exportando, setExportando] = useState(false)
   const debouncedBusqueda = useDebounce(busqueda, 350)
+
+  // Desde el resumen por asesor se llega con ?vendedor=&desde=&hasta=&sede=&tratamiento=.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('vendedor')) setVendedor(q.get('vendedor')!)
+    if (q.get('desde')) setDesde(q.get('desde')!)
+    if (q.get('hasta')) setHasta(q.get('hasta')!)
+    if (q.get('sede')) setSede(q.get('sede')!)
+    if (q.get('tratamiento')) setTratamientos(q.get('tratamiento')!.split(',').filter(Boolean))
+    // Ya aplicados: se quitan de la URL para que recargar no traiga de vuelta un filtro que se quitó.
+    if (q.toString()) window.history.replaceState(null, '', window.location.pathname)
+  }, [])
+
+  const { data: catalogo = [] } = useQuery({
+    queryKey: ['ventas', 'tratamientos'],
+    queryFn: ventasApi.tratamientos,
+    staleTime: 5 * 60 * 1000,
+  })
 
   const { data: vendedores = [] } = useQuery({
     queryKey: ['ventas', 'vendedores'],
@@ -137,6 +160,7 @@ export default function VentasPage() {
   if (vendedor !== TODAS) params.vendedor = vendedor
   if (pagos === 'mora') params.con_mora = '1'
   if (estado !== TODAS) params.terminada = estado === 'terminadas' ? 'true' : 'false'
+  if (tratamientos.length) params.tratamiento = tratamientos.join(',')
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['ventas', params],
@@ -144,7 +168,10 @@ export default function VentasPage() {
   })
 
   const total = data?.count ?? 0
-  const hayFiltros = Boolean(debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS || pagos !== TODAS || estado !== TODAS)
+  const hayFiltros = Boolean(
+    debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS || pagos !== TODAS
+    || estado !== TODAS || tratamientos.length,
+  )
 
   function conReinicio<T>(set: (v: T) => void) {
     return (v: T) => {
@@ -169,6 +196,7 @@ export default function VentasPage() {
     setVendedor(TODAS)
     setPagos(TODAS)
     setEstado(TODAS)
+    setTratamientos([])
     setPage(1)
   }
 
@@ -209,6 +237,30 @@ export default function VentasPage() {
     }
   }
 
+  const repetidos = nombresRepetidos(vendedores)
+  const nombreDe = (lista: { id: string; nombre: string }[], id: string) => lista.find((x) => x.id === id)?.nombre ?? '…'
+  const chips: ChipFiltro[] = [
+    ...(desde || hasta
+      ? [{ clave: 'periodo', label: etiquetaPeriodo(desde, hasta), onQuitar: () => { setDesde(''); setHasta(''); setPage(1) } }]
+      : []),
+    ...(sede !== TODAS ? [{ clave: 'sede', label: nombreDe(sedes, sede), onQuitar: () => conReinicio(setSede)(TODAS) }] : []),
+    ...(vendedor !== TODAS
+      ? [{ clave: 'vendedor', label: `Vendió: ${nombreDe(vendedores, vendedor)}`, onQuitar: () => conReinicio(setVendedor)(TODAS) }]
+      : []),
+    ...tratamientos.map((id) => ({
+      clave: `trat-${id}`,
+      label: nombreDe(catalogo, id),
+      onQuitar: () => conReinicio(setTratamientos)(tratamientos.filter((x) => x !== id)),
+    })),
+    ...(pagos === 'mora' ? [{ clave: 'pagos', label: 'En mora', onQuitar: () => conReinicio(setPagos)(TODAS) }] : []),
+    ...(estado !== TODAS
+      ? [{ clave: 'estado', label: estado === 'terminadas' ? 'Terminadas' : 'Vigentes', onQuitar: () => conReinicio(setEstado)(TODAS) }]
+      : []),
+  ]
+  // Lo que está dentro del menú Filtros (el periodo y la búsqueda se ven en la fila).
+  const filtrosMenu = [sede !== TODAS, vendedor !== TODAS, tratamientos.length > 0, pagos !== TODAS, estado !== TODAS]
+    .filter(Boolean).length
+
   function abrir(v: Venta) {
     setAbriendo(v.id)
     router.push(`/ventas/${v.id}`)
@@ -227,87 +279,82 @@ export default function VentasPage() {
         }
       />
 
-      <div className="flex items-end gap-3 flex-wrap">
-        <div className="space-y-1 w-full sm:w-auto">
-          <label className="text-xs font-medium text-muted-foreground">Buscar</label>
-          <Input
-            placeholder="Paciente…"
-            value={busqueda}
-            onChange={(e) => conReinicio(setBusqueda)(e.target.value)}
-            className="w-full sm:w-56 h-9"
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Vendidas desde</label>
-          <Input
-            type="date"
-            value={desde}
-            max={hasta || undefined}
-            onChange={(e) => conReinicio(setDesde)(e.target.value)}
-            className="w-40 h-9"
-          />
-        </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Hasta</label>
-          <Input
-            type="date"
-            value={hasta}
-            min={desde || undefined}
-            onChange={(e) => conReinicio(setHasta)(e.target.value)}
-            className="w-40 h-9"
-          />
-        </div>
-        {sedes.length > 1 && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Sede</label>
-            <Select value={sede} onValueChange={conReinicio(setSede)}>
-              <SelectTrigger className="w-44 h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={TODAS}>Todas las sedes</SelectItem>
-                {sedes.map((s) => <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>)}
-              </SelectContent>
-            </Select>
+      <VentasTabs />
+
+      <div className="space-y-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative w-full sm:w-64">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Buscar paciente…"
+              aria-label="Buscar paciente"
+              value={busqueda}
+              onChange={(e) => conReinicio(setBusqueda)(e.target.value)}
+              className="h-9 pl-8"
+            />
           </div>
-        )}
-        {vendedores.length > 1 && (
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">Profesional</label>
-            <Select value={vendedor} onValueChange={conReinicio(setVendedor)}>
-              <SelectTrigger className="w-48 h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value={TODAS}>Todos</SelectItem>
-                {vendedores.map((v) => <SelectItem key={v.id} value={v.id}>{v.nombre}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Pagos</label>
-          <Select value={pagos} onValueChange={(v) => conReinicio(setPagos)(v as typeof pagos)}>
-            <SelectTrigger className="w-36 h-9"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TODAS}>Todas</SelectItem>
-              <SelectItem value="mora">En mora</SelectItem>
-            </SelectContent>
-          </Select>
+          <FiltroPeriodo
+            desde={desde}
+            hasta={hasta}
+            onChange={(d, h) => { setDesde(d); setHasta(h); setPage(1) }}
+          />
+          <MenuFiltros activos={filtrosMenu}>
+            {sedes.length > 1 && (
+              <SeccionFiltro titulo="Sede">
+                <ListaSeleccion
+                  opciones={sedes.map((s) => ({ id: s.id, nombre: s.nombre }))}
+                  seleccion={sede === TODAS ? [] : [sede]}
+                  onChange={(ids) => conReinicio(setSede)(ids[0] ?? TODAS)}
+                  todos="Todas las sedes"
+                />
+              </SeccionFiltro>
+            )}
+            {vendedores.length > 1 && (
+              <SeccionFiltro titulo="Profesional que vendió">
+                <ListaSeleccion
+                  opciones={vendedores.map((v) => ({
+                    id: v.id, nombre: v.nombre,
+                    detalle: repetidos.has(v.nombre.trim().toLowerCase()) ? v.email : undefined,
+                  }))}
+                  seleccion={vendedor === TODAS ? [] : [vendedor]}
+                  onChange={(ids) => conReinicio(setVendedor)(ids[0] ?? TODAS)}
+                  buscar="Buscar profesional…"
+                />
+              </SeccionFiltro>
+            )}
+            <SeccionFiltro titulo="Tratamiento o procedimiento">
+              <ListaSeleccion
+                multiple
+                opciones={catalogo.map((c) => ({
+                  id: c.id, nombre: c.nombre, grupo: c.tipo === 'tratamiento' ? 'Tratamientos' : 'Procedimientos',
+                }))}
+                seleccion={tratamientos}
+                onChange={conReinicio(setTratamientos)}
+                buscar="Buscar tratamiento…"
+                vacio="Todavía no hay ventas con tratamientos del catálogo."
+              />
+            </SeccionFiltro>
+            <SeccionFiltro titulo="Pagos">
+              <Segmentado<typeof pagos>
+                opciones={[{ value: TODAS, label: 'Todas' }, { value: 'mora', label: 'En mora' }]}
+                valor={pagos}
+                onChange={conReinicio(setPagos)}
+              />
+            </SeccionFiltro>
+            <SeccionFiltro titulo="Estado">
+              <Segmentado<typeof estado>
+                opciones={[
+                  { value: TODAS, label: 'Todas' },
+                  { value: 'en_curso', label: 'Vigentes' },
+                  { value: 'terminadas', label: 'Terminadas' },
+                ]}
+                valor={estado}
+                onChange={conReinicio(setEstado)}
+              />
+            </SeccionFiltro>
+          </MenuFiltros>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs font-medium text-muted-foreground">Estado</label>
-          <Select value={estado} onValueChange={(v) => conReinicio(setEstado)(v as typeof estado)}>
-            <SelectTrigger className="w-36 h-9"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value={TODAS}>Todas</SelectItem>
-              <SelectItem value="en_curso">Vigentes</SelectItem>
-              <SelectItem value="terminadas">Terminadas</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        {hayFiltros && (
-          <Button variant="ghost" size="sm" className="h-9" onClick={limpiar}>
-            <X className="h-3.5 w-3.5 mr-1.5" />
-            Limpiar
-          </Button>
-        )}
+        <ChipsFiltros chips={chips} onLimpiar={limpiar} />
       </div>
 
       {isLoading ? (

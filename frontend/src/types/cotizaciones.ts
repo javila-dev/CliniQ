@@ -321,6 +321,13 @@ export interface Venta {
   valor_perdonado?: string
 }
 
+/** Tratamiento o procedimiento que aparece en las ventas (opciones del filtro). */
+export interface CatalogoVendido {
+  id: string
+  nombre: string
+  tipo: 'tratamiento' | 'procedimiento'
+}
+
 // ── Terminación de ventas (docs/plan-terminacion-ventas.md) ─────────────────
 
 export type MotivoTerminacion = 'economico' | 'insatisfaccion' | 'salud' | 'traslado' | 'no_responde' | 'otro'
