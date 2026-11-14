@@ -25,6 +25,13 @@ export interface Paciente {
   autoriza_datos: boolean
   activo: boolean
   created_at: string
+
+  /** Sede donde se registró. El paciente es de la clínica: solo sirve para filtrar. */
+  sede_registro?: string | null
+  sede_registro_nombre?: string | null
+  /** Sede de su última cita (o cotización, o la de registro). Calculada. */
+  sede_habitual?: string | null
+  sede_habitual_nombre?: string | null
   updated_at: string
 
   /** true si la API enmascaró documento/teléfono/email/dirección/fecha de nacimiento
@@ -75,6 +82,8 @@ export interface CreatePacienteRequest {
   email?: string
   canal_confirmacion: CanalConfirmacion
   autoriza_datos: boolean
+  /** Sin enviar al crear: la sede principal de quien lo registra, o la única de la clínica. */
+  sede_registro?: string | null
 
   // H5.2 — campos extendidos (todos opcionales)
   direccion?: string

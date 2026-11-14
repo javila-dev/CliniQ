@@ -44,7 +44,7 @@ Al cambiar una app, correr sus pruebas y las de las apps que la importan
 | Si cambia… | Correr también |
 |---|---|
 | `historia_clinica` | agenda, configuracion, consentimientos, cotizaciones, inventario, obesidad, pacientes, protocolos |
-| `cotizaciones` | agenda, cartera, consentimientos, historia_clinica, inventario, migracion, reportes, seguimiento |
+| `cotizaciones` | agenda, cartera, consentimientos, historia_clinica, inventario, migracion, pacientes, reportes, seguimiento |
 | `protocolos` | agenda, cotizaciones, historia_clinica, inventario, migracion, pacientes, seguimiento |
 | `pacientes` | agenda, configuracion, consentimientos, cotizaciones, historia_clinica, migracion, notificaciones, seguimiento, suscripciones |
 | `cobros` | agenda, caja, cartera, cotizaciones, inventario, migracion, reportes, suscripciones |

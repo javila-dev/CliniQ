@@ -46,7 +46,10 @@ export interface PacientesFilter {
   sexo?: string
   canal_confirmacion?: string
   tipo_documento?: string
+  /** Sede habitual (la de su última cita). */
+  sede?: string
   page?: number
+  page_size?: number
 }
 
 export const pacientesApi = {
@@ -96,13 +99,15 @@ export const pacientesApi = {
   },
 
   /** Activos que cumplen años hoy o en los próximos `dias` (7 por defecto). */
-  cumpleanos: async (dias = 7): Promise<CumpleanosPaciente[]> => {
-    const res = await apiClient.get<CumpleanosPaciente[]>('/pacientes/cumpleanos/', { params: { dias } })
+  /** Con `sede`: registrados, atendidos o cotizados en esa sede. */
+  cumpleanos: async (dias = 7, sede?: string): Promise<CumpleanosPaciente[]> => {
+    const res = await apiClient.get<CumpleanosPaciente[]>('/pacientes/cumpleanos/', { params: { dias, sede } })
     return res.data
   },
 
-  resumen: async (): Promise<ResumenPacientes> => {
-    const res = await apiClient.get<ResumenPacientes>('/pacientes/resumen/')
+  /** Con `sede`: cada paciente cuenta en su sede habitual. */
+  resumen: async (sede?: string): Promise<ResumenPacientes> => {
+    const res = await apiClient.get<ResumenPacientes>('/pacientes/resumen/', { params: { sede } })
     return res.data
   },
 

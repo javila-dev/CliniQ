@@ -7,6 +7,7 @@ import { AlertTriangle, Loader2, Lock } from 'lucide-react'
 import { pacientesApi } from '@/lib/api/pacientes'
 import { useDebounce } from '@/hooks/useDebounce'
 import { useAuthStore } from '@/store/authStore'
+import { useUserSedes } from '@/hooks/useUserSedes'
 import { useForm, Controller, type FieldErrors } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -69,6 +70,7 @@ const baseSchema = z.object({
   tipo_afiliado: z.string().optional(), regimen: z.string().optional(),
   nombre_responsable: z.string().optional(), parentesco_responsable: z.string().optional(),
   telefono_responsable: z.string().optional(),
+  sede_registro: z.string().optional(),
 })
 
 type FormValues = z.infer<typeof baseSchema>
@@ -116,6 +118,7 @@ type TabKey = keyof typeof TABS_LABEL
 const CAMPOS_TAB: Partial<Record<keyof FormValues, TabKey>> = {
   nombres: 'basico', apellidos: 'basico', tipo_documento: 'basico', numero_documento: 'basico', sexo: 'basico',
   fecha_nacimiento: 'basico', telefono: 'basico', email: 'basico', canal_confirmacion: 'basico',
+  sede_registro: 'basico',
   direccion: 'personal', ciudad: 'personal', barrio: 'personal', estado_civil: 'personal', ocupacion: 'personal',
   escolaridad: 'personal', grupo_etnico: 'personal', nombre_responsable: 'personal',
   parentesco_responsable: 'personal', telefono_responsable: 'personal',
@@ -180,6 +183,18 @@ export function PacienteForm({
       : null
   const [codigoPais, setCodigoPais] = useState(detectado?.code ?? 'CO')
 
+  // Sede de registro: solo para filtrar (cumpleaños, estadísticas); el paciente
+  // sigue siendo de toda la clínica. Con una sola sede no se pregunta: el
+  // backend la pone sola.
+  const autenticado = useAuthStore((s) => s.isAuthenticated)
+  const sedePrincipal = useAuthStore((s) => s.user?.sede_id) ?? null
+  const { sedes: sedesUsuario } = useUserSedes()
+  const opcionesSede = [...sedesUsuario]
+  if (defaultValues?.sede_registro && !opcionesSede.some((s) => s.id === defaultValues.sede_registro)) {
+    opcionesSede.push({ id: defaultValues.sede_registro, nombre: defaultValues.sede_registro_nombre ?? 'Otra sede' })
+  }
+  const preguntarSede = autenticado && opcionesSede.length > 1
+
   const [errorServidor, setErrorServidor] = useState<string | null>(null)
   const { register, handleSubmit, control, watch, setError, formState: { errors } } = useForm<FormValues>({
     resolver: zodResolver(crearSchema(tabsRequeridos, lockSensitive)),
@@ -197,10 +212,13 @@ export function PacienteForm({
       nombre_responsable: defaultValues.nombre_responsable ?? '',
       parentesco_responsable: defaultValues.parentesco_responsable ?? '',
       telefono_responsable: defaultValues.telefono_responsable ?? '',
+      sede_registro: defaultValues.sede_registro ?? '',
     } : {
       nombres: initialNombre ?? '', tipo_documento: 'CC', sexo: 'F',
       telefono: detectado ? detectado.localPhone.replace(/\D/g, '') : undefined,
       canal_confirmacion: 'whatsapp', autoriza_datos: false,
+      // Arranca en la sede principal de quien lo registra (si tiene).
+      sede_registro: sedePrincipal ?? '',
     },
   })
 
@@ -212,7 +230,6 @@ export function PacienteForm({
   // Aviso de posible duplicado por teléfono o correo (M2-20). No bloquea: los
   // familiares comparten teléfono; el duplicado real es el documento. Solo con
   // sesión iniciada: el autorregistro público no debe revelar quién es paciente.
-  const autenticado = useAuthStore((s) => s.isAuthenticated)
   const telDigitos = useDebounce(watch('telefono') ?? '', 500).replace(/\D/g, '')
   const emailDebounced = useDebounce(watch('email') ?? '', 500).trim()
   const telCompleto = '+' + dialCode + telDigitos
@@ -269,6 +286,9 @@ export function PacienteForm({
       nombre_responsable: values.nombre_responsable || vacio,
       parentesco_responsable: values.parentesco_responsable || vacio,
       telefono_responsable: values.telefono_responsable || vacio,
+    }
+    if (preguntarSede) {
+      payload.sede_registro = values.sede_registro || (defaultValues ? null : undefined)
     }
 
     if (lockSensitive) {
@@ -408,6 +428,27 @@ export function PacienteForm({
           )} />
         </Field>
       </div>
+
+      {preguntarSede && (
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <Field label="Sede de registro" error={errors.sede_registro?.message}>
+            <Controller name="sede_registro" control={control} render={({ field }) => (
+              <Select value={field.value || NONE} onValueChange={(v) => field.onChange(v === NONE ? '' : v)}>
+                <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NONE}><span className="text-muted-foreground">Sin definir</span></SelectItem>
+                  {opcionesSede.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )} />
+          </Field>
+          <p className="sm:col-span-2 self-end pb-2 text-xs text-muted-foreground">
+            Solo para filtrar cumpleaños y estadísticas: el paciente puede atenderse en cualquier sede.
+          </p>
+        </div>
+      )}
 
       {avisoDuplicados.length > 0 && (
         <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2" role="status">

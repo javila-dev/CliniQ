@@ -1,11 +1,14 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
 import { Cake } from 'lucide-react'
 
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useUserSedes } from '@/hooks/useUserSedes'
 import { pacientesApi, type CumpleanosPaciente } from '@/lib/api/pacientes'
 import { cn, toTitleCase } from '@/lib/utils'
 
@@ -33,11 +36,22 @@ function linkFelicitar(p: CumpleanosPaciente): string | null {
   return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`
 }
 
-/** Pacientes que cumplen años hoy y en la semana, para felicitarlos a tiempo. */
+const TODAS = 'todas'
+
+/** Pacientes que cumplen años hoy y en la semana, para felicitarlos a tiempo.
+ *  Con varias sedes se filtra por sede: entra quien se registró, se atendió o se
+ *  cotizó ahí (quien va a dos sedes sale en las dos). Quien está acotado a una
+ *  sede arranca en la suya. */
 export function CumpleanosCard({ className }: { className?: string }) {
+  const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
+  const [eleccion, setEleccion] = useState<string | null>(null)
+  const filtro = eleccion ?? defaultSedeId ?? TODAS
+  const sede = filtro === TODAS ? undefined : filtro
+  const ofrecerFiltro = sedes.length > 1 || (!isAllSedes && sedes.length === 1)
+
   const { data, isLoading } = useQuery({
-    queryKey: ['pacientes', 'cumpleanos', DIAS],
-    queryFn: () => pacientesApi.cumpleanos(DIAS),
+    queryKey: ['pacientes', 'cumpleanos', DIAS, sede ?? null],
+    queryFn: () => pacientesApi.cumpleanos(DIAS, sede),
     staleTime: 30 * 60 * 1000,
   })
 
@@ -48,12 +62,32 @@ export function CumpleanosCard({ className }: { className?: string }) {
 
   return (
     <div className={cn('rounded-xl border bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md', className)}>
-      <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <Cake className="h-4 w-4 text-primary" />
-          <h2 className="text-sm font-semibold">Cumpleaños</h2>
+      <div className="mb-3 flex items-start justify-between gap-2">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <Cake className="h-4 w-4 shrink-0 text-primary" />
+            <h2 className="text-sm font-semibold">Cumpleaños</h2>
+          </div>
+          {/* Con selector de sede no caben los dos en la fila: el rango va debajo. */}
+          {ofrecerFiltro && (
+            <p className="mt-0.5 pl-6 text-xs text-muted-foreground">Próximos {DIAS} días</p>
+          )}
         </div>
-        <span className="text-xs text-muted-foreground">Próximos {DIAS} días</span>
+        {ofrecerFiltro ? (
+          <Select value={filtro} onValueChange={setEleccion}>
+            <SelectTrigger className="h-7 w-auto min-w-0 max-w-[11rem] shrink gap-1 border-gray-200 px-2 text-xs" aria-label="Sede">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODAS}>Todas las sedes</SelectItem>
+              {sedes.map((s) => (
+                <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <span className="shrink-0 text-xs text-muted-foreground">Próximos {DIAS} días</span>
+        )}
       </div>
 
       {isLoading ? (
@@ -62,7 +96,9 @@ export function CumpleanosCard({ className }: { className?: string }) {
           <Skeleton className="h-4 w-3/4" />
         </div>
       ) : lista.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nadie cumple años esta semana.</p>
+        <p className="text-sm text-muted-foreground">
+          {sede ? 'Nadie de esta sede cumple años esta semana.' : 'Nadie cumple años esta semana.'}
+        </p>
       ) : (
         <>
           {hoy > 0 && (

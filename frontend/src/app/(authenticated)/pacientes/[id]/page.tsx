@@ -413,6 +413,12 @@ export default function PacienteDetailPage({ params }: Props) {
             <Dato label="Correo electrónico" value={p.email} />
             <Dato label="Canal de confirmación" value={CANAL_LABEL[p.canal_confirmacion] ?? p.canal_confirmacion} />
             <Dato label="Autoriza tratamiento de datos" value={p.autoriza_datos} />
+            {(p.sede_registro_nombre || p.sede_habitual_nombre) && (
+              <Dato label="Sede de registro" value={p.sede_registro_nombre} />
+            )}
+            {p.sede_habitual_nombre && p.sede_habitual_nombre !== p.sede_registro_nombre && (
+              <Dato label="Sede habitual (última cita)" value={p.sede_habitual_nombre} />
+            )}
           </Seccion>
 
           <Seccion title="Datos personales">
