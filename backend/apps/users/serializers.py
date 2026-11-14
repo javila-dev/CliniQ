@@ -4,7 +4,12 @@ from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 from apps.core.models import ConfiguracionGlobal
 from apps.core.storage import get_public_url, upload_public_file, read_public_file
-from apps.users.authorization import get_user_permission_keys, user_is_tenant_admin, user_sede_ids_acotadas
+from apps.users.authorization import (
+    get_user_permission_keys,
+    permisos_extra_de,
+    user_is_tenant_admin,
+    user_sede_ids_acotadas,
+)
 from apps.users.models import Permiso, Rol
 from apps.users.permissions_catalog import PERMISOS_SOLO_CHECK_ATIENDE
 from apps.users.services import validate_password_strength
@@ -127,6 +132,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
     role_id = serializers.SerializerMethodField()
     role_nombre = serializers.SerializerMethodField()
     permissions = serializers.SerializerMethodField()
+    permisos_extra = serializers.SerializerMethodField()
     nombre_completo = serializers.CharField(read_only=True)
     tiene_colaborador = serializers.SerializerMethodField()
     sede_principal_nombre = serializers.SerializerMethodField()
@@ -144,6 +150,7 @@ class UserAdminSerializer(serializers.ModelSerializer):
             "role_id",
             "role_nombre",
             "permissions",
+            "permisos_extra",
             "es_profesional",
             "telefono",
             "foto_perfil",
@@ -188,6 +195,12 @@ class UserAdminSerializer(serializers.ModelSerializer):
 
     def get_permissions(self, obj):
         return sorted(get_user_permission_keys(obj, request=self.context.get("request")))
+
+    def get_permisos_extra(self, obj):
+        """Claves otorgadas además del rol (vacío para el administrador)."""
+        if user_is_tenant_admin(obj):
+            return []
+        return sorted(permisos_extra_de(obj))
 
 
 class UserCreateSerializer(serializers.ModelSerializer):

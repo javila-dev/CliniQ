@@ -23,6 +23,7 @@ import { cn, todayISO } from '@/lib/utils'
 import { useAuthStore } from '@/store/authStore'
 import { hasPermission, PERM } from '@/lib/permissions'
 import { GruposAtencionSelect, useGruposAtencion } from '@/components/colaboradores/GruposAtencionSelect'
+import { PermisosExtraField, usePuedeAsignarPermisosExtra } from '@/components/colaboradores/PermisosExtraField'
 import { toast } from '@/hooks/use-toast'
 import type { Colaborador, HorarioColaborador } from '@/types/colaboradores'
 import type { Rol, VistaAtencion } from '@/types/usuarios'
@@ -513,6 +514,7 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
   // el usuario, aparte del colaborador, al guardar el formulario: solo la ve
   // quien puede editar usuarios (gestionar colaboradores no alcanza).
   const puedeCambiarVista = hasPermission(useAuthStore((st) => st.user), PERM.USUARIOS_EDITAR)
+  const puedeAsignarExtra = usePuedeAsignarPermisosExtra(usuarioDetail)
   const { vista: vistaClinica } = useVistaAtencionClinica()
   const vistaGuardada = usuarioDetail?.vista_atencion ?? null
   const [vistaUsuario, setVistaUsuario] = useState<VistaAtencion | null>(null)
@@ -991,6 +993,12 @@ export function ColaboradorDialog({ open, onOpenChange, colaborador, puedeAgrega
                               </SelectContent>
                             </Select>
                           </Campo>
+                        )}
+                        {usuarioDetail && puedeAsignarExtra && (
+                          <PermisosExtraField
+                            usuario={usuarioDetail}
+                            rol={roles.find((r) => r.id === usuarioDetail.role_id)}
+                          />
                         )}
                       </Seccion>
                       {editForm.watch('es_profesional') && (

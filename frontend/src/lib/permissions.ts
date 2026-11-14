@@ -82,6 +82,7 @@ export const PERM = {
   ROLES_CREAR:               'roles.crear',
   ROLES_EDITAR:              'roles.editar',
   ROLES_ELIMINAR:            'roles.eliminar',
+  ROLES_ASIGNAR_PERMISOS:    'roles.asignar_permisos',
 
   // Configuración de clínica
   CLINICAS_VER:              'clinicas.ver',

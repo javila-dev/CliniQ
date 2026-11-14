@@ -54,6 +54,12 @@ export const usuariosApi = {
     return res.data
   },
 
+  /** Reemplaza los permisos que tiene además de su rol. */
+  setPermisosExtra: async (id: string, permission_keys: string[]): Promise<UsuarioAdmin> => {
+    const res = await apiClient.put<UsuarioAdmin>(`/usuarios/${id}/permisos-extra/`, { permission_keys })
+    return res.data
+  },
+
   reenviarInvitacion: async (id: string): Promise<{ ok: boolean; url: string; email_enviado: boolean }> => {
     const res = await apiClient.post<{ ok: boolean; url: string; email_enviado: boolean }>(
       `/usuarios/${id}/reenviar_invitacion/`

@@ -42,6 +42,7 @@ export const ACCION_LABEL: Record<string, string> = {
   'usuario.desactivar':          'Usuario desactivado',
   'usuario.reenviar_invitacion': 'Invitación reenviada',
   'usuario.cambiar_password':    'Contraseña cambiada',
+  'usuario.permisos_extra':      'Permisos adicionales actualizados',
   'rol.crear':                   'Rol creado',
   'rol.editar':                  'Rol actualizado',
   'rol.eliminar':                'Rol eliminado',

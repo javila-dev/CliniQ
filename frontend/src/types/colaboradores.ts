@@ -83,6 +83,8 @@ export interface Colaborador {
   rol?: UserRole
   role_id?: string | null
   role_nombre?: string | null
+  /** Permisos que tiene además de su rol. */
+  permisos_extra_count?: number
   es_profesional?: boolean
   telefono?: string | null
   foto_perfil?: string | null

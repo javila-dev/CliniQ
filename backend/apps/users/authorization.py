@@ -11,6 +11,16 @@ def _legacy_role_permissions(role: str) -> set[str]:
     return set(ROLE_PERMISSION_DEFAULTS.get(role, set()))
 
 
+def permisos_extra_de(user) -> set[str]:
+    """Claves otorgadas al usuario además de su rol (las activas del catálogo).
+
+    Usa el prefetch de ``permisos_extra`` si el queryset lo trae (listados)."""
+    cache = getattr(user, "_prefetched_objects_cache", {})
+    if "permisos_extra" in cache:
+        return {p.clave for p in cache["permisos_extra"] if p.activo}
+    return set(user.permisos_extra.filter(activo=True).values_list("clave", flat=True))
+
+
 def get_user_permission_keys(user, request=None) -> set[str]:
     if not user or not getattr(user, "is_authenticated", False):
         return set()
@@ -38,8 +48,12 @@ def get_user_permission_keys(user, request=None) -> set[str]:
         )
     # El check "atiende pacientes" da los permisos de atencion clinica,
     # independiente del rol (salvo rol desactivado: sin acceso).
-    if getattr(user, "es_profesional", False) and not (rol is not None and not rol.activo):
+    rol_desactivado = rol is not None and not rol.activo
+    if getattr(user, "es_profesional", False) and not rol_desactivado:
         permissions |= PERMISOS_ATIENDE_PACIENTES
+    # Permisos otorgados al usuario por fuera de su rol: solo suman.
+    if not rol_desactivado and getattr(user, "pk", None):
+        permissions |= permisos_extra_de(user)
 
     if request is not None:
         request._rbac_permission_cache[cache_key] = permissions

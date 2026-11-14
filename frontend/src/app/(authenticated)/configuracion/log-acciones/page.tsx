@@ -116,6 +116,7 @@ const ACCION_MAP: Record<string, AccionMeta> = {
   'usuario.desactivar': { label: resumenO('Desactivó un usuario'), icon: UserCog, color: ROJO },
   'usuario.eliminar': { label: resumenO('Eliminó un usuario'), icon: UserCog, color: ROJO },
   'usuario.cambiar_password': { label: resumenO('Cambió la contraseña de un usuario'), icon: UserCog, color: AMBAR },
+  'usuario.permisos_extra': { label: resumenO('Cambió los permisos adicionales de un usuario'), icon: Shield, color: VIOLETA },
   'usuario.reenviar_invitacion': { label: resumenO('Reenvió una invitación'), icon: UserCog, color: AZUL },
   'usuario.suplantar': { label: resumenO('Ingresó como otro usuario'), icon: UserCog, color: AMBAR },
   'usuario.suplantar_fin': { label: resumenO('Volvió a su propia cuenta'), icon: UserCog, color: GRIS },
@@ -175,6 +176,7 @@ const TIPOS = [
   { value: 'cotizacion.autorizacion_precio.solicitar', label: 'Precios por autorizar' },
   { value: 'cotizacion.autorizacion_precio.autorizar', label: 'Precios autorizados' },
   { value: 'rol.permisos', label: 'Cambios de permisos' },
+  { value: 'usuario.permisos_extra', label: 'Permisos adicionales' },
   { value: 'usuario.suplantar', label: 'Ingresos como otro usuario' },
 ]
 
