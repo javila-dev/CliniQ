@@ -29,7 +29,7 @@ const ORDEN_INICIAL: Orden = { campo: 'aceptada_en', desc: true }
 
 /** Avance de sesiones: barra fina con "3/6". */
 function Sesiones({ venta }: { venta: Venta }) {
-  if (!venta.sesiones) return <span className="text-gray-400">—</span>
+  if (!venta.sesiones) return venta.terminada_en ? <Terminada /> : <span className="text-gray-400">—</span>
   const { completadas, total } = venta.sesiones
   const pct = Math.min(100, Math.round((completadas / total) * 100))
   return (
@@ -38,7 +38,17 @@ function Sesiones({ venta }: { venta: Venta }) {
         <div className={pct === 100 ? 'h-full rounded-full bg-emerald-500' : 'h-full rounded-full bg-primary'} style={{ width: `${pct}%` }} />
       </div>
       <span className="text-xs tabular-nums text-gray-600">{completadas}/{total}</span>
+      {venta.terminada_en && <Terminada />}
     </div>
+  )
+}
+
+/** El paciente dejó la venta a medias: ya no se agendan más sesiones. */
+function Terminada() {
+  return (
+    <span className="inline-flex items-center rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-500/15">
+      Terminada
+    </span>
   )
 }
 
@@ -62,6 +72,17 @@ function Pagado({ venta }: { venta: Venta }) {
 
 function Saldo({ venta }: { venta: Venta }) {
   if (Number(venta.saldo_pendiente) <= 0) {
+    // Terminada con saldo perdonado: no quedó pagada, quedó cerrada.
+    if (Number(venta.valor_perdonado ?? 0) > 0) {
+      return (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600 ring-1 ring-inset ring-gray-500/15"
+          title="Al terminar la venta se perdonó el saldo"
+        >
+          Saldo perdonado
+        </span>
+      )
+    }
     return (
       <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/15">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" aria-hidden />
@@ -92,6 +113,7 @@ export default function VentasPage() {
   const [vendedor, setVendedor] = useState(TODAS)
   // El backend ya filtraba ?con_mora=1; faltaba en la pantalla (M5-30).
   const [pagos, setPagos] = useState<typeof TODAS | 'mora'>(TODAS)
+  const [estado, setEstado] = useState<typeof TODAS | 'en_curso' | 'terminadas'>(TODAS)
   const [orden, setOrden] = useState<Orden>(ORDEN_INICIAL)
   const [page, setPage] = useState(1)
   const [abriendo, setAbriendo] = useState<string | null>(null)
@@ -114,6 +136,7 @@ export default function VentasPage() {
   if (sede !== TODAS) params.sede = sede
   if (vendedor !== TODAS) params.vendedor = vendedor
   if (pagos === 'mora') params.con_mora = '1'
+  if (estado !== TODAS) params.terminada = estado === 'terminadas' ? 'true' : 'false'
 
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['ventas', params],
@@ -121,7 +144,7 @@ export default function VentasPage() {
   })
 
   const total = data?.count ?? 0
-  const hayFiltros = Boolean(debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS || pagos !== TODAS)
+  const hayFiltros = Boolean(debouncedBusqueda || desde || hasta || sede !== TODAS || vendedor !== TODAS || pagos !== TODAS || estado !== TODAS)
 
   function conReinicio<T>(set: (v: T) => void) {
     return (v: T) => {
@@ -145,6 +168,7 @@ export default function VentasPage() {
     setSede(TODAS)
     setVendedor(TODAS)
     setPagos(TODAS)
+    setEstado(TODAS)
     setPage(1)
   }
 
@@ -170,9 +194,11 @@ export default function VentasPage() {
         Saldo: Number(v.saldo_pendiente),
         'En mora': v.en_mora ? 'Sí' : 'No',
         Sesiones: v.sesiones ? `${v.sesiones.completadas}/${v.sesiones.total}` : '',
+        Terminada: v.terminada_en ? 'Sí' : 'No',
+        Perdonado: Number(v.valor_perdonado ?? 0),
       }))
       const ws = XLSX.utils.json_to_sheet(filas, { cellDates: true, dateNF: 'dd/mm/yyyy' })
-      ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 9 }, { wch: 10 }]
+      ws['!cols'] = [{ wch: 12 }, { wch: 30 }, { wch: 18 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 9 }, { wch: 10 }, { wch: 10 }, { wch: 14 }]
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, 'Ventas')
       XLSX.writeFile(wb, `ventas_${new Date().toLocaleDateString('en-CA')}.xlsx`)
@@ -262,6 +288,17 @@ export default function VentasPage() {
             <SelectContent>
               <SelectItem value={TODAS}>Todas</SelectItem>
               <SelectItem value="mora">En mora</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <label className="text-xs font-medium text-muted-foreground">Estado</label>
+          <Select value={estado} onValueChange={(v) => conReinicio(setEstado)(v as typeof estado)}>
+            <SelectTrigger className="w-36 h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={TODAS}>Todas</SelectItem>
+              <SelectItem value="en_curso">Vigentes</SelectItem>
+              <SelectItem value="terminadas">Terminadas</SelectItem>
             </SelectContent>
           </Select>
         </div>

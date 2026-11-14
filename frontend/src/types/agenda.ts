@@ -31,6 +31,8 @@ export interface CotizacionResumenCita {
   num_citas: number
   citas_agendadas: number
   citas_restantes: number
+  /** El paciente dejó la venta: esta cita se atiende, pero no se agenda la siguiente. */
+  venta_terminada?: boolean
 }
 
 export interface SesionTratamientoProc {

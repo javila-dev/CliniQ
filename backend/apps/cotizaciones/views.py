@@ -140,6 +140,9 @@ class CotizacionViewSet(ModelViewSet):
         # cotización ya aceptan a los dos; sin esto el botón abría un 403.
         if self.action == "nota_clinica":
             return [RequireAnyPermission("cotizaciones.gestionar", "historia.notas.crear")()]
+        # Terminar una venta que el paciente deja a medias tiene permiso propio.
+        if self.action in {"terminacion", "terminar", "reanudar"}:
+            return [RequirePermission("cotizaciones.terminar")()]
         return [RequirePermission("cotizaciones.gestionar")()]
 
     def get_queryset(self):
@@ -205,6 +208,7 @@ class CotizacionViewSet(ModelViewSet):
     ACCIONES_EN_SU_SEDE = {
         "update", "partial_update", "destroy", "cambiar_estado", "renovar",
         "enviar_whatsapp", "enviar_email_action", "registrar_envio",
+        "terminacion", "terminar", "reanudar",
     }
 
     # Lo comercial de una cotización. Sus consentimientos (clínicos, sin montos)
@@ -449,6 +453,39 @@ class CotizacionViewSet(ModelViewSet):
         # El compromiso pendiente cita la fecha de vigencia: se rehace con la nueva.
         self._refrescar_compromiso_pendiente(cotizacion)
         registrar_accion(request, "cotizacion.renovar", cotizacion, {"vigente_desde": cotizacion.vigente_desde.isoformat()})
+        return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="terminacion")
+    def terminacion(self, request, pk=None):
+        """Vista previa de terminar la venta: sesiones, citas sin cerrar, saldo."""
+        from apps.cotizaciones.terminacion import vista_previa
+
+        cotizacion = self.get_object()
+        if cotizacion.estado != Cotizacion.Estado.ACEPTADA:
+            raise ValidationError({"error": "Solo se termina una venta (cotización aceptada).", "code": "VENTA_NO_ACEPTADA"})
+        return Response(vista_previa(cotizacion), status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="terminar")
+    def terminar(self, request, pk=None):
+        """El paciente deja la venta a medias: no se agendan más sesiones y se
+        perdona el saldo o se deja un cobro (docs/plan-terminacion-ventas.md)."""
+        from apps.cotizaciones.terminacion import TerminarVentaSerializer, terminar
+
+        cotizacion = self.get_object()
+        entrada = TerminarVentaSerializer(data=request.data)
+        entrada.is_valid(raise_exception=True)
+        resumen = terminar(cotizacion, entrada.validated_data, usuario=request.user, request=request)
+        cotizacion = self.get_queryset().get(pk=cotizacion.pk)
+        return Response({**self.get_serializer(cotizacion).data, "terminacion": resumen}, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["post"], url_path="reanudar")
+    def reanudar(self, request, pk=None):
+        """Deshace la terminación si no se perdonó nada."""
+        from apps.cotizaciones.terminacion import reanudar
+
+        cotizacion = self.get_object()
+        reanudar(cotizacion, usuario=request.user, request=request)
+        cotizacion = self.get_queryset().get(pk=cotizacion.pk)
         return Response(self.get_serializer(cotizacion).data, status=status.HTTP_200_OK)
 
     def _refrescar_compromiso_pendiente(self, cotizacion, compromiso=None):
@@ -905,6 +942,8 @@ class CotizacionViewSet(ModelViewSet):
         payload = {
             "cotizacion_id": str(cotizacion.id),
             "paciente_nombre": cotizacion.paciente.nombre_completo,
+            # Venta terminada: lo que quedaba ya no se agenda (Nueva cita no la ofrece).
+            "terminada": cotizacion.terminada_en is not None,
             "items": [],
         }
         # Ritmo de cada paquete (cuándo debería ser la siguiente sesión).

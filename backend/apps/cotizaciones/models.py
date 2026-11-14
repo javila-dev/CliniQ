@@ -20,6 +20,15 @@ class MotivoDescarte(models.TextChoices):
     OTRO = "otro", "Otro"
 
 
+class MotivoTerminacion(models.TextChoices):
+    ECONOMICO = "economico", "Razones económicas"
+    INSATISFACCION = "insatisfaccion", "No quedó satisfecho"
+    SALUD = "salud", "Motivos de salud"
+    TRASLADO = "traslado", "Cambio de ciudad"
+    NO_RESPONDE = "no_responde", "No responde"
+    OTRO = "otro", "Otro"
+
+
 class EstadoComercial(models.TextChoices):
     """Estado que ve la clínica. Solo ``estado`` se guarda; "vencida" se deriva.
 
@@ -99,6 +108,29 @@ class Cotizacion(BaseModel):
     # Lo recalcula cada guardado de ítems y cada decisión del autorizador.
     precio_por_autorizar = models.BooleanField(default=False)
 
+    # ── Terminación (docs/plan-terminacion-ventas.md) ──
+    # El paciente deja el paquete a medias. La venta sigue "aceptada" (cuenta
+    # como vendida en su fecha); terminada_en marca que ya no se agenda más y
+    # valor_perdonado es lo que la clínica decidió no cobrar.
+    terminada_en = models.DateTimeField(null=True, blank=True, db_index=True)
+    terminada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ventas_terminadas",
+    )
+    # db_default en las columnas NOT NULL: la base compartida de desarrollo la
+    # usan otras ramas que no conocen estas columnas y crean cotizaciones sin ellas.
+    motivo_terminacion = models.CharField(
+        max_length=20, choices=MotivoTerminacion.choices, blank=True, default="", db_default="",
+    )
+    nota_terminacion = models.TextField(blank=True, default="", db_default="")
+    saldo_al_terminar = models.DecimalField(max_digits=14, decimal_places=2, null=True, blank=True)
+    valor_perdonado = models.DecimalField(
+        max_digits=14, decimal_places=2, default=Decimal("0.00"), db_default=Decimal("0.00"),
+    )
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self._estado_anterior = self.estado
@@ -127,6 +159,11 @@ class Cotizacion(BaseModel):
         if self.estado == self.Estado.BORRADOR and self.esta_vencida:
             return EstadoComercial.VENCIDA
         return self.estado
+
+    @property
+    def esta_terminada(self) -> bool:
+        """Venta que el paciente dejó a medias: no se agendan más sesiones."""
+        return self.terminada_en is not None
 
     @property
     def enviada_en(self):
@@ -441,6 +478,8 @@ class ItemCotizacion(BaseModel):
         return self.num_citas
 
     def citas_restantes(self):
+        # En una venta terminada sigue diciendo cuántas faltaban: lo que impide
+        # agendarlas es la validación de la agenda (VENTA_TERMINADA).
         return max(
             0,
             self.num_sesiones_efectivas()

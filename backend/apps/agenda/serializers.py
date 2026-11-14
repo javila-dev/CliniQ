@@ -458,6 +458,8 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "num_citas": item.num_sesiones_efectivas(),
             "citas_agendadas": item.citas_no_canceladas(),
             "citas_restantes": item.citas_restantes(),
+            # El paciente dejó la venta: esta cita se atiende, pero no se agenda la siguiente.
+            "venta_terminada": item.cotizacion.terminada_en is not None,
         }
 
     def validate_profesional(self, value):
@@ -544,6 +546,15 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
                     {
                         "error": "Solo se pueden consumir items de cotizaciones aceptadas.",
                         "code": "COTIZACION_NO_ACEPTADA",
+                    }
+                )
+            # Venta terminada: las citas que ya tenía se atienden o se reprograman,
+            # pero no se agendan sesiones nuevas (docs/plan-terminacion-ventas.md).
+            if item_cotizacion.cotizacion.terminada_en is not None:
+                raise serializers.ValidationError(
+                    {
+                        "error": "La venta está terminada: no se agendan más sesiones.",
+                        "code": "VENTA_TERMINADA",
                     }
                 )
             if sede and item_cotizacion.cotizacion.clinica_id != sede.clinica_id:

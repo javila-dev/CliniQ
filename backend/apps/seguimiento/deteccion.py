@@ -50,13 +50,14 @@ def _items_vendidos(clinica):
     from django.db.models import Prefetch
 
     # Sin productos ni los paquetes ya terminados o abandonados, que no pueden
-    # estar atrasados.
+    # estar atrasados, ni las ventas terminadas (el paciente dejó el paquete).
     return (
         ItemCotizacion.objects.filter(
             activo=True,
             cotizacion__clinica=clinica,
             cotizacion__activo=True,
             cotizacion__estado=Cotizacion.Estado.ACEPTADA,
+            cotizacion__terminada_en__isnull=True,
             cotizacion__paciente__activo=True,
         )
         .exclude(tipo=ItemCotizacion.Tipo.INSUMO)

@@ -105,6 +105,8 @@ def _paquete(item, lotes, hoy) -> dict | None:
     from apps.protocolos.models import TratamientoPaciente
 
     cotizacion = item.cotizacion
+    if cotizacion.terminada_en is not None:
+        return None  # venta terminada: el paciente dejó el paquete
     if cotizacion.es_migracion:
         lote = lotes.get(cotizacion.lote_migracion)
         if lote is None:

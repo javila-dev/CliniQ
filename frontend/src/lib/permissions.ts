@@ -110,6 +110,7 @@ export const PERM = {
   COTIZACIONES_VER:          'cotizaciones.ver',
   COTIZACIONES_GESTIONAR:    'cotizaciones.gestionar',
   COTIZACIONES_CAMBIAR_PRECIO: 'cotizaciones.cambiar_precio',
+  COTIZACIONES_TERMINAR:     'cotizaciones.terminar',
 
   // Seguimiento (embudo comercial y retención)
   SEGUIMIENTO_VER:           'seguimiento.oportunidades.ver',

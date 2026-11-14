@@ -34,6 +34,7 @@ PERMISSION_CATALOG = [
     ("cartera.ver", "cartera", "ver", "Ver cartera", True),
     ("cotizaciones.cambiar_precio", "cotizaciones", "cambiar_precio", "Cambiar precio de items con precio bloqueado", False),
     ("cotizaciones.gestionar", "cotizaciones", "gestionar", "Gestionar cotizaciones", True),
+    ("cotizaciones.terminar", "cotizaciones", "terminar", "Terminar y reanudar ventas que el paciente deja a medias", False),
     ("cotizaciones.ver", "cotizaciones", "ver", "Ver cotizaciones", True),
     ("seguimiento.oportunidades.gestionar", "seguimiento", "oportunidades.gestionar", "Registrar interesados y gestionar el seguimiento (llamadas, etapas, cierres)", True),
     ("seguimiento.oportunidades.ver", "seguimiento", "oportunidades.ver", "Ver la bandeja de seguimiento y el embudo", True),
@@ -329,6 +330,15 @@ CAPABILITY_CATALOG = [
                     "y autorizar o rechazar los precios que piden los demás en sus sedes."
                 ),
                 "permisos": ["cotizaciones.cambiar_precio"],
+            },
+            {
+                "clave": "cotizaciones.terminar",
+                "titulo": "Terminar ventas",
+                "descripcion": (
+                    "Dar por terminada una venta que el paciente deja a medias: no se agendan más "
+                    "sesiones y se decide si se perdona el saldo o se cobra un valor."
+                ),
+                "permisos": ["cotizaciones.terminar", "cotizaciones.ver"],
             },
             {
                 "clave": "comercial.ver_sede",

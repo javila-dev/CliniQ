@@ -66,7 +66,10 @@ def calcular(item, config, hoy=None):
     base = {"total": total, "realizadas": min(realizadas, total), "cada_dias": None, "sin_ritmo": False}
     if realizadas >= total:
         return {**base, "estado": "completo", "proxima_esperada": None, "dias_atraso": 0}
-    if tratamiento is not None and tratamiento.estado == TratamientoPaciente.Estado.ABANDONADO:
+    # Venta terminada (el paciente dejó el paquete): también cubre los
+    # procedimientos, que no tienen TratamientoPaciente.
+    abandonado = tratamiento is not None and tratamiento.estado == TratamientoPaciente.Estado.ABANDONADO
+    if abandonado or item.cotizacion.terminada_en is not None:
         return {**base, "estado": "pausado", "proxima_esperada": None, "dias_atraso": 0}
 
     activas = [c for c in citas if c.estado in ESTADOS_ACTIVOS_CITA]

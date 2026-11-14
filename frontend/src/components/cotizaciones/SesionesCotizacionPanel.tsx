@@ -370,7 +370,9 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId, sedeId }: Se
               : construirFilasOrdinales(item.descripcion, item.num_citas, item.citas)
 
             const abierto = expandidos.has(item.item_id)
-            const porAgendar = filas.filter((f) => f.agendable)
+            // Venta terminada: las sesiones que faltaban quedan sin agendar.
+            const terminada = !!data.terminada
+            const porAgendar = terminada ? [] : filas.filter((f) => f.agendable)
             const proxima = porAgendar[0]
             const abrirAgenda = (sesionEjecutadaId: string | null) =>
               setModal({
@@ -454,6 +456,10 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId, sedeId }: Se
                       Agendar
                     </Button>
                   </div>
+                ) : terminada && item.citas_restantes > 0 ? (
+                  <p className="text-xs text-muted-foreground">
+                    Venta terminada: {item.citas_restantes === 1 ? 'la sesión que faltaba no se agenda' : `las ${item.citas_restantes} sesiones que faltaban no se agendan`}.
+                  </p>
                 ) : filas.length > 0 && item.citas_restantes === 0 ? (
                   <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
                     <CheckCircle2 className="h-3.5 w-3.5 text-green-600" />
@@ -482,7 +488,7 @@ export function SesionesCotizacionPanel({ cotizacionId, pacienteId, sedeId }: Se
                         {filas.map((fila) => (
                           <SesionRow
                             key={fila.key}
-                            fila={fila}
+                            fila={terminada ? { ...fila, agendable: false } : fila}
                             historial={fila.citaId ? historialByCita.get(fila.citaId) : undefined}
                             historialAbierto={!!fila.citaId && historialAbierto.has(fila.citaId)}
                             onToggleHistorial={() => { if (fila.citaId) toggleHistorial(fila.citaId) }}

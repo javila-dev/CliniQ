@@ -89,6 +89,8 @@ class VentaListSerializer(serializers.ModelSerializer):
             "en_mora",
             "cartera_id",
             "sesiones",
+            "terminada_en",
+            "valor_perdonado",
         )
         read_only_fields = fields
 
@@ -187,10 +189,18 @@ class VentaViewSet(ReadOnlyModelViewSet):
             total_venta=_suma_por_cotizacion(items, "subtotal_item"),
             pagado_venta=_suma_por_cotizacion(pagos, "valor"),
         ).annotate(
-            saldo_venta=ExpressionWrapper(F("total_venta") - F("pagado_venta"), output_field=_DINERO),
+            # Lo perdonado al terminar la venta ya no se cobra.
+            saldo_venta=ExpressionWrapper(
+                F("total_venta") - F("pagado_venta") - F("valor_perdonado"), output_field=_DINERO,
+            ),
         )
         if params.get("con_mora") in {"1", "true"}:
             queryset = queryset.filter(_en_mora=True)
+        terminada = params.get("terminada")
+        if terminada in {"1", "true"}:
+            queryset = queryset.filter(terminada_en__isnull=False)
+        elif terminada in {"0", "false"}:
+            queryset = queryset.filter(terminada_en__isnull=True)
 
         # Lo que leen get_sesiones / num_sesiones_efectivas, precargado: antes cada
         # ítem tratamiento consultaba su seguimiento, sus obsequios y el catálogo (M5-19).
