@@ -9,7 +9,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('users', '0029_permiso_regularizar_paquetes'),
+        ('users', '0030_permiso_terminar_ventas'),
     ]
 
     operations = [
