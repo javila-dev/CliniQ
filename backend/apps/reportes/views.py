@@ -523,7 +523,12 @@ class CotizacionesReporteView(APIView):
             ventas_qs = ventas_qs.filter(cotizacion__sede_id__in=sede_ids)
         if vendedor_ids:
             ventas_qs = ventas_qs.filter(cotizacion__profesional_id__in=vendedor_ids)
-        ventas = ventas_qs.aggregate(valor=Sum("total"), cantidad=Count("id"))
+        ventas = ventas_qs.aggregate(
+            valor=Sum(ExpressionWrapper(
+                F("total") + F("cotizacion__valor_perdonado"), output_field=DecimalField(max_digits=14, decimal_places=2),
+            )),
+            cantidad=Count("id"),
+        )
 
         return Response({
             "total_mes": total,
@@ -537,6 +542,14 @@ class CotizacionesReporteView(APIView):
 _ITEM_SUBTOTAL = ExpressionWrapper(
     F("num_citas") * F("valor_unitario") * (Decimal("1") - F("descuento_porcentaje") / Decimal("100")),
     output_field=DecimalField(max_digits=14, decimal_places=2),
+)
+
+
+# Valor vendido de una cotización aceptada: el total de su cartera más lo que se
+# perdonó al terminarla (terminar una venta baja el total de la cartera para que
+# el saldo quede en cero, pero lo vendido no cambia; docs/plan-terminacion-ventas.md).
+_VALOR_VENDIDO = ExpressionWrapper(
+    F("cartera__total") + F("valor_perdonado"), output_field=DecimalField(max_digits=14, decimal_places=2),
 )
 
 
@@ -582,7 +595,7 @@ def _serie_comercial(base, fecha_inicio, fecha_fin):
         )
         .annotate(p=trunc("aceptada_en"))
         .values("p")
-        .annotate(valor=Sum("cartera__total"), cantidad=Count("id"))
+        .annotate(valor=Sum(_VALOR_VENDIDO), cantidad=Count("id"))
     )
     filas = {}
 
@@ -681,7 +694,7 @@ class ComercialReporteView(APIView):
 
         vendidas = base.filter(estado=Cotizacion.Estado.ACEPTADA, **en_periodo("aceptada_en__date"))
         ventas = vendidas.aggregate(
-            valor=Sum("cartera__total"),
+            valor=Sum(_VALOR_VENDIDO),
             cantidad=Count("id"),
             dias_cierre=Avg(ExpressionWrapper(F("aceptada_en") - F("created_at"), output_field=DurationField())),
         )
@@ -726,6 +739,105 @@ class ComercialReporteView(APIView):
             "granularidad": granularidad,
             "serie": serie,
         })
+
+
+class ComercialAsesoresView(APIView):
+    """Cotizaciones y ventas por asesor, en tabla (pedido de una gerente, 2026-11-14).
+
+    El asesor es quien creó la cotización (``profesional``), igual que el filtro
+    de vendedores. Mismas reglas que ``ComercialReporteView`` para que los
+    totales cuadren con el dashboard: creadas por ``created_at``, vendidas por
+    ``aceptada_en``, valor vendido = cartera + lo perdonado al terminar, tasa de
+    cierre por cohorte (de las creadas en el periodo, cuántas ya se vendieron) y
+    sin los datos previos migrados. ``?tratamiento=id1,id2`` deja solo las
+    cotizaciones con esos tratamientos o procedimientos (el valor sigue siendo
+    el de la cotización completa).
+    """
+
+    permission_classes = (RequirePermission("reportes.ver_financieros"),)
+
+    def get(self, request: Request):
+        from apps.cotizaciones.ventas import filtrar_por_catalogo, ids_catalogo
+
+        hoy = timezone.localdate()
+        fecha_inicio = _parse_date(request.query_params.get("fecha_inicio"), hoy.replace(day=1))
+        fecha_fin = _parse_date(request.query_params.get("fecha_fin"), hoy)
+        periodo = {"desde": fecha_inicio.isoformat(), "hasta": fecha_fin.isoformat()}
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response({"periodo": periodo, "asesores": [], "totales": _fila_asesor(None, "Total", True, {}, {})})
+
+        base = Cotizacion.objects.filter(clinica=clinica, activo=True, es_migracion=False)
+        sede_ids = sede_ids_para_filtro(request.user, request.query_params.get("sede_id"))
+        if sede_ids is not None:
+            base = base.filter(sede_id__in=sede_ids)
+        base = filtrar_por_catalogo(base, ids_catalogo(request.query_params))
+
+        creadas = base.filter(created_at__date__gte=fecha_inicio, created_at__date__lte=fecha_fin)
+        vendidas = base.filter(
+            estado=Cotizacion.Estado.ACEPTADA, aceptada_en__date__gte=fecha_inicio, aceptada_en__date__lte=fecha_fin,
+        )
+        dias = Avg(ExpressionWrapper(F("aceptada_en") - F("created_at"), output_field=DurationField()))
+
+        def cotizado(qs, por_asesor):
+            items = ItemCotizacion.objects.filter(cotizacion__in=qs.values("pk"), activo=True, es_obsequio=False)
+            if por_asesor:
+                return {
+                    r["cotizacion__profesional_id"]: r["v"]
+                    for r in items.values("cotizacion__profesional_id").annotate(v=Sum(_ITEM_SUBTOTAL))
+                }
+            return items.aggregate(v=Sum(_ITEM_SUBTOTAL))["v"]
+
+        conteo_creadas = {"n": Count("id"), "vendidas": Count("id", filter=Q(estado=Cotizacion.Estado.ACEPTADA))}
+
+        por_asesor = {}
+        valor_creadas = cotizado(creadas, True)
+        for r in creadas.values("profesional_id").annotate(**conteo_creadas):
+            por_asesor.setdefault(r["profesional_id"], [{}, {}])[0] = {**r, "valor": valor_creadas.get(r["profesional_id"])}
+        for r in vendidas.values("profesional_id").annotate(n=Count("id"), valor=Sum(_VALOR_VENDIDO), dias=dias):
+            por_asesor.setdefault(r["profesional_id"], [{}, {}])[1] = r
+
+        usuarios = {u.id: u for u in User.objects.filter(pk__in=[k for k in por_asesor if k])}
+        filas = []
+        for asesor_id, (c, v) in por_asesor.items():
+            usuario = usuarios.get(asesor_id)
+            nombre = usuario.nombre_completo if usuario else "Sin asesor"
+            fila = _fila_asesor(asesor_id, nombre, usuario.is_active if usuario else True, c, v)
+            # Para distinguir a dos usuarios con el mismo nombre.
+            fila["email"] = usuario.email if usuario else None
+            filas.append(fila)
+        filas.sort(key=lambda f: (-Decimal(f["ventas"]["valor"]), f["nombre"].lower()))
+
+        totales_c = {**creadas.aggregate(**conteo_creadas), "valor": cotizado(creadas, False)}
+        totales_v = vendidas.aggregate(n=Count("id"), valor=Sum(_VALOR_VENDIDO), dias=dias)
+        return Response({
+            "periodo": periodo,
+            "asesores": filas,
+            "totales": _fila_asesor(None, "Total", True, totales_c, totales_v),
+        })
+
+
+def _fila_asesor(asesor_id, nombre, activo, creadas: dict, vendidas: dict) -> dict:
+    n_creadas = creadas.get("n") or 0
+    n_ventas = vendidas.get("n") or 0
+    valor_ventas = Decimal(vendidas.get("valor") or 0)
+    creadas_vendidas = creadas.get("vendidas") or 0
+    dias = vendidas.get("dias")
+    return {
+        "asesor_id": str(asesor_id) if asesor_id else None,
+        "nombre": nombre,
+        "activo": activo,
+        "cotizaciones": {"cantidad": n_creadas, "valor": _money(creadas.get("valor"))},
+        "ventas": {
+            "cantidad": n_ventas,
+            "valor": _money(valor_ventas),
+            "ticket_promedio": _money(valor_ventas / n_ventas) if n_ventas else None,
+            "dias_promedio_cierre": round(dias.total_seconds() / 86400, 1) if dias else None,
+        },
+        # De las creadas en el periodo, cuántas ya se vendieron (cohorte).
+        "creadas_vendidas": creadas_vendidas,
+        "tasa_cierre_pct": f"{(creadas_vendidas / n_creadas * 100):.2f}" if n_creadas else None,
+    }
 
 
 class VendedoresView(APIView):
