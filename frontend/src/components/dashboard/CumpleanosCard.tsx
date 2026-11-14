@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { Cake } from 'lucide-react'
+import { Cake, ChevronDown, ChevronUp } from 'lucide-react'
 
 import { WhatsAppIcon } from '@/components/icons/WhatsAppIcon'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -13,14 +13,14 @@ import { pacientesApi, type CumpleanosPaciente } from '@/lib/api/pacientes'
 import { cn, toTitleCase } from '@/lib/utils'
 
 const DIAS = 7
-const MAX_FILAS = 6
+const MAX_FILAS = 5
 
-/** "Hoy", "Mañana" o "jue 12 nov". La fecha llega sin hora: se lee a mediodía. */
+/** "Hoy", "Mañana" o "jue 12". La fecha llega sin hora: se lee a mediodía. */
 function cuando(p: CumpleanosPaciente): string {
   if (p.dias_faltan === 0) return 'Hoy'
   if (p.dias_faltan === 1) return 'Mañana'
   const d = new Date(`${p.fecha}T12:00:00`)
-  return d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\./g, '')
+  return d.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric' }).replace(/\./g, '')
 }
 
 /** wa.me con el saludo listo. Sin teléfono o enmascarado -> null. */
@@ -36,6 +36,11 @@ function linkFelicitar(p: CumpleanosPaciente): string | null {
   return `https://wa.me/${numero}?text=${encodeURIComponent(texto)}`
 }
 
+function iniciales(nombre: string): string {
+  const partes = nombre.trim().split(/\s+/)
+  return ((partes[0]?.[0] ?? '') + (partes[1]?.[0] ?? '')).toUpperCase()
+}
+
 const TODAS = 'todas'
 
 /** Pacientes que cumplen años hoy y en la semana, para felicitarlos a tiempo.
@@ -45,6 +50,7 @@ const TODAS = 'todas'
 export function CumpleanosCard({ className }: { className?: string }) {
   const { sedes, isAllSedes, defaultSedeId } = useUserSedes()
   const [eleccion, setEleccion] = useState<string | null>(null)
+  const [verTodos, setVerTodos] = useState(false)
   const filtro = eleccion ?? defaultSedeId ?? TODAS
   const sede = filtro === TODAS ? undefined : filtro
   const ofrecerFiltro = sedes.length > 1 || (!isAllSedes && sedes.length === 1)
@@ -57,28 +63,30 @@ export function CumpleanosCard({ className }: { className?: string }) {
 
   const lista = data ?? []
   const hoy = lista.filter((p) => p.dias_faltan === 0).length
-  const visibles = lista.slice(0, MAX_FILAS)
-  const resto = lista.length - visibles.length
+  const visibles = verTodos ? lista : lista.slice(0, MAX_FILAS)
+  const resto = lista.length - MAX_FILAS
 
   return (
-    <div className={cn('rounded-xl border bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md', className)}>
-      <div className="mb-3 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <Cake className="h-4 w-4 shrink-0 text-primary" />
-            <h2 className="text-sm font-semibold">Cumpleaños</h2>
-          </div>
-          {/* Con selector de sede no caben los dos en la fila: el rango va debajo. */}
-          {ofrecerFiltro && (
-            <p className="mt-0.5 pl-6 text-xs text-muted-foreground">Próximos {DIAS} días</p>
+    <div className={cn('flex flex-col rounded-xl border bg-white shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md', className)}>
+      <div className="flex items-center justify-between gap-2 border-b px-5 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <Cake className="h-4 w-4 shrink-0 text-primary" />
+          <h2 className="text-sm font-semibold">Cumpleaños</h2>
+          {!isLoading && hoy > 0 && (
+            <span className="rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-semibold tabular-nums text-primary">
+              {hoy} hoy
+            </span>
           )}
         </div>
         {ofrecerFiltro ? (
-          <Select value={filtro} onValueChange={setEleccion}>
-            <SelectTrigger className="h-7 w-auto min-w-0 max-w-[11rem] shrink gap-1 border-gray-200 px-2 text-xs" aria-label="Sede">
+          <Select value={filtro} onValueChange={(v) => { setEleccion(v); setVerTodos(false) }}>
+            <SelectTrigger
+              className="h-7 w-auto min-w-0 max-w-[9.5rem] shrink gap-1 border-0 bg-transparent px-1.5 text-xs text-muted-foreground shadow-none hover:bg-gray-50 focus:ring-0"
+              aria-label="Sede"
+            >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent align="end">
               <SelectItem value={TODAS}>Todas las sedes</SelectItem>
               {sedes.map((s) => (
                 <SelectItem key={s.id} value={s.id}>{s.nombre}</SelectItem>
@@ -91,51 +99,64 @@ export function CumpleanosCard({ className }: { className?: string }) {
       </div>
 
       {isLoading ? (
-        <div className="space-y-2">
-          <Skeleton className="h-4 w-full" />
-          <Skeleton className="h-4 w-3/4" />
+        <div className="space-y-2 px-5 py-4">
+          {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-7 w-full rounded-lg" />)}
         </div>
       ) : lista.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
+        <p className="px-5 py-4 text-sm text-muted-foreground">
           {sede ? 'Nadie de esta sede cumple años esta semana.' : 'Nadie cumple años esta semana.'}
         </p>
       ) : (
         <>
-          {hoy > 0 && (
-            <p className="mb-2 text-sm text-gray-600">
-              <span className="font-semibold text-gray-900">{hoy}</span>{' '}
-              {hoy === 1 ? 'paciente cumple' : 'pacientes cumplen'} años hoy
-            </p>
-          )}
-          <ul className="space-y-1">
+          <ul className={cn('divide-y', verTodos && 'max-h-80 overflow-y-auto')}>
             {visibles.map((p) => {
               const wa = linkFelicitar(p)
+              const esHoy = p.dias_faltan === 0
+              const nombre = toTitleCase(p.nombre_completo)
               return (
-                <li key={p.id} className="flex items-center gap-2.5 rounded-lg px-2 py-1.5 hover:bg-gray-50">
-                  <Link href={`/pacientes/${p.id}`} className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-medium text-gray-800">{toTitleCase(p.nombre_completo)}</p>
-                    <p className={cn('text-[11px]', p.dias_faltan === 0 ? 'font-medium text-primary' : 'text-muted-foreground')}>
-                      {cuando(p)} · cumple {p.edad_cumple}
-                    </p>
+                <li key={p.id} className="flex items-center gap-3 px-5 py-2 transition-colors hover:bg-gray-50">
+                  <span
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold',
+                      esHoy ? 'bg-primary/10 text-primary' : 'bg-gray-100 text-gray-500',
+                    )}
+                    aria-hidden
+                  >
+                    {iniciales(nombre)}
+                  </span>
+                  <Link href={`/pacientes/${p.id}`} className="min-w-0 flex-1 truncate text-[13px] font-medium text-gray-800 hover:text-primary">
+                    {nombre}
                   </Link>
-                  {wa && (
+                  <span className={cn('shrink-0 text-xs tabular-nums', esHoy ? 'font-medium text-primary' : 'text-muted-foreground')}>
+                    {cuando(p)} · {p.edad_cumple} años
+                  </span>
+                  {wa ? (
                     <a
                       href={wa}
                       target="_blank"
                       rel="noopener noreferrer"
                       title="Felicitar por WhatsApp"
                       aria-label={`Felicitar a ${p.nombres} por WhatsApp`}
-                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
+                      className="-mr-1.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-emerald-600 transition-colors hover:bg-emerald-50"
                     >
                       <WhatsAppIcon className="h-4 w-4" />
                     </a>
+                  ) : (
+                    <span className="-mr-1.5 h-7 w-7 shrink-0" aria-hidden />
                   )}
                 </li>
               )
             })}
           </ul>
           {resto > 0 && (
-            <p className="mt-2 px-2 text-xs text-muted-foreground">y {resto} más esta semana</p>
+            <button
+              type="button"
+              onClick={() => setVerTodos((v) => !v)}
+              className="flex items-center justify-between border-t px-5 py-2.5 text-xs text-muted-foreground transition-colors hover:bg-gray-50 hover:text-primary"
+            >
+              <span>{verTodos ? 'Ver menos' : `${resto} más esta semana`}</span>
+              {verTodos ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
           )}
         </>
       )}

@@ -289,6 +289,10 @@ class PacienteViewSet(HasClinicamente, ModelViewSet):
         payload = []
         for p in pacientes:
             fecha = fechas_por_mes_dia[(p.fecha_nacimiento.month, p.fecha_nacimiento.day)]
+            if fecha.year - p.fecha_nacimiento.year < 1:
+                # Nacimiento en el mismo año (o después): es una fecha mal
+                # cargada (p. ej. la del día del registro), no un cumpleaños.
+                continue
             payload.append({
                 "id": str(p.id),
                 "nombre_completo": p.nombre_completo,

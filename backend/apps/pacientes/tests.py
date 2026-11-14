@@ -500,6 +500,14 @@ class CumpleanosPacientesTests(TestCase):
         self.assertEqual(data[0]["fecha"], "2027-01-02")
         self.assertEqual(data[0]["edad_cumple"], 27)
 
+    def test_nacimiento_en_el_mismo_anio_no_es_cumpleanos(self):
+        # Fecha de nacimiento mal cargada (la del día del registro): "cumple 0".
+        self._paciente(date(2026, 11, 5))
+        self._paciente(date(2026, 11, 7))
+        bien = self._paciente(date(1995, 11, 6))
+        data = self._get(self.admin, date(2026, 11, 5))
+        self.assertEqual([p["id"] for p in data], [str(bien.id)])
+
     def test_29_de_febrero_en_anio_no_bisiesto_cae_el_28(self):
         p = self._paciente(date(2000, 2, 29))
         data = self._get(self.admin, date(2027, 2, 28), "?dias=0")
