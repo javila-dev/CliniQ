@@ -1,4 +1,3 @@
-from django.apps import apps
 from django.contrib.auth import get_user_model
 from django.db import transaction
 from rest_framework import serializers
@@ -754,17 +753,8 @@ class GrupoAtencionSerializer(serializers.ModelSerializer):
 
 
 def colaborador_tiene_citas_futuras(colaborador):
-    try:
-        cita_model = apps.get_model("agenda", "Cita")
-    except LookupError:
-        return False
+    """Citas por delante que todavía se van a atender: las canceladas o cerradas
+    no cuentan (antes bloqueaban desactivar sin motivo)."""
+    from apps.colaboradores.reasignacion import citas_futuras
 
-    if not hasattr(cita_model, "fecha_inicio"):
-        return False
-
-    from django.utils import timezone
-
-    return cita_model.objects.filter(
-        profesional=colaborador.user,
-        fecha_inicio__gt=timezone.now(),
-    ).exists()
+    return citas_futuras(colaborador).exists()
