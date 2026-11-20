@@ -8,6 +8,9 @@ import type {
   CreateHorarioColaboradorRequest,
   GrupoAtencion,
   GrupoAtencionRequest,
+  CitasFuturasResponse,
+  ReasignarCitasRequest,
+  ReasignarCitasResponse,
 } from '@/types/colaboradores'
 import type { Paginated } from '@/types/common'
 
@@ -44,6 +47,18 @@ export const colaboradoresApi = {
 
   delete: async (id: string): Promise<void> => {
     await apiClient.delete(`/colaboradores/${id}/`)
+  },
+
+  /** Citas por delante que frenan la desactivación. */
+  citasFuturas: async (id: string): Promise<CitasFuturasResponse> => {
+    const res = await apiClient.get<CitasFuturasResponse>(`/colaboradores/${id}/citas_futuras/`)
+    return res.data
+  },
+
+  /** Pasa las citas futuras a otro profesional (o lo simula con `confirmar: false`). */
+  reasignarCitas: async (id: string, data: ReasignarCitasRequest): Promise<ReasignarCitasResponse> => {
+    const res = await apiClient.post<ReasignarCitasResponse>(`/colaboradores/${id}/reasignar_citas/`, data)
+    return res.data
   },
 
   /** Profesionales que se pueden elegir al agendar. El servidor solo filtra por

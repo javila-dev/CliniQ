@@ -202,6 +202,9 @@ def procedimientos_de_la_cita(*, servicio=None, item_cotizacion=None, sesion=Non
 class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
     paciente_nombre = serializers.CharField(source="paciente.nombre_completo", read_only=True)
     profesional_nombre = serializers.CharField(source="profesional.nombre_completo", read_only=True)
+    # False cuando se desactivó al profesional dejándole sus citas: recepción
+    # debe cambiarlo antes de recibir al paciente.
+    profesional_activo = serializers.BooleanField(source="profesional.activo", read_only=True)
     servicio_nombre = serializers.SerializerMethodField()
     sede_nombre = serializers.CharField(source="sede.nombre", read_only=True)
     ultimo_registro_confirmacion = serializers.SerializerMethodField()
@@ -240,6 +243,7 @@ class CitaSerializer(AcotadoAClinicaMixin, serializers.ModelSerializer):
             "motivo",
             "profesional",
             "profesional_nombre",
+            "profesional_activo",
             "fecha_inicio",
             "fecha_fin",
             "fecha_inicio_real",

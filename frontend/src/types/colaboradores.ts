@@ -140,6 +140,8 @@ export interface UpdateColaboradorRequest {
   es_profesional?: boolean
   grupos?: string[]
   activo?: boolean
+  /** Al desactivar con citas futuras: quitar el acceso y dejarle las citas. */
+  conservar_citas?: boolean
 }
 
 export interface ColaboradorProfesional {
@@ -157,4 +159,40 @@ export interface ColaboradorProfesional {
   sede_principal_nombre?: string | null
   activo?: boolean
   especialidades: ColaboradorEspecialidad[]
+}
+
+// ── Desactivar con citas futuras ─────────────────────────────────────────────
+
+/** Una cita por delante del colaborador que se desactiva. */
+export interface CitaFutura {
+  id: string
+  fecha_inicio: string
+  fecha_fin: string
+  paciente_nombre: string
+  servicio_nombre: string
+  sede_nombre: string
+  estado: string
+  /** Solo en las que no se pudieron pasar: por qué. */
+  motivo?: string
+}
+
+export interface CitasFuturasResponse {
+  total: number
+  citas: CitaFutura[]
+}
+
+export interface ReasignarCitasRequest {
+  /** Id de usuario del profesional que recibe las citas. */
+  profesional: string
+  /** false = vista previa: el servidor lo intenta y lo descarta. */
+  confirmar: boolean
+  /** Desactivar al colaborador si ya no le queda ninguna cita. */
+  desactivar?: boolean
+}
+
+export interface ReasignarCitasResponse {
+  movidas: CitaFutura[]
+  pendientes: CitaFutura[]
+  confirmado: boolean
+  desactivado: boolean
 }

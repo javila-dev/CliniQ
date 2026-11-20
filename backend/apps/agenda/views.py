@@ -471,6 +471,19 @@ class CitaViewSet(ModelViewSet):
             )
             raise ValidationError({"error": "El flujo de estado no es valido."})
 
+        # Al desactivar a alguien la clínica puede dejarle las citas: el paciente
+        # no se recibe ni se atiende con quien ya no está, primero se cambia el
+        # profesional. Volver de "en curso" a "en espera" no se frena.
+        recibe = nuevo_estado == Cita.Estado.EN_ESPERA and cita.estado != Cita.Estado.EN_CURSO
+        if (recibe or nuevo_estado == Cita.Estado.EN_CURSO) and not cita.profesional.activo:
+            raise ValidationError({
+                "error": (
+                    f"{cita.profesional.nombre_completo} ya no está disponible en la clínica. "
+                    f"Cambia el profesional de la cita antes de {'recibir al paciente' if recibe else 'iniciar la atención'}."
+                ),
+                "code": "PROFESIONAL_NO_DISPONIBLE",
+            })
+
         if nuevo_estado in {Cita.Estado.EN_CURSO, Cita.Estado.COMPLETADA} and not puede_atender_la_cita(request.user, cita):
             raise PermissionDenied("Solo quien atiende esta cita puede iniciar o cerrar la atención.")
 

@@ -2,6 +2,7 @@ import logging
 from uuid import UUID
 
 from django.contrib.auth import get_user_model
+from django.db import transaction
 from django.db.models import Q
 from rest_framework import status
 from rest_framework.decorators import action
@@ -11,6 +12,7 @@ from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 
 from apps.colaboradores import grupos as reglas_grupos
+from apps.colaboradores import reasignacion
 from apps.colaboradores.models import Colaborador, GrupoAtencion, HorarioColaborador
 from apps.colaboradores.serializers import (
     ColaboradorListSerializer,
@@ -29,6 +31,10 @@ logger = logging.getLogger(__name__)
 User = get_user_model()
 
 
+def _es_verdadero(valor) -> bool:
+    return valor is True or str(valor).strip().lower() in {"true", "1"}
+
+
 class ColaboradorViewSet(HasClinicamente, ModelViewSet):
     serializer_class = ColaboradorSerializer
     queryset = Colaborador.objects.select_related(
@@ -43,8 +49,11 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
     ordering_fields = ("fecha_ingreso", "created_at", "user__first_name", "user__last_name")
 
     def get_permissions(self):
-        if self.action in {"create", "update", "partial_update", "destroy"}:
+        if self.action in {"create", "update", "partial_update", "destroy", "citas_futuras"}:
             permission_classes = (RequirePermission("colaboradores.gestionar"),)
+        elif self.action == "reasignar_citas":
+            # Mueve citas de la agenda: además de gestionar el personal, editar citas.
+            permission_classes = (RequirePermission("colaboradores.gestionar"), RequirePermission("agenda.citas.editar"))
         elif self.action == "profesionales":
             # Selector de profesionales de agenda, bloqueos y procedimientos: no
             # exige `colaboradores.ver` (ese permiso es para la ficha del personal).
@@ -128,11 +137,15 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
     def perform_update(self, serializer):
         instance = self.get_object()
         nuevo_activo = serializer.validated_data.get("activo", instance.activo)
-        if instance.activo and not nuevo_activo and colaborador_tiene_citas_futuras(instance):
+        # Con ``conservar_citas`` la clínica le quita el acceso y deja sus citas a
+        # su nombre: recepción cambia el profesional al recibir a cada paciente.
+        conservar_citas = _es_verdadero(self.request.data.get("conservar_citas"))
+        if instance.activo and not nuevo_activo and not conservar_citas and colaborador_tiene_citas_futuras(instance):
             raise ValidationError({
                 "activo": [
                     "Tiene citas futuras en la agenda. Reasígnalas a otro profesional o cancélalas antes de desactivarlo."
-                ]
+                ],
+                "code": "COLABORADOR_CON_CITAS_FUTURAS",
             })
 
         # Desactivar el colaborador desactiva su usuario (ver
@@ -153,6 +166,51 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         if colaborador_tiene_citas_futuras(instance):
             raise ValidationError({"error": "No se puede eliminar un colaborador con citas futuras."})
         instance.delete()
+
+    @action(detail=True, methods=["get"], url_path="citas_futuras")
+    def citas_futuras(self, request, pk=None):
+        """Las citas que frenan la desactivación, para el diálogo de desactivar."""
+        citas = reasignacion.citas_futuras(self.get_object())
+        return Response({
+            "total": citas.count(),
+            "citas": [reasignacion.resumen_cita(c) for c in citas[:200]],
+        })
+
+    @action(detail=True, methods=["post"], url_path="reasignar_citas")
+    @transaction.atomic
+    def reasignar_citas(self, request, pk=None):
+        """Pasa las citas futuras a otro profesional y, si ya no queda ninguna y
+        se pide, desactiva al colaborador. Con ``confirmar: false`` es solo la
+        vista previa (hace todo y lo descarta).
+
+        Body: ``{"profesional": <id de usuario>, "confirmar": bool, "desactivar": bool}``.
+        """
+        colaborador = self.get_object()
+        profesional_id = request.data.get("profesional")
+        if not profesional_id:
+            raise ValidationError({"profesional": ["Elige a quién pasar las citas."]})
+        profesional = (
+            User.objects.select_related("colaborador")
+            .filter(pk=self._parse_uuid(str(profesional_id), "profesional"))
+            .first()
+        )
+        if profesional is None:
+            raise ValidationError({"profesional": ["Ese profesional no existe."]})
+        confirmar = _es_verdadero(request.data.get("confirmar"))
+        resultado = reasignacion.reasignar(colaborador, profesional, request=request, confirmar=confirmar)
+
+        desactivado = False
+        if confirmar and _es_verdadero(request.data.get("desactivar")) and colaborador.activo and not resultado["pendientes"]:
+            # Mismo camino que el PATCH: valida que no se quede la clínica sin
+            # administrador y apaga también el usuario. Si falla, las citas
+            # vuelven a su profesional (todo va en la misma transacción).
+            serializer = ColaboradorSerializer(
+                colaborador, data={"activo": False}, partial=True, context=self.get_serializer_context(),
+            )
+            serializer.is_valid(raise_exception=True)
+            self.perform_update(serializer)
+            desactivado = True
+        return Response({**resultado, "confirmado": confirmar, "desactivado": desactivado})
 
     @action(detail=False, methods=["get"], url_path="profesionales", pagination_class=None)
     def profesionales(self, request, *args, **kwargs):
