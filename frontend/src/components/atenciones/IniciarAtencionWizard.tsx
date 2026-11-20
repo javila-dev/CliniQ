@@ -21,6 +21,7 @@ import {
   type PasoRecepcion,
 } from '@/lib/recepcion'
 import { LlegadaCheckinContent } from './LlegadaCheckinContent'
+import { CambiarProfesionalDialog } from '@/components/agenda/CambiarProfesionalDialog'
 import { ConsentimientoFirmaContent } from './ConsentimientoFirmaContent'
 import { PagoContent } from './PagoContent'
 import { FirmaAsistenciaContent } from './FirmaAsistenciaContent'
@@ -105,6 +106,12 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
     },
   })
 
+  // Se desactivó al profesional dejándole sus citas: antes de recibir al
+  // paciente hay que elegir quién lo atiende (el backend también lo exige).
+  const profesionalNoDisponible = Boolean(cita && cita.profesional_activo === false && cita.estado !== 'en_curso')
+  const puedeCambiarProfesional = hasPermission(user, PERM.AGENDA_EDITAR)
+  const [cambiarProfOpen, setCambiarProfOpen] = useState(false)
+
   const pendienteConsentimiento = cita?.consentimiento_info?.consentimientos?.find((c) => !c.vigente) ?? null
 
   const { currentStep, statusByStep, allDone } = useMemo(() => {
@@ -152,11 +159,11 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
   const llegadaEnviadaRef = useRef<string | null>(null)
   useEffect(() => {
     if (!allDone || !wizardConfig || wizardConfig.paso_checkin) return
-    if (cita?.estado !== 'confirmada' || confirmandoLlegada) return
+    if (cita?.estado !== 'confirmada' || confirmandoLlegada || profesionalNoDisponible) return
     if (llegadaEnviadaRef.current === cita.id) return
     llegadaEnviadaRef.current = cita.id
     confirmarLlegada(undefined, { onError: () => { llegadaEnviadaRef.current = null } })
-  }, [allDone, wizardConfig, cita?.estado, cita?.id, confirmandoLlegada, confirmarLlegada])
+  }, [allDone, wizardConfig, cita?.estado, cita?.id, confirmandoLlegada, confirmarLlegada, profesionalNoDisponible])
 
   // Si el paciente rechazó la firma desde su teléfono, dejamos de consultar:
   // el usuario tiene que reenviar o firmar en pantalla.
@@ -240,7 +247,7 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
         </div>
 
         {/* Pasos — siempre a la vista, con su nombre: nada depende del hover. */}
-        {!firmandoConsentimiento && cita && !cita.deuda_info && (
+        {!firmandoConsentimiento && cita && !cita.deuda_info && !profesionalNoDisponible && (
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b bg-muted/20 px-5 py-2.5 shrink-0">
             <ol className="flex flex-wrap items-center gap-1.5 text-xs" aria-label="Pasos de recepción">
               {activeSteps.map((step, i) => {
@@ -301,7 +308,34 @@ export function IniciarAtencionWizard({ citaId, onClose, onIniciarAtencion }: Pr
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 min-h-0 relative">
-          {cita?.deuda_info ? (
+          {cita && profesionalNoDisponible ? (
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
+              <div className="h-16 w-16 rounded-full bg-amber-100 flex items-center justify-center">
+                <AlertTriangle className="h-8 w-8 text-amber-600" />
+              </div>
+              <div className="max-w-md">
+                <p className="text-lg font-semibold">El profesional ya no está disponible</p>
+                <p className="text-sm text-muted-foreground mt-1.5">
+                  {cita.profesional_nombre} ya no tiene acceso a la clínica. Elige quién atiende esta cita para
+                  poder recibir al paciente.
+                </p>
+              </div>
+              <div className="flex gap-2">
+                {puedeCambiarProfesional ? (
+                  <Button onClick={() => setCambiarProfOpen(true)}>Cambiar profesional</Button>
+                ) : (
+                  <p className="text-sm text-muted-foreground">Pídele a quien gestiona la agenda que cambie el profesional.</p>
+                )}
+                <Button variant="ghost" onClick={() => handleOpenChange(false)}>Cerrar</Button>
+              </div>
+              <CambiarProfesionalDialog
+                key={`${cita.id}-${cita.profesional}`}
+                cita={cita}
+                open={cambiarProfOpen}
+                onOpenChange={setCambiarProfOpen}
+              />
+            </div>
+          ) : cita?.deuda_info ? (
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-6">
               <div className="h-16 w-16 rounded-full bg-red-100 flex items-center justify-center">
                 <AlertTriangle className="h-8 w-8 text-red-600" />

@@ -325,7 +325,22 @@ export function CitaDetailSheet({ citaId, onClose }: CitaDetailSheetProps) {
                   <p className="text-sm text-muted-foreground flex items-center gap-1.5">
                     <Stethoscope className="h-3.5 w-3.5 shrink-0" />
                     {cita.profesional_nombre}
+                    {cita.profesional_activo === false && <span className="text-amber-700 dark:text-amber-400">· sin acceso</span>}
                   </p>
+                  {cita.profesional_activo === false && ['pendiente', 'confirmada', 'en_espera'].includes(cita.estado) && (
+                    <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                      <p>
+                        {cita.profesional_nombre} ya no está disponible en la clínica. Cambia el profesional antes de recibir al paciente.
+                      </p>
+                      {puedeEditar ? (
+                        <Button size="sm" variant="outline" className="mt-2 bg-background" onClick={() => setCambiarProfOpen(true)}>
+                          Cambiar profesional
+                        </Button>
+                      ) : (
+                        <p className="mt-1 text-xs">Pídele a quien gestiona la agenda que lo cambie.</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Último contacto: quién confirmó / canceló / no confirmó y cuándo */}

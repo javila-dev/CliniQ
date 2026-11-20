@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { toast } from '@/hooks/use-toast'
 import { ColaboradorDialog } from '@/components/colaboradores/ColaboradorDialog'
+import { DesactivarColaboradorDialog } from '@/components/colaboradores/DesactivarColaboradorDialog'
 import { EtiquetaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
@@ -516,19 +517,19 @@ export default function PersonalPage() {
         puedeAgregar={puedeAgregar}
       />
 
+      <DesactivarColaboradorDialog
+        colaborador={toggleTarget?.activo ? toggleTarget : null}
+        onOpenChange={(v) => { if (!v) setToggleTarget(null) }}
+      />
+
       <ConfirmDialog
-        open={!!toggleTarget}
+        open={!!toggleTarget && !toggleTarget.activo}
         onOpenChange={(v) => { if (!v && !toggleMut.isPending) setToggleTarget(null) }}
-        title={toggleTarget?.activo ? 'Desactivar usuario' : 'Activar usuario'}
-        description={
-          toggleTarget?.activo
-            ? `${toggleTarget?.nombre_completo} perderá el acceso a la clínica hasta que se reactive.`
-            : `Se restablecerá el acceso de ${toggleTarget?.nombre_completo} a la clínica.`
-        }
-        confirmLabel={toggleTarget?.activo ? 'Desactivar' : 'Activar'}
-        variant={toggleTarget?.activo ? 'destructive' : 'default'}
+        title="Activar usuario"
+        description={`Se restablecerá el acceso de ${toggleTarget?.nombre_completo} a la clínica.`}
+        confirmLabel="Activar"
         loading={toggleMut.isPending}
-        onConfirm={() => toggleTarget && toggleMut.mutate({ id: toggleTarget.id, activo: !toggleTarget.activo })}
+        onConfirm={() => toggleTarget && toggleMut.mutate({ id: toggleTarget.id, activo: true })}
       />
     </div>
   )

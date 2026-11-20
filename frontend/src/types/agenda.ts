@@ -64,6 +64,8 @@ export interface Cita {
   servicio_nombre: string
   profesional: string
   profesional_nombre: string
+  /** false si se desactivó al profesional dejándole sus citas: hay que cambiarlo antes de recibir. */
+  profesional_activo?: boolean
   fecha_inicio: string
   fecha_fin: string
   estado: EstadoCita

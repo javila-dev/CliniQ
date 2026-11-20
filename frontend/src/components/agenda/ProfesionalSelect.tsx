@@ -26,6 +26,8 @@ interface ProfesionalSelectProps {
   /** Con el filtro activo, texto que se muestra mientras aún falta elegir el procedimiento.
    *  Mientras esté presente el selector queda inactivo. */
   esperando?: string
+  /** Ids de usuario que no se ofrecen (p. ej. quien se está desactivando). */
+  excluirIds?: string[]
 }
 
 export function ProfesionalSelect({
@@ -36,6 +38,7 @@ export function ProfesionalSelect({
   disabled,
   filtro,
   esperando,
+  excluirIds,
 }: ProfesionalSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -55,11 +58,12 @@ export function ProfesionalSelect({
   const seleccionado = data?.find((p) => p.id === value)
 
   const filtrados = useMemo(() => {
-    const opciones = data ?? []
+    const excluidos = new Set(excluirIds ?? [])
+    const opciones = (data ?? []).filter((p) => !excluidos.has(p.id))
     const q = query.trim().toLowerCase()
     if (!q) return opciones
     return opciones.filter((p) => p.nombre_completo.toLowerCase().includes(q))
-  }, [data, query])
+  }, [data, query, excluirIds])
 
   const sinProfesionalesParaElProcedimiento = filtroActivo && hayFiltro && (data?.length ?? 0) === 0
 
