@@ -129,7 +129,11 @@ class ColaboradorViewSet(HasClinicamente, ModelViewSet):
         instance = self.get_object()
         nuevo_activo = serializer.validated_data.get("activo", instance.activo)
         if instance.activo and not nuevo_activo and colaborador_tiene_citas_futuras(instance):
-            raise ValidationError({"activo": "No se puede desactivar un colaborador con citas futuras."})
+            raise ValidationError({
+                "activo": [
+                    "Tiene citas futuras en la agenda. Reasígnalas a otro profesional o cancélalas antes de desactivarlo."
+                ]
+            })
 
         # Desactivar el colaborador desactiva su usuario (ver
         # ColaboradorSerializer._sync_user_activo); cambiar su rol puede quitarle

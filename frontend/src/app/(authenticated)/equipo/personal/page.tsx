@@ -24,6 +24,7 @@ import { ColaboradorDialog } from '@/components/colaboradores/ColaboradorDialog'
 import { EtiquetaAjuste, SeccionAjustes, VacioAjustes } from '@/components/configuracion/ajustes'
 import { useDebounce } from '@/hooks/useDebounce'
 import { cn } from '@/lib/utils'
+import { mensajeDeError } from '@/lib/errores'
 import { useAuthStore } from '@/store/authStore'
 import { isSuperAdmin, hasPermission, PERM } from '@/lib/permissions'
 import { PageHeader } from '@/components/shared/PageHeader'
@@ -334,17 +335,7 @@ export default function PersonalPage() {
       qc.invalidateQueries({ queryKey: ['mi-plan'] })
       setToggleTarget(null)
     },
-    onError: (e: any) => {
-      const data = e?.response?.data
-      const msg = typeof data?.error === 'string'
-        ? data.error
-        : typeof data?.activo?.[0] === 'string'
-          ? data.activo[0]
-          : typeof data?.[0] === 'string'
-            ? data[0]
-            : 'Intenta de nuevo.'
-      toast.error('No se pudo cambiar el estado', msg)
-    },
+    onError: (e) => toast.error('No se pudo cambiar el estado', mensajeDeError(e, 'Intenta de nuevo.')),
   })
 
   const resendMut = useMutation({
