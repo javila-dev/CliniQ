@@ -30,7 +30,7 @@ import {
   Tag,
   Briefcase,
   PhoneCall,
-  CalendarCheck,
+  BarChart3,
 } from 'lucide-react'
 
 import { useAuthStore } from '@/store/authStore'
@@ -59,7 +59,7 @@ const NAV = {
   atenciones:     { href: '/atenciones',     label: 'Atenciones',      icon: Stethoscope,     perm: PERM.HISTORIA_NOTAS_CREAR  },
   agenda:         { href: '/agenda',         label: 'Agenda',          icon: CalendarDays,    perm: PERM.AGENDA_VER            },
   pacientes:      { href: '/pacientes',      label: 'Pacientes',       icon: Users,           perm: PERM.PACIENTES_VER         },
-  citasProfesional: { href: '/citas-por-profesional', label: 'Citas por profesional', icon: CalendarCheck, perm: PERM.REPORTES_VER },
+  reportes:       { href: '/reportes',       label: 'Reportes',        icon: BarChart3,       perm: PERM.REPORTES_VER          },
   catalogo:       { href: '/catalogo',       label: 'Catálogo',        icon: Layers,          perm: PERM.SERVICIOS_VER         },
   // Bandeja diaria ("Para hoy") y embudo de interesados.
   seguimiento:    { href: '/seguimiento',    label: 'Seguimiento',     icon: PhoneCall,       perm: PERM.SEGUIMIENTO_VER       },
@@ -99,7 +99,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   const n = NAV
   const vis = (item: typeof NAV[keyof typeof NAV]) => allow(user, item)
 
-  const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes, n.citasProfesional].filter(vis)
+  const atencionItems: NavItem[] = [n.atenciones, n.agenda, n.pacientes].filter(vis)
   const comercialItems: NavItem[] = [n.seguimiento, n.cotizaciones, n.ventas, n.catalogo, n.campanas].filter(vis)
   const insumosItems: NavItem[]  = [n.insumos, n.compras, n.proveedores].filter(vis)
   const finanzasItems: NavItem[] = [n.resultados, n.cobros, n.cartera].filter(vis)
@@ -110,6 +110,7 @@ function buildNav(user: AuthUser | null): NavEntry[] {
   // /console, fuera de este sidebar — ver AuthGuard/defaultRoute.
 
   if (vis(n.dashboard))  entries.push(n.dashboard)
+  if (vis(n.reportes))   entries.push(n.reportes)
   if (atencionItems.length) entries.push({ section: 'Atención', items: atencionItems, icon: Stethoscope })
   if (comercialItems.length) entries.push({ section: 'Comercial', items: comercialItems, icon: Briefcase })
   if (insumosItems.length)  entries.push({ section: 'Insumos',  items: insumosItems,  icon: Package     })

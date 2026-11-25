@@ -1,6 +1,6 @@
 'use client'
 
-// Citas por profesional: qué pasó con cada cita del mes (atendida, cancelada, no
+// Reportes › citas por profesional: qué pasó con cada cita del mes (atendida, cancelada, no
 // asistió, sin cerrar, programada), de qué fue (sesión N de M de un tratamiento,
 // procedimiento individual, cita libre) y el resumen por profesional. Backend:
 // /reportes/citas-profesional/ (apps/reportes/citas_profesional.py).
@@ -380,8 +380,8 @@ function CitasPorProfesional() {
   return (
     <div className="space-y-4">
       <PageHeader
-        title="Citas por profesional"
-        description="Qué pasó con cada cita del mes, de qué fue y cómo le fue a cada profesional."
+        title="Reportes"
+        description="Citas por profesional: qué pasó con cada cita del mes, de qué fue y cómo le fue a cada profesional."
         helpSlug="reporte-de-citas-por-profesional"
         action={
           <Button variant="outline" className="gap-1.5" disabled={!citas.length} onClick={exportarExcel}>
