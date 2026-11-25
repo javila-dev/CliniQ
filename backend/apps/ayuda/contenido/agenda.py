@@ -351,11 +351,16 @@ responder la pregunta más común del mostrador, «¿cuántas sesiones me quedan
         "destacado": False,
         "contenido": """
 En **Atención › Reportes** (o **Ver detalle** en la tarjeta de ocupación del
-dashboard) ves todas las citas de un mes, agrupadas por quien las atendía. Cambia de mes con las flechas.
+dashboard) ves las citas de un periodo, agrupadas por quien las atendía. Arriba
+eliges el periodo:
+
+- **Día**: un solo día; las flechas pasan al día anterior o al siguiente.
+- **Mes**: el mes completo (es lo que se abre por defecto).
+- **Entre fechas**: desde y hasta, máximo un año.
 
 ## Qué muestra
 
-Arriba, los totales del mes. Haz clic en una tarjeta (por ejemplo **Sin
+Primero, los totales del periodo. Haz clic en una tarjeta (por ejemplo **Sin
 cerrar**) para ver solo esas citas en el detalle.
 
 Debajo, una fila por profesional con:

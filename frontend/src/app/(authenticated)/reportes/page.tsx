@@ -1,8 +1,9 @@
 'use client'
 
-// Reportes › citas por profesional: qué pasó con cada cita del mes (atendida, cancelada, no
-// asistió, sin cerrar, programada), de qué fue (sesión N de M de un tratamiento,
-// procedimiento individual, cita libre) y el resumen por profesional. Backend:
+// Reportes › citas por profesional: qué pasó con cada cita del periodo (un día, un
+// mes o entre fechas): atendida, cancelada, no asistió, sin cerrar o programada; de
+// qué fue (sesión N de M de un tratamiento, procedimiento individual, cita libre) y
+// el resumen por profesional. Backend:
 // /reportes/citas-profesional/ (apps/reportes/citas_profesional.py).
 
 import { useMemo, useState } from 'react'
@@ -60,7 +61,27 @@ const CONFIRMACION: Record<string, string> = {
 const CANAL: Record<string, string> = { presencial: 'Presencial', telefono: 'Teléfono', web: 'Web', redes: 'Redes' }
 const FIRMA: Record<string, string> = { sin_firma: 'Sin firma', enviada: 'Enviada', firmada: 'Firmada', rechazada: 'Rechazada' }
 
-// ── Mes ──
+// ── Periodo: un día, un mes o entre fechas ──
+
+type ModoPeriodo = 'dia' | 'mes' | 'rango'
+interface Periodo { modo: ModoPeriodo; dia: string; mes: string; desde: string; hasta: string }
+
+const MAX_DIAS = 366  // el backend no devuelve más de un año
+
+function isoDe(d: Date) {
+  return d.toLocaleDateString('en-CA')
+}
+
+function fechaDe(iso: string) {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+function sumarDias(iso: string, dias: number) {
+  const d = fechaDe(iso)
+  d.setDate(d.getDate() + dias)
+  return isoDe(d)
+}
 
 function mesDe(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
@@ -71,41 +92,132 @@ function moverMes(mes: string, delta: number) {
   return mesDe(new Date(y, m - 1 + delta, 1))
 }
 
-function nombreMes(mes: string) {
-  const [y, m] = mes.split('-').map(Number)
-  const texto = new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' })
+function capital(texto: string) {
   return texto.charAt(0).toUpperCase() + texto.slice(1)
 }
 
-function SelectorMes({ mes, onChange }: { mes: string; onChange: (m: string) => void }) {
-  const actual = mesDe(new Date())
+function nombreMes(mes: string) {
+  const [y, m] = mes.split('-').map(Number)
+  return capital(new Date(y, m - 1, 1).toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }))
+}
+
+function periodoInicial(): Periodo {
+  const hoy = new Date()
+  const iso = isoDe(hoy)
+  return { modo: 'mes', dia: iso, mes: mesDe(hoy), desde: isoDe(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), hasta: iso }
+}
+
+function rangoDe(p: Periodo): { desde: string; hasta: string } {
+  if (p.modo === 'dia') return { desde: p.dia, hasta: p.dia }
+  if (p.modo === 'mes') {
+    const [y, m] = p.mes.split('-').map(Number)
+    return { desde: isoDe(new Date(y, m - 1, 1)), hasta: isoDe(new Date(y, m, 0)) }
+  }
+  return p.desde <= p.hasta ? { desde: p.desde, hasta: p.hasta } : { desde: p.hasta, hasta: p.desde }
+}
+
+/** "el 25 nov 2026", "noviembre de 2026" o "entre el 1 nov 2026 y el 25 nov 2026". */
+function etiquetaPeriodo(p: Periodo) {
+  const larga = (iso: string) => fechaDe(iso).toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })
+  if (p.modo === 'mes') return nombreMes(p.mes).toLowerCase()
+  const { desde, hasta } = rangoDe(p)
+  return desde === hasta ? `el ${larga(desde)}` : `entre el ${larga(desde)} y el ${larga(hasta)}`
+}
+
+const flecha = 'grid h-full w-8 shrink-0 place-items-center text-muted-foreground hover:text-foreground'
+const campoFecha = 'h-full border-0 bg-transparent px-1 text-sm font-medium tabular-nums outline-none'
+const atajo = 'h-full border-l px-2.5 text-xs text-muted-foreground hover:text-foreground'
+
+function SelectorPeriodo({ periodo, onChange }: { periodo: Periodo; onChange: (p: Periodo) => void }) {
+  const hoy = isoDe(new Date())
+  const mesActual = mesDe(new Date())
+  const set = (cambios: Partial<Periodo>) => onChange({ ...periodo, ...cambios })
+
+  function cambiarModo(modo: ModoPeriodo) {
+    if (modo === periodo.modo) return
+    // "Entre fechas" arranca con lo que se estaba viendo.
+    if (modo === 'rango') return set({ modo, ...rangoDe(periodo) })
+    set({ modo })
+  }
+
   return (
-    <div className="inline-flex h-9 items-center rounded-md border border-input bg-white">
-      <button
-        type="button"
-        onClick={() => onChange(moverMes(mes, -1))}
-        className="grid h-full w-8 place-items-center text-muted-foreground hover:text-foreground"
-        aria-label="Mes anterior"
-      >
-        <ChevronLeft className="h-4 w-4" />
-      </button>
-      <span className="min-w-[9.5rem] px-1 text-center text-sm font-medium tabular-nums">{nombreMes(mes)}</span>
-      <button
-        type="button"
-        onClick={() => onChange(moverMes(mes, 1))}
-        className="grid h-full w-8 place-items-center text-muted-foreground hover:text-foreground"
-        aria-label="Mes siguiente"
-      >
-        <ChevronRight className="h-4 w-4" />
-      </button>
-      {mes !== actual && (
-        <button
-          type="button"
-          onClick={() => onChange(actual)}
-          className="h-full border-l px-2.5 text-xs text-muted-foreground hover:text-foreground"
-        >
-          Este mes
-        </button>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="inline-flex h-9 items-center rounded-md border border-input bg-white p-0.5" role="radiogroup" aria-label="Periodo">
+        {([['dia', 'Día'], ['mes', 'Mes'], ['rango', 'Entre fechas']] as const).map(([modo, label]) => (
+          <button
+            key={modo}
+            type="button"
+            role="radio"
+            aria-checked={periodo.modo === modo}
+            onClick={() => cambiarModo(modo)}
+            className={cn(
+              'h-full rounded px-2.5 text-xs font-medium transition-colors',
+              periodo.modo === modo ? 'bg-primary text-white' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {periodo.modo === 'dia' && (
+        <div className="inline-flex h-9 items-center rounded-md border border-input bg-white">
+          <button type="button" onClick={() => set({ dia: sumarDias(periodo.dia, -1) })} className={flecha} aria-label="Día anterior">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <input
+            type="date"
+            aria-label="Día"
+            value={periodo.dia}
+            onChange={(e) => e.target.value && set({ dia: e.target.value })}
+            className={campoFecha}
+          />
+          <button type="button" onClick={() => set({ dia: sumarDias(periodo.dia, 1) })} className={flecha} aria-label="Día siguiente">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          {periodo.dia !== hoy && (
+            <button type="button" onClick={() => set({ dia: hoy })} className={atajo}>Hoy</button>
+          )}
+        </div>
+      )}
+
+      {periodo.modo === 'mes' && (
+        <div className="inline-flex h-9 items-center rounded-md border border-input bg-white">
+          <button type="button" onClick={() => set({ mes: moverMes(periodo.mes, -1) })} className={flecha} aria-label="Mes anterior">
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <span className="min-w-[9.5rem] px-1 text-center text-sm font-medium tabular-nums">{nombreMes(periodo.mes)}</span>
+          <button type="button" onClick={() => set({ mes: moverMes(periodo.mes, 1) })} className={flecha} aria-label="Mes siguiente">
+            <ChevronRight className="h-4 w-4" />
+          </button>
+          {periodo.mes !== mesActual && (
+            <button type="button" onClick={() => set({ mes: mesActual })} className={atajo}>Este mes</button>
+          )}
+        </div>
+      )}
+
+      {periodo.modo === 'rango' && (
+        <div className="inline-flex h-9 items-center gap-1 rounded-md border border-input bg-white px-2">
+          <input
+            type="date"
+            aria-label="Desde"
+            value={periodo.desde}
+            max={periodo.hasta || undefined}
+            min={periodo.hasta ? sumarDias(periodo.hasta, -MAX_DIAS) : undefined}
+            onChange={(e) => e.target.value && set({ desde: e.target.value })}
+            className={campoFecha}
+          />
+          <span className="text-xs text-muted-foreground">a</span>
+          <input
+            type="date"
+            aria-label="Hasta"
+            value={periodo.hasta}
+            min={periodo.desde || undefined}
+            max={periodo.desde ? sumarDias(periodo.desde, MAX_DIAS) : undefined}
+            onChange={(e) => e.target.value && set({ hasta: e.target.value })}
+            className={campoFecha}
+          />
+        </div>
       )}
     </div>
   )
@@ -238,7 +350,8 @@ function CeldasResumen({ f, total = false }: { f: ResumenProfesionalCitas; total
 
 function CitasPorProfesional() {
   const { sedes } = useUserSedes()
-  const [mes, setMes] = useState(() => mesDe(new Date()))
+  const [periodo, setPeriodo] = useState<Periodo>(periodoInicial)
+  const { desde, hasta } = rangoDe(periodo)
   const [sede, setSede] = useState<string | null>(null)
   const [profesionales, setProfesionales] = useState<string[]>([])
   const [resultados, setResultados] = useState<string[]>([])
@@ -247,8 +360,8 @@ function CitasPorProfesional() {
   const [pagina, setPagina] = useState(1)
 
   const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ['reportes', 'citas-profesional', mes, sede],
-    queryFn: () => reportesApi.getCitasProfesional({ mes, sede_id: sede ?? undefined }),
+    queryKey: ['reportes', 'citas-profesional', desde, hasta, sede],
+    queryFn: () => reportesApi.getCitasProfesional({ desde, hasta, sede_id: sede ?? undefined }),
   })
 
   const conReinicio = <T,>(fn: (v: T) => void) => (v: T) => { fn(v); setPagina(1) }
@@ -371,7 +484,7 @@ function CitasPorProfesional() {
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, hojaResumen, 'Resumen')
       XLSX.utils.book_append_sheet(wb, hojaCitas, 'Citas')
-      XLSX.writeFile(wb, `citas_por_profesional_${mes}.xlsx`)
+      XLSX.writeFile(wb, `citas_por_profesional_${desde === hasta ? desde : `${desde}_${hasta}`}.xlsx`)
     } catch {
       toast.error('No se pudo exportar', 'Vuelve a intentarlo en un momento.')
     }
@@ -381,7 +494,7 @@ function CitasPorProfesional() {
     <div className="space-y-4">
       <PageHeader
         title="Reportes"
-        description="Citas por profesional: qué pasó con cada cita del mes, de qué fue y cómo le fue a cada profesional."
+        description="Citas por profesional: qué pasó con cada cita del periodo, de qué fue y cómo le fue a cada profesional."
         helpSlug="reporte-de-citas-por-profesional"
         action={
           <Button variant="outline" className="gap-1.5" disabled={!citas.length} onClick={exportarExcel}>
@@ -393,7 +506,7 @@ function CitasPorProfesional() {
 
       <div className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          <SelectorMes mes={mes} onChange={conReinicio(setMes)} />
+          <SelectorPeriodo periodo={periodo} onChange={conReinicio(setPeriodo)} />
           <div className="relative w-full sm:w-64">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -422,7 +535,7 @@ function CitasPorProfesional() {
                 seleccion={profesionales}
                 onChange={conReinicio(setProfesionales)}
                 buscar="Buscar profesional…"
-                vacio="Nadie tiene citas en este mes."
+                vacio="Nadie tiene citas en este periodo."
               />
             </SeccionFiltro>
             <SeccionFiltro titulo="Resultado">
@@ -457,8 +570,8 @@ function CitasPorProfesional() {
       ) : !data.citas.length ? (
         <TablaVacia
           icono={<CalendarCheck className="h-5 w-5" />}
-          titulo={`Sin citas en ${nombreMes(mes).toLowerCase()}`}
-          texto="Prueba con otro mes o con otra sede."
+          titulo={periodo.modo === 'mes' ? `Sin citas en ${etiquetaPeriodo(periodo)}` : capital(`sin citas ${etiquetaPeriodo(periodo)}`)}
+          texto="Prueba con otro periodo o con otra sede."
         />
       ) : (
         <>
