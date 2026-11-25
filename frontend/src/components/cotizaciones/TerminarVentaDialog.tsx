@@ -2,7 +2,8 @@
 
 // Terminar una venta que el paciente deja a medias (docs/plan-terminacion-ventas.md):
 // no se agendan más sesiones, se decide qué pasa con las citas sin cerrar y con el
-// saldo (perdonarlo o dejar un cobro de X).
+// saldo (perdonarlo o dejar un cobro de X). En los dos casos el plan de cuotas
+// pendiente se cierra; el modal dice antes de confirmar cómo queda la cartera.
 
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -97,6 +98,7 @@ export function TerminarVentaDialog({
   const [valor, setValor] = useState('')
   const [fecha, setFecha] = useState(hoyISO())
   const [formaPago, setFormaPago] = useState<string | null>(null)
+  const [confirmando, setConfirmando] = useState(false)
 
   const { data: previa, isLoading, isError, error } = useQuery({
     queryKey: ['cotizacion-terminacion', cotizacion.id],
@@ -109,12 +111,12 @@ export function TerminarVentaDialog({
   useEffect(() => {
     if (!open) {
       setMotivo(null); setNota(''); setAccionCitas(null); setModo(null)
-      setValor(''); setFecha(hoyISO()); setFormaPago(null)
+      setValor(''); setFecha(hoyISO()); setFormaPago(null); setConfirmando(false)
     }
   }, [open])
   useEffect(() => {
     if (previa) {
-      setValor(saldo > 0 ? String(Math.round(saldo)) : '')
+      setValor(saldo > 0 ? String(saldo) : '')
       setFormaPago(previa.forma_pago_sugerida)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -127,25 +129,57 @@ export function TerminarVentaDialog({
       toast.success('Venta terminada', 'Ya no se agendan más sesiones de esta venta.')
       onOpenChange(false)
     },
-    onError: (err) => toast.error('No se pudo terminar la venta', mensajeDeError(err)),
+    onError: (err) => {
+      setConfirmando(false)
+      toast.error('No se pudo terminar la venta', mensajeDeError(err))
+    },
   })
 
   const citas = previa?.citas
   const cancelables = citas ? citas.agendadas.length + citas.sin_cerrar.length : 0
   const enAtencion = citas?.en_atencion.length ?? 0
   const valorNum = Number(valor || 0)
-  const cobroParcial = modo === 'cobrar' && valorNum > 0 && valorNum < saldo
+  const cobrando = modo === 'cobrar'
+  const perdonar = modo === 'perdonar' ? saldo : cobrando ? Math.max(saldo - valorNum, 0) : 0
+  const cuotasPendientes = previa?.cuotas_pendientes ?? []
+  // Saldo que ninguna cuota cubre (carteras de antes de exigir el plan de pagos).
+  const saldoSinCuota = Math.max(saldo - cuotasPendientes.reduce((a, c) => a + Number(c.saldo), 0), 0)
+  const nombreFormaPago = formasPago.find((f) => f.id === formaPago)?.nombre
 
   const faltante =
     !motivo ? 'Elige el motivo.'
       : motivo === 'otro' && !nota.trim() ? 'Escribe el motivo.'
         : cancelables > 0 && !accionCitas ? 'Elige qué hacer con las citas.'
           : saldo > 0 && !modo ? 'Elige qué pasa con el saldo.'
-            : modo === 'cobrar' && (valorNum <= 0 || valorNum > saldo) ? `El valor debe estar entre 1 y ${cop(saldo)}.`
-              : cobroParcial && (!fecha || fecha < hoyISO()) ? 'Elige la fecha del cobro (desde hoy).'
-                : cobroParcial && !formaPago ? 'Elige la forma de pago.'
+            : cobrando && (valorNum <= 0 || valorNum > saldo) ? `El valor debe estar entre 1 y ${cop(saldo)}.`
+              : cobrando && (!fecha || fecha < hoyISO()) ? 'Elige la fecha del cobro (desde hoy).'
+                : cobrando && !formaPago ? 'Elige la forma de pago.'
                   : previa?.acuerdo_pendiente ? 'Hay un acuerdo de pago pendiente de firma: anúlalo primero.'
                     : null
+
+  // Lo que va a pasar con la cartera, en frases cortas: se muestra antes de
+  // elegir "Terminar venta" y otra vez en la confirmación.
+  const queda: string[] = []
+  if (saldo <= 0) {
+    queda.push('La venta está pagada: la cartera no cambia.')
+  } else if (modo === 'perdonar') {
+    queda.push(`Se perdonan ${cop(saldo)}. La cartera de esta venta queda en $0 y el paciente sale de mora por ella.`)
+  } else if (cobrando && valorNum > 0 && valorNum <= saldo) {
+    queda.push(
+      `La cartera de esta venta queda con una sola cuota de ${cop(valorNum)}`
+      + `${fecha ? ` para el ${formatFechaLocal(fecha)}` : ''}${nombreFormaPago ? ` (${nombreFormaPago})` : ''}.`,
+    )
+    queda.push(perdonar > 0 ? `Se perdonan ${cop(perdonar)}.` : 'No se perdona nada.')
+    queda.push('Si esa cuota vence sin pagarse, el paciente entra en mora.')
+  }
+  if (saldo > 0 && modo && cuotasPendientes.length > 0) {
+    queda.unshift(
+      cuotasPendientes.length === 1
+        ? 'La cuota pendiente del plan se cierra.'
+        : `Las ${cuotasPendientes.length} cuotas pendientes del plan se cierran.`,
+    )
+  }
+  if (perdonar > 0) queda.push('Como se perdona dinero, la venta no se podrá reanudar.')
 
   function confirmar() {
     if (faltante || !motivo) return
@@ -154,9 +188,9 @@ export function TerminarVentaDialog({
       nota: nota.trim(),
       citas: cancelables > 0 ? accionCitas : null,
       modo: saldo > 0 ? modo : null,
-      valor: modo === 'cobrar' ? String(valorNum) : null,
-      fecha: cobroParcial ? fecha : null,
-      forma_pago: cobroParcial ? formaPago : null,
+      valor: cobrando ? String(valorNum) : null,
+      fecha: cobrando ? fecha : null,
+      forma_pago: cobrando ? formaPago : null,
     })
   }
 
@@ -269,21 +303,41 @@ export function TerminarVentaDialog({
             {saldo > 0 && (
               <div className="space-y-2">
                 <Label>Saldo pendiente: {cop(saldo)}</Label>
+                {(cuotasPendientes.length > 0 || saldoSinCuota > 0) && (
+                  <ul className="divide-y rounded-md border text-xs">
+                    {cuotasPendientes.map((c) => (
+                      <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-1.5">
+                        <span className="min-w-0 truncate">
+                          {c.descripcion || 'Cuota'}
+                          {c.fecha_esperada ? ` · ${formatFechaLocal(c.fecha_esperada)}` : ''}
+                          {c.vencida && <span className="ml-1.5 font-medium text-rose-600">Vencida</span>}
+                        </span>
+                        <span className="shrink-0 tabular-nums">{cop(Number(c.saldo))}</span>
+                      </li>
+                    ))}
+                    {saldoSinCuota > 0 && (
+                      <li className="flex items-center justify-between gap-3 px-3 py-1.5">
+                        <span className="min-w-0 truncate text-muted-foreground">Saldo sin cuota en la cartera</span>
+                        <span className="shrink-0 tabular-nums">{cop(saldoSinCuota)}</span>
+                      </li>
+                    )}
+                  </ul>
+                )}
                 <div className="flex flex-col sm:flex-row gap-2">
                   <OpcionTarjeta
                     activa={modo === 'perdonar'}
                     titulo="Perdonar el saldo"
-                    detalle="La deuda queda en 0 y se levanta la mora."
+                    detalle="Se cierran las cuotas pendientes. La cartera queda en $0 y se levanta la mora."
                     onClick={() => setModo('perdonar')}
                   />
                   <OpcionTarjeta
-                    activa={modo === 'cobrar'}
+                    activa={cobrando}
                     titulo="Cobrar un valor"
-                    detalle="El paciente sigue debiendo lo que acuerden."
+                    detalle="Se cierran las cuotas pendientes y queda una sola cuota por el valor y la fecha que elijas."
                     onClick={() => setModo('cobrar')}
                   />
                 </div>
-                {modo === 'cobrar' && (
+                {cobrando && (
                   <div className="grid gap-3 sm:grid-cols-3">
                     <div className="space-y-1">
                       <Label htmlFor="terminar-valor" className="text-xs">Valor a cobrar</Label>
@@ -297,32 +351,31 @@ export function TerminarVentaDialog({
                         onChange={(e) => setValor(e.target.value)}
                       />
                     </div>
-                    {cobroParcial && (
-                      <>
-                        <div className="space-y-1">
-                          <Label htmlFor="terminar-fecha" className="text-xs">Fecha del cobro</Label>
-                          <Input id="terminar-fecha" type="date" min={hoyISO()} value={fecha} onChange={(e) => setFecha(e.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label htmlFor="terminar-forma-pago" className="text-xs">Forma de pago</Label>
-                          <Select value={formaPago ?? undefined} onValueChange={setFormaPago}>
-                            <SelectTrigger id="terminar-forma-pago"><SelectValue placeholder="Elegir" /></SelectTrigger>
-                            <SelectContent>
-                              {formasPago.map((f) => <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>)}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </>
-                    )}
-                    <p className="sm:col-span-3 text-xs text-muted-foreground">
-                      {valorNum >= saldo
-                        ? 'El plan de cuotas queda como está.'
-                        : valorNum > 0
-                          ? `Las cuotas pendientes se cierran y queda una sola cuota de ${cop(valorNum)}. Se perdonan ${cop(saldo - valorNum)}.`
-                          : null}
-                    </p>
+                    <div className="space-y-1">
+                      <Label htmlFor="terminar-fecha" className="text-xs">Fecha del cobro</Label>
+                      <Input id="terminar-fecha" type="date" min={hoyISO()} value={fecha} onChange={(e) => setFecha(e.target.value)} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label htmlFor="terminar-forma-pago" className="text-xs">Forma de pago</Label>
+                      <Select value={formaPago ?? undefined} onValueChange={setFormaPago}>
+                        <SelectTrigger id="terminar-forma-pago"><SelectValue placeholder="Elegir" /></SelectTrigger>
+                        <SelectContent>
+                          {formasPago.map((f) => <SelectItem key={f.id} value={f.id}>{f.nombre}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Así queda la cartera: la consecuencia del dinero, a la vista antes de terminar. */}
+            {(saldo <= 0 || modo) && queda.length > 0 && (
+              <div className="rounded-lg border border-primary/30 bg-primary/5 px-3 py-2.5">
+                <p className="text-xs font-semibold">Así queda la cartera</p>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs">
+                  {queda.map((t) => <li key={t}>{t}</li>)}
+                </ul>
               </div>
             )}
 
@@ -350,11 +403,31 @@ export function TerminarVentaDialog({
                 variant="destructive"
                 className="flex-1"
                 disabled={isPending || !!faltante}
-                onClick={confirmar}
+                onClick={() => setConfirmando(true)}
               >
-                {isPending ? 'Terminando…' : 'Terminar venta'}
+                Terminar venta
               </Button>
             </div>
+            <ConfirmDialog
+              open={confirmando}
+              onOpenChange={(v) => { if (!isPending) setConfirmando(v) }}
+              title="¿Terminar la venta?"
+              description={
+                <>
+                  <span className="block">Ya no se agendan más sesiones de esta venta.</span>
+                  {accionCitas === 'cancelar' && cancelables > 0 && (
+                    <span className="block">
+                      {cancelables === 1 ? 'Se cancela 1 cita.' : `Se cancelan ${cancelables} citas.`}
+                    </span>
+                  )}
+                  {queda.map((t) => <span key={t} className="block">{t}</span>)}
+                </>
+              }
+              confirmLabel="Sí, terminar"
+              variant="destructive"
+              loading={isPending}
+              onConfirm={confirmar}
+            />
           </div>
         )}
       </DialogContent>

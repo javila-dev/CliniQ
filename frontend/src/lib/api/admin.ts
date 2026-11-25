@@ -9,7 +9,7 @@ import type {
   SoporteAtencion, SoportePaciente, TrasladoPrevisualizacion, TrasladarAtencionRequest,
   EliminacionPrevisualizacion, EliminarAtencionRequest, CorreccionSoporte, TipoCorreccionSoporte,
   SoporteCargaMigrada, SoporteTratamientoCatalogo, CorreccionMigradoRequest, CorreccionMigradoPrevisualizacion,
-  SoporteVentaTratamiento, CambioTratamientoRequest,
+  SoporteVentaTratamiento, CambioTratamientoRequest, SoporteVentaTerminada,
   CambiarCorreoRequest, CambiarCorreoResultado, CambioCorreoReciente,
 } from '@/types/admin'
 import type { Paginated } from '@/types/common'
@@ -70,6 +70,14 @@ export const adminApi = {
     },
     cambiarTratamiento: async (data: CambioTratamientoRequest & { motivo: string }): Promise<{ id: string }> => {
       const res = await apiClient.post<{ id: string }>('/admin/soporte/cambiar-tratamiento/confirmar/', data)
+      return res.data
+    },
+    ventasTerminadas: async (clinica: string, paciente: string): Promise<SoporteVentaTerminada[]> => {
+      const res = await apiClient.get<SoporteVentaTerminada[]>('/admin/soporte/cerrar-cartera/', { params: { clinica, paciente } })
+      return res.data
+    },
+    cerrarCartera: async (data: { clinica: string; cotizacion: string; motivo: string }): Promise<{ id: string }> => {
+      const res = await apiClient.post<{ id: string }>('/admin/soporte/cerrar-cartera/confirmar/', data)
       return res.data
     },
     correcciones: async (clinica: string, tipo?: TipoCorreccionSoporte): Promise<CorreccionSoporte[]> => {

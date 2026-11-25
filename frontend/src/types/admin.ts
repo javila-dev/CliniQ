@@ -430,7 +430,8 @@ export interface CambioTratamientoRequest {
   asignaciones: AsignacionAtencion[]
 }
 
-export type TipoCorreccionSoporte = 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas' | 'cambiar_tratamiento'
+export type TipoCorreccionSoporte =
+  | 'trasladar_atencion' | 'eliminar_atencion' | 'corregir_sesiones_previas' | 'cambiar_tratamiento' | 'cerrar_cartera'
 
 export interface CorreccionSoporte {
   id: string
@@ -451,9 +452,39 @@ export interface CorreccionSoporte {
   /** Al cambiar el tratamiento (de un paquete migrado o de una venta). */
   tratamiento_antes: string | null
   tratamiento_despues: string | null
+  /** Al cerrar la cartera de una venta terminada: lo que se perdonó. */
+  saldo_cerrado: string | null
   motivo: string
   realizado_por: string | null
   created_at: string
+}
+
+// ── Soporte: cerrar la cartera de una venta terminada ───────────────────────
+
+export interface SoporteCuotaPendiente {
+  id: string
+  descripcion: string
+  fecha_esperada: string | null
+  saldo: string
+  abonado: string
+  vencida: boolean
+}
+
+export interface SoporteVentaTerminada {
+  cotizacion_id: string
+  descripcion: string
+  aceptada_en: string | null
+  terminada_en: string
+  motivo_terminacion: string
+  terminada_por: string | null
+  valor_perdonado: string
+  /** Lo que la cartera aún tiene por cobrar. */
+  saldo: string
+  /** Parte del saldo que ninguna cuota cubre. */
+  saldo_sin_cuota: string
+  cuotas_pendientes: SoporteCuotaPendiente[]
+  /** Por qué no se puede cerrar (ya cerrada, acuerdo pendiente). */
+  bloqueo: string | null
 }
 
 // ── Soporte: cambiar el correo de acceso de un usuario ──────────────────────

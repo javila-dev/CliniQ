@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeftRight, AtSign, ChevronRight, ListChecks, Replace, Trash2, type LucideIcon } from 'lucide-react'
+import { ArrowLeftRight, AtSign, ChevronRight, ListChecks, Replace, Trash2, Wallet, type LucideIcon } from 'lucide-react'
 
 // Cada error común de los usuarios que soporte corrige tiene su herramienta:
 // una tarjeta aquí y su página en /console/soporte/<herramienta>.
@@ -29,6 +29,12 @@ const HERRAMIENTAS: { href: string; titulo: string; descripcion: string; icon: L
     titulo: 'Cambiar tratamiento de una venta',
     descripcion: 'Se cotizó otro tratamiento y la venta ya se aceptó, con citas hechas o agendadas. Pasa al tratamiento correcto sin cambiar lo cobrado.',
     icon: Replace,
+  },
+  {
+    href: '/console/soporte/cerrar-cartera',
+    titulo: 'Cerrar cartera de una venta terminada',
+    descripcion: 'La venta se terminó pero su cartera quedó con saldo por error. Se perdona lo pendiente y la cartera queda en $0.',
+    icon: Wallet,
   },
   {
     href: '/console/soporte/cambiar-correo',
