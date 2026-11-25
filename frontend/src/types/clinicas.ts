@@ -8,7 +8,11 @@ export interface WizardConfig {
 }
 
 export interface ConfiguracionCartera {
+  /** Pese al nombre, activa el COMPROMISO DE PAGO (nombre histórico). */
   requiere_consentimiento_promocional: boolean
+  /** Condiciones de compra promocional en toda venta (no devolución, plazo, etc.). */
+  exige_condiciones_compra_promocional: boolean
+  plazo_inicio_promocional_dias: number
   updated_at: string
 }
 

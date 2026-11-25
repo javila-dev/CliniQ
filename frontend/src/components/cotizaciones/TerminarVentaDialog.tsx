@@ -161,6 +161,10 @@ export function TerminarVentaDialog({
   }
 
   const sesionesPendientes = previa?.sesiones.reduce((a, s) => a + s.pendientes, 0) ?? 0
+  // El paciente firmó las condiciones de compra promocional (no hay devolución).
+  const cp = cotizacion.compromiso_pago
+  const firmoCompraPromocional = cp?.estado === 'firmado'
+    && (cp.alcance_aceptacion === 'promocional' || cp.alcance_aceptacion === 'ambos')
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!isPending) onOpenChange(v) }}>
@@ -179,6 +183,11 @@ export function TerminarVentaDialog({
           <p className="text-sm text-destructive">{mensajeDeError(error, 'No se pudo cargar la venta.')}</p>
         ) : (
           <div className="space-y-5">
+            {firmoCompraPromocional && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                El paciente firmó las condiciones de compra promocional: aceptó que no hay devolución de dinero.
+              </p>
+            )}
             {/* Sesiones */}
             {previa.sesiones.length > 0 && (
               <div className="rounded-lg bg-muted/50 px-3 py-2.5 text-sm">
