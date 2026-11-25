@@ -16,7 +16,7 @@ const PLAZOS = [15, 30, 45, 60, 90, 120, 180, 365]
 /** Sección "Cotizaciones" de Configuración → Comercial: el documento que firma
  *  el paciente al aceptar una cotización (antes era la pestaña "Otros documentos").
  *  Puede llevar el compromiso de pago, las condiciones de compra promocional o
- *  las dos cosas en un mismo documento con una sola firma. */
+ *  las dos cosas: dos documentos en el mismo sobre, cada uno con su firma. */
 export function CotizacionesAjustes() {
   const queryClient = useQueryClient()
 
@@ -124,7 +124,7 @@ export function CotizacionesAjustes() {
           )}
           <NotaAjuste>
             El texto de los documentos es estándar y no se edita: aquí solo los activas o los desactivas.
-            Si activas los dos, van en un mismo documento y el paciente firma una sola vez. Quien cotiza
+            Si activas los dos, el paciente los recibe juntos en el mismo envío y firma cada documento por separado. Quien cotiza
             necesita su firma guardada en el perfil para las condiciones de compra promocional.
           </NotaAjuste>
         </>
