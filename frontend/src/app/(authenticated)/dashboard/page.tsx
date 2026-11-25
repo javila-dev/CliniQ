@@ -1344,7 +1344,10 @@ function DashboardContent() {
         {/* Ocupación por profesional — tab del periodo elegido vs. Hoy */}
         <div className="bg-white rounded-xl border shadow-sm overflow-hidden transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
           <div className="flex items-center justify-between px-5 py-4 border-b">
-            <h2 className="font-semibold text-sm">Ocupación por profesional</h2>
+            <div className="flex items-baseline gap-2">
+              <h2 className="font-semibold text-sm">Ocupación por profesional</h2>
+              <Link href="/citas-por-profesional" className="text-xs text-primary hover:underline">Ver detalle</Link>
+            </div>
             {periodo === 'hoy' ? (
               <span className="text-xs text-muted-foreground">Hoy</span>
             ) : (

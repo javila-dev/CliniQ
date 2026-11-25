@@ -291,3 +291,71 @@ export interface SesionARegistrar {
   nota?: string
   nota_clinica?: string
 }
+
+// ── Citas por profesional (/reportes/citas-profesional/) ──
+
+export type ResultadoCita = 'atendida' | 'cancelada' | 'no_asistio' | 'sin_cerrar' | 'programada'
+export type TipoCitaReporte = 'tratamiento' | 'procedimiento' | 'item_libre' | 'cita_libre'
+
+export interface CitaReporte {
+  id: string
+  fecha: string
+  hora: string
+  hora_fin: string
+  duracion_min: number | null
+  profesional_id: string
+  profesional: string
+  sede_id: string
+  sede: string
+  recursos: string
+  paciente_id: string
+  paciente: string
+  documento: string
+  telefono: string
+  estado: string
+  resultado: ResultadoCita
+  tipo: TipoCitaReporte
+  es_obsequio: boolean
+  servicio: string
+  tratamiento: string
+  tipo_sesion: string
+  sesion_numero: number | null
+  sesion_total: number | null
+  motivo: string
+  motivo_cancelacion: string
+  confirmacion: string
+  canal_origen: string
+  llegada: string | null
+  inicio_real: string | null
+  fin_real: string | null
+  duracion_real_min: number | null
+  historia: 'firmada' | 'borrador' | 'sin_nota'
+  firma_asistencia: string
+  agendada_por: string
+  agendada_en: string
+  vendida_por: string
+}
+
+export interface ResumenProfesionalCitas {
+  profesional_id: string | null
+  profesional: string
+  total: number
+  atendida: number
+  cancelada: number
+  no_asistio: number
+  sin_cerrar: number
+  programada: number
+  atendidas_por_tipo: Record<TipoCitaReporte, number>
+  pacientes_atendidos: number
+  minutos_atendidos: number
+  atendidas_sin_nota_firmada: number
+  pct_asistencia: number | null
+}
+
+export interface ReporteCitasProfesional {
+  desde: string
+  hasta: string
+  totales: ResumenProfesionalCitas
+  profesionales: ResumenProfesionalCitas[]
+  citas: CitaReporte[]
+}

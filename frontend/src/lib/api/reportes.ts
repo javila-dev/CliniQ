@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  ReporteCitasProfesional,
   ComercialAsesores,
   DashboardData, IngresosPeriodo, ServicioReporte,
   OcupacionReporte, ReportesParams, IngresosPorOrigen, CotizacionesMesMetrics, ComercialMetrics,
@@ -70,6 +71,11 @@ export const reportesApi = {
 
   getVendedores: async (): Promise<Vendedor[]> => {
     const res = await apiClient.get<Vendedor[]>('/reportes/vendedores/')
+    return res.data
+  },
+
+  getCitasProfesional: async (params: { mes: string; sede_id?: string }): Promise<ReporteCitasProfesional> => {
+    const res = await apiClient.get<ReporteCitasProfesional>('/reportes/citas-profesional/', { params })
     return res.data
   },
 
