@@ -27,13 +27,11 @@ REFERENCIA_OBSEQUIO = "obsequio_cotizacion"
 
 
 def clinica_exige_compromiso_pago(cotizacion) -> bool:
-    """True si la clínica de la cotización requiere el compromiso de pago firmado."""
-    from apps.configuracion.models import ConfiguracionCartera
+    """True si la clínica exige firmar el documento de aceptación de la cotización:
+    el compromiso de pago, las condiciones de compra promocional o ambos."""
+    from apps.consentimientos.services import alcance_aceptacion_configurado
 
-    return ConfiguracionCartera.objects.filter(
-        clinica_id=cotizacion.clinica_id,
-        requiere_consentimiento_promocional=True,
-    ).exists()
+    return alcance_aceptacion_configurado(cotizacion) is not None
 
 
 # Tolerancia de 1 peso: el descuento porcentual puede dejar centavos que la

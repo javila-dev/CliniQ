@@ -250,8 +250,19 @@ class CambiarTratamientoVentaTests(TestCase):
         [venta] = self._ventas()
         [aviso] = venta["avisos"]
         self.assertEqual(aviso["code"], "COMPROMISO_FIRMADO")
-        self.assertIn("compromiso de pago", aviso["texto"])
+        self.assertIn("documento de aceptación", aviso["texto"])
         # Avisa, no bloquea.
+        self.assertEqual(self._cambiar().status_code, 201)
+
+    def test_avisa_las_condiciones_de_compra_promocional_firmadas(self):
+        Consentimiento.objects.create(
+            cotizacion=self.cotizacion, paciente=self.paciente, plantilla=None,
+            alcance_aceptacion=Consentimiento.AlcanceAceptacion.PROMOCIONAL,
+            contenido_snapshot="Promo", hash_contenido="x" * 64, estado=Consentimiento.Estado.FIRMADO,
+        )
+        [venta] = self._ventas()
+        codigos = [aviso["code"] for aviso in venta["avisos"]]
+        self.assertEqual(codigos, ["COMPROMISO_FIRMADO", "COMPRA_PROMOCIONAL_FIRMADA"])
         self.assertEqual(self._cambiar().status_code, 201)
 
     def test_venta_de_otra_clinica(self):

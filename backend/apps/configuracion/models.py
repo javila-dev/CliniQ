@@ -1,3 +1,4 @@
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 
 from apps.core.models import BaseModel
@@ -143,7 +144,18 @@ class ConfiguracionCartera(BaseModel):
     # Al aceptar una cotizacion se genera un compromiso de pago estandar
     # (texto fijo, no configurable) pendiente de firma. La clinica solo lo
     # activa o desactiva aqui.
+    # OJO: pese al nombre, este campo activa el COMPROMISO DE PAGO (historico).
     requiere_consentimiento_promocional = models.BooleanField(default=False)
+    # Condiciones de compra promocional (no devolucion, no reemplazo, plazo para
+    # iniciar, no transferible). Si esta activo, toda venta lleva esa seccion en
+    # el documento de aceptacion, firmada por el paciente y por quien cotizo.
+    # Texto fijo; la clinica solo lo activa y elige el plazo.
+    exige_condiciones_compra_promocional = models.BooleanField(default=False, db_default=False)
+    plazo_inicio_promocional_dias = models.PositiveSmallIntegerField(
+        default=90,
+        db_default=90,
+        validators=[MinValueValidator(1), MaxValueValidator(365)],
+    )
 
     class Meta:
         db_table = "configuracion_cartera"

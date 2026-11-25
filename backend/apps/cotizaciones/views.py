@@ -499,7 +499,7 @@ class CotizacionViewSet(ModelViewSet):
         from apps.consentimientos.services import (
             descartar_sobre_reemplazado,
             es_acta_acuerdo_pago,
-            renderizar_compromiso_pago_estandar,
+            renderizar_aceptacion_estandar,
         )
 
         if cotizacion.estado != Cotizacion.Estado.BORRADOR:
@@ -512,14 +512,19 @@ class CotizacionViewSet(ModelViewSet):
         ):
             return compromiso
 
-        snapshot = renderizar_compromiso_pago_estandar(
-            cotizacion, fecha_generacion=timezone.localtime(compromiso.created_at).date(),
+        snapshot, alcance = renderizar_aceptacion_estandar(
+            cotizacion,
+            fecha_generacion=timezone.localtime(compromiso.created_at).date(),
+            actor=self._actor(),
+            # Si la clínica apagó los requisitos, el pendiente no cambia de secciones.
+            alcance_actual=compromiso.alcance_aceptacion,
         )
         hash_contenido = hashlib.sha256(snapshot.encode("utf-8")).hexdigest()
         if hash_contenido == compromiso.hash_contenido:
             return compromiso
 
         sobre_anterior = compromiso.documenso_documento_id
+        compromiso.alcance_aceptacion = alcance
         compromiso.contenido_snapshot = snapshot
         compromiso.hash_contenido = hash_contenido
         compromiso.documenso_documento_id = ""
@@ -535,6 +540,11 @@ class CotizacionViewSet(ModelViewSet):
             transaction.on_commit(lambda: descartar_sobre_reemplazado(sobre_anterior, consentimiento_id=compromiso.id))
         return compromiso
 
+    def _actor(self):
+        """Usuario de la petición, o None si se llama fuera de una (tareas, pruebas)."""
+        request = getattr(self, "request", None)
+        return getattr(request, "user", None) if request is not None else None
+
     def _serializar_compromiso_pago(self, compromiso_pago):
         if not compromiso_pago:
             return None
@@ -544,14 +554,19 @@ class CotizacionViewSet(ModelViewSet):
 
     def _generar_compromiso_pago_si_aplica(self, cotizacion):
         """
-        Si la clinica tiene activo el requisito de compromiso de pago
-        (configuracion.ConfiguracionCartera.requiere_consentimiento_promocional),
+        Si la clinica exige el documento de aceptacion (compromiso de pago,
+        ``ConfiguracionCartera.requiere_consentimiento_promocional``, y/o
+        condiciones de compra promocional, ``exige_condiciones_compra_promocional``),
         genera el documento estandar en estado pendiente de firma. El texto es
-        fijo y no configurable — la clinica solo activa o desactiva el requisito.
+        fijo y no configurable — la clinica solo activa o desactiva cada parte.
         """
-        from apps.configuracion.models import ConfiguracionCartera
         from apps.consentimientos.models import Consentimiento
-        from apps.consentimientos.services import generar_consentimiento
+        from apps.consentimientos.services import (
+            alcance_aceptacion_configurado,
+            generar_consentimiento,
+            incluye_compra_promocional,
+            vendedor_sin_firma,
+        )
 
         # Datos previos (asistente de puesta en marcha): no se genera un
         # compromiso de pago pendiente de firma — es histórico / firmado en papel.
@@ -561,13 +576,19 @@ class CotizacionViewSet(ModelViewSet):
         if Decimal(cotizacion.total) <= 0:
             return None
 
-        config = ConfiguracionCartera.objects.filter(
-            clinica_id=cotizacion.clinica_id,
-            requiere_consentimiento_promocional=True,
-        ).first()
-        if not config:
+        alcance = alcance_aceptacion_configurado(cotizacion)
+        if alcance is None:
+            # La clínica dejó de exigir el documento: uno que quedó pendiente ya no
+            # tiene uso (la venta se acepta sin él) y no debe quedar "Pendiente".
+            pendiente = self._compromiso_pago_existente(cotizacion)
+            if pendiente is not None and pendiente.estado == Consentimiento.Estado.PENDIENTE:
+                pendiente.estado = Consentimiento.Estado.REVOCADO
+                pendiente.revocado_en = timezone.now()
+                pendiente.motivo_revocacion = "La clínica dejó de exigir este documento para aceptar cotizaciones."
+                pendiente.save(update_fields=["estado", "revocado_en", "motivo_revocacion", "updated_at"])
             return None
 
+        actor = self._actor()
         existente = self._compromiso_pago_existente(cotizacion)
         if existente and existente.estado == Consentimiento.Estado.FIRMADO and cotizacion.estado == Cotizacion.Estado.BORRADOR:
             # Lo firmado tiene que ser lo que se vende: si la cotización cambió
@@ -576,7 +597,7 @@ class CotizacionViewSet(ModelViewSet):
             from apps.consentimientos.services import renderizar_compromiso_pago_estandar
 
             snapshot = renderizar_compromiso_pago_estandar(
-                cotizacion, fecha_generacion=timezone.localtime(existente.created_at).date(),
+                cotizacion, fecha_generacion=timezone.localtime(existente.created_at).date(), actor=actor,
             )
             if hashlib.sha256(snapshot.encode("utf-8")).hexdigest() != existente.hash_contenido:
                 existente.estado = Consentimiento.Estado.REVOCADO
@@ -584,11 +605,34 @@ class CotizacionViewSet(ModelViewSet):
                 existente.motivo_revocacion = "La cotización cambió después de la firma: se generó un compromiso nuevo."
                 existente.save(update_fields=["estado", "revocado_en", "motivo_revocacion", "updated_at"])
                 existente = None
+
+        if incluye_compra_promocional(alcance) and (
+            existente is None or existente.estado == Consentimiento.Estado.PENDIENTE
+        ):
+            # Las condiciones de compra promocional las firma quien cotizó, con la
+            # firma guardada en su perfil. Sin ella no se genera el documento (y se
+            # deshace lo anterior: cambiar_estado es atómico).
+            sin_firma = vendedor_sin_firma(cotizacion, actor)
+            if sin_firma is not None:
+                es_el_mismo = actor is not None and sin_firma.pk == actor.pk
+                raise ValidationError({
+                    "error": (
+                        "Para generar las condiciones de compra promocional necesitas tu firma guardada."
+                        if es_el_mismo
+                        else f"{sin_firma.nombre_completo} hizo esta cotización y no tiene su firma guardada. "
+                        "Pídele que la cargue en su perfil para poder generar las condiciones de compra promocional."
+                    ),
+                    # REQUERIDA: quien acepta es el vendedor y puede dibujarla ya.
+                    # DE_OTRO: el vendedor es otra persona y debe cargarla ella.
+                    "code": "FIRMA_VENDEDOR_REQUERIDA" if es_el_mismo else "FIRMA_VENDEDOR_DE_OTRO",
+                    "vendedor_nombre": sin_firma.nombre_completo,
+                })
+
         if existente:
             return self._refrescar_compromiso_pendiente(cotizacion, existente)
 
         try:
-            return generar_consentimiento(cotizacion=cotizacion, plantilla=None)
+            return generar_consentimiento(cotizacion=cotizacion, plantilla=None, actor=actor)
         except Exception as exc:
             logger.exception(
                 "[cambiar_estado] fallo al generar compromiso de pago | cotizacion_id=%s", cotizacion.id,

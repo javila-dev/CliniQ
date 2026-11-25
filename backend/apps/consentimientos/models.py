@@ -94,6 +94,20 @@ class Consentimiento(BaseModel):
         related_name="consentimientos",
         help_text="Nulo para el compromiso de pago estandar (texto no configurable).",
     )
+
+    class AlcanceAceptacion(models.TextChoices):
+        COMPROMISO = "compromiso", "Compromiso de pago"
+        PROMOCIONAL = "promocional", "Condiciones de compra promocional"
+        AMBOS = "ambos", "Compromiso de pago y condiciones de compra promocional"
+
+    # Solo para el documento estandar de aceptacion de la cotizacion
+    # (plantilla nula, no acta): que secciones lleva. Se fija al renderizar.
+    alcance_aceptacion = models.CharField(
+        max_length=20,
+        choices=AlcanceAceptacion.choices,
+        default=AlcanceAceptacion.COMPROMISO,
+        db_default=AlcanceAceptacion.COMPROMISO,
+    )
     contenido_snapshot = models.TextField()
     hash_contenido = models.CharField(max_length=64)
     estado = models.CharField(max_length=20, choices=Estado.choices, default=Estado.PENDIENTE)

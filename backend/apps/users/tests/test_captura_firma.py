@@ -116,13 +116,14 @@ class CapturaFirmaMovilTests(TestCase):
 
         self.assertEqual(response.status_code, 404)
 
-    def test_usuario_sin_perfil_profesional_no_puede_generar_qr(self):
+    def test_usuario_sin_perfil_profesional_tambien_puede_generar_qr(self):
+        # Quien vende firma las condiciones de compra promocional aunque no atienda.
         recepcion = User.objects.create_user(
             email="recepcion-captura@example.com", password="x", rol=User.Role.RECEPCION, clinica=self.clinica,
         )
         self.client.force_authenticate(recepcion)
 
-        self.assertEqual(self.client.post("/api/v1/auth/me/captura-firma/").status_code, 403)
+        self.assertEqual(self.client.post("/api/v1/auth/me/captura-firma/").status_code, 201)
 
 
 @override_settings(MINIO_PUBLIC_BUCKET="", MEDIA_ROOT=tempfile.gettempdir())
@@ -196,6 +197,15 @@ class CambiarFirmaDesdeElPerfilTests(TestCase):
         self.assertEqual(response.status_code, 200, response.content)
         user.refresh_from_db()
         return response.json()["firma_digital_url"]
+
+    def test_recepcion_puede_subir_firma_pero_no_registro_profesional(self):
+        # Quien vende firma las condiciones de compra promocional aunque no atienda.
+        recepcion = User.objects.create_user(
+            email="recepcion-firma@example.com", password="x", rol=User.Role.RECEPCION, clinica=self.clinica,
+        )
+        self.assertTrue(self._subir_firma(recepcion, self._png(303)))
+        response = self.client.patch("/api/v1/auth/me/", {"registro_profesional": "TP-1"}, format="json")
+        self.assertEqual(response.status_code, 400)
 
     def test_cambiar_la_firma_cambia_la_url_y_borra_la_anterior(self):
         from apps.core.storage import read_public_file

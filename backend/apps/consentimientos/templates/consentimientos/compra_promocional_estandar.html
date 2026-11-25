@@ -1,0 +1,70 @@
+<h1>Consentimiento de compra promocional</h1>
+<p><strong>Consentimiento informado para compra de tratamiento estético en condiciones promocionales</strong></p>
+
+{% comment %}Nombre e identificación ya van en el encabezado del documento (Datos del paciente).{% endcomment %}
+<table style="width:100%; border-collapse:collapse; font-size:11px; margin:4px 0 8px 0;">
+  <tr>
+    <td style="padding:3px 6px 3px 0; color:#6b7280; width:32%;">Teléfono</td>
+    <td style="padding:3px 0;">{{ paciente.telefono|default:"—" }}</td>
+  </tr>
+  <tr>
+    <td style="padding:3px 6px 3px 0; color:#6b7280;">Correo electrónico</td>
+    <td style="padding:3px 0;">{{ paciente.email|default:"—" }}</td>
+  </tr>
+</table>
+
+<h2>Descripción del tratamiento</h2>
+{% if tratamientos_adquiridos %}
+<ul style="margin:0 0 6px 0; padding-left:18px;">
+  {% for tratamiento in tratamientos_adquiridos %}
+  <li>{{ tratamiento.descripcion }}{% if tratamiento.sesiones > 1 %} ({{ tratamiento.sesiones }} sesiones){% endif %}</li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% if obsequios_incluidos %}
+<p style="font-size:10.5px; color:#6b7280;">Incluye sin costo: {{ obsequios_incluidos|join:", " }}.</p>
+{% endif %}
+
+<h2>Condiciones de la compra</h2>
+<p>
+  El paciente reconoce y acepta que adquirió los tratamientos descritos en condiciones comerciales
+  promocionales, por un valor total de <strong>{{ total_fmt }}</strong>.
+</p>
+
+<h2>Política de no devolución</h2>
+<p>
+  El paciente acepta y entiende que, bajo ninguna circunstancia, se realizará la devolución del dinero
+  por concepto de reemplazo o cambio de tratamiento. Esta política es aplicable sin excepción alguna, y
+  no se aceptarán cambios debido a desplazamientos a otras ciudades, enfermedades o cualquier otra razón.
+</p>
+
+<h2>Términos y condiciones</h2>
+<p>
+  Me han dejado claro con anticipación que la compra de este tratamiento se hizo en condiciones
+  promocionales, que tienen los siguientes factores a tener en cuenta:
+</p>
+<ul style="margin:0 0 8px 0; padding-left:18px;">
+  <li>No se hace devolución de dinero bajo ninguna circunstancia.</li>
+  <li>No se reemplaza por otro tratamiento.</li>
+  <li>Tiempo máximo de <strong>{{ plazo_inicio_dias }} días</strong> para iniciarlo.</li>
+  <li>No se puede transferir a ninguna otra persona.</li>
+</ul>
+<p>
+  El paciente declara que leyó y comprendió los términos y condiciones del tratamiento, los cuales
+  fueron establecidos previamente.
+</p>
+
+{% comment %}
+La firma de quien vende es parte del contenido firmado (entra al hash), pero en
+el PDF se dibuja junto a la del paciente: generar_pdf_para_firma_documenso la
+saca de entre estos marcadores y la pone en el bloque de firmas.
+{% endcomment %}<!--FIRMA_VENDEDOR-->
+<div style="page-break-inside:avoid; break-inside:avoid;">
+  <p style="font-size:9px; font-weight:bold; color:#9ca3af; letter-spacing:0.08em; text-transform:uppercase; margin:0 0 6px;">Asesor(a) que realizó la venta</p>
+  <div style="height:70px; border-bottom:1px solid #9ca3af; margin-bottom:6px;">
+    {% if vendedor.firma %}<img src="{{ vendedor.firma }}" alt="Firma de {{ vendedor.nombre }}" style="max-height:66px; max-width:240px;">{% endif %}
+  </div>
+  <p style="font-size:11px; color:#6b7280; border-bottom:0.5px solid #e5e7eb; padding-bottom:3px; margin:11px 0 3px;">{{ vendedor.nombre }}</p>
+  <p style="font-size:10px; color:#9ca3af; margin:10px 0 0;">{{ vendedor.cargo|default:"&nbsp;" }}</p>
+</div>
+<!--/FIRMA_VENDEDOR-->

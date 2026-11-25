@@ -22,8 +22,10 @@ class FirmaInvalidaError(Exception):
 
 
 def puede_tener_firma(user) -> bool:
-    """Mismo criterio que el perfil: quien atiende pacientes o un admin."""
-    return bool(getattr(user, "es_profesional", False) or getattr(user, "es_admin", False))
+    """Cualquier usuario puede guardar su firma: además de los profesionales, quien
+    vende la firma en las condiciones de compra promocional. El registro
+    profesional sí sigue siendo solo de profesionales y admins."""
+    return bool(user and user.is_authenticated)
 
 
 def validar_png_firma(datos: bytes) -> bytes:
