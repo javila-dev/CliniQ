@@ -82,7 +82,7 @@ class ConsentimientoIniciarFirmaCompromisoPagoTests(TestCase):
             f"/api/v1/consentimientos/{self.consentimiento.id}/iniciar_firma_documenso/", {}, format="json"
         )
 
-    @patch("apps.agenda.pdf_coords.extraer_coordenadas_firma")
+    @patch("apps.agenda.pdf_coords.extraer_coordenadas_firmas")
     @patch("apps.consentimientos.services.generar_pdf_para_firma_documenso")
     @patch("apps.consentimientos.services._crear_envelope_documenso")
     @patch("apps.historia_clinica.services.requests.request")
@@ -90,7 +90,7 @@ class ConsentimientoIniciarFirmaCompromisoPagoTests(TestCase):
         self, mocked_request, mocked_crear_envelope, mocked_generar_pdf, mocked_coords
     ):
         mocked_generar_pdf.return_value = b"%PDF-fake"
-        mocked_coords.return_value = {"pageNumber": 1, "pageX": 10, "pageY": 10, "pageWidth": 50, "pageHeight": 20}
+        mocked_coords.return_value = [{"pageNumber": 1, "pageX": 10, "pageY": 10, "pageWidth": 50, "pageHeight": 20}]
         mocked_crear_envelope.return_value = "envelope-abc"
         mocked_request.return_value = self._mock_response(
             {

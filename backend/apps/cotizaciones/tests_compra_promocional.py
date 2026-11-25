@@ -111,17 +111,53 @@ class CondicionesCompraPromocionalTests(TestCase):
         self.assertNotIn("Forma de pago acordada", html)
         self.assertNotIn("precio normal", html.lower())
 
-    def test_con_compromiso_lleva_las_dos_secciones_en_un_documento(self):
+    def test_con_compromiso_son_dos_documentos_en_un_sobre_cada_uno_con_su_firma(self):
+        import io as _io
+
+        import pdfplumber
+
+        from apps.agenda.pdf_coords import extraer_coordenadas_firmas
+        from apps.consentimientos.services import _crear_envelope_documenso, generar_pdf_para_firma_documenso
+
         self.config.requiere_consentimiento_promocional = True
         self.config.save()
         cotizacion_id = self._crear()
         self._aceptar(cotizacion_id)
 
+        # Un solo registro (un sobre), con las dos partes.
         [doc] = Consentimiento.objects.filter(cotizacion_id=cotizacion_id)
         self.assertEqual(doc.alcance_aceptacion, Alcance.AMBOS)
         self.assertIn("Forma de pago acordada", doc.contenido_snapshot)
         self.assertIn("Consentimiento de compra promocional", doc.contenido_snapshot)
-        self.assertIn("page-break-before", doc.contenido_snapshot)
+
+        # En el PDF son dos documentos: cada uno con su encabezado y su firma del paciente.
+        pdf = generar_pdf_para_firma_documenso(doc)
+        recuadros = extraer_coordenadas_firmas(pdf)
+        self.assertEqual(len(recuadros), 2)
+        with pdfplumber.open(_io.BytesIO(pdf)) as archivo:
+            textos = [pagina.extract_text() or "" for pagina in archivo.pages]
+        primera, segunda = (textos[r["pageNumber"] - 1] for r in recuadros)
+        self.assertLess(recuadros[0]["pageNumber"], recuadros[1]["pageNumber"])
+        self.assertIn("FIRMA DEL PACIENTE", primera)
+        self.assertIn("FIRMA DEL PACIENTE", segunda)
+        texto = " ".join(textos)
+        self.assertIn("#ACEP-", texto)
+        self.assertIn("#PROMO-", texto)
+        self.assertEqual(texto.count("DATOS DEL PACIENTE"), 2)
+        # La firma del asesor va solo en el de compra promocional.
+        self.assertNotIn("ASESOR(A)", primera)
+        self.assertIn("ASESOR(A)", segunda)
+
+        # El sobre lleva un campo de firma del paciente por documento.
+        with patch("apps.consentimientos.services._requests.post") as post, override_settings(
+            DOCUMENSO_API_URL="https://documenso.test", DOCUMENSO_API_KEY="k",
+        ):
+            post.return_value.json.return_value = {"id": "env-1"}
+            _crear_envelope_documenso(pdf, "x.pdf", "Carla", "c@example.com", recuadros)
+        import json as _json
+
+        campos = _json.loads(post.call_args.kwargs["data"]["payload"])["recipients"][0]["fields"]
+        self.assertEqual([c["page"] for c in campos], [r["pageNumber"] for r in recuadros])
 
     def test_solo_compromiso_queda_como_antes(self):
         self.config.requiere_consentimiento_promocional = True
@@ -327,7 +363,7 @@ class CondicionesCompraPromocionalTests(TestCase):
         self.assertEqual(titulo_documento(doc), "Consentimiento de compra promocional")
         self.assertEqual(_documento_tipo_consentimiento(doc), "consentimiento de compra promocional")
         doc.alcance_aceptacion = Alcance.AMBOS
-        self.assertIn("compromiso de pago y condiciones de compra promocional", titulo_documento(doc))
+        self.assertEqual(titulo_documento(doc), "Compromiso de pago y consentimiento de compra promocional")
 
 
 class ConfiguracionCompraPromocionalTests(TestCase):

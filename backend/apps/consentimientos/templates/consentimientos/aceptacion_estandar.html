@@ -1,7 +1,9 @@
 {% comment %}
 Documento estandar de aceptacion de la cotizacion. Las secciones dependen de
 ConfiguracionCartera: compromiso de pago y/o condiciones de compra promocional.
-El paciente firma una sola vez al final (bloque de firma de pdf_firma_documenso).
-{% endcomment %}{% if incluye_compromiso %}{% include "consentimientos/compromiso_pago_estandar.html" %}{% endif %}{% if incluye_promocional %}{% if incluye_compromiso %}
+Cada seccion va entre marcadores SECCION: en el PDF cada una sale como un
+documento aparte (su encabezado, su titulo y su firma del paciente) dentro del
+mismo sobre de Documenso. Ver generar_pdf_para_firma_documenso.
+{% endcomment %}{% if incluye_compromiso %}<!--SECCION:compromiso-->{% include "consentimientos/compromiso_pago_estandar.html" %}<!--/SECCION:compromiso-->{% endif %}{% if incluye_promocional %}{% if incluye_compromiso %}
 <div style="page-break-before: always; break-before: page;"></div>
-{% endif %}{% include "consentimientos/compra_promocional_estandar.html" %}{% endif %}
+{% endif %}<!--SECCION:promocional-->{% include "consentimientos/compra_promocional_estandar.html" %}<!--/SECCION:promocional-->{% endif %}

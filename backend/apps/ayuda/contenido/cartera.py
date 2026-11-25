@@ -334,7 +334,8 @@ paciente.
 
 En la misma sección puedes activar también las
 [condiciones de compra promocional](/ayuda/articulo/condiciones-de-compra-promocional).
-Si activas las dos, van en **un solo documento** y el paciente firma una sola vez.
+Si activas las dos, van **en el mismo envío para firmar**, pero como dos documentos
+separados, y el paciente firma cada uno.
 
 ## Cómo funciona el flujo
 
@@ -415,9 +416,10 @@ Si lo desactivas, las ventas nuevas ya no lo llevan y lo ya firmado no cambia.
 Un documento que haya quedado pendiente conserva lo que tenía, y si después
 aceptas esa cotización, se acepta sin él y el documento se anula.
 
-Si también tienes activado el compromiso de pago, las dos partes van en un mismo
-documento y el paciente firma una sola vez, al final. La firma del paciente es
-la que cierra la venta, igual que con el compromiso de pago.
+Si también tienes activado el compromiso de pago, el paciente recibe los dos
+documentos en el mismo envío (en la clínica o por el enlace) y firma cada uno:
+cada documento queda con su propia firma. Cuando termina de firmar, la venta
+queda aceptada, igual que con el compromiso de pago.
 
 ## La firma de quien vende
 

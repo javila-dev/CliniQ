@@ -404,7 +404,7 @@ def es_acta_acuerdo_pago(consentimiento: Consentimiento) -> bool:
 TITULO_ACEPTACION_COTIZACION = "Aceptación de cotización y compromiso de pago"
 TITULOS_ACEPTACION = {
     Alcance.COMPROMISO: TITULO_ACEPTACION_COTIZACION,
-    Alcance.AMBOS: "Aceptación de cotización, compromiso de pago y condiciones de compra promocional",
+    Alcance.AMBOS: "Compromiso de pago y consentimiento de compra promocional",
     Alcance.PROMOCIONAL: "Consentimiento de compra promocional",
 }
 
@@ -437,33 +437,31 @@ def separar_firma_vendedor(snapshot: str) -> tuple[str, str]:
     return snapshot[:inicio] + snapshot[fin + len(MARCA_FIN_FIRMA_VENDEDOR):], firma
 
 
-def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
-    """
-    Renderiza el PDF de firma reutilizando el mismo sistema visual que el
-    registro de asistencia (header con logo de la clinica, secciones, area de
-    firma con marcadores invisibles) — el contenido_snapshot que redacto la
-    clinica en su plantilla se inserta dentro de una seccion propia.
-    """
+SECCIONES_ACEPTACION = {
+    "compromiso": ("ACEP", TITULO_ACEPTACION_COTIZACION),
+    "promocional": ("PROMO", "Consentimiento de compra promocional"),
+}
+
+
+def separar_secciones(snapshot: str) -> list[tuple[str, str]]:
+    """Secciones del documento de aceptacion (``[(clave, html), ...]``) segun los
+    marcadores SECCION de aceptacion_estandar.html. Sin marcadores (plantillas de
+    la clinica, actas, documentos anteriores) es una sola: ``[("", snapshot)]``."""
+    import re
+
+    secciones = re.findall(r"<!--SECCION:(\w+)-->(.*?)<!--/SECCION:\1-->", snapshot, flags=re.DOTALL)
+    return secciones or [("", snapshot)]
+
+
+def _html_pdf_firma(consentimiento, *, contenido: str, titulo: str, doc_ref: str, clinica) -> str:
     from django.template.loader import render_to_string
 
-    if consentimiento.cotizacion_id:
-        clinica = consentimiento.cotizacion.clinica
-        prefijo = "ACTA" if es_acta_acuerdo_pago(consentimiento) else "ACEP"
-        doc_ref = f"#{prefijo}-{str(consentimiento.cotizacion_id)[:8].upper()}"
-    else:
-        clinica = consentimiento.cita.sede.clinica
-        doc_ref = f"#CONS-{str(consentimiento.id)[:8].upper()}"
-
     now = timezone.localtime(timezone.now())
-    contenido, firma_vendedor = separar_firma_vendedor(consentimiento.contenido_snapshot)
-    context = {
+    contenido, firma_vendedor = separar_firma_vendedor(contenido)
+    return render_to_string("consentimientos/pdf_firma_documenso.html", {
         "clinica": clinica,
         "logo_url": _build_logo_url(clinica),
-        "doc_title": (
-            consentimiento.plantilla.nombre
-            if consentimiento.plantilla_id and consentimiento.plantilla.nombre
-            else ("Consentimiento" if consentimiento.plantilla_id else titulo_documento(consentimiento))
-        ),
+        "doc_title": titulo,
         "doc_ref": doc_ref,
         "paciente": consentimiento.paciente,
         "documento_paciente": f"{consentimiento.paciente.tipo_documento} {consentimiento.paciente.numero_documento}",
@@ -471,9 +469,47 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
         "firma_vendedor": firma_vendedor,
         "fecha_generacion": now.strftime("%d/%m/%Y"),
         "generado_en": now.strftime("%d/%m/%Y · %I:%M %p"),
-    }
-    html = render_to_string("consentimientos/pdf_firma_documenso.html", context)
-    return HTML(string=html, base_url="/").write_pdf()
+    })
+
+
+def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
+    """
+    Renderiza el PDF de firma reutilizando el mismo sistema visual que el
+    registro de asistencia (header con logo de la clinica, secciones, area de
+    firma con marcadores invisibles) — el contenido_snapshot que redacto la
+    clinica en su plantilla se inserta dentro de una seccion propia.
+
+    El documento de aceptacion con compromiso de pago y condiciones de compra
+    promocional sale como DOS documentos en el mismo PDF (y el mismo sobre de
+    Documenso): cada uno con su encabezado, su titulo y su firma del paciente.
+    """
+    if consentimiento.cotizacion_id:
+        clinica = consentimiento.cotizacion.clinica
+        prefijo = "ACTA" if es_acta_acuerdo_pago(consentimiento) else "ACEP"
+        referencia = str(consentimiento.cotizacion_id)[:8].upper()
+    else:
+        clinica = consentimiento.cita.sede.clinica
+        prefijo = "CONS"
+        referencia = str(consentimiento.id)[:8].upper()
+
+    titulo_general = (
+        consentimiento.plantilla.nombre
+        if consentimiento.plantilla_id and consentimiento.plantilla.nombre
+        else ("Consentimiento" if consentimiento.plantilla_id else titulo_documento(consentimiento))
+    )
+    secciones = separar_secciones(consentimiento.contenido_snapshot)
+    documentos = []
+    for clave, contenido in secciones:
+        prefijo_seccion, titulo = SECCIONES_ACEPTACION.get(clave, (prefijo, titulo_general))
+        html = _html_pdf_firma(
+            consentimiento, contenido=contenido, titulo=titulo,
+            doc_ref=f"#{prefijo_seccion}-{referencia}", clinica=clinica,
+        )
+        documentos.append(HTML(string=html, base_url="/").render())
+    if len(documentos) == 1:
+        return documentos[0].write_pdf()
+    paginas = [pagina for documento in documentos for pagina in documento.pages]
+    return documentos[0].copy(paginas).write_pdf()
 
 
 def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> dict:
@@ -482,7 +518,6 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
     el paciente firme el compromiso de pago. Mismo patron que
     agenda.services.iniciar_registro_asistencia_documenso.
     """
-    from apps.agenda.pdf_coords import extraer_coordenadas_firma
     from apps.historia_clinica.services import (
         DocumensoIntegrationError,
         _buscar_signatario,
@@ -517,8 +552,11 @@ def iniciar_firma_compromiso_pago_documenso(consentimiento: Consentimiento) -> d
         return {"signing_token": signing_token, "document_id": consentimiento.documenso_documento_id}
 
     # Crear nuevo envelope.
+    from apps.agenda.pdf_coords import extraer_coordenadas_firmas
+
     pdf_bytes = generar_pdf_para_firma_documenso(consentimiento)
-    coords = extraer_coordenadas_firma(pdf_bytes)
+    # Una firma del paciente por documento (compromiso y compra promocional).
+    coords = extraer_coordenadas_firmas(pdf_bytes)
     prefijo_archivo = "acta_acuerdo_pago" if es_acta_acuerdo_pago(consentimiento) else "aceptacion_cotizacion"
     nombre_archivo = f"{prefijo_archivo}_{str(consentimiento.id)[:8].upper()}.pdf"
 
@@ -908,10 +946,11 @@ def enviar_firma_asistencia_cita(cita, plantilla) -> dict:
 
 
 def _crear_envelope_documenso(
-    pdf_bytes: bytes, nombre: str, recipient_name: str, recipient_email: str, coords: dict,
+    pdf_bytes: bytes, nombre: str, recipient_name: str, recipient_email: str, coords: dict | list[dict],
     *, external_id: str | None = None,
 ) -> str:
-    """Crea un envelope v2 con el PDF embebido en el propio request (sin S3)."""
+    """Crea un envelope v2 con el PDF embebido en el propio request (sin S3).
+    ``coords`` puede traer varios recuadros: un campo de firma por cada uno."""
     from apps.historia_clinica.services import DocumensoIntegrationError, _documenso_api_key
 
     if not settings.DOCUMENSO_API_URL or not settings.DOCUMENSO_API_KEY:
@@ -931,12 +970,13 @@ def _crear_envelope_documenso(
                     {
                         "identifier": 0,
                         "type": "SIGNATURE",
-                        "page": coords["pageNumber"],
-                        "positionX": coords["pageX"],
-                        "positionY": coords["pageY"],
-                        "width": coords["pageWidth"],
-                        "height": coords["pageHeight"],
+                        "page": recuadro["pageNumber"],
+                        "positionX": recuadro["pageX"],
+                        "positionY": recuadro["pageY"],
+                        "width": recuadro["pageWidth"],
+                        "height": recuadro["pageHeight"],
                     }
+                    for recuadro in (coords if isinstance(coords, list) else [coords])
                 ],
             }
         ],

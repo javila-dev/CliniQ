@@ -47,6 +47,30 @@ def extraer_coordenadas_firma(pdf_bytes: bytes) -> dict:
         }
 
 
+def extraer_coordenadas_firmas(pdf_bytes: bytes) -> list[dict]:
+    """
+    Como :func:`extraer_coordenadas_firma`, pero devuelve TODOS los recuadros de
+    firma del paciente: un PDF puede traer varios documentos, cada uno con su
+    firma (p. ej. compromiso de pago y consentimiento de compra promocional en
+    el mismo sobre). Sin marcadores, el recuadro de respaldo.
+    """
+    coordenadas = []
+    with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
+        for numero, page in enumerate(pdf.pages, start=1):
+            words = page.extract_words()
+            esquinas_tl = [w for w in words if "__SIG_TL__" in w.get("text", "")]
+            esquinas_br = [w for w in words if "__SIG_BR__" in w.get("text", "")]
+            for marker_tl, marker_br in zip(esquinas_tl, esquinas_br):
+                coordenadas.append({
+                    "pageNumber": numero,
+                    "pageX": round((marker_tl["x0"] / page.width) * 100, 2),
+                    "pageY": round((marker_tl["top"] / page.height) * 100, 2),
+                    "pageWidth": round(((marker_br["x1"] - marker_tl["x0"]) / page.width) * 100, 2),
+                    "pageHeight": round(((marker_br["bottom"] - marker_tl["top"]) / page.height) * 100, 2),
+                })
+        return coordenadas or [_coordenadas_fallback(pdf.pages[0])]
+
+
 def recortar_firma_paciente(pdf_bytes: bytes) -> bytes | None:
     """
     Recorta la imagen de la firma manuscrita del paciente desde un PDF de
