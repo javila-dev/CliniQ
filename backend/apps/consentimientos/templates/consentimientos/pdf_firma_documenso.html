@@ -242,6 +242,29 @@
       text-align: right;
       line-height: 1.6;
     }
+    {% if compacto %}
+    /* Compacto: el documento no cupo en una pagina (ver generar_pdf_para_firma_documenso). */
+    @page { margin: 12mm 12mm 12mm 12mm; }
+    .header { padding-bottom: 8px; margin-bottom: 10px; }
+    .section { margin-bottom: 8px; }
+    .content { padding: 8px 12px; margin: 2px 0 8px; line-height: 1.4; }
+    .content h1 { display: none; }
+    .content h2 { margin: 8px 0 3px; }
+    .content p { margin: 0 0 5px; }
+    .sig-section { margin-top: 6px; }
+    .sig-area { height: 56px; }
+    .sig-area-vendedor { height: 56px !important; }
+    .sig-area-vendedor img { max-height: 52px !important; }
+    .footer { margin-top: 6px; padding-top: 5px; }
+    {% endif %}
+    {% if compacto >= 2 %}
+    body { font-size: 10.5px; }
+    .content { font-size: 10.5px; line-height: 1.3; }
+    .field-table td { padding: 1px 0; font-size: 10.5px; }
+    .sig-area { height: 48px; }
+    .sig-area-vendedor { height: 48px !important; }
+    .sig-area-vendedor img { max-height: 44px !important; }
+    {% endif %}
   </style>
 </head>
 <body>

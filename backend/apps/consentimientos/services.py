@@ -453,7 +453,7 @@ def separar_secciones(snapshot: str) -> list[tuple[str, str]]:
     return secciones or [("", snapshot)]
 
 
-def _html_pdf_firma(consentimiento, *, contenido: str, titulo: str, doc_ref: str, clinica) -> str:
+def _html_pdf_firma(consentimiento, *, contenido: str, titulo: str, doc_ref: str, clinica, compacto: int = 0) -> str:
     from django.template.loader import render_to_string
 
     now = timezone.localtime(timezone.now())
@@ -469,6 +469,7 @@ def _html_pdf_firma(consentimiento, *, contenido: str, titulo: str, doc_ref: str
         "firma_vendedor": firma_vendedor,
         "fecha_generacion": now.strftime("%d/%m/%Y"),
         "generado_en": now.strftime("%d/%m/%Y · %I:%M %p"),
+        "compacto": compacto,
     })
 
 
@@ -501,11 +502,19 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
     documentos = []
     for clave, contenido in secciones:
         prefijo_seccion, titulo = SECCIONES_ACEPTACION.get(clave, (prefijo, titulo_general))
-        html = _html_pdf_firma(
-            consentimiento, contenido=contenido, titulo=titulo,
-            doc_ref=f"#{prefijo_seccion}-{referencia}", clinica=clinica,
-        )
-        documentos.append(HTML(string=html, base_url="/").render())
+        # Cada documento de la aceptacion (compromiso, compra promocional) va en
+        # una sola pagina: si no cabe, se vuelve a dibujar mas compacto. Si ni
+        # asi cabe (muchos items o cuotas), queda en varias paginas.
+        niveles = (0, 1, 2) if clave in SECCIONES_ACEPTACION else (0,)
+        for compacto in niveles:
+            html = _html_pdf_firma(
+                consentimiento, contenido=contenido, titulo=titulo,
+                doc_ref=f"#{prefijo_seccion}-{referencia}", clinica=clinica, compacto=compacto,
+            )
+            documento = HTML(string=html, base_url="/").render()
+            if len(documento.pages) == 1:
+                break
+        documentos.append(documento)
     if len(documentos) == 1:
         return documentos[0].write_pdf()
     paginas = [pagina for documento in documentos for pagina in documento.pages]

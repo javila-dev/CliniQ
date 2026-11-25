@@ -97,7 +97,7 @@ class CondicionesCompraPromocionalTests(TestCase):
 
         doc = Consentimiento.objects.get(cotizacion_id=cotizacion_id)
         html = doc.contenido_snapshot
-        self.assertIn("Consentimiento de compra promocional", html)
+        self.assertIn("Consentimiento informado para compra de tratamiento", html)
         # Nombre e identificación van en el encabezado del PDF; aquí lo demás.
         self.assertIn("3001234567", html)
         self.assertIn("carla@example.com", html)
@@ -128,7 +128,7 @@ class CondicionesCompraPromocionalTests(TestCase):
         [doc] = Consentimiento.objects.filter(cotizacion_id=cotizacion_id)
         self.assertEqual(doc.alcance_aceptacion, Alcance.AMBOS)
         self.assertIn("Forma de pago acordada", doc.contenido_snapshot)
-        self.assertIn("Consentimiento de compra promocional", doc.contenido_snapshot)
+        self.assertIn("Consentimiento informado para compra de tratamiento", doc.contenido_snapshot)
 
         # En el PDF son dos documentos: cada uno con su encabezado y su firma del paciente.
         pdf = generar_pdf_para_firma_documenso(doc)
@@ -158,6 +158,40 @@ class CondicionesCompraPromocionalTests(TestCase):
 
         campos = _json.loads(post.call_args.kwargs["data"]["payload"])["recipients"][0]["fields"]
         self.assertEqual([c["page"] for c in campos], [r["pageNumber"] for r in recuadros])
+
+    def test_con_contenido_largo_cada_documento_sigue_en_una_pagina(self):
+        import io as _io
+
+        import pdfplumber
+
+        from apps.agenda.pdf_coords import extraer_coordenadas_firmas
+        from apps.consentimientos.services import generar_pdf_para_firma_documenso
+
+        self.config.requiere_consentimiento_promocional = True
+        self.config.save()
+        self.client.force_authenticate(self.vendedora)
+        forma = FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia")
+        items = [
+            {"descripcion": f"Tratamiento de prueba número {i} con una descripción larga de varias palabras",
+             "num_citas": 4, "valor_unitario": "100000.00", "descuento_porcentaje": "0.00"}
+            for i in range(5)
+        ]
+        response = self.client.post("/api/v1/cotizaciones/", {
+            "paciente": str(self.paciente.id), "validez_dias": 30, "items": items,
+            "formas_pago": [{"tipo": str(forma.id), "valor": "2000000.00"}],
+        }, format="json")
+        self.assertEqual(response.status_code, 201, response.content[:300])
+        self._aceptar(response.json()["id"])
+        doc = Consentimiento.objects.get(cotizacion_id=response.json()["id"])
+
+        pdf = generar_pdf_para_firma_documenso(doc)
+        with pdfplumber.open(_io.BytesIO(pdf)) as archivo:
+            textos = [pagina.extract_text() or "" for pagina in archivo.pages]
+        self.assertEqual(len(textos), 2, "cada documento en una sola página")
+        self.assertIn("#ACEP-", textos[0])
+        self.assertIn("#PROMO-", textos[1])
+        self.assertIn("Referencia #PROMO-", textos[1])  # el pie no se fue a otra página
+        self.assertEqual([r["pageNumber"] for r in extraer_coordenadas_firmas(pdf)], [1, 2])
 
     def test_solo_compromiso_queda_como_antes(self):
         self.config.requiere_consentimiento_promocional = True
@@ -325,7 +359,7 @@ class CondicionesCompraPromocionalTests(TestCase):
         }, format="json")
         doc.refresh_from_db()
         self.assertEqual(doc.alcance_aceptacion, Alcance.PROMOCIONAL)
-        self.assertIn("Consentimiento de compra promocional", doc.contenido_snapshot)
+        self.assertIn("Consentimiento informado para compra de tratamiento", doc.contenido_snapshot)
         self.assertNotIn("Forma de pago acordada", doc.contenido_snapshot)
 
         # Aceptar ya no lo exige: la venta se acepta y el pendiente se anula.
