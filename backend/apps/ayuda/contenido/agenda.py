@@ -341,4 +341,62 @@ responder la pregunta más común del mostrador, «¿cuántas sesiones me quedan
 > lista de llamadas para una tarde floja.
 """,
     },
+    {
+        "slug": "reporte-de-citas-por-profesional",
+        "categoria": "agenda",
+        "titulo": "Reporte de citas por profesional",
+        "resumen": "Qué pasó con cada cita del mes por profesional: atendidas, canceladas, inasistencias y citas sin cerrar, de qué fue cada una y cómo bajarlo a Excel.",
+        "area": "agenda",
+        "keywords": "reporte, citas, profesional, atendidas, canceladas, no asistió, sin cerrar, mes, excel, exportar, productividad, sesiones",
+        "destacado": False,
+        "contenido": """
+En **Citas por profesional** (menú Atención, o **Ver detalle** en la tarjeta de
+ocupación del dashboard) ves todas las citas de un mes, agrupadas por quien las
+atendía. Cambia de mes con las flechas.
+
+## Qué muestra
+
+Arriba, los totales del mes. Haz clic en una tarjeta (por ejemplo **Sin
+cerrar**) para ver solo esas citas en el detalle.
+
+Debajo, una fila por profesional con:
+
+| Columna | Qué cuenta |
+|---|---|
+| **Atendidas** | Citas completadas. |
+| **Canceladas** | Citas que se anularon. |
+| **No asistió** | El paciente no llegó y quedó marcado. |
+| **Sin cerrar** | Ya pasó su hora y siguen pendientes, confirmadas, en espera o en curso. |
+| **Programadas** | Todavía no llega su hora. |
+| **Asistencia** | Atendidas sobre atendidas + no asistió. |
+| **Horas** | Tiempo atendido (el real si se registró el inicio y el fin). |
+| **Sin nota firmada** | Atendidas cuya nota clínica quedó en borrador o no existe. |
+
+Haz clic en un profesional para ver solo sus citas.
+
+## El detalle de cada cita
+
+Cada cita trae la fecha y la hora, el paciente, el resultado y **de qué fue**:
+
+- **Sesión de tratamiento**: con el número de sesión, por ejemplo «Sesión 3 de
+  6 · Radiofrecuencia».
+- **Procedimiento individual**: un procedimiento vendido suelto.
+- **Cita libre**: agendada sin venta, como una valoración.
+
+Los obsequios se marcan aparte. Las sesiones cargadas en la puesta en marcha no
+aparecen: no fueron citas de la agenda.
+
+## Exportar a Excel
+
+**Exportar Excel** baja dos hojas: **Resumen** (una fila por profesional) y
+**Citas** (el detalle, con los filtros que tengas puestos). La hoja de citas trae
+además la sala, la confirmación, la hora real de inicio y fin, el estado de la
+nota clínica y de la firma de asistencia, quién la agendó y quién vendió el
+tratamiento.
+
+> Las citas **sin cerrar** son las que nadie registró: el paciente vino y no se
+> cerró la atención, o no vino y no se marcó. Revisarlas al final de cada semana
+> deja los números del mes limpios.
+""",
+    },
 ]
