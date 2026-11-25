@@ -266,3 +266,36 @@ class SoporteCambiarTratamientoView(_SoporteView):
             motivo=v["motivo"], usuario=request.user, request=request,
         )
         return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)
+
+
+class SoporteVentasTerminadasView(_SoporteView):
+    """Ventas terminadas de un paciente con el saldo que su cartera aún tiene."""
+
+    def get(self, request):
+        from apps.cotizaciones.terminacion import ventas_terminadas_del_paciente
+        from apps.pacientes.models import Paciente
+
+        clinica = _clinica(request.query_params.get("clinica"))
+        paciente = Paciente.objects.filter(pk=request.query_params.get("paciente"), clinica=clinica).first()
+        if paciente is None:
+            raise serializers.ValidationError({"error": "Elige un paciente.", "code": "PACIENTE_REQUERIDO"})
+        return Response(ventas_terminadas_del_paciente(clinica, paciente))
+
+
+class CerrarCarteraSerializer(serializers.Serializer):
+    clinica = serializers.UUIDField()
+    cotizacion = serializers.UUIDField()
+    motivo = serializers.CharField(max_length=1000)
+
+
+class SoporteCerrarCarteraView(_SoporteView):
+    def post(self, request):
+        from apps.cotizaciones.terminacion import cerrar_cartera
+
+        datos = CerrarCarteraSerializer(data=request.data)
+        datos.is_valid(raise_exception=True)
+        v = datos.validated_data
+        correccion = cerrar_cartera(
+            _clinica(v["clinica"]), v["cotizacion"], motivo=v["motivo"], usuario=request.user, request=request,
+        )
+        return Response({"id": str(correccion.id)}, status=status.HTTP_201_CREATED)

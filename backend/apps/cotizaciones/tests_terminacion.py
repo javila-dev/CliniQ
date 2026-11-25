@@ -1,13 +1,15 @@
 """Terminar una venta que el paciente deja a medias (docs/plan-terminacion-ventas.md)."""
 from datetime import timedelta
 from decimal import Decimal
+from io import StringIO
 
+from django.core.management import call_command
 from django.test import TestCase
 from django.utils import timezone
 
 from apps.agenda import services as agenda_services
 from apps.agenda.models import Cita
-from apps.cartera.models import AcuerdoPago, CuotaCartera
+from apps.cartera.models import AcuerdoPago, Cartera, CuotaCartera
 from apps.clinicas.models import FormaDePago, Servicio
 from apps.core.models import LogAccion
 from apps.cotizaciones.models import Cotizacion, ItemCotizacion
@@ -109,12 +111,19 @@ class TerminarSaldoTests(TerminacionFixture, TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.json()["code"], "NO_REANUDABLE")
 
-    def test_cobrar_el_saldo_completo_no_toca_el_plan_y_se_reanuda(self):
-        response = self._terminar(modo="cobrar", valor="400000.00")
+    def test_cobrar_el_saldo_completo_cierra_el_plan_y_se_reanuda(self):
+        # Antes el plan quedaba intacto: la cuota vencida seguía en mora y
+        # bloqueaba la recepción de una venta ya terminada.
+        fecha = timezone.localdate() + timedelta(days=5)
+        response = self._terminar(modo="cobrar", valor="400000.00", fecha=fecha.isoformat())
         self.assertEqual(response.status_code, 200, response.content)
         self._refrescar()
-        self.assertFalse(self.vencida.anulada)
-        self.assertFalse(self.futura.anulada)
+        self.assertTrue(self.vencida.anulada)
+        self.assertTrue(self.futura.anulada)
+        vigentes = list(self.cartera.cuotas.filter(anulada=False))
+        self.assertEqual([(c.valor_esperado, c.fecha_esperada) for c in vigentes], [(Decimal("400000.00"), fecha)])
+        self.assertEqual(self.cartera.total, Decimal("400000.00"))
+        self.assertFalse(agenda_services._cuotas_vencidas_bloqueantes(self.cotizacion.paciente, self.clinica).exists())
         self.assertEqual(self.cotizacion.valor_perdonado, Decimal("0.00"))
         self.assertTrue(response.json()["puede_reanudar"])
         self.assertTrue(self.client.get(self._url("sesiones")).json()["terminada"])
@@ -153,6 +162,94 @@ class TerminarSaldoTests(TerminacionFixture, TestCase):
         self._refrescar()
         self.assertEqual(self.cotizacion.valor_perdonado, Decimal("0.00"))
         self.assertTrue(response.json()["puede_reanudar"])
+
+    # ── Carteras descuadradas: total mayor que lo que suman sus cuotas ──
+    # Ventas aceptadas antes de exigir el plan de pagos quedaron con la cartera
+    # sin cuotas (o con cuotas que no suman el total). La cartera muestra saldo
+    # (total − abonado) y la terminación lo calculaba solo con las cuotas: veía
+    # 0, no pedía perdonar ni cobrar y la cartera seguía activa para siempre.
+
+    def _saldo_en_listado(self):
+        filas = self.client.get("/api/v1/cartera/").json()["results"]
+        return [f["saldo_pendiente"] for f in filas if f["id"] == str(self.cartera.id)][0]
+
+    def test_cartera_sin_cuotas_pide_decidir_el_saldo_y_al_perdonar_queda_en_cero(self):
+        CuotaCartera.objects.filter(cartera=self.cartera).delete()
+        self.assertEqual(self._saldo_en_listado(), "400000.00")
+        self.assertEqual(self.client.get(self._url("terminacion")).json()["saldo"], "400000.00")
+
+        response = self._terminar()
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(response.json()["code"], "ELEGIR_MODO_SALDO")
+
+        response = self._terminar(modo="perdonar")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.cotizacion.refresh_from_db()
+        self.cartera.refresh_from_db()
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("400000.00"))
+        self.assertEqual(self.cartera.total, Decimal("0.00"))
+        self.assertEqual(self._saldo_en_listado(), "0.00")
+        pagadas = self.client.get("/api/v1/cartera/?estado=pagada").json()["results"]
+        self.assertIn(str(self.cartera.id), [f["id"] for f in pagadas])
+
+    def test_total_mayor_que_las_cuotas_se_perdona_completo(self):
+        Cartera.objects.filter(pk=self.cartera.pk).update(total=Decimal("500000.00"))
+        CuotaCartera.objects.filter(pk=self.vencida.pk).update(valor_pagado=Decimal("200000.00"), pagada=True)
+        CuotaCartera.objects.filter(pk=self.futura.pk).update(valor_pagado=Decimal("200000.00"), pagada=True)
+        self.assertEqual(self._saldo_en_listado(), "100000.00")
+
+        response = self._terminar(modo="perdonar")
+        self.assertEqual(response.status_code, 200, response.content)
+        self._refrescar()
+        self.assertEqual(self.cotizacion.saldo_al_terminar, Decimal("100000.00"))
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("100000.00"))
+        self.assertEqual(self.cartera.total, Decimal("400000.00"))
+        self.assertEqual(self._saldo_en_listado(), "0.00")
+
+    def test_cobrar_el_saldo_completo_sin_cuotas_que_lo_cubran_deja_una_cuota(self):
+        Cartera.objects.filter(pk=self.cartera.pk).update(total=Decimal("500000.00"))
+
+        response = self._terminar(modo="cobrar", valor="500000.00")
+        self.assertEqual(response.status_code, 200, response.content)
+        self._refrescar()
+        self.assertTrue(self.vencida.anulada)
+        self.assertTrue(self.futura.anulada)
+        vigentes = list(self.cartera.cuotas.filter(anulada=False))
+        self.assertEqual(len(vigentes), 1)
+        self.assertEqual(vigentes[0].valor_esperado, Decimal("500000.00"))
+        self.assertEqual(vigentes[0].fecha_esperada, timezone.localdate())
+        self.assertEqual(vigentes[0].tipo, self.efectivo)
+        self.assertEqual(self.cartera.total, Decimal("500000.00"))
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("0.00"))
+        self.assertEqual(self._saldo_en_listado(), "500000.00")
+
+    def test_comando_corrige_ventas_terminadas_antes_del_arreglo(self):
+        # Estado que dejaba la versión anterior: venta terminada sin nada
+        # perdonado y la cartera con 100.000 que ninguna cuota cubre.
+        Cartera.objects.filter(pk=self.cartera.pk).update(total=Decimal("500000.00"))
+        Cotizacion.objects.filter(pk=self.cotizacion.pk).update(
+            terminada_en=timezone.now(), motivo_terminacion="economico",
+            saldo_al_terminar=Decimal("400000.00"), valor_perdonado=Decimal("0.00"),
+        )
+
+        salida = StringIO()
+        call_command("corregir_carteras_ventas_terminadas", stdout=salida)
+        self.assertIn("sin cuota 100,000", salida.getvalue())
+        self._refrescar()
+        self.assertEqual(self.cartera.total, Decimal("500000.00"))  # sin --aplicar no cambia nada
+
+        call_command("corregir_carteras_ventas_terminadas", "--aplicar", stdout=StringIO())
+        self._refrescar()
+        self.assertEqual(self.cartera.total, Decimal("400000.00"))
+        self.assertEqual(self._saldo_en_listado(), "400000.00")  # lo que cubre el plan se sigue cobrando
+        self.assertFalse(self.vencida.anulada)
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("100000.00"))
+        self.assertEqual(self.cotizacion.saldo_al_terminar, Decimal("500000.00"))
+        self.assertTrue(LogAccion.objects.filter(accion="venta.corregir_saldo_sin_cuota").exists())
+
+        salida = StringIO()
+        call_command("corregir_carteras_ventas_terminadas", stdout=salida)
+        self.assertIn("No hay ventas terminadas", salida.getvalue())
 
     def test_acuerdo_de_pago_pendiente_bloquea(self):
         AcuerdoPago.objects.create(
@@ -265,3 +362,101 @@ class TerminarEfectosTests(TerminacionFixture, TestCase):
         self.assertEqual(r["estado"], "pausado")
         with self.assertRaises(ValidationError):
             agenda_services._reservar_sesion_del_item(item)
+
+
+class SoporteCerrarCarteraTests(TerminacionFixture, TestCase):
+    """Console › Soporte › Cerrar cartera de una venta terminada."""
+
+    URL = "/api/v1/admin/soporte/cerrar-cartera/"
+
+    def _ventas(self):
+        r = self.client.get(self.URL, {"clinica": str(self.clinica.id), "paciente": str(self.cotizacion.paciente_id)})
+        self.assertEqual(r.status_code, 200, r.content)
+        return r.json()
+
+    def _cerrar(self, motivo="La asesora cobró un valor por error; la clínica confirma que no se cobra nada."):
+        return self.client.post(f"{self.URL}confirmar/", {
+            "clinica": str(self.clinica.id), "cotizacion": str(self.cotizacion.id), "motivo": motivo,
+        }, format="json")
+
+    def _terminar_cobrando(self):
+        fecha = (timezone.localdate() + timedelta(days=10)).isoformat()
+        r = self._terminar(modo="cobrar", valor="100000.00", fecha=fecha)
+        self.assertEqual(r.status_code, 200, r.content)
+
+    def test_solo_ventas_terminadas(self):
+        self.assertEqual(self._ventas(), [])
+        r = self._cerrar()
+        self.assertEqual(r.status_code, 400, r.content)
+        self.assertEqual(r.json()["code"], "VENTA_NO_TERMINADA")
+        self._refrescar()
+        self.assertFalse(self.vencida.anulada)
+
+    def test_cierra_la_cartera_y_queda_registrado(self):
+        from apps.agenda.models import CorreccionSoporte
+
+        self._terminar_cobrando()
+        [venta] = self._ventas()
+        self.assertEqual(venta["saldo"], "100000.00")
+        self.assertEqual(venta["valor_perdonado"], "300000.00")
+        self.assertEqual(len(venta["cuotas_pendientes"]), 1)
+        self.assertIsNone(venta["bloqueo"])
+
+        r = self._cerrar()
+        self.assertEqual(r.status_code, 201, r.content)
+        self._refrescar()
+        self.assertEqual(self.cartera.saldo_pendiente, Decimal("0"))
+        self.assertEqual(self.cartera.total, Decimal("0.00"))
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("400000.00"))
+        self.assertEqual(self.cotizacion.saldo_al_terminar, Decimal("400000.00"))
+        self.assertFalse(self.cartera.cuotas.filter(anulada=False).exists())
+
+        correccion = CorreccionSoporte.objects.get(tipo=CorreccionSoporte.Tipo.CERRAR_CARTERA)
+        self.assertEqual(correccion.realizado_por, self.superadmin)
+        self.assertEqual(correccion.resumen["saldo_cerrado"], "100000.00")
+        self.assertTrue(LogAccion.objects.filter(accion="venta.cerrar_cartera", objeto_id=str(self.cotizacion.id)).exists())
+        hechas = self.client.get(
+            "/api/v1/admin/soporte/correcciones/", {"clinica": str(self.clinica.id), "tipo": "cerrar_cartera"},
+        ).json()
+        self.assertEqual([h["saldo_cerrado"] for h in hechas], ["100000.00"])
+
+        [venta] = self._ventas()
+        self.assertEqual(venta["saldo"], "0.00")
+        self.assertIsNotNone(venta["bloqueo"])
+        r = self._cerrar()
+        self.assertEqual(r.json()["code"], "CARTERA_YA_CERRADA")
+
+    def test_cuota_con_abono_queda_cerrada_por_lo_abonado(self):
+        self._terminar_cobrando()
+        cuota = self.cartera.cuotas.get(anulada=False)
+        CuotaCartera.objects.filter(pk=cuota.pk).update(valor_pagado=Decimal("30000.00"))
+
+        r = self._cerrar()
+        self.assertEqual(r.status_code, 201, r.content)
+        cuota.refresh_from_db()
+        self.cartera.refresh_from_db()
+        self.assertTrue(cuota.pagada)
+        self.assertEqual(cuota.valor_esperado, Decimal("30000.00"))
+        self.assertEqual(self.cartera.saldo_pendiente, Decimal("0"))
+        self.cotizacion.refresh_from_db()
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("370000.00"))
+
+    def test_motivo_y_acuerdo_pendiente(self):
+        self._terminar_cobrando()
+        r = self._cerrar(motivo="  ")
+        self.assertEqual(r.status_code, 400, r.content)
+        AcuerdoPago.objects.create(
+            cartera=self.cartera, numero=1, motivo="Renegociar", saldo_al_proponer=Decimal("100000.00"),
+            plan_propuesto=[],
+        )
+        r = self._cerrar()
+        self.assertEqual(r.json()["code"], "ACUERDO_PENDIENTE")
+
+    def test_solo_superadmin(self):
+        self._terminar_cobrando()
+        self.client.force_authenticate(self.laura)
+        self.assertEqual(self._cerrar().status_code, 403)
+        self.assertEqual(
+            self.client.get(self.URL, {"clinica": str(self.clinica.id), "paciente": str(self.cotizacion.paciente_id)}).status_code,
+            403,
+        )

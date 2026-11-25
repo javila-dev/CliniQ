@@ -128,10 +128,19 @@ aparece y solo se aplica lo de las sesiones.
 
 **Cobrar un valor X (0 < X ≤ saldo)**
 
-- Si X = saldo, el plan de cuotas no se toca: la deuda sigue tal cual.
-- Si X < saldo, las cuotas pendientes se cierran como arriba y se crea **una
-  cuota nueva** por X, con la fecha y la forma de pago que elija la clínica. Por
-  defecto se proponen hoy y la forma de pago de la primera cuota pendiente.
+- Las cuotas pendientes se cierran como arriba y se crea **una cuota nueva** por
+  X, con la fecha y la forma de pago que elija la clínica. Por defecto se
+  proponen hoy y la forma de pago de la primera cuota pendiente.
+- Esto vale también con X = saldo (cambio del 2026-11-25). Antes, con X = saldo
+  el plan de cuotas no se tocaba: la cuota vencida seguía en mora y bloqueaba la
+  recepción de una venta ya terminada, y los usuarios veían la cartera "activa".
+  El modal muestra "Así queda la cartera" y pide confirmar con ese resumen.
+- El saldo es el que muestra la cartera (`total − abonado`), aunque parte no
+  tenga cuota (carteras de antes de exigir el plan de pagos). Antes se sumaban
+  solo las cuotas y ese saldo sin cuota quedaba vivo para siempre.
+- Si un usuario dejó por error la cartera de una venta terminada con saldo,
+  soporte la cierra en Console › Soporte › «Cerrar cartera de una venta
+  terminada» (perdona lo pendiente; solo ventas terminadas).
 - `valor_perdonado = saldo − X`. La cuota nueva es deuda real: si vence, genera
   mora como cualquier otra.
 
@@ -152,8 +161,9 @@ etiqueta en `configuracion/log-acciones`.
 
 ## Reanudar
 
-Se puede reanudar una venta terminada solo si **no se tocó el dinero**: no
-había saldo, o se eligió X = saldo, que deja el plan de cuotas intacto.
+Se puede reanudar una venta terminada solo si **no se perdonó nada**: no había
+saldo, o se eligió X = saldo. En ese caso el plan viejo no vuelve: queda la
+cuota del cobro por el saldo completo.
 
 - `terminada_en` y sus campos vuelven a `null`.
 - Los `TratamientoPaciente` vuelven a `ACTIVO`, o a `COMPLETADO` si ya tenían
@@ -220,7 +230,7 @@ Casos clave:
 
 - Perdonar con cuotas sin abono, con abono parcial y vencidas: saldo 0, sin mora y `cartera.total` correcto.
 - Cobrar X < saldo: una sola cuota nueva y mora si vence.
-- Cobrar X = saldo: el plan queda intacto y se puede reanudar.
+- Cobrar X = saldo: el plan se cierra, queda una sola cuota por el saldo y se puede reanudar.
 - No deja agendar más (serializer y `_reservar_sesion_del_item`).
 - "Cancelarlas ahora": cancela las agendadas y las sin cerrar, libera sus sesiones, devuelve insumos y mantiene el cobro.
 - "Las manejo yo": las citas quedan; se pueden atender, reagendar y cancelar, pero no reemplazar.

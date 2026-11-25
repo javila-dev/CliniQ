@@ -5,6 +5,7 @@ from apps.agenda.soporte_views import (
     SoporteAtencionesView,
     SoporteCambiarTratamientoView,
     SoporteCargasMigradasView,
+    SoporteCerrarCarteraView,
     SoporteCorreccionesView,
     SoporteCorregirSesionesPreviasView,
     SoporteEliminarAtencionView,
@@ -16,6 +17,7 @@ from apps.agenda.soporte_views import (
     SoporteTrasladoAtencionView,
     SoporteTratamientosMigracionView,
     SoporteVentasPacienteView,
+    SoporteVentasTerminadasView,
 )
 from apps.clinicas.views import AdminTenantViewSet, PlanViewSet
 from apps.notificaciones.views import (
@@ -74,6 +76,8 @@ urlpatterns = [
         SoporteCambiarTratamientoView.as_view(),
         name="admin-soporte-cambiar-tratamiento",
     ),
+    path("soporte/cerrar-cartera/", SoporteVentasTerminadasView.as_view(), name="admin-soporte-cerrar-cartera-ventas"),
+    path("soporte/cerrar-cartera/confirmar/", SoporteCerrarCarteraView.as_view(), name="admin-soporte-cerrar-cartera"),
     path("soporte/correcciones/", SoporteCorreccionesView.as_view(), name="admin-soporte-correcciones"),
     path("soporte/cambiar-correo/", SoporteCambiarCorreoView.as_view(), name="admin-soporte-cambiar-correo"),
     path("tenants/<uuid:clinica_id>/whatsapp-propio/", AdminWhatsappPropioView.as_view(), name="admin-whatsapp-propio"),

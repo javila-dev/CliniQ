@@ -238,8 +238,9 @@ def avisos_comunes(cita) -> list[dict]:
 
 def registrar(
     request, *, clinica, tipo, cita, paciente, accion_cobro, motivo, usuario, resumen,
-    paciente_destino=None, item_origen=None, item_destino=None, detalle=None,
+    paciente_destino=None, item_origen=None, item_destino=None, detalle=None, objeto=None,
 ) -> CorreccionSoporte:
+    """``objeto``: contra qué queda el LogAccion si no es la cita ni el ítem (la cotización)."""
     from apps.core.logging import registrar_accion
 
     correccion = CorreccionSoporte.objects.create(
@@ -252,9 +253,10 @@ def registrar(
         CorreccionSoporte.Tipo.ELIMINAR_ATENCION: "cita.eliminar_atencion",
         CorreccionSoporte.Tipo.CORREGIR_SESIONES_PREVIAS: "cotizacion.corregir_sesiones_previas",
         CorreccionSoporte.Tipo.CAMBIAR_TRATAMIENTO: "cotizacion.cambiar_tratamiento",
+        CorreccionSoporte.Tipo.CERRAR_CARTERA: "venta.cerrar_cartera",
     }[tipo]
     registrar_accion(
-        request, accion, cita or item_origen,
+        request, accion, objeto or cita or item_origen,
         {
             "paciente_nombre": paciente.nombre_completo,
             "paciente_id": str(paciente.id),
@@ -289,6 +291,7 @@ def correcciones_de_la_clinica(clinica, tipo=None, limite=20) -> list[dict]:
             "sesiones_despues": c.resumen.get("sesiones_despues"),
             "tratamiento_antes": c.resumen.get("tratamiento_antes"),
             "tratamiento_despues": c.resumen.get("tratamiento_despues"),
+            "saldo_cerrado": c.resumen.get("saldo_cerrado"),
             "motivo": c.motivo,
             "realizado_por": nombre(c.realizado_por),
             "created_at": c.created_at,

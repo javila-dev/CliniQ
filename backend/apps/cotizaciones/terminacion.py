@@ -8,10 +8,15 @@ La cotización sigue ``aceptada`` (cuenta como vendida en su ``aceptada_en``);
 - Las citas sin cerrar se cancelan o quedan a cargo de la clínica, según elija
   quien termina. Las que están en atención nunca se cancelan solas.
 - Las oportunidades abiertas del paquete se cierran como perdidas.
-- El saldo de cartera se perdona o se deja un cobro de X (0 < X ≤ saldo). Si X
-  es el saldo completo, el plan de cuotas no se toca.
+- El saldo de cartera se perdona o se deja un cobro de X (0 < X ≤ saldo). En
+  los dos casos el plan de cuotas pendiente se cierra; al cobrar queda una sola
+  cuota por X, con su fecha y forma de pago, aunque X sea el saldo completo. El
+  saldo es el que muestra la cartera (``total − abonado``), aunque parte no
+  tenga cuota (ver ``_saldo_venta``).
 
-Reanudar solo se puede si no se perdonó nada.
+Reanudar solo se puede si no se perdonó nada (el plan cerrado no vuelve: queda
+la cuota del cobro). Si un usuario dejó por error la cartera de una venta
+terminada con saldo, soporte la cierra con ``cerrar_cartera``.
 """
 
 from decimal import Decimal
@@ -127,6 +132,40 @@ def _saldo(cuotas) -> Decimal:
     return sum((c.saldo_pendiente for c in cuotas), CERO)
 
 
+def _saldo_venta(cartera, cuotas) -> Decimal:
+    """Saldo que se perdona o se cobra al terminar.
+
+    La cartera muestra ``total − abonado`` (listado, resumen, filtro "pagada"),
+    pero hay carteras cuyo total no cuadra con sus cuotas: ventas aceptadas antes
+    de exigir el plan de pagos quedaron sin cuotas o con cuotas que no suman el
+    total. Ese saldo sin cuota también es deuda: si solo se miraran las cuotas,
+    la terminación lo ignoraría y la cartera quedaría activa para siempre.
+    """
+    saldo_cuotas = _saldo(cuotas)
+    if cartera is None:
+        return saldo_cuotas
+    return max(saldo_cuotas, Decimal(cartera.saldo_pendiente))
+
+
+def _forma_pago_sugerida(cartera, cuotas):
+    """Forma de pago del cobro de X: la de la primera cuota pendiente; si no hay,
+    la de la última cuota de la cartera; si tampoco, efectivo."""
+    if cuotas:
+        return cuotas[0].tipo
+    if cartera is not None:
+        ultima = cartera.cuotas.select_related("tipo").order_by("-created_at").first()
+        if ultima is not None:
+            return ultima.tipo
+        from apps.clinicas.models import FormaDePago
+
+        return (
+            FormaDePago.objects.filter(clinica_id=cartera.cotizacion.clinica_id, tipo_base="efectivo", activo=True)
+            .order_by("created_at")
+            .first()
+        )
+    return None
+
+
 def _acuerdo_pendiente(cartera) -> bool:
     if cartera is None:
         return False
@@ -143,13 +182,15 @@ def vista_previa(cotizacion) -> dict:
     cartera = _cartera(cotizacion)
     cuotas = _cuotas_pendientes(cartera)
     citas = _citas_sin_cerrar(cotizacion)
+    saldo = _saldo_venta(cartera, cuotas)
+    forma_pago = _forma_pago_sugerida(cartera, cuotas)
     return {
         "terminada": cotizacion.terminada_en is not None,
         "puede_reanudar": se_puede_reanudar(cotizacion),
         "sesiones": _sesiones(cotizacion),
         "citas": {grupo: [_cita_publica(c) for c in lista] for grupo, lista in citas.items()},
         "oportunidades_abiertas": _oportunidades_abiertas(cotizacion).count(),
-        "saldo": f"{_saldo(cuotas):.2f}",
+        "saldo": f"{saldo:.2f}",
         "cuotas_pendientes": [
             {
                 "id": str(c.id),
@@ -160,7 +201,7 @@ def vista_previa(cotizacion) -> dict:
             }
             for c in cuotas
         ],
-        "forma_pago_sugerida": str(cuotas[0].tipo_id) if cuotas else None,
+        "forma_pago_sugerida": str(forma_pago.id) if forma_pago else None,
         "acuerdo_pendiente": _acuerdo_pendiente(cartera),
         "motivos": [{"value": v, "label": l} for v, l in MotivoTerminacion.choices],
     }
@@ -269,7 +310,7 @@ def terminar(cotizacion, datos: dict, *, usuario, request=None) -> dict:
 
     # Dinero: si hay saldo, perdonarlo o dejar un cobro de X.
     cuotas = _cuotas_pendientes(cartera)
-    saldo = _saldo(cuotas)
+    saldo = _saldo_venta(cartera, cuotas)
     cobro = CERO
     forma_pago = None
     fecha = None
@@ -284,16 +325,24 @@ def terminar(cotizacion, datos: dict, *, usuario, request=None) -> dict:
                     f"El valor a cobrar debe estar entre 1 y el saldo pendiente (${saldo:,.0f}).".replace(",", "."),
                     "VALOR_FUERA_DE_RANGO",
                 )
-            if cobro < saldo:
-                fecha = datos.get("fecha")
-                if fecha is None:
-                    _error("Elige la fecha del cobro.", "FECHA_REQUERIDA")
-                if fecha < timezone.localdate():
-                    _error("La fecha del cobro no puede ser anterior a hoy.", "FECHA_INVALIDA")
-                forma_pago_id = datos.get("forma_pago") or (cuotas[0].tipo_id if cuotas else None)
-                forma_pago = FormaDePago.objects.filter(pk=forma_pago_id, clinica=cotizacion.clinica).first()
-                if forma_pago is None:
-                    _error("Elige la forma de pago del cobro.", "FORMA_PAGO_REQUERIDA")
+            # Cobrar siempre cierra el plan y deja una sola cuota por X, también
+            # cuando X es el saldo completo: la venta terminó y su plan de cuotas
+            # (con su mora) ya no rige.
+            fecha = datos.get("fecha")
+            if fecha is None and cobro == saldo:
+                # Compatibilidad: el modal anterior solo pedía fecha en un cobro parcial.
+                fecha = timezone.localdate()
+            if fecha is None:
+                _error("Elige la fecha del cobro.", "FECHA_REQUERIDA")
+            if fecha < timezone.localdate():
+                _error("La fecha del cobro no puede ser anterior a hoy.", "FECHA_INVALIDA")
+            forma_pago_id = datos.get("forma_pago")
+            if forma_pago_id is None:
+                sugerida = _forma_pago_sugerida(cartera, cuotas)
+                forma_pago_id = sugerida.id if sugerida else None
+            forma_pago = FormaDePago.objects.filter(pk=forma_pago_id, clinica=cotizacion.clinica).first()
+            if forma_pago is None:
+                _error("Elige la forma de pago del cobro.", "FORMA_PAGO_REQUERIDA")
     perdonado = saldo - cobro
 
     # ── Aplicar ──
@@ -323,7 +372,7 @@ def terminar(cotizacion, datos: dict, *, usuario, request=None) -> dict:
         perder(oportunidad, usuario=usuario, motivo="otro", nota=f"Venta terminada: {motivo_texto}")
         oportunidades += 1
 
-    if cartera is not None and perdonado > 0:
+    if cartera is not None and saldo > 0:
         etiqueta = "Cerrada por terminación de la venta"
         _cerrar_cuotas_pendientes(cuotas, usuario=usuario, etiqueta=etiqueta)
         if cobro > 0:
@@ -394,3 +443,121 @@ def reanudar(cotizacion, *, usuario, request=None) -> None:
     registrar_accion(
         request, "venta.reanudar", cotizacion, {"terminada_en": terminada_en.isoformat()}, actor=usuario,
     )
+
+
+# ── Soporte: cerrar la cartera de una venta terminada ────────────────────────
+# Al terminar, quien cobró un valor pudo dejar por error la cartera con saldo
+# (o la venta se terminó antes de que la terminación viera el saldo sin cuota).
+# Soporte la cierra desde el console: perdona lo pendiente, igual que "perdonar"
+# al terminar. Solo para ventas ya terminadas.
+
+
+def _descripcion_venta(cotizacion) -> str:
+    items = cotizacion.items.filter(activo=True).exclude(tipo=ItemCotizacion.Tipo.INSUMO).order_by("created_at")
+    return ", ".join(i.descripcion for i in items) or "Venta sin ítems"
+
+
+def _cartera_soporte(cotizacion) -> dict:
+    cartera = _cartera(cotizacion)
+    cuotas = _cuotas_pendientes(cartera)
+    saldo = _saldo_venta(cartera, cuotas)
+    bloqueo = None
+    if cartera is None or saldo <= 0:
+        bloqueo = "La cartera ya está cerrada: no tiene saldo pendiente."
+    elif _acuerdo_pendiente(cartera):
+        bloqueo = "La cartera tiene un acuerdo de pago pendiente de firma: anúlalo antes de cerrarla."
+    return {
+        "cotizacion_id": str(cotizacion.id),
+        "descripcion": _descripcion_venta(cotizacion),
+        "aceptada_en": cotizacion.aceptada_en,
+        "terminada_en": cotizacion.terminada_en,
+        "motivo_terminacion": cotizacion.get_motivo_terminacion_display(),
+        "terminada_por": cotizacion.terminada_por.nombre_completo if cotizacion.terminada_por_id else None,
+        "valor_perdonado": f"{Decimal(cotizacion.valor_perdonado or 0):.2f}",
+        "saldo": f"{max(saldo, CERO):.2f}",
+        # Parte del saldo que ninguna cuota cubre (carteras descuadradas).
+        "saldo_sin_cuota": f"{max(saldo - _saldo(cuotas), CERO):.2f}",
+        "cuotas_pendientes": [
+            {
+                "id": str(c.id),
+                "descripcion": c.descripcion,
+                "fecha_esperada": c.fecha_esperada.isoformat() if c.fecha_esperada else None,
+                "saldo": f"{c.saldo_pendiente:.2f}",
+                "abonado": f"{Decimal(c.valor_pagado or 0):.2f}",
+                "vencida": c.vencida,
+            }
+            for c in cuotas
+        ],
+        "bloqueo": bloqueo,
+    }
+
+
+def ventas_terminadas_del_paciente(clinica, paciente) -> list[dict]:
+    """Ventas terminadas del paciente con el estado de su cartera."""
+    ventas = Cotizacion.objects.filter(
+        clinica=clinica, paciente=paciente, estado=Cotizacion.Estado.ACEPTADA, terminada_en__isnull=False,
+    ).select_related("terminada_por").order_by("-terminada_en")
+    return [_cartera_soporte(v) for v in ventas]
+
+
+def cerrar_cartera(clinica, cotizacion_id, *, motivo: str, usuario=None, request=None):
+    """Perdona el saldo pendiente de la cartera de una venta terminada: cierra
+    sus cuotas pendientes como al terminar con "perdonar" y suma lo cerrado a
+    ``valor_perdonado``. Devuelve la ``CorreccionSoporte``."""
+    from apps.agenda import soporte
+    from apps.agenda.models import CorreccionSoporte
+    from apps.cartera.models import Cartera
+
+    motivo = (motivo or "").strip()
+    if not motivo:
+        _error("Escribe el motivo.", "MOTIVO_REQUERIDO")
+
+    with transaction.atomic():
+        cotizacion = (
+            Cotizacion.objects.select_for_update().select_related("paciente")
+            .filter(pk=cotizacion_id, clinica=clinica).first()
+        )
+        if cotizacion is None:
+            _error("La venta no existe en esta clínica.", "VENTA_NO_ENCONTRADA")
+        if cotizacion.estado != Cotizacion.Estado.ACEPTADA or cotizacion.terminada_en is None:
+            _error(
+                "Solo se cierra la cartera de una venta terminada. Termina la venta desde su pantalla.",
+                "VENTA_NO_TERMINADA",
+            )
+        cartera = Cartera.objects.select_for_update().filter(cotizacion=cotizacion).first()
+        cuotas = _cuotas_pendientes(cartera)
+        saldo = _saldo_venta(cartera, cuotas)
+        if cartera is None or saldo <= 0:
+            _error("La cartera ya está cerrada: no tiene saldo pendiente.", "CARTERA_YA_CERRADA")
+        if _acuerdo_pendiente(cartera):
+            _error(
+                "La cartera tiene un acuerdo de pago pendiente de firma: anúlalo antes de cerrarla.",
+                "ACUERDO_PENDIENTE",
+            )
+
+        total_antes = cartera.total
+        perdonado_antes = Decimal(cotizacion.valor_perdonado or 0)
+        _cerrar_cuotas_pendientes(cuotas, usuario=usuario, etiqueta="Cerrada por soporte: venta terminada")
+        _recalcular_total_cartera(cartera)
+
+        cotizacion.valor_perdonado = perdonado_antes + saldo
+        # valor_perdonado nunca supera el saldo que había al terminar.
+        cotizacion.saldo_al_terminar = max(Decimal(cotizacion.saldo_al_terminar or 0), cotizacion.valor_perdonado)
+        cotizacion.save(update_fields=["valor_perdonado", "saldo_al_terminar", "updated_at"])
+
+        cambio = {
+            "paquete": _descripcion_venta(cotizacion),
+            "saldo_cerrado": f"{saldo:.2f}",
+            "cuotas_cerradas": len(cuotas),
+            "total_cartera_antes": f"{total_antes:.2f}",
+            "total_cartera_despues": f"{cartera.total:.2f}",
+            "valor_perdonado_antes": f"{perdonado_antes:.2f}",
+            "valor_perdonado_despues": f"{cotizacion.valor_perdonado:.2f}",
+        }
+        return soporte.registrar(
+            request,
+            clinica=clinica, tipo=CorreccionSoporte.Tipo.CERRAR_CARTERA, cita=None,
+            paciente=cotizacion.paciente, objeto=cotizacion,
+            accion_cobro=CorreccionSoporte.AccionCobro.SIN_COBRO, motivo=motivo, usuario=usuario,
+            resumen={"cotizacion": str(cotizacion.id), **cambio}, detalle=cambio,
+        )

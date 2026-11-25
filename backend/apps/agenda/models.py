@@ -339,6 +339,7 @@ class CorreccionSoporte(BaseModel):
         ELIMINAR_ATENCION = "eliminar_atencion", "Eliminar atención"
         CORREGIR_SESIONES_PREVIAS = "corregir_sesiones_previas", "Corregir sesiones previas"
         CAMBIAR_TRATAMIENTO = "cambiar_tratamiento", "Cambiar tratamiento de una venta"
+        CERRAR_CARTERA = "cerrar_cartera", "Cerrar cartera de una venta terminada"
 
     class AccionCobro(models.TextChoices):
         SIN_COBRO = "sin_cobro", "La cita no tenía cobro"
