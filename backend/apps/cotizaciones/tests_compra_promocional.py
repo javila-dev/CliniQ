@@ -159,6 +159,45 @@ class CondicionesCompraPromocionalTests(TestCase):
 
         self.assertIn("45 días", Consentimiento.objects.get(cotizacion_id=cotizacion_id).contenido_snapshot)
 
+    # ── Aviso antes de aceptar ───────────────────────────────────────────
+
+    def test_el_borrador_avisa_que_documento_pedira_y_si_hay_firma(self):
+        cotizacion_id = self._crear()
+        requisitos = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["requisitos_aceptacion"]
+
+        self.assertEqual(requisitos["alcance"], Alcance.PROMOCIONAL)
+        self.assertEqual(requisitos["titulo"], "Consentimiento de compra promocional")
+        self.assertEqual(requisitos["vendedor_nombre"], "Lina Mora")
+        self.assertTrue(requisitos["vendedor_tiene_firma"])
+        self.assertTrue(requisitos["vendedor_es_usted"])
+
+        # Otra persona la mira y la vendedora no tiene firma.
+        self.vendedora.firma_digital = None
+        self.vendedora.save()
+        otra = User.objects.create_user(email="mira@example.com", password="x", rol=User.Role.ADMIN, clinica=self.clinica)
+        self.client.force_authenticate(otra)
+        requisitos = self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["requisitos_aceptacion"]
+        self.assertFalse(requisitos["vendedor_tiene_firma"])
+        self.assertFalse(requisitos["vendedor_es_usted"])
+
+    def test_guardar_el_borrador_devuelve_los_requisitos(self):
+        cotizacion_id = self._crear()
+        forma = FormaDePago.objects.get(clinica=self.clinica, tipo_base="transferencia")
+        data = self.client.patch(f"/api/v1/cotizaciones/{cotizacion_id}/", {
+            "items": [{"descripcion": "Axilas", "num_citas": 6, "valor_unitario": "50000.00", "descuento_porcentaje": "0.00"}],
+            "formas_pago": [{"tipo": str(forma.id), "valor": "300000.00"}],
+        }, format="json").json()
+        self.assertEqual(data["requisitos_aceptacion"]["alcance"], Alcance.PROMOCIONAL)
+        self.assertIn("compromiso_pago", data)
+
+    def test_sin_requisitos_o_ya_aceptada_no_avisa_nada(self):
+        self.config.exige_condiciones_compra_promocional = False
+        self.config.save()
+        cotizacion_id = self._crear()
+        self.assertIsNone(self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["requisitos_aceptacion"])
+        self._aceptar(cotizacion_id)
+        self.assertIsNone(self.client.get(f"/api/v1/cotizaciones/{cotizacion_id}/").json()["requisitos_aceptacion"])
+
     # ── Firma de quien vende ─────────────────────────────────────────────
 
     def test_sin_firma_quien_cotizo_debe_dibujarla(self):

@@ -226,6 +226,37 @@ def vendedor_sin_firma(cotizacion, actor=None):
     return None if _firma_vendedor_data_url(vendedor) else vendedor
 
 
+def requisitos_aceptacion(cotizacion, actor=None) -> dict | None:
+    """Lo que pedirá aceptar esta cotización en borrador, para avisarlo antes de
+    pulsar "Registrar aceptación": qué documento firma el paciente y, si lleva
+    condiciones de compra promocional, si quien vendió ya tiene su firma.
+    None si no se exige ningún documento (o no aplica: migración, total 0)."""
+    from apps.cotizaciones.models import Cotizacion
+
+    if cotizacion.estado != Cotizacion.Estado.BORRADOR or getattr(cotizacion, "es_migracion", False):
+        return None
+    alcance = alcance_aceptacion_configurado(cotizacion)
+    if alcance is None or Decimal(cotizacion.total) <= 0:
+        return None
+    datos = {
+        "alcance": alcance,
+        "titulo": TITULOS_ACEPTACION[alcance],
+        "incluye_promocional": incluye_compra_promocional(alcance),
+        "vendedor_nombre": None,
+        "vendedor_tiene_firma": None,
+        "vendedor_es_usted": None,
+    }
+    if datos["incluye_promocional"]:
+        vendedor = vendedor_de_cotizacion(cotizacion, actor)
+        if vendedor is not None:
+            datos.update({
+                "vendedor_nombre": vendedor.nombre_completo,
+                "vendedor_tiene_firma": bool(vendedor.firma_digital),
+                "vendedor_es_usted": actor is not None and vendedor.pk == actor.pk,
+            })
+    return datos
+
+
 def _contexto_compra_promocional(cotizacion, actor=None) -> dict:
     config = _config_cartera(cotizacion.clinica_id)
     vendedor = vendedor_de_cotizacion(cotizacion, actor)

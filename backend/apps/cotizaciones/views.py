@@ -283,7 +283,14 @@ class CotizacionViewSet(ModelViewSet):
         # lo generan al aceptarse (cambiar_estado).
         compromiso = self._compromiso_pago_existente(cotizacion)
         response.data["compromiso_pago"] = self._serializar_compromiso_pago(compromiso)
+        response.data["requisitos_aceptacion"] = self._requisitos_aceptacion(cotizacion)
         return response
+
+    def _requisitos_aceptacion(self, cotizacion):
+        """Qué documento pedirá aceptar el borrador (para avisarlo antes)."""
+        from apps.consentimientos.services import requisitos_aceptacion
+
+        return requisitos_aceptacion(cotizacion, self._actor())
 
     def _compromiso_pago_existente(self, cotizacion):
         """Compromiso de pago vigente de la cotizacion (consentimiento sin plantilla)."""
@@ -367,8 +374,14 @@ class CotizacionViewSet(ModelViewSet):
         self.perform_update(serializer)
         # El compromiso pendiente ya generado copia los servicios y la forma de
         # pago: si la cotizacion cambio, hay que re-emitirlo para no firmar montos viejos.
-        self._refrescar_compromiso_pendiente(instance)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        compromiso = self._refrescar_compromiso_pendiente(instance)
+        # El front reemplaza el detalle con esta respuesta: lleva lo mismo que el detalle.
+        data = dict(serializer.data)
+        data["compromiso_pago"] = self._serializar_compromiso_pago(
+            compromiso if compromiso is not None else self._compromiso_pago_existente(instance)
+        )
+        data["requisitos_aceptacion"] = self._requisitos_aceptacion(instance)
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"], url_path="cambiar_estado")
     @transaction.atomic
@@ -417,6 +430,7 @@ class CotizacionViewSet(ModelViewSet):
                 payload = self.get_serializer(cotizacion).data
                 payload["compromiso_pago"] = self._serializar_compromiso_pago(compromiso_pago)
                 payload["requiere_firma_compromiso"] = True
+                payload["requisitos_aceptacion"] = self._requisitos_aceptacion(cotizacion)
                 return Response(payload, status=status.HTTP_200_OK)
 
             consentimientos_pendientes = aceptar_cotizacion(cotizacion, actor=request.user)
