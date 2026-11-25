@@ -30,6 +30,7 @@ import { CarteraAvanceCotizacionPanel } from './CarteraAvanceCotizacionPanel'
 import { FirmarConsentimientosCotizacionWizard, CONSENTIMIENTOS_PENDIENTES_KEY, CONSENTIMIENTOS_COTIZACION_KEY } from './FirmarConsentimientosCotizacionWizard'
 import { ConsentimientosCotizacionPanel } from './ConsentimientosCotizacionPanel'
 import { FirmaProfesionalModal } from '@/components/atenciones/FirmaProfesionalModal'
+import { CapturaFirmaProfesional } from '@/components/firma/CapturaFirmaProfesional'
 import { precioEnSede, precioGeneralProcedimiento, precioPropioSede } from '@/lib/precios'
 import { ObsequiosCotizacionSection, nuevaClave } from './ObsequiosCotizacionSection'
 import { DescartarCotizacionDialog } from './DescartarCotizacionDialog'
@@ -962,7 +963,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             ? 'La cotización quedó aceptada.'
             : actual.precio_por_autorizar
               ? 'Falta que autoricen el precio para registrar la venta.'
-              : 'El compromiso de pago quedó firmado.',
+              : 'El documento de aceptación quedó firmado.',
         )
       })
       .catch(() => queryClient.invalidateQueries({ queryKey: ['cotizacion', id] }))
@@ -999,6 +1000,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   const [descartarOpen, setDescartarOpen] = useState(false)
   // Fecha de vencimiento cuando el backend pide confirmar la aceptación de una vencida.
   const [vencidaAlAceptar, setVencidaAlAceptar] = useState<string | null>(null)
+  // Condiciones de compra promocional: quien cotizó firma con la firma de su
+  // perfil. Si no la tiene, se le pide aquí y se reintenta la aceptación.
+  const [firmaVendedorPara, setFirmaVendedorPara] = useState<{ confirmar_vencida?: boolean } | null>(null)
 
   const { mutate: cambiarEstadoMut, isPending: cambiando } = useMutation({
     mutationFn: ({ estado, extra }: {
@@ -1029,10 +1033,15 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
       }
       router.refresh()
     },
-    onError: (err: any) => {
+    onError: (err: any, variables) => {
       const data = err?.response?.data
       if (data?.code === 'COTIZACION_VENCIDA') {
         setVencidaAlAceptar(data.fecha_vencimiento ?? cotizacion?.fecha_vencimiento ?? '')
+        return
+      }
+      if (data?.code === 'FIRMA_VENDEDOR_REQUERIDA') {
+        setVencidaAlAceptar(null)
+        setFirmaVendedorPara({ confirmar_vencida: variables.extra?.confirmar_vencida })
         return
       }
       toast.error('No se pudo cambiar el estado', data?.error ?? data?.detail ?? 'Vuelve a intentarlo en un momento.')
@@ -1187,7 +1196,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
         <div className="flex items-center gap-2.5 min-w-0">
           <FileSignature className="h-4 w-4 text-primary shrink-0" />
           <div className="min-w-0">
-            <p className="text-sm font-medium">Aceptación y compromiso de pago</p>
+            <p className="text-sm font-medium">{cp.titulo_documento ?? 'Aceptación y compromiso de pago'}</p>
             <p className="text-xs text-muted-foreground">
               {cp.estado === 'firmado'
                 ? `Firmado${cp.firmado_en ? ' · ' + formatDateTime(cp.firmado_en) : ''}`
@@ -1507,7 +1516,7 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                 {cotizacion.compromiso_pago?.estado === 'pendiente' && (
                   <li className="flex items-center gap-1.5 text-amber-700">
                     <Clock className="h-3.5 w-3.5" />
-                    Falta la firma del compromiso de pago: pasa a venta cuando el cliente firme
+                    Falta la firma del documento de aceptación: pasa a venta cuando el cliente firme
                   </li>
                 )}
               </ul>
@@ -2341,6 +2350,24 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
             loading={cambiando}
             onAceptarIgual={() => cambiarEstado('aceptada', { confirmar_vencida: true })}
           />
+          <Dialog open={firmaVendedorPara !== null} onOpenChange={(v) => { if (!v) setFirmaVendedorPara(null) }}>
+            <DialogContent className="sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Tu firma para las condiciones de compra promocional</DialogTitle>
+              </DialogHeader>
+              <p className="text-sm text-muted-foreground">
+                La clínica pide que quien hace la venta firme las condiciones de compra promocional.
+                Dibújala una vez: queda guardada en tu perfil y se usa en tus próximas ventas.
+              </p>
+              <CapturaFirmaProfesional
+                onGuardada={() => {
+                  const extra = firmaVendedorPara ?? {}
+                  setFirmaVendedorPara(null)
+                  cambiarEstado('aceptada', extra.confirmar_vencida ? { confirmar_vencida: true } : undefined)
+                }}
+              />
+            </DialogContent>
+          </Dialog>
         </>
       )}
 
@@ -2436,12 +2463,13 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-4.5 w-4.5 text-primary" />
-              Aceptación y compromiso de pago
+              {cotizacion?.compromiso_pago?.titulo_documento ?? 'Aceptación y compromiso de pago'}
             </DialogTitle>
           </DialogHeader>
           {compromisoPagoId && (
             <CompromisoPagoFirmaContent
               consentimientoId={compromisoPagoId}
+              documentoLabel={cotizacion?.compromiso_pago?.titulo_documento ?? undefined}
               onFirmado={() => {
                 firmaVistaEnModalRef.current = true
                 setCompromisoPagoId(null)

@@ -30,6 +30,10 @@ export interface Consentimiento {
   cotizacion_referencia?: string | null
   plantilla: string
   plantilla_nombre: string
+  /** Documento de aceptación de la cotización: qué secciones lleva. */
+  alcance_aceptacion?: 'compromiso' | 'promocional' | 'ambos'
+  /** Título para mostrar (plantilla, acta o aceptación según sus secciones). */
+  titulo_documento?: string
   template_nombre?: string | null
   paciente_nombre: string
   estado: EstadoConsentimiento

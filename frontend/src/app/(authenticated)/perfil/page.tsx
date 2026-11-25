@@ -174,7 +174,7 @@ export default function PerfilPage() {
         </div>
       </div>
 
-      <div className={cn('grid gap-5 items-start', atiende && 'lg:grid-cols-[3fr_2fr]')}>
+      <div className="grid gap-5 items-start lg:grid-cols-[3fr_2fr]">
         {/* Columna izquierda: información personal y contraseña */}
         <div className="space-y-5">
         <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
@@ -255,16 +255,17 @@ export default function PerfilPage() {
           </div>
         </div>
 
-        {/* Columna derecha: firma y TP */}
-        {atiende && (
+        {/* Columna derecha: firma y TP. La firma la puede tener cualquiera: quien
+            vende firma las condiciones de compra promocional. */}
         <div className="space-y-5">
         {/* Firma */}
-        {atiende && (
           <div className="bg-white rounded-xl border border-gray-100 shadow-sm">
             <CardHeader
               icon={PenLine}
               titulo="Firma"
-              descripcion="Para los consentimientos que firmas como profesional y las órdenes médicas."
+              descripcion={atiende
+                ? 'Para los consentimientos que firmas como profesional, las órdenes médicas y las ventas que haces.'
+                : 'Para las condiciones de compra promocional de las ventas que haces.'}
             />
             <div className="px-6 py-5 space-y-3">
               {user.firma_digital_url && !cambiandoFirma ? (
@@ -292,7 +293,9 @@ export default function PerfilPage() {
                 <>
                   {!user.firma_digital_url && (
                     <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      Aún no tienes firma. Sin ella no podrás iniciar las atenciones que requieren tu firma.
+                      {atiende
+                        ? 'Aún no tienes firma. Sin ella no podrás iniciar las atenciones que requieren tu firma.'
+                        : 'Aún no tienes firma. Si la clínica pide condiciones de compra promocional, la necesitas para aceptar tus ventas.'}
                     </p>
                   )}
                   <CapturaFirmaProfesional
@@ -315,7 +318,6 @@ export default function PerfilPage() {
               {eliminarFirma.isError && <p className="text-xs text-red-600">{mensajeDeError(eliminarFirma.error, 'No se pudo eliminar la firma.')}</p>}
             </div>
           </div>
-        )}
 
         {/* Tarjeta profesional */}
         {atiende && (
@@ -338,7 +340,6 @@ export default function PerfilPage() {
           </div>
         )}
         </div>
-        )}
       </div>
     </div>
   )

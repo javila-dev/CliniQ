@@ -471,7 +471,7 @@ export const clinicasApi = {
       const res = await apiClient.get<ConfiguracionCartera>('/configuracion/cartera/')
       return res.data
     },
-    update: async (data: Partial<Pick<ConfiguracionCartera, 'requiere_consentimiento_promocional'>>): Promise<ConfiguracionCartera> => {
+    update: async (data: Partial<Omit<ConfiguracionCartera, 'updated_at'>>): Promise<ConfiguracionCartera> => {
       const res = await apiClient.patch<ConfiguracionCartera>('/configuracion/cartera/', data)
       return res.data
     },

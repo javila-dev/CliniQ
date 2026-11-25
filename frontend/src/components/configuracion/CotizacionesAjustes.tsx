@@ -1,15 +1,22 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Receipt } from 'lucide-react'
+import { BadgePercent, CalendarClock, Receipt } from 'lucide-react'
 import { clinicasApi } from '@/lib/api/clinicas'
 import { toast } from '@/hooks/use-toast'
-import { avisarGuardado, FilaAjuste, NotaAjuste, SeccionAjustes } from '@/components/configuracion/ajustes'
+import { avisarGuardado, FilaAjuste, NotaAjuste, SeccionAjustes, SelectAjuste } from '@/components/configuracion/ajustes'
 import { Button } from '@/components/ui/button'
 import { Switch } from '@/components/ui/switch'
+import type { ConfiguracionCartera } from '@/types/clinicas'
+
+type CambioCartera = Partial<Omit<ConfiguracionCartera, 'updated_at'>>
+
+const PLAZOS = [15, 30, 45, 60, 90, 120, 180, 365]
 
 /** Sección "Cotizaciones" de Configuración → Comercial: el documento que firma
- *  el paciente al aceptar una cotización (antes era la pestaña "Otros documentos"). */
+ *  el paciente al aceptar una cotización (antes era la pestaña "Otros documentos").
+ *  Puede llevar el compromiso de pago, las condiciones de compra promocional o
+ *  las dos cosas en un mismo documento con una sola firma. */
 export function CotizacionesAjustes() {
   const queryClient = useQueryClient()
 
@@ -19,8 +26,7 @@ export function CotizacionesAjustes() {
   })
 
   const mutation = useMutation({
-    mutationFn: (data: { requiere_consentimiento_promocional: boolean }) =>
-      clinicasApi.carteraConfig.update(data),
+    mutationFn: (data: CambioCartera) => clinicasApi.carteraConfig.update(data),
     onSuccess: (data) => {
       queryClient.setQueryData(['config-cartera'], data)
     },
@@ -29,16 +35,23 @@ export function CotizacionesAjustes() {
     },
   })
 
-  function cambiarRequiere(valor: boolean, conDeshacer = true) {
-    mutation.mutate(
-      { requiere_consentimiento_promocional: valor },
-      { onSuccess: () => avisarGuardado(conDeshacer ? () => cambiarRequiere(!valor, false) : undefined) },
-    )
+  function guardar(cambio: CambioCartera, deshacer?: CambioCartera) {
+    mutation.mutate(cambio, {
+      onSuccess: () => avisarGuardado(deshacer ? () => guardar(deshacer) : undefined),
+    })
   }
 
   // Mientras se guarda se muestra el valor nuevo.
-  const requiereActivo = (mutation.isPending ? mutation.variables?.requiere_consentimiento_promocional : undefined)
-    ?? config?.requiere_consentimiento_promocional ?? false
+  function valor<K extends keyof CambioCartera>(campo: K, porDefecto: NonNullable<CambioCartera[K]>) {
+    const pendiente = mutation.isPending ? mutation.variables?.[campo] : undefined
+    return (pendiente ?? config?.[campo] ?? porDefecto) as NonNullable<CambioCartera[K]>
+  }
+
+  const compromisoActivo = valor('requiere_consentimiento_promocional', false)
+  const promocionalActivo = valor('exige_condiciones_compra_promocional', false)
+  const plazo = valor('plazo_inicio_promocional_dias', 90)
+  const opcionesPlazo = (PLAZOS.includes(plazo) ? PLAZOS : [...PLAZOS, plazo].sort((a, b) => a - b))
+    .map((dias) => ({ value: String(dias), label: `${dias} días` }))
 
   return (
     <SeccionAjustes
@@ -63,20 +76,57 @@ export function CotizacionesAjustes() {
         <>
           <FilaAjuste
             icono={Receipt}
-            apagada={!requiereActivo}
+            apagada={!compromisoActivo}
             titulo="Aceptación y compromiso de pago firmados"
-            descripcion={requiereActivo
+            descripcion={compromisoActivo
               ? 'Al aceptar una cotización queda pendiente de firma un documento con los servicios aceptados, el valor total y la forma de pago (valores y fechas).'
               : 'Apagado: la cotización se acepta sin documento de compromiso de pago.'}
           >
             <Switch
-              checked={requiereActivo}
+              checked={compromisoActivo}
               disabled={mutation.isPending}
-              onCheckedChange={(v) => cambiarRequiere(v)}
+              onCheckedChange={(v) => guardar({ requiere_consentimiento_promocional: v }, { requiere_consentimiento_promocional: !v })}
               aria-label="Aceptación y compromiso de pago firmados"
             />
           </FilaAjuste>
-          <NotaAjuste>El texto del documento es estándar y no se edita: aquí solo lo activas o lo desactivas.</NotaAjuste>
+          <FilaAjuste
+            icono={BadgePercent}
+            apagada={!promocionalActivo}
+            titulo="Condiciones de compra promocional"
+            descripcion={promocionalActivo
+              ? 'Toda venta lleva una página donde el paciente acepta que no hay devolución de dinero, que no se cambia por otro tratamiento, que no es transferible y el plazo para iniciarlo. La firman el paciente y quien hizo la cotización.'
+              : 'Apagado: las ventas no llevan condiciones de compra promocional.'}
+          >
+            <Switch
+              checked={promocionalActivo}
+              disabled={mutation.isPending}
+              onCheckedChange={(v) => guardar({ exige_condiciones_compra_promocional: v }, { exige_condiciones_compra_promocional: !v })}
+              aria-label="Condiciones de compra promocional"
+            />
+          </FilaAjuste>
+          {promocionalActivo && (
+            <FilaAjuste
+              icono={CalendarClock}
+              titulo="Plazo para iniciar el tratamiento"
+              descripcion="Días que tiene el paciente para empezar, contados desde la compra."
+            >
+              <SelectAjuste
+                valor={String(plazo)}
+                opciones={opcionesPlazo}
+                deshabilitado={mutation.isPending}
+                etiqueta="Plazo para iniciar el tratamiento"
+                onCambiar={(v) => guardar(
+                  { plazo_inicio_promocional_dias: Number(v) },
+                  { plazo_inicio_promocional_dias: plazo },
+                )}
+              />
+            </FilaAjuste>
+          )}
+          <NotaAjuste>
+            El texto de los documentos es estándar y no se edita: aquí solo los activas o los desactivas.
+            Si activas los dos, van en un mismo documento y el paciente firma una sola vez. Quien cotiza
+            necesita su firma guardada en el perfil para las condiciones de compra promocional.
+          </NotaAjuste>
         </>
       )}
     </SeccionAjustes>
