@@ -190,6 +190,9 @@ export interface Cotizacion {
   puede_reanudar?: boolean
   envios?: CotizacionEnvio[]
   compromiso_pago?: Consentimiento | null  // solo en el detalle (retrieve); consentimiento sin plantilla atado a esta cotización
+  /** Solo en borrador (detalle, guardado y aceptación): qué documento pedirá
+   *  aceptarla. null si la clínica no exige ninguno. */
+  requisitos_aceptacion?: RequisitosAceptacion | null
   /** Tiene precios fuera de regla sin autorizar: no se envía, no sale el PDF ni se acepta. */
   precio_por_autorizar?: boolean
   /** Última solicitud de autorización de precios (sin las canceladas). Solo en el detalle. */
@@ -362,4 +365,15 @@ export interface TerminarVentaRequest {
   valor?: string | null
   fecha?: string | null
   forma_pago?: string | null
+}
+
+/** Documento de aceptación que pedirá la cotización y firma de quien vendió. */
+export interface RequisitosAceptacion {
+  alcance: 'compromiso' | 'promocional' | 'ambos'
+  titulo: string
+  incluye_promocional: boolean
+  /** Solo con condiciones de compra promocional. */
+  vendedor_nombre: string | null
+  vendedor_tiene_firma: boolean | null
+  vendedor_es_usted: boolean | null
 }

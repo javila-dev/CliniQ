@@ -1179,6 +1179,9 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
   // Tarjeta de "Aceptación y compromiso de pago": se calcula una sola vez para
   // no duplicar su JSX entre el layout de cotización aceptada (comparte fila
   // con Seguimiento de sesiones) y el de borrador (compromiso pendiente, sola).
+  // Qué documento pedirá aceptar el borrador (para avisarlo antes de pulsar).
+  const requisitos = cotizacion?.requisitos_aceptacion ?? null
+
   const compromisoCard = mostrarCompromiso && cotizacion?.compromiso_pago && (() => {
     const cp = cotizacion.compromiso_pago!
     const enBorrador = cotizacion.estado === 'borrador'
@@ -1513,11 +1516,35 @@ async function handleCrearPaciente(data: CreatePacienteRequest) {
                       : 'Falta que autoricen el precio'}
                   </li>
                 )}
-                {cotizacion.compromiso_pago?.estado === 'pendiente' && (
+                {cotizacion.compromiso_pago?.estado === 'pendiente' ? (
                   <li className="flex items-center gap-1.5 text-amber-700">
                     <Clock className="h-3.5 w-3.5" />
                     Falta la firma del documento de aceptación: pasa a venta cuando el cliente firme
                   </li>
+                ) : requisitos && (
+                  <>
+                    <li className="flex items-center gap-1.5 text-muted-foreground">
+                      <FileSignature className="h-3.5 w-3.5 shrink-0" />
+                      Al registrarla, el paciente firma el {requisitos.titulo.toLowerCase()}: pasa a venta cuando firme
+                    </li>
+                    {requisitos.incluye_promocional && requisitos.vendedor_nombre && (
+                      requisitos.vendedor_tiene_firma ? (
+                        <li className="flex items-center gap-1.5 text-green-700">
+                          <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+                          {requisitos.vendedor_es_usted
+                            ? 'Tu firma de asesor ya está guardada'
+                            : `La firma de ${requisitos.vendedor_nombre} ya está guardada`}
+                        </li>
+                      ) : (
+                        <li className="flex items-center gap-1.5 text-amber-700">
+                          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                          {requisitos.vendedor_es_usted
+                            ? 'Falta tu firma de asesor: te la pedimos al registrar la aceptación'
+                            : `${requisitos.vendedor_nombre} hizo la cotización y no tiene su firma guardada: debe cargarla en su perfil`}
+                        </li>
+                      )
+                    )}
+                  </>
                 )}
               </ul>
             </div>
