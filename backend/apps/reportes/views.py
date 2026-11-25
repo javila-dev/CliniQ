@@ -957,6 +957,30 @@ class DeshacerRegularizacionView(RegularizarPaqueteView):
         return self._ejecutar(request, deshacer, item_id, sesion_id, motivo=request.data.get("motivo"))
 
 
+class CitasPorProfesionalView(APIView):
+    """Citas del periodo con su resultado (atendida, cancelada, no asistió, sin
+    cerrar, programada), su tipo y su sesión, y el resumen por profesional (ver
+    ``reportes.citas_profesional``). ``?mes=YYYY-MM`` o ``?desde=&hasta=``."""
+
+    permission_classes = (RequirePermission("reportes.ver_operativos"),)
+
+    def get(self, request: Request):
+        from apps.pacientes.serializers import usuario_ve_datos_sensibles
+        from apps.reportes.citas_profesional import citas_por_profesional, rango_del_periodo
+
+        desde, hasta = rango_del_periodo(request.query_params)
+        clinica = get_clinica_activa(request)
+        if clinica is None:
+            return Response({"error": "Elige una clínica.", "code": "SIN_CLINICA"}, status=400)
+        return Response(citas_por_profesional(
+            clinica,
+            sede_ids=sede_ids_para_filtro(request.user, request.query_params.get("sede_id")),
+            desde=desde,
+            hasta=hasta,
+            ve_sensibles=usuario_ve_datos_sensibles({"request": request}),
+        ))
+
+
 class OcupacionView(APIView):
     permission_classes = (RequirePermission("reportes.ver_operativos"),)
 
