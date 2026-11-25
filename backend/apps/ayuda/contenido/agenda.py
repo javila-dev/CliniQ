@@ -350,9 +350,8 @@ responder la pregunta más común del mostrador, «¿cuántas sesiones me quedan
         "keywords": "reporte, citas, profesional, atendidas, canceladas, no asistió, sin cerrar, mes, excel, exportar, productividad, sesiones",
         "destacado": False,
         "contenido": """
-En **Reportes** (en el menú, debajo de Dashboard, o **Ver detalle** en la
-tarjeta de ocupación del dashboard) ves todas las citas de un mes, agrupadas por
-quien las atendía. Cambia de mes con las flechas.
+En **Atención › Reportes** (o **Ver detalle** en la tarjeta de ocupación del
+dashboard) ves todas las citas de un mes, agrupadas por quien las atendía. Cambia de mes con las flechas.
 
 ## Qué muestra
 
