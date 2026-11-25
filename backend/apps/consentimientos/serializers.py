@@ -41,6 +41,7 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
     # Siempre enmascarado: solo sirve para confirmar a que numero salio el link.
     link_enviado_a = serializers.SerializerMethodField()
     firma_desactualizada_pdf_url = serializers.SerializerMethodField()
+    titulo_documento = serializers.SerializerMethodField()
 
     class Meta:
         model = Consentimiento
@@ -54,6 +55,8 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "paciente_nombre",
             "plantilla",
             "plantilla_nombre",
+            "alcance_aceptacion",
+            "titulo_documento",
             "contenido_snapshot",
             "hash_contenido",
             "estado",
@@ -75,6 +78,7 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
         read_only_fields = (
             "id",
             "paciente",
+            "alcance_aceptacion",
             "contenido_snapshot",
             "hash_contenido",
             "estado",
@@ -93,6 +97,11 @@ class ConsentimientoSerializer(serializers.ModelSerializer):
             "motivo_revocacion",
             "created_at",
         )
+
+    def get_titulo_documento(self, obj):
+        from apps.consentimientos.services import titulo_documento
+
+        return titulo_documento(obj)
 
     def get_firma_desactualizada_pdf_url(self, obj):
         if not obj.firma_desactualizada_pdf:

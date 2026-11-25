@@ -306,6 +306,10 @@
           <p class="sig-name">{{ paciente.nombre_completo }}</p>
           <p class="sig-doc">{{ documento_paciente }}</p>
         </td>
+        {% if firma_vendedor %}
+        <td style="width:4%;"></td>
+        <td class="sig-cell">{{ firma_vendedor|safe }}</td>
+        {% endif %}
       </tr>
     </table>
   </div>

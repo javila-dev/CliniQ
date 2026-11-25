@@ -18,6 +18,8 @@ class ConfiguracionCarteraSerializer(serializers.ModelSerializer):
         model = ConfiguracionCartera
         fields = (
             "requiere_consentimiento_promocional",
+            "exige_condiciones_compra_promocional",
+            "plazo_inicio_promocional_dias",
             "updated_at",
         )
         read_only_fields = ("updated_at",)

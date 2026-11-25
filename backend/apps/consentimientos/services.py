@@ -151,21 +151,134 @@ COMPROMISO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/compromiso_pago_estandar.ht
 ACTA_ACUERDO_PAGO_ESTANDAR_TEMPLATE = "consentimientos/acta_acuerdo_pago_estandar.html"
 
 
-def renderizar_compromiso_pago_estandar(cotizacion, fecha_generacion=None) -> str:
+ACEPTACION_ESTANDAR_TEMPLATE = "consentimientos/aceptacion_estandar.html"
+
+Alcance = Consentimiento.AlcanceAceptacion
+
+
+def _config_cartera(clinica_id):
+    from apps.configuracion.models import ConfiguracionCartera
+
+    return ConfiguracionCartera.objects.filter(clinica_id=clinica_id).first()
+
+
+def alcance_aceptacion_configurado(cotizacion) -> str | None:
+    """Que secciones exige la clinica en el documento de aceptacion de la
+    cotizacion, o None si no exige ninguno.
+
+    - compromiso de pago: ``ConfiguracionCartera.requiere_consentimiento_promocional``
+      (el nombre es historico);
+    - condiciones de compra promocional: ``exige_condiciones_compra_promocional``.
     """
-    Cuerpo estandar (no configurable) de la aceptacion de la cotizacion con
-    compromiso de pago: servicios aceptados, forma de pago acordada y
-    condiciones. La clinica solo activa o desactiva el requisito en
-    ConfiguracionCartera; el texto es fijo, igual que el registro de asistencia.
-    ``fecha_generacion`` fija la fecha impresa para que re-renderizar el mismo
-    contenido de otro dia no cambie el hash.
+    config = _config_cartera(cotizacion.clinica_id)
+    if config is None:
+        return None
+    compromiso = config.requiere_consentimiento_promocional
+    promocional = config.exige_condiciones_compra_promocional
+    if compromiso and promocional:
+        return Alcance.AMBOS
+    if promocional:
+        return Alcance.PROMOCIONAL
+    if compromiso:
+        return Alcance.COMPROMISO
+    return None
+
+
+def incluye_compra_promocional(alcance: str | None) -> bool:
+    return alcance in (Alcance.PROMOCIONAL, Alcance.AMBOS)
+
+
+def vendedor_de_cotizacion(cotizacion, actor=None):
+    """Quien firma las condiciones de compra promocional como vendedor: quien
+    creo la cotizacion; si ya no esta activo, quien la esta aceptando."""
+    creador = cotizacion.profesional
+    if creador is not None and creador.is_active:
+        return creador
+    return actor or creador
+
+
+def cargo_usuario(user) -> str:
+    if user is None:
+        return ""
+    if getattr(user, "rol_dinamico_id", None) and user.rol_dinamico:
+        return user.rol_dinamico.nombre
+    return user.get_rol_display()
+
+
+def _firma_vendedor_data_url(user) -> str:
+    """Firma guardada del vendedor como data URL, o "" si no tiene o no se puede leer."""
+    if user is None or not user.firma_digital:
+        return ""
+    from apps.historia_clinica.firma_profesional import FirmaNoDisponibleError, firma_png_del_usuario
+
+    try:
+        return firma_png_del_usuario(user)
+    except FirmaNoDisponibleError:
+        logger.warning("[aceptacion] no se pudo leer la firma del vendedor | user_id=%s", user.id)
+        return ""
+
+
+def vendedor_sin_firma(cotizacion, actor=None):
+    """El vendedor si no tiene una firma utilizable, o None si todo esta bien."""
+    vendedor = vendedor_de_cotizacion(cotizacion, actor)
+    if vendedor is None:
+        return None
+    return None if _firma_vendedor_data_url(vendedor) else vendedor
+
+
+def _contexto_compra_promocional(cotizacion, actor=None) -> dict:
+    config = _config_cartera(cotizacion.clinica_id)
+    vendedor = vendedor_de_cotizacion(cotizacion, actor)
+    items = cotizacion.items.filter(activo=True).order_by("created_at")
+    tratamientos = [
+        {"descripcion": item.descripcion, "sesiones": item.num_citas}
+        for item in items
+        if not item.es_obsequio
+    ]
+    obsequios = [item.descripcion for item in items if item.es_obsequio]
+    return {
+        "plazo_inicio_dias": config.plazo_inicio_promocional_dias if config else 90,
+        "tratamientos_adquiridos": tratamientos,
+        "obsequios_incluidos": obsequios,
+        "vendedor": {
+            "nombre": vendedor.nombre_completo if vendedor else "",
+            "cargo": cargo_usuario(vendedor),
+            "firma": _firma_vendedor_data_url(vendedor),
+        },
+    }
+
+
+def renderizar_aceptacion_estandar(
+    cotizacion, fecha_generacion=None, *, actor=None, alcance_actual=None,
+) -> tuple[str, str]:
+    """
+    Documento estandar (no configurable) de aceptacion de la cotizacion. Lleva
+    las secciones que exige la clinica en ConfiguracionCartera: el compromiso
+    de pago (servicios, forma de pago, condiciones) y/o las condiciones de
+    compra promocional. Devuelve ``(html, alcance)``.
+
+    Si la clinica ya no exige ninguna (se desactivo con un documento pendiente)
+    se conservan las secciones que el documento ya tenia (``alcance_actual``);
+    sin eso, el compromiso, como antes. ``fecha_generacion`` fija la fecha
+    impresa para que re-renderizar el mismo contenido de otro dia no cambie el
+    hash.
     """
     from django.template.loader import render_to_string
 
-    return render_to_string(
-        COMPROMISO_PAGO_ESTANDAR_TEMPLATE,
-        _contexto_merge_cotizacion(cotizacion, fecha_generacion=fecha_generacion),
-    )
+    alcance = alcance_aceptacion_configurado(cotizacion) or alcance_actual or Alcance.COMPROMISO
+    contexto = _contexto_merge_cotizacion(cotizacion, fecha_generacion=fecha_generacion)
+    contexto["incluye_compromiso"] = alcance in (Alcance.COMPROMISO, Alcance.AMBOS)
+    contexto["incluye_promocional"] = incluye_compra_promocional(alcance)
+    if contexto["incluye_promocional"]:
+        contexto.update(_contexto_compra_promocional(cotizacion, actor))
+    return render_to_string(ACEPTACION_ESTANDAR_TEMPLATE, contexto), alcance
+
+
+def renderizar_compromiso_pago_estandar(cotizacion, fecha_generacion=None, *, actor=None, alcance_actual=None) -> str:
+    """Solo el HTML de :func:`renderizar_aceptacion_estandar`."""
+    return renderizar_aceptacion_estandar(
+        cotizacion, fecha_generacion, actor=actor, alcance_actual=alcance_actual,
+    )[0]
 
 
 def documenso_configurado() -> bool:
@@ -258,6 +371,39 @@ def es_acta_acuerdo_pago(consentimiento: Consentimiento) -> bool:
 
 
 TITULO_ACEPTACION_COTIZACION = "Aceptación de cotización y compromiso de pago"
+TITULOS_ACEPTACION = {
+    Alcance.COMPROMISO: TITULO_ACEPTACION_COTIZACION,
+    Alcance.AMBOS: "Aceptación de cotización, compromiso de pago y condiciones de compra promocional",
+    Alcance.PROMOCIONAL: "Consentimiento de compra promocional",
+}
+
+
+def titulo_documento(consentimiento: Consentimiento) -> str:
+    """Titulo del documento: el de la plantilla, el acta de acuerdo de pago o
+    el de la aceptacion de la cotizacion segun sus secciones."""
+    if consentimiento.plantilla_id:
+        return consentimiento.plantilla.nombre or "Consentimiento Informado"
+    if not consentimiento.cotizacion_id:
+        return "Consentimiento"
+    if es_acta_acuerdo_pago(consentimiento):
+        return "Acta de acuerdo de pago"
+    return TITULOS_ACEPTACION.get(consentimiento.alcance_aceptacion, TITULO_ACEPTACION_COTIZACION)
+
+
+MARCA_FIRMA_VENDEDOR = "<!--FIRMA_VENDEDOR-->"
+MARCA_FIN_FIRMA_VENDEDOR = "<!--/FIRMA_VENDEDOR-->"
+
+
+def separar_firma_vendedor(snapshot: str) -> tuple[str, str]:
+    """Saca del contenido la firma de quien vende (condiciones de compra
+    promocional) para dibujarla en el bloque de firmas, junto a la del paciente.
+    Devuelve ``(contenido_sin_firma, firma)``; sin marcadores, ``(snapshot, "")``."""
+    inicio = snapshot.find(MARCA_FIRMA_VENDEDOR)
+    fin = snapshot.find(MARCA_FIN_FIRMA_VENDEDOR, inicio + 1)
+    if inicio < 0 or fin < 0:
+        return snapshot, ""
+    firma = snapshot[inicio + len(MARCA_FIRMA_VENDEDOR):fin]
+    return snapshot[:inicio] + snapshot[fin + len(MARCA_FIN_FIRMA_VENDEDOR):], firma
 
 
 def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
@@ -278,26 +424,20 @@ def generar_pdf_para_firma_documenso(consentimiento: Consentimiento) -> bytes:
         doc_ref = f"#CONS-{str(consentimiento.id)[:8].upper()}"
 
     now = timezone.localtime(timezone.now())
+    contenido, firma_vendedor = separar_firma_vendedor(consentimiento.contenido_snapshot)
     context = {
         "clinica": clinica,
         "logo_url": _build_logo_url(clinica),
         "doc_title": (
             consentimiento.plantilla.nombre
             if consentimiento.plantilla_id and consentimiento.plantilla.nombre
-            else (
-                (
-                    "Acta de acuerdo de pago"
-                    if es_acta_acuerdo_pago(consentimiento)
-                    else TITULO_ACEPTACION_COTIZACION
-                )
-                if consentimiento.cotizacion_id
-                else "Consentimiento"
-            )
+            else ("Consentimiento" if consentimiento.plantilla_id else titulo_documento(consentimiento))
         ),
         "doc_ref": doc_ref,
         "paciente": consentimiento.paciente,
         "documento_paciente": f"{consentimiento.paciente.tipo_documento} {consentimiento.paciente.numero_documento}",
-        "contenido_snapshot": consentimiento.contenido_snapshot,
+        "contenido_snapshot": contenido,
+        "firma_vendedor": firma_vendedor,
         "fecha_generacion": now.strftime("%d/%m/%Y"),
         "generado_en": now.strftime("%d/%m/%Y · %I:%M %p"),
     }
@@ -473,9 +613,8 @@ def _documento_tipo_consentimiento(consentimiento: Consentimiento) -> str:
     if consentimiento.plantilla_id:
         return consentimiento.plantilla.nombre
     if consentimiento.cotizacion_id:
-        if es_acta_acuerdo_pago(consentimiento):
-            return "acta de acuerdo de pago"
-        return "aceptación de cotización y compromiso de pago"
+        titulo = titulo_documento(consentimiento)
+        return titulo[:1].lower() + titulo[1:]
     return "consentimiento"
 
 
@@ -588,15 +727,18 @@ def asegurar_bucket_consentimientos():
         client.create_bucket(Bucket=settings.MINIO_PRIVATE_BUCKET)
 
 
-def generar_consentimiento(cita=None, plantilla: PlantillaConsentimiento = None, *, cotizacion=None) -> Consentimiento:
+def generar_consentimiento(
+    cita=None, plantilla: PlantillaConsentimiento = None, *, cotizacion=None, actor=None,
+) -> Consentimiento:
     if bool(cita) == bool(cotizacion):
         raise ValueError("Debes indicar exactamente uno: cita o cotizacion.")
 
+    alcance = Consentimiento.AlcanceAceptacion.COMPROMISO
     if cotizacion is not None:
         if plantilla is not None:
             contenido_snapshot = renderizar_template_cotizacion_con_datos(cotizacion, plantilla)
         else:
-            contenido_snapshot = renderizar_compromiso_pago_estandar(cotizacion)
+            contenido_snapshot, alcance = renderizar_aceptacion_estandar(cotizacion, actor=actor)
         paciente = cotizacion.paciente
     else:
         contenido_snapshot = renderizar_template_con_datos(cita, plantilla)
@@ -608,6 +750,7 @@ def generar_consentimiento(cita=None, plantilla: PlantillaConsentimiento = None,
         cotizacion=cotizacion,
         paciente=paciente,
         plantilla=plantilla,
+        alcance_aceptacion=alcance,
         contenido_snapshot=contenido_snapshot,
         hash_contenido=hash_contenido,
         token_expira=timezone.now() + timedelta(hours=48),

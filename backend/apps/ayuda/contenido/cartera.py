@@ -332,6 +332,10 @@ El texto del documento es **estándar y no editable**. Es intencional: el conten
 legal es responsabilidad de la clínica y se define una vez, no se improvisa por
 paciente.
 
+En la misma sección puedes activar también las
+[condiciones de compra promocional](/ayuda/articulo/condiciones-de-compra-promocional).
+Si activas las dos, van en **un solo documento** y el paciente firma una sola vez.
+
 ## Cómo funciona el flujo
 
 1. Se arma la cotización con sus ítems y sus formas de pago.
@@ -369,6 +373,76 @@ documento: la confirmación puede tardar unos segundos en llegar.
 > Este documento no reemplaza al consentimiento informado. Uno es sobre el
 > dinero, el otro sobre el procedimiento, y ambos pueden ser necesarios en la
 > misma venta.
+""",
+    },
+    {
+        "slug": "condiciones-de-compra-promocional",
+        "categoria": "cartera-y-cobros",
+        "titulo": "Condiciones de compra promocional",
+        "resumen": "El documento en que el paciente acepta que no hay devolución, que no se cambia por otro tratamiento, que no es transferible y el plazo para iniciarlo. Lo firman el paciente y quien vendió.",
+        "area": "cartera",
+        "keywords": "compra promocional, promoción, no devolución, reembolso, plazo, transferible, firma del asesor, vendedor, consentimiento",
+        "destacado": False,
+        "contenido": """
+Las **condiciones de compra promocional** son una página que el paciente firma al
+aceptar la cotización. Con ella declara que compró en condiciones promocionales y
+que por eso acepta reglas más estrictas que en una venta normal.
+
+## Qué dice el documento
+
+- **Datos del paciente:** nombre, identificación, teléfono y correo.
+- **Tratamientos adquiridos:** cada uno con su número de sesiones, y los
+  obsequios incluidos sin costo.
+- **Valor total de la compra.**
+- **Política de no devolución:** no se devuelve el dinero bajo ninguna
+  circunstancia, ni por enfermedad ni por cambio de ciudad.
+- **Términos:** no se reemplaza por otro tratamiento, no se transfiere a otra
+  persona y hay un **plazo máximo para iniciarlo** (el que fije la clínica).
+- **Firmas:** la del paciente y la de **quien hizo la cotización**.
+
+El documento no compara un "precio normal" con un "precio promocional": muestra
+solo el valor total que el paciente acepta pagar.
+
+## Cómo se activa
+
+En **Configuración → Comercial**, sección Cotizaciones, activa **Condiciones de
+compra promocional** y elige el **plazo para iniciar** (90 días por defecto).
+Aplica a **todas** las ventas de la clínica, no solo a las que tienen precio de
+campaña. Solo quedan por fuera los datos migrados y las ventas de puros
+obsequios.
+
+Si lo desactivas, las ventas nuevas ya no lo llevan y lo ya firmado no cambia.
+Un documento que haya quedado pendiente conserva lo que tenía, y si después
+aceptas esa cotización, se acepta sin él y el documento se anula.
+
+Si también tienes activado el compromiso de pago, las dos partes van en un mismo
+documento y el paciente firma una sola vez, al final. La firma del paciente es
+la que cierra la venta, igual que con el compromiso de pago.
+
+## La firma de quien vende
+
+La firma del asesor sale de su **perfil**: cualquier usuario puede guardar ahí su
+firma, aunque no sea profesional.
+
+- Si quien hizo la cotización no tiene firma y es quien la está aceptando,
+  CliniQ se la pide en ese momento. La dibuja una vez y queda guardada para sus
+  próximas ventas.
+- Si la cotización la hizo otra persona sin firma, la venta no se puede aceptar
+  hasta que esa persona cargue su firma en su perfil.
+- Si quien hizo la cotización ya no está activo en la clínica, firma quien la
+  acepta.
+
+## Después de la venta
+
+- **Terminar una venta:** el diálogo recuerda que el paciente aceptó que no hay
+  devolución de dinero.
+- **Cambiar el tratamiento de una venta (soporte):** se avisa que el paciente
+  firmó que la compra no se reemplaza. Úsalo solo para corregir un error al
+  cotizar.
+
+> El texto es estándar. Antes de activarlo, revisa con tu asesor legal que una
+> política de "no devolución bajo ninguna circunstancia" sea válida para tus
+> ventas, sobre todo en las que se firman a distancia por enlace.
 """,
     },
 ]

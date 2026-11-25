@@ -421,14 +421,14 @@ class MeUpdateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         # Los admins también atienden pacientes en algunas clínicas: pueden cargar
-        # firma y registro profesional aunque su rol no sea "profesional".
+        # registro profesional aunque su rol no sea "profesional". La firma la
+        # puede cargar cualquiera (quien vende firma las condiciones de compra
+        # promocional).
         puede_datos_profesionales = (
             getattr(self.instance, "es_profesional", False)
             or getattr(self.instance, "es_admin", False)
         )
         if not puede_datos_profesionales:
-            if "firma_digital" in attrs:
-                raise serializers.ValidationError({"firma_digital": "Solo los profesionales pueden subir una firma digital."})
             if "registro_profesional" in attrs and attrs["registro_profesional"]:
                 raise serializers.ValidationError({"registro_profesional": "Solo los profesionales tienen registro profesional."})
         return attrs

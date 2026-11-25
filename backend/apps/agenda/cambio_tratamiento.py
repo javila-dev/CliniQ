@@ -31,10 +31,19 @@ def _avisos(item) -> list[dict]:
 
     firmados = Consentimiento.objects.filter(cotizacion=item.cotizacion, estado=Consentimiento.Estado.FIRMADO)
     avisos = []
-    if firmados.filter(plantilla__isnull=True).exists():
+    aceptacion = firmados.filter(plantilla__isnull=True)
+    if aceptacion.exists():
         avisos.append({"code": "COMPROMISO_FIRMADO", "texto": (
-            f"El compromiso de pago firmado nombra «{item.descripcion}». Sigue valiendo por el mismo monto; "
+            f"El documento de aceptación firmado nombra «{item.descripcion}». Sigue valiendo por el mismo monto; "
             "si la clínica quiere el tratamiento correcto en el papel, que el paciente firme uno nuevo."
+        )})
+    if aceptacion.filter(alcance_aceptacion__in=[
+        Consentimiento.AlcanceAceptacion.PROMOCIONAL, Consentimiento.AlcanceAceptacion.AMBOS,
+    ]).exists():
+        avisos.append({"code": "COMPRA_PROMOCIONAL_FIRMADA", "texto": (
+            "El paciente firmó las condiciones de compra promocional: la compra no se reemplaza por otro "
+            "tratamiento. Usa este cambio solo para corregir un error al cotizar, no para cambiarle el "
+            "tratamiento a pedido del paciente."
         )})
     otros = firmados.filter(plantilla__isnull=False).count()
     if otros:
