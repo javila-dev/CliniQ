@@ -1,23 +1,26 @@
-"""Ventas terminadas cuya cartera sigue con saldo que no tiene cuota.
+"""Ventas terminadas cuya cartera quedó abierta por cómo funcionaba la terminación.
 
-Antes de la corrección, terminar una venta calculaba el saldo solo con las
-cuotas pendientes. Si la cartera estaba descuadrada (total mayor que lo que
-suman sus cuotas: ventas aceptadas antes de exigir el plan de pagos, carteras
-creadas por ``backfill_carteras``), la terminación no veía ese saldo: no pedía
-perdonarlo ni cobrarlo y la cartera quedó activa para siempre.
+Antes del 2026-11-25 una venta terminada podía quedar con la cartera abierta de
+dos formas:
 
-Solo quedaron mal las terminadas sin nada perdonado (``valor_perdonado = 0``):
-cuando se perdonó o se cobró un valor parcial, el total de la cartera ya se
-recalculó con sus cuotas y el descuadre desapareció.
+1. **Plan de cuotas de antes de terminar.** Al terminar se eligió "Cobrar un
+   valor" por el saldo completo y el plan no se tocaba: las cuotas originales
+   siguieron vivas, con su mora y el bloqueo de recepción. Se reconocen porque
+   la cartera tiene cuotas pendientes creadas antes de ``terminada_en``. El
+   comando solo las lista: la clínica decide si se cobran. Si no se van a
+   cobrar, soporte las cierra en Console › Soporte › «Cerrar cartera de una
+   venta terminada». Si sí, se reanuda la venta y se termina de nuevo: ahora
+   queda una sola cuota con la fecha que se elija.
 
-Por defecto solo lista. Con ``--aplicar`` perdona la parte sin cuota (la deja
-en ``valor_perdonado`` y ``saldo_al_terminar``, recalcula el total de la cartera
-con sus cuotas vigentes y deja registro en el log de acciones). Las cuotas
-vigentes no se tocan: lo que el plan sí cubre se sigue cobrando. La venta deja
-de poder reanudarse, igual que cualquier venta con saldo perdonado.
+2. **Saldo sin cuota.** La terminación sumaba solo las cuotas pendientes. Si la
+   cartera estaba descuadrada (total mayor que lo que suman sus cuotas: ventas
+   aceptadas antes de exigir el plan de pagos, carteras de ``backfill_carteras``),
+   no veía ese saldo y la cartera quedó activa para siempre. Con ``--aplicar`` se
+   perdona esa parte sin cuota (queda en ``valor_perdonado`` y
+   ``saldo_al_terminar``, se recalcula el total con las cuotas vigentes y queda
+   en el log de acciones). Las cuotas vigentes no se tocan.
 
-La alternativa sin script: reanudar la venta desde su pantalla y terminarla de
-nuevo, que ahora sí pide decidir sobre todo el saldo.
+Por defecto solo lista y no cambia nada.
 """
 
 from decimal import Decimal
@@ -35,15 +38,20 @@ CERO = Decimal("0.00")
 
 
 class Command(BaseCommand):
-    help = "Lista (o con --aplicar, perdona) el saldo sin cuota de las ventas terminadas que quedó en cartera."
+    help = (
+        "Lista las ventas terminadas con la cartera abierta (plan de cuotas viejo o saldo sin cuota). "
+        "Con --aplicar perdona el saldo sin cuota."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument("--aplicar", action="store_true", help="Perdona el saldo sin cuota. Sin esto solo lista.")
         parser.add_argument("--clinica", help="Limita a una clínica (id).")
 
-    def _afectadas(self, clinica_id=None):
+    def _revisar(self, clinica_id=None):
+        """Por cada venta terminada con algo abierto: (venta, cartera, saldo de
+        la cartera, cuotas del plan viejo, saldo sin cuota)."""
         ventas = Cotizacion.objects.filter(
-            estado=Cotizacion.Estado.ACEPTADA, terminada_en__isnull=False, valor_perdonado__lte=0,
+            estado=Cotizacion.Estado.ACEPTADA, terminada_en__isnull=False,
         ).select_related("clinica", "paciente")
         if clinica_id:
             ventas = ventas.filter(clinica_id=clinica_id)
@@ -51,35 +59,56 @@ class Command(BaseCommand):
             cartera = Cartera.objects.filter(cotizacion=venta).first()
             if cartera is None:
                 continue
+            cuotas = _cuotas_pendientes(cartera)
             saldo_cartera = Decimal(cartera.saldo_pendiente)
-            saldo_cuotas = _saldo(_cuotas_pendientes(cartera))
-            sin_cuota = saldo_cartera - saldo_cuotas
-            if sin_cuota > 0:
-                yield venta, cartera, saldo_cartera, saldo_cuotas, sin_cuota
+            plan_viejo = [c for c in cuotas if c.created_at < venta.terminada_en]
+            sin_cuota = saldo_cartera - _saldo(cuotas)
+            if plan_viejo or sin_cuota > 0:
+                yield venta, cartera, saldo_cartera, plan_viejo, max(sin_cuota, CERO)
+
+    def _linea(self, venta, extra):
+        return (
+            f"  {venta.clinica.nombre} | venta {venta.id} | {venta.paciente.nombre_completo} | "
+            f"terminada {venta.terminada_en:%Y-%m-%d} | {extra}"
+        )
 
     def handle(self, *args, **options):
         aplicar = options["aplicar"]
-        filas = list(self._afectadas(options.get("clinica")))
+        filas = list(self._revisar(options.get("clinica")))
         if not filas:
-            self.stdout.write(self.style.SUCCESS("No hay ventas terminadas con saldo sin cuota en cartera."))
+            self.stdout.write(self.style.SUCCESS("No hay ventas terminadas con la cartera abierta por error."))
             return
 
-        self.stdout.write(f"Ventas terminadas con saldo sin cuota: {len(filas)}")
-        total_sin_cuota = CERO
-        for venta, cartera, saldo_cartera, saldo_cuotas, sin_cuota in filas:
-            total_sin_cuota += sin_cuota
+        con_plan = [f for f in filas if f[3]]
+        self.stdout.write(f"\n1. Con el plan de cuotas de antes de terminar: {len(con_plan)}")
+        for venta, _cartera, saldo_cartera, plan_viejo, _sin_cuota in con_plan:
+            vencidas = [c for c in plan_viejo if c.vencida]
+            self.stdout.write(self._linea(venta, (
+                f"saldo cartera {saldo_cartera:,.0f} | {len(plan_viejo)} cuota(s) del plan viejo por "
+                f"{_saldo(plan_viejo):,.0f} | vencidas {len(vencidas)} por {_saldo(vencidas):,.0f}"
+            )))
+        if con_plan:
             self.stdout.write(
-                f"  {venta.clinica.nombre} | venta {venta.id} | {venta.paciente.nombre_completo} | "
-                f"terminada {venta.terminada_en:%Y-%m-%d} | saldo cartera {saldo_cartera:,.0f} | "
-                f"cubierto por cuotas {saldo_cuotas:,.0f} | sin cuota {sin_cuota:,.0f}"
+                "  Este comando no las cambia. Si la clínica no las va a cobrar: Console › Soporte › "
+                "«Cerrar cartera de una venta terminada». Si sí: reanudar la venta y terminarla de nuevo."
             )
-        self.stdout.write(f"Total sin cuota: {total_sin_cuota:,.0f}")
+
+        sin_cuota_filas = [f for f in filas if f[4] > 0]
+        self.stdout.write(f"\n2. Con saldo sin cuota: {len(sin_cuota_filas)}")
+        for venta, _cartera, saldo_cartera, _plan_viejo, sin_cuota in sin_cuota_filas:
+            self.stdout.write(self._linea(
+                venta, f"saldo cartera {saldo_cartera:,.0f} | sin cuota {sin_cuota:,.0f}",
+            ))
+        if sin_cuota_filas:
+            total = sum((f[4] for f in sin_cuota_filas), CERO)
+            self.stdout.write(f"  Total sin cuota: {total:,.0f}")
 
         if not aplicar:
-            self.stdout.write(self.style.WARNING("Solo lista. Usa --aplicar para perdonar el saldo sin cuota."))
+            if sin_cuota_filas:
+                self.stdout.write(self.style.WARNING("\nSolo lista. Usa --aplicar para perdonar el saldo sin cuota (grupo 2)."))
             return
 
-        for venta, cartera, _saldo_cartera, saldo_cuotas, sin_cuota in filas:
+        for venta, cartera, _saldo_cartera, plan_viejo, sin_cuota in sin_cuota_filas:
             with transaction.atomic():
                 cartera = Cartera.objects.select_for_update().get(pk=cartera.pk)
                 venta = Cotizacion.objects.select_for_update().get(pk=venta.pk)
@@ -98,8 +127,8 @@ class Command(BaseCommand):
                         "total_nuevo": f"{cartera.total:.2f}",
                         "perdonado_sin_cuota": f"{sin_cuota:.2f}",
                         "saldo_al_terminar_anterior": f"{saldo_al_terminar_anterior or CERO:.2f}",
-                        "saldo_cubierto_por_cuotas": f"{saldo_cuotas:.2f}",
+                        "saldo_cubierto_por_cuotas": f"{_saldo(_cuotas_pendientes(cartera)):.2f}",
                     },
                     clinica=venta.clinica,
                 )
-        self.stdout.write(self.style.SUCCESS(f"Corregidas {len(filas)} ventas."))
+        self.stdout.write(self.style.SUCCESS(f"\nCorregidas {len(sin_cuota_filas)} ventas con saldo sin cuota."))

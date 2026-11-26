@@ -247,9 +247,40 @@ class TerminarSaldoTests(TerminacionFixture, TestCase):
         self.assertEqual(self.cotizacion.saldo_al_terminar, Decimal("500000.00"))
         self.assertTrue(LogAccion.objects.filter(accion="venta.corregir_saldo_sin_cuota").exists())
 
+        # El saldo sin cuota ya no aparece; el plan viejo sí, y el comando no lo toca.
+        salida = StringIO()
+        call_command("corregir_carteras_ventas_terminadas", "--aplicar", stdout=salida)
+        self.assertIn("2. Con saldo sin cuota: 0", salida.getvalue())
+        self.assertIn("1. Con el plan de cuotas de antes de terminar: 1", salida.getvalue())
+        self._refrescar()
+        self.assertFalse(self.futura.anulada)
+        self.assertEqual(self.cotizacion.valor_perdonado, Decimal("100000.00"))
+
+    def test_comando_lista_las_cobradas_completas_con_el_plan_viejo(self):
+        # Estado que dejaba "cobrar el saldo completo" antes del arreglo: venta
+        # terminada, nada perdonado y las cuotas originales vivas (una vencida).
+        Cotizacion.objects.filter(pk=self.cotizacion.pk).update(
+            terminada_en=timezone.now(), motivo_terminacion="economico",
+            saldo_al_terminar=Decimal("400000.00"), valor_perdonado=Decimal("0.00"),
+        )
+        salida = StringIO()
+        call_command("corregir_carteras_ventas_terminadas", "--aplicar", stdout=salida)
+        texto = salida.getvalue()
+        self.assertIn("1. Con el plan de cuotas de antes de terminar: 1", texto)
+        self.assertIn("2 cuota(s) del plan viejo por 400,000 | vencidas 1 por 200,000", texto)
+        self.assertIn("Cerrar cartera de una venta terminada", texto)
+        self.assertIn("2. Con saldo sin cuota: 0", texto)
+        self._refrescar()  # --aplicar no toca el plan viejo: lo decide la clínica
+        self.assertFalse(self.vencida.anulada)
+        self.assertEqual(self.cartera.total, Decimal("400000.00"))
+        self.assertFalse(LogAccion.objects.filter(accion="venta.corregir_saldo_sin_cuota").exists())
+
+    def test_comando_no_lista_lo_que_deja_la_terminacion_actual(self):
+        r = self._terminar(modo="cobrar", valor="400000.00", fecha=timezone.localdate().isoformat())
+        self.assertEqual(r.status_code, 200, r.content)
         salida = StringIO()
         call_command("corregir_carteras_ventas_terminadas", stdout=salida)
-        self.assertIn("No hay ventas terminadas", salida.getvalue())
+        self.assertIn("No hay ventas terminadas con la cartera abierta por error.", salida.getvalue())
 
     def test_acuerdo_de_pago_pendiente_bloquea(self):
         AcuerdoPago.objects.create(
